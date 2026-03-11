@@ -34,42 +34,40 @@ export function FrontDesk() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
-  const fetchData = React.useCallback(async () => {
-    if (!hotel?.id || !profile || hasPermissionError) return;
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
 
     setLoading(true);
-    try {
-      const resRef = collection(db, 'hotels', hotel.id, 'reservations');
-      const roomsRef = collection(db, 'hotels', hotel.id, 'rooms');
+    const resRef = collection(db, 'hotels', hotel.id, 'reservations');
+    const roomsRef = collection(db, 'hotels', hotel.id, 'rooms');
 
-      const [resSnap, roomsSnap] = await Promise.all([
-        getDocs(query(resRef, orderBy('checkIn', 'desc'))),
-        getDocs(roomsRef)
-      ]);
-
-      setReservations(resSnap.docs.map(doc => {
-        const data = doc.data() as Record<string, any>;
-        return { id: doc.id, ...data } as Reservation;
-      }));
-      setRooms(roomsSnap.docs.map(doc => {
-        const data = doc.data() as Record<string, any>;
-        return { id: doc.id, ...data } as Room;
-      }));
-    } catch (err: any) {
-      if (err.code === 'permission-denied') {
-        setHasPermissionError(true);
-      } else {
-        console.error("FrontDesk data fetch error:", err);
+    const unsubscribeRes = onSnapshot(query(resRef, orderBy('checkIn', 'desc')), 
+      (snap) => {
+        setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Reservations listener error:", err);
+        if (err.code === 'permission-denied') setHasPermissionError(true);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [hotel?.id, profile, hasPermissionError]);
+    );
+
+    const unsubscribeRooms = onSnapshot(roomsRef, 
+      (snap) => {
+        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      },
+      (err) => console.error("Rooms listener error:", err)
+    );
+
+    return () => {
+      unsubscribeRes();
+      unsubscribeRooms();
+    };
+  }, [hotel?.id, profile?.uid]);
 
   useEffect(() => {
     setHasPermissionError(false);
-    fetchData();
-  }, [profile?.uid, hotel?.id, fetchData]);
+  }, [profile?.uid, hotel?.id]);
 
   const handleBooking = async () => {
     if (!hotel?.id) return;
@@ -117,10 +115,10 @@ export function FrontDesk() {
         </div>
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => fetchData()}
+            onClick={() => window.location.reload()}
             disabled={loading}
             className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
-            title="Refresh Data"
+            title="Refresh Page"
           >
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
           </button>

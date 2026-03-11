@@ -53,49 +53,57 @@ export function SuperAdmin() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
-  const fetchData = React.useCallback(async () => {
-    if (profile?.role !== 'superAdmin' || hasPermissionError) return;
+  // Real-time listeners
+  useEffect(() => {
+    if (profile?.role !== 'superAdmin') return;
 
     setLoading(true);
-    try {
-      const [codesSnap, hotelsSnap, requestsSnap, settingsSnap] = await Promise.all([
-        getDocs(collection(db, 'trackingCodes')),
-        getDocs(collection(db, 'hotels')),
-        getDocs(collection(db, 'trackingCodeRequests')),
-        getDoc(doc(db, 'system', 'settings'))
-      ]);
-
-      setTrackingCodes(codesSnap.docs.map(doc => {
-        const data = doc.data() as Record<string, any>;
-        return { id: doc.id, ...data } as TrackingCode;
-      }));
-      setHotels(hotelsSnap.docs.map(doc => {
-        const data = doc.data() as Record<string, any>;
-        return { id: doc.id, ...data } as Hotel;
-      }));
-      setRequests(requestsSnap.docs.map(doc => {
-        const data = doc.data() as Record<string, any>;
-        return { id: doc.id, ...data } as TrackingCodeRequest;
-      }));
-      
-      if (settingsSnap.exists()) {
-        setSettings(settingsSnap.data() as any);
+    
+    // 1. Tracking Codes Listener
+    const unsubscribeCodes = onSnapshot(collection(db, 'trackingCodes'), 
+      (snap) => {
+        setTrackingCodes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCode)));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Tracking codes listener error:", err);
+        if (err.code === 'permission-denied') setHasPermissionError(true);
       }
-    } catch (err: any) {
-      if (err.code === 'permission-denied') {
-        setHasPermissionError(true);
-      } else {
-        console.error("SuperAdmin data fetch error:", err);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [profile?.role, hasPermissionError]);
+    );
 
-  useEffect(() => {
-    setHasPermissionError(false);
-    fetchData();
-  }, [profile?.uid, fetchData]);
+    // 2. Hotels Listener
+    const unsubscribeHotels = onSnapshot(collection(db, 'hotels'), 
+      (snap) => {
+        setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
+      },
+      (err) => console.error("Hotels listener error:", err)
+    );
+
+    // 3. Requests Listener
+    const unsubscribeRequests = onSnapshot(collection(db, 'trackingCodeRequests'), 
+      (snap) => {
+        setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCodeRequest)));
+      },
+      (err) => console.error("Requests listener error:", err)
+    );
+
+    // 4. Settings Listener
+    const unsubscribeSettings = onSnapshot(doc(db, 'system', 'settings'), 
+      (snap) => {
+        if (snap.exists()) {
+          setSettings(snap.data() as any);
+        }
+      },
+      (err) => console.error("Settings listener error:", err)
+    );
+
+    return () => {
+      unsubscribeCodes();
+      unsubscribeHotels();
+      unsubscribeRequests();
+      unsubscribeSettings();
+    };
+  }, [profile?.role]);
 
   const updateSettings = async () => {
     await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
@@ -191,7 +199,6 @@ export function SuperAdmin() {
     });
     
     setExtendingCode(null);
-    fetchData();
   };
 
   const giveLiveAccess = async (hotel: Hotel) => {
@@ -214,7 +221,6 @@ export function SuperAdmin() {
       hotelId: 'system'
     });
     
-    fetchData();
     alert(`Live access granted to ${hotel.name}. Expiry: ${format(newExpiry, 'MMM d, yyyy')}`);
   };
 
@@ -232,7 +238,7 @@ export function SuperAdmin() {
         hotelId: 'system'
       });
       
-      fetchData();
+      alert(`Hotel ${hotel.name} deleted.`);
     }
   };
 
@@ -295,10 +301,10 @@ export function SuperAdmin() {
         </div>
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => fetchData()}
+            onClick={() => window.location.reload()}
             disabled={loading}
             className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
-            title="Refresh Data"
+            title="Refresh Page"
           >
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
           </button>
@@ -384,7 +390,6 @@ export function SuperAdmin() {
                   onClick={() => {
                     setIsAddingCode(false);
                     setGeneratedCode(null);
-                    fetchData();
                   }}
                   className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
                 >
@@ -444,29 +449,6 @@ export function SuperAdmin() {
             >
               Cancel
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Manage Staff Modal */}
-      {managingStaffHotel && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-xl font-bold text-white">Staff Management</h3>
-                <p className="text-sm text-zinc-400">{managingStaffHotel.name}</p>
-              </div>
-              <button 
-                onClick={() => setManagingStaffHotel(null)}
-                className="p-2 text-zinc-500 hover:text-white transition-colors"
-              >
-                <XCircle size={24} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <StaffManagement hotelId={managingStaffHotel.id} />
-            </div>
           </div>
         </div>
       )}
@@ -751,7 +733,6 @@ export function SuperAdmin() {
                         onClick={async () => {
                           if (window.confirm('Are you sure you want to delete this code?')) {
                             await deleteDoc(doc(db, 'trackingCodes', code.id));
-                            fetchData();
                           }
                         }}
                         className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"

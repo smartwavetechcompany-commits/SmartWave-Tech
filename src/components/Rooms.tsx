@@ -60,7 +60,8 @@ export function Rooms() {
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
-  const addRoom = async () => {
+  const addRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!hotel?.id) return;
     await addDoc(collection(db, 'hotels', hotel.id, 'rooms'), {
       ...newRoom,
@@ -193,11 +194,13 @@ export function Rooms() {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-white mb-6">Add New Room</h3>
-            <div className="space-y-4">
+            <form onSubmit={addRoom} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room Number</label>
                 <input 
+                  required
                   type="text" 
+                  placeholder="e.g. 101, 204A"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                   value={newRoom.number}
                   onChange={(e) => setNewRoom({ ...newRoom, number: e.target.value })}
@@ -246,21 +249,22 @@ export function Rooms() {
                   />
                 </div>
               </div>
-            </div>
-            <div className="flex gap-4 mt-8">
-              <button 
-                onClick={() => setIsAddingRoom(false)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={addRoom}
-                className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
-              >
-                Create Room
-              </button>
-            </div>
+              <div className="flex gap-4 mt-8">
+                <button 
+                  type="button"
+                  onClick={() => setIsAddingRoom(false)}
+                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                >
+                  Create Room
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

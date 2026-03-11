@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { collection, getDocs, query, orderBy, limit, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AuditLog } from '../types';
@@ -13,39 +13,43 @@ export function AuditLogs() {
 
   const { hotel, profile } = useAuth();
 
-  const fetchLogs = useCallback(async () => {
-    if (!profile || hasPermissionError) return;
-    if (profile.role !== 'superAdmin' && profile.role !== 'hotelAdmin') return;
-    if (profile.role === 'hotelAdmin' && !hotel?.id) return;
+  const fetchLogs = useCallback(() => {
+    if (!profile || hasPermissionError) return () => {};
+    if (profile.role !== 'superAdmin' && profile.role !== 'hotelAdmin') return () => {};
+    if (profile.role === 'hotelAdmin' && !hotel?.id) return () => {};
 
     setLoading(true);
-    try {
-      let q;
-      if (profile.role === 'superAdmin') {
-        q = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
-      } else {
-        q = query(collection(db, 'activityLogs'), where('hotelId', '==', hotel?.id), orderBy('timestamp', 'desc'), limit(50));
-      }
-
-      const snap = await getDocs(q);
-      setLogs(snap.docs.map(doc => {
-        const data = doc.data() as Record<string, any>;
-        return { id: doc.id, ...data } as any;
-      }));
-    } catch (err: any) {
-      if (err.code === 'permission-denied') {
-        setHasPermissionError(true);
-      } else {
-        console.error("Audit logs fetch error:", err);
-      }
-    } finally {
-      setLoading(false);
+    let q;
+    if (profile.role === 'superAdmin') {
+      q = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
+    } else {
+      q = query(collection(db, 'activityLogs'), where('hotelId', '==', hotel?.id), orderBy('timestamp', 'desc'), limit(50));
     }
+
+    const unsubscribe = onSnapshot(q, 
+      (snap) => {
+        setLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+        setLoading(false);
+      },
+      (err) => {
+        if (err.code === 'permission-denied') {
+          setHasPermissionError(true);
+        } else {
+          console.error("Audit logs listener error:", err);
+        }
+        setLoading(false);
+      }
+    );
+
+    return unsubscribe;
   }, [hotel?.id, profile?.role, hasPermissionError]);
 
   useEffect(() => {
     setHasPermissionError(false);
-    fetchLogs();
+    const unsubscribe = fetchLogs();
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
   }, [profile?.uid, hotel?.id, fetchLogs]);
 
   return (

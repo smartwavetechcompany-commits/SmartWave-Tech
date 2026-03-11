@@ -22,17 +22,14 @@ export function AuthPage() {
   });
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const snap = await getDoc(doc(db, 'system', 'settings'));
-        if (snap.exists()) {
-          setSettings(snap.data() as any);
-        }
-      } catch (err) {
-        // Silently fail for public users if permissions aren't set yet
+    const unsub = onSnapshot(doc(db, 'system', 'settings'), (snap) => {
+      if (snap.exists()) {
+        setSettings(snap.data() as any);
       }
-    };
-    fetchSettings();
+    }, (err) => {
+      // Silently fail for public users if permissions aren't set yet
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
