@@ -1,0 +1,730 @@
+import React, { useEffect, useState } from 'react';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { TrackingCode, Hotel, TrackingCodeRequest } from '../types';
+import { 
+  Plus, 
+  Search, 
+  MoreVertical, 
+  Trash2, 
+  RefreshCw, 
+  ShieldAlert,
+  Calendar,
+  Key,
+  Mail,
+  Phone,
+  CheckCircle2,
+  XCircle,
+  Settings,
+  CreditCard,
+  Link as LinkIcon,
+  Users
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { cn } from '../utils';
+
+import { AuditLogs } from './AuditLogs';
+import { ErrorBoundary } from './ErrorBoundary';
+import { StaffManagement } from './StaffManagement';
+
+export function SuperAdmin() {
+  const { profile } = useAuth();
+  const [trackingCodes, setTrackingCodes] = useState<TrackingCode[]>([]);
+  const [hotels, setHotels] = useState<Hotel[]>([]);
+  const [requests, setRequests] = useState<TrackingCodeRequest[]>([]);
+  const [settings, setSettings] = useState({
+    paymentLink: '',
+    bankDetails: '',
+  });
+  const [isAddingCode, setIsAddingCode] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [extendingHotel, setExtendingHotel] = useState<Hotel | null>(null);
+  const [extendingCode, setExtendingCode] = useState<TrackingCode | null>(null);
+  const [managingStaffHotel, setManagingStaffHotel] = useState<Hotel | null>(null);
+  const [newCode, setNewCode] = useState({
+    duration: '1 month',
+    type: 'Standard',
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [hasPermissionError, setHasPermissionError] = useState(false);
+
+  const fetchData = React.useCallback(async () => {
+    if (profile?.role !== 'superAdmin' || hasPermissionError) return;
+
+    setLoading(true);
+    try {
+      const [codesSnap, hotelsSnap, requestsSnap, settingsSnap] = await Promise.all([
+        getDocs(collection(db, 'trackingCodes')),
+        getDocs(collection(db, 'hotels')),
+        getDocs(collection(db, 'trackingCodeRequests')),
+        getDoc(doc(db, 'system', 'settings'))
+      ]);
+
+      setTrackingCodes(codesSnap.docs.map(doc => {
+        const data = doc.data() as Record<string, any>;
+        return { id: doc.id, ...data } as TrackingCode;
+      }));
+      setHotels(hotelsSnap.docs.map(doc => {
+        const data = doc.data() as Record<string, any>;
+        return { id: doc.id, ...data } as Hotel;
+      }));
+      setRequests(requestsSnap.docs.map(doc => {
+        const data = doc.data() as Record<string, any>;
+        return { id: doc.id, ...data } as TrackingCodeRequest;
+      }));
+      
+      if (settingsSnap.exists()) {
+        setSettings(settingsSnap.data() as any);
+      }
+    } catch (err: any) {
+      if (err.code === 'permission-denied') {
+        setHasPermissionError(true);
+      } else {
+        console.error("SuperAdmin data fetch error:", err);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [profile?.role, hasPermissionError]);
+
+  useEffect(() => {
+    setHasPermissionError(false);
+    fetchData();
+  }, [profile?.uid, fetchData]);
+
+  const updateSettings = async () => {
+    await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
+    alert('Settings updated successfully');
+  };
+
+  const generateCodeForRequest = async (request: TrackingCodeRequest) => {
+    const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const expiryDate = new Date();
+    // Default to 1 month for requests unless specified
+    expiryDate.setMonth(expiryDate.getMonth() + 1);
+
+    const tc: Omit<TrackingCode, 'id'> = {
+      code,
+      expiryDate: expiryDate.toISOString(),
+      duration: '1 month',
+      type: request.plan,
+      status: 'active',
+    };
+
+    // 1. Create tracking code
+    await addDoc(collection(db, 'trackingCodes'), tc);
+
+    // 2. Update request status
+    await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
+      status: 'approved',
+      generatedCode: code
+    });
+
+    // 3. Log action
+    await addDoc(collection(db, 'activityLogs'), {
+      timestamp: new Date().toISOString(),
+      userId: 'system',
+      userEmail: 'superadmin@system.com',
+      action: 'APPROVE_CODE_REQUEST',
+      resource: `Hotel: ${request.hotelName}, Code: ${code}`,
+      hotelId: 'system'
+    });
+
+    alert(`Code ${code} generated for ${request.hotelName}. Please send it to ${request.email}`);
+  };
+
+  const rejectRequest = async (requestId: string) => {
+    await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
+  };
+
+  const generateCode = async () => {
+    const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const expiryDate = new Date();
+    if (newCode.duration === '1 month') expiryDate.setMonth(expiryDate.getMonth() + 1);
+    else if (newCode.duration === '6 months') expiryDate.setMonth(expiryDate.getMonth() + 6);
+    else if (newCode.duration === '1 year') expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+
+    const tc: Omit<TrackingCode, 'id'> = {
+      code,
+      expiryDate: expiryDate.toISOString(),
+      duration: newCode.duration,
+      type: newCode.type,
+      status: 'active',
+    };
+
+    await addDoc(collection(db, 'trackingCodes'), tc);
+
+    // Log the action
+    await addDoc(collection(db, 'activityLogs'), {
+      timestamp: new Date().toISOString(),
+      userId: profile?.uid || 'system',
+      userEmail: profile?.email || 'superadmin@system.com',
+      action: 'GENERATE_TRACKING_CODE',
+      resource: `Code: ${code} (${newCode.duration})`,
+      hotelId: 'system'
+    });
+
+    setGeneratedCode(code);
+  };
+
+  const extendTrackingCode = async (code: TrackingCode, months: number) => {
+    const currentExpiry = new Date(code.expiryDate);
+    const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
+    
+    await updateDoc(doc(db, 'trackingCodes', code.id), { 
+      expiryDate: newExpiry.toISOString()
+    });
+
+    // Log the action
+    await addDoc(collection(db, 'activityLogs'), {
+      timestamp: new Date().toISOString(),
+      userId: profile?.uid || 'system',
+      userEmail: profile?.email || 'superadmin@system.com',
+      action: 'EXTEND_TRACKING_CODE',
+      resource: `Code ${code.code}: +${months} months`,
+      hotelId: 'system'
+    });
+    
+    setExtendingCode(null);
+    fetchData();
+  };
+
+  const giveLiveAccess = async (hotel: Hotel) => {
+    const now = new Date();
+    const currentExpiry = new Date(hotel.expiryDate);
+    const newExpiry = currentExpiry > now ? currentExpiry : new Date(now.setMonth(now.getMonth() + 1));
+    
+    await setDoc(doc(db, 'hotels', hotel.id), { 
+      expiryDate: newExpiry.toISOString(),
+      status: 'active' 
+    }, { merge: true });
+
+    // Log the action
+    await addDoc(collection(db, 'activityLogs'), {
+      timestamp: new Date().toISOString(),
+      userId: profile?.uid || 'system',
+      userEmail: profile?.email || 'superadmin@system.com',
+      action: 'GIVE_LIVE_ACCESS',
+      resource: `Hotel: ${hotel.name}`,
+      hotelId: 'system'
+    });
+    
+    fetchData();
+    alert(`Live access granted to ${hotel.name}. Expiry: ${format(newExpiry, 'MMM d, yyyy')}`);
+  };
+
+  const deleteHotel = async (hotel: Hotel) => {
+    if (window.confirm(`Are you sure you want to delete ${hotel.name}? This will delete all hotel data including rooms, reservations, and staff profiles. This action cannot be undone.`)) {
+      await deleteDoc(doc(db, 'hotels', hotel.id));
+      
+      // Log the action
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'superadmin@system.com',
+        action: 'DELETE_HOTEL',
+        resource: `Hotel: ${hotel.name}`,
+        hotelId: 'system'
+      });
+      
+      fetchData();
+    }
+  };
+
+  const toggleHotelStatus = async (hotel: Hotel) => {
+    const newStatus = hotel.status === 'active' ? 'suspended' : 'active';
+    await setDoc(doc(db, 'hotels', hotel.id), { ...hotel, status: newStatus }, { merge: true });
+
+    // Log the action
+    await addDoc(collection(db, 'activityLogs'), {
+      timestamp: new Date().toISOString(),
+      userId: 'system',
+      userEmail: 'superadmin@system.com',
+      action: 'TOGGLE_HOTEL_STATUS',
+      resource: `Hotel ${hotel.name}: ${newStatus}`,
+      hotelId: 'system'
+    });
+  };
+
+  const extendSubscription = async (hotel: Hotel, months: number) => {
+    const currentExpiry = new Date(hotel.expiryDate);
+    const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
+    
+    await setDoc(doc(db, 'hotels', hotel.id), { 
+      expiryDate: newExpiry.toISOString(),
+      status: 'active' 
+    }, { merge: true });
+
+    // Log the action
+    await addDoc(collection(db, 'activityLogs'), {
+      timestamp: new Date().toISOString(),
+      userId: 'system',
+      userEmail: 'superadmin@system.com',
+      action: 'EXTEND_SUBSCRIPTION',
+      resource: `Hotel ${hotel.name}: +${months} months`,
+      hotelId: 'system'
+    });
+    
+    setExtendingHotel(null);
+  };
+
+  return (
+    <div className="p-8 space-y-8">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">System Control</h1>
+          <p className="text-zinc-400">Manage tracking codes and hotel subscriptions</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => fetchData()}
+            disabled={loading}
+            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            title="Refresh Data"
+          >
+            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+          </button>
+          <button 
+            onClick={() => setIsAddingCode(true)}
+            className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+          >
+            <Plus size={18} />
+            Generate Code
+          </button>
+        </div>
+      </header>
+
+      {isAddingCode && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+            {!generatedCode ? (
+              <>
+                <h3 className="text-xl font-bold text-white mb-6">Generate Tracking Code</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Duration</label>
+                    <select 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                      value={newCode.duration}
+                      onChange={(e) => setNewCode({ ...newCode, duration: e.target.value })}
+                    >
+                      <option>1 month</option>
+                      <option>6 months</option>
+                      <option>1 year</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type</label>
+                    <select 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                      value={newCode.type}
+                      onChange={(e) => setNewCode({ ...newCode, type: e.target.value })}
+                    >
+                      <option>Standard</option>
+                      <option>Premium</option>
+                      <option>Enterprise</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-4 mt-8">
+                  <button 
+                    onClick={() => setIsAddingCode(false)}
+                    className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={generateCode}
+                    className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                  >
+                    Generate
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="text-center">
+                <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Key size={32} />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Code Generated!</h3>
+                <p className="text-zinc-400 text-sm mb-6">Share this code with the hotel admin</p>
+                
+                <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 mb-8 relative group">
+                  <div className="text-3xl font-mono font-bold text-emerald-500 tracking-[0.2em]">{generatedCode}</div>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedCode);
+                      alert('Code copied to clipboard!');
+                    }}
+                    className="mt-4 text-xs font-bold text-zinc-500 hover:text-emerald-500 transition-colors uppercase tracking-widest"
+                  >
+                    Click to Copy
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => {
+                    setIsAddingCode(false);
+                    setGeneratedCode(null);
+                    fetchData();
+                  }}
+                  className="w-full bg-emerald-500 text-black font-bold py-3 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                >
+                  Done
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {extendingCode && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+            <h3 className="text-xl font-bold text-white mb-2">Extend Access Code</h3>
+            <p className="text-zinc-400 text-sm mb-6">Extending code: {extendingCode.code}</p>
+            <div className="grid grid-cols-1 gap-3">
+              {[1, 3, 6, 12].map(months => (
+                <button 
+                  key={months}
+                  onClick={() => extendTrackingCode(extendingCode, months)}
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-lg font-medium transition-all active:scale-95"
+                >
+                  Add {months} Month{months > 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+            <button 
+              onClick={() => setExtendingCode(null)}
+              className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {extendingHotel && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+            <h3 className="text-xl font-bold text-white mb-2">Extend Subscription</h3>
+            <p className="text-zinc-400 text-sm mb-6">Extending subscription for {extendingHotel.name}</p>
+            <div className="grid grid-cols-1 gap-3">
+              {[1, 3, 6, 12].map(months => (
+                <button 
+                  key={months}
+                  onClick={() => extendSubscription(extendingHotel, months)}
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-lg font-medium transition-all active:scale-95"
+                >
+                  Add {months} Month{months > 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+            <button 
+              onClick={() => setExtendingHotel(null)}
+              className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Staff Modal */}
+      {managingStaffHotel && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-white">Staff Management</h3>
+                <p className="text-sm text-zinc-400">{managingStaffHotel.name}</p>
+              </div>
+              <button 
+                onClick={() => setManagingStaffHotel(null)}
+                className="p-2 text-zinc-500 hover:text-white transition-colors"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <StaffManagement hotelId={managingStaffHotel.id} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Staff Modal */}
+      {managingStaffHotel && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-white">Staff Management</h3>
+                <p className="text-sm text-zinc-400">{managingStaffHotel.name}</p>
+              </div>
+              <button 
+                onClick={() => setManagingStaffHotel(null)}
+                className="p-2 text-zinc-500 hover:text-white transition-colors"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <StaffManagement hotelId={managingStaffHotel.id} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <div className="xl:col-span-2 space-y-8">
+          {/* Hotels List */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <h3 className="font-bold text-white">Registered Hotels</h3>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                <input 
+                  type="text" 
+                  placeholder="Search hotels..."
+                  className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
+                    <th className="px-6 py-4">Hotel Name</th>
+                    <th className="px-6 py-4">Tracking Code</th>
+                    <th className="px-6 py-4">Expiry</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {hotels.map(hotel => (
+                    <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-medium text-white">{hotel.name}</div>
+                        <div className="text-xs text-zinc-500">{hotel.subscriptionType}</div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
+                      <td className="px-6 py-4 text-xs text-zinc-400">{format(new Date(hotel.expiryDate), 'MMM d, yyyy')}</td>
+                      <td className="px-6 py-4">
+                        <span className={cn(
+                          "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                          hotel.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                        )}>
+                          {hotel.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={() => setManagingStaffHotel(hotel)}
+                            className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all active:scale-90"
+                            title="Manage Staff"
+                          >
+                            <Users size={18} />
+                          </button>
+                          <button 
+                            onClick={() => giveLiveAccess(hotel)}
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                            title="Give Live Access"
+                          >
+                            <CheckCircle2 size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setExtendingHotel(hotel)}
+                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                            title="Extend Subscription"
+                          >
+                            <RefreshCw size={18} />
+                          </button>
+                          <button 
+                            onClick={() => toggleHotelStatus(hotel)}
+                            className={cn(
+                              "p-2 rounded-lg transition-all active:scale-90",
+                              hotel.status === 'active' ? "text-zinc-500 hover:text-red-500" : "text-emerald-500 hover:text-emerald-400"
+                            )}
+                            title={hotel.status === 'active' ? "Suspend Hotel" : "Activate Hotel"}
+                          >
+                            <ShieldAlert size={18} />
+                          </button>
+                          <button 
+                            onClick={() => deleteHotel(hotel)}
+                            className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all active:scale-90"
+                            title="Delete Hotel"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          {/* Tracking Code Requests */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Mail size={18} className="text-emerald-500" />
+                Tracking Code Requests
+              </h3>
+            </div>
+            <div className="divide-y divide-zinc-800">
+              {requests.filter(r => r.status === 'pending').length === 0 ? (
+                <div className="p-8 text-center text-zinc-500 text-sm">No pending requests</div>
+              ) : (
+                requests.filter(r => r.status === 'pending').map(request => (
+                  <div key={request.id} className="p-6 hover:bg-zinc-800/50 transition-colors">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-bold text-white">{request.hotelName}</span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                            {request.plan}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-4 text-xs text-zinc-500">
+                          <div className="flex items-center gap-1">
+                            <Mail size={12} />
+                            {request.email}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Phone size={12} />
+                            {request.phone}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Calendar size={12} />
+                            {format(new Date(request.timestamp), 'MMM d, yyyy HH:mm')}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => generateCodeForRequest(request)}
+                          className="flex-1 sm:flex-none bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+                        >
+                          <CheckCircle2 size={14} />
+                          Approve & Generate Code
+                        </button>
+                        <button 
+                          onClick={() => rejectRequest(request.id)}
+                          className="flex-1 sm:flex-none bg-zinc-800 text-zinc-400 px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+                        >
+                          <XCircle size={14} />
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <ErrorBoundary>
+            <AuditLogs />
+          </ErrorBoundary>
+        </div>
+
+        <div className="xl:col-span-1 space-y-8">
+          {/* System Settings */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Settings size={18} className="text-emerald-500" />
+                System Settings
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                  <LinkIcon size={12} />
+                  Payment Link
+                </label>
+                <input 
+                  type="text" 
+                  placeholder="https://payment.link/..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  value={settings.paymentLink}
+                  onChange={(e) => setSettings({ ...settings, paymentLink: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                  <CreditCard size={12} />
+                  Bank Details
+                </label>
+                <textarea 
+                  placeholder="Bank: Example Bank&#10;Account: 1234567890&#10;Name: SmartWave PMS"
+                  rows={4}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none resize-none"
+                  value={settings.bankDetails}
+                  onChange={(e) => setSettings({ ...settings, bankDetails: e.target.value })}
+                />
+              </div>
+              <button 
+                onClick={updateSettings}
+                className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 text-sm"
+              >
+                Save Settings
+              </button>
+            </div>
+          </div>
+
+          {/* Tracking Codes List */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Key size={18} className="text-emerald-500" />
+                Active Tracking Codes
+              </h3>
+            </div>
+            <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
+              {trackingCodes.filter(c => !c.hotelId).map(code => (
+                <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-mono text-emerald-500 font-bold tracking-widest">{code.code}</span>
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                      <button 
+                        onClick={() => setExtendingCode(code)}
+                        className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
+                        title="Extend Expiry"
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to delete this code?')) {
+                            await deleteDoc(doc(db, 'trackingCodes', code.id));
+                            fetchData();
+                          }
+                        }}
+                        className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
+                        title="Delete Code"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
+                    <span>{code.duration} • {code.type}</span>
+                    <span>Exp: {format(new Date(code.expiryDate), 'MMM d, yyyy')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

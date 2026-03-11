@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile and role information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "hotelId": { "type": "string" },
+        "role": { "type": "string", "enum": ["superAdmin", "hotelAdmin", "staff"] },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string" },
+        "displayName": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Hotel": {
+      "title": "Hotel",
+      "description": "Hotel property information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "trackingCode": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" },
+        "subscriptionType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "adminUIDs": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "name", "status"]
+    },
+    "ActivityLog": {
+      "title": "Activity Log",
+      "description": "Audit log of system actions",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "resource": { "type": "string" },
+        "hotelId": { "type": "string" }
+      },
+      "required": ["timestamp", "userId", "action"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles"
+    },
+    "/hotels/{hotelId}": {
+      "schema": "Hotel",
+      "description": "Hotel properties"
+    },
+    "/activityLogs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "System activity logs"
+    }
+  }
+}

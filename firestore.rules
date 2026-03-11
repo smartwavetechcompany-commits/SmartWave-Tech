@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Direct check for default admin to avoid unnecessary get() calls
+    function isDefaultAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email == "smartwavetechcompany@gmail.com" && 
+             request.auth.token.email_verified == true;
+    }
+
+    // Check for superAdmin role in profile
+    function isSuperAdmin() {
+      return isDefaultAdmin() || 
+             (isAuthenticated() && 
+              exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin");
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Users collection
+    match /users/{userId} {
+      // Owner can always read/write their own profile
+      // This MUST be the first check to avoid recursion when isSuperAdmin() calls get() on the requester's own profile
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      
+      // SuperAdmins can read/write all
+      allow read, write: if isSuperAdmin();
+      
+      // HotelAdmins can read profiles of users in their hotel
+      allow read: if isAuthenticated() && 
+                  exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hotelAdmin" &&
+                  resource.data != null && 
+                  resource.data.hotelId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId;
+    }
+
+    // Hotels collection
+    match /hotels/{hotelId} {
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        (resource.data != null && 'adminUIDs' in resource.data && request.auth.uid in resource.data.adminUIDs) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId == hotelId)
+      );
+      allow write: if isSuperAdmin();
+      allow update: if isAuthenticated() && 
+                    (resource.data != null && 'adminUIDs' in resource.data && request.auth.uid in resource.data.adminUIDs);
+
+      // Subcollections (rooms, reservations, finance, etc.)
+      match /{subCollection}/{docId} {
+        allow read, write: if isAuthenticated() && (
+          isSuperAdmin() || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId == hotelId)
+        );
+      }
+    }
+
+    // Tracking Codes
+    match /trackingCodes/{codeId} {
+      allow read: if true; // Allow unauthenticated users to verify codes during registration
+      allow write: if isSuperAdmin();
+    }
+
+    // Tracking Code Requests
+    match /trackingCodeRequests/{requestId} {
+      allow create: if true;
+      allow read, write: if isSuperAdmin();
+    }
+
+    // System Settings
+    match /system/settings {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Activity Logs
+    match /activityLogs/{logId} {
+      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         resource.data != null && 
+         resource.data.hotelId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId)
+      );
+      allow write: if isSuperAdmin();
+    }
+
+    // Global Deny (except for SuperAdmin)
+    match /{document=**} {
+      allow read, write: if isSuperAdmin();
+    }
+  }
+}
