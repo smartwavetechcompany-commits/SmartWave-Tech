@@ -32,7 +32,7 @@ function AppContent() {
     return (
       <>
         <AuthPage />
-        <DevTools />
+        {window.location.search.includes('debug=true') && <DevTools />}
       </>
     );
   }
@@ -61,7 +61,7 @@ function AppContent() {
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>
         </AnimatePresence>
-        <DevTools />
+        {profile?.role === 'superAdmin' && <DevTools />}
       </main>
     </div>
   );
