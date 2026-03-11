@@ -10,93 +10,108 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Direct check for default admin to avoid unnecessary get() calls
-    function isDefaultAdmin() {
+    // Check if the user is the hardcoded bootstrap admin
+    function isBootstrapAdmin() {
       return isAuthenticated() && 
-             request.auth.token.email == "smartwavetechcompany@gmail.com" && 
+             request.auth.token.email == "smartwavetechcompany@gmail.com" &&
              request.auth.token.email_verified == true;
     }
 
-    // Check for superAdmin role in profile
+    // Get user data from the users collection
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Check if user has a specific role in their profile
+    function hasRole(role) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().role == role;
+    }
+
     function isSuperAdmin() {
-      return isDefaultAdmin() || 
-             (isAuthenticated() && 
-              exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin");
+      return isBootstrapAdmin() || hasRole("superAdmin");
+    }
+
+    function isHotelAdmin() {
+      return hasRole("hotelAdmin");
+    }
+
+    function isStaff() {
+      return hasRole("staff");
     }
 
     // ===============================================================
-    // Rules
+    // Collection Rules
     // ===============================================================
 
-    // Users collection
-    match /users/{userId} {
-      // Owner can always read/write their own profile
-      // This MUST be the first check to avoid recursion when isSuperAdmin() calls get() on the requester's own profile
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      
-      // SuperAdmins can read/write all
+    // 🔓 Allow public hotel requests
+    match /trackingCodeRequests/{requestId} {
+      allow create: if true;
       allow read, write: if isSuperAdmin();
+    }
+
+    // 🔓 Public system settings
+    match /system/settings {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Users collection - CRITICAL SECURITY
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
       
-      // HotelAdmins can read profiles of users in their hotel
-      allow read: if isAuthenticated() && 
-                  exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hotelAdmin" &&
-                  resource.data != null && 
-                  resource.data.hotelId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId;
+      // Only allow creation if it's the user's own profile
+      // Role MUST be 'hotelAdmin' or 'staff' unless they are already a SuperAdmin
+      allow create: if isAuthenticated() && request.auth.uid == userId && (
+        (request.resource.data.role in ['hotelAdmin', 'staff']) || 
+        isSuperAdmin()
+      );
+
+      // Only SuperAdmin can change roles. Users can only update their own non-role fields.
+      allow update: if isAuthenticated() && (
+        isSuperAdmin() || 
+        (request.auth.uid == userId && request.resource.data.role == resource.data.role)
+      );
+
+      allow delete: if isSuperAdmin();
     }
 
     // Hotels collection
     match /hotels/{hotelId} {
+      allow read, write: if isSuperAdmin();
+      
       allow read: if isAuthenticated() && (
-        isSuperAdmin() || 
-        (resource.data != null && 'adminUIDs' in resource.data && request.auth.uid in resource.data.adminUIDs) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId == hotelId)
+        (isHotelAdmin() && request.auth.uid in resource.data.adminUIDs) ||
+        (isStaff() && getUserData().hotelId == hotelId)
       );
-      allow write: if isSuperAdmin();
-      allow update: if isAuthenticated() && 
-                    (resource.data != null && 'adminUIDs' in resource.data && request.auth.uid in resource.data.adminUIDs);
 
-      // Subcollections (rooms, reservations, finance, etc.)
+      // Only admins can update hotel details
+      allow update: if isHotelAdmin() && request.auth.uid in resource.data.adminUIDs;
+
+      // Subcollections (rooms, reservations, etc.)
       match /{subCollection}/{docId} {
-        allow read, write: if isAuthenticated() && (
-          isSuperAdmin() || 
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId == hotelId)
+        allow read, write: if isSuperAdmin() || (
+          isAuthenticated() && 
+          getUserData().hotelId == hotelId && 
+          (isHotelAdmin() || isStaff())
         );
       }
     }
 
     // Tracking Codes
     match /trackingCodes/{codeId} {
-      allow read: if true; // Allow unauthenticated users to verify codes during registration
-      allow write: if isSuperAdmin();
-    }
-
-    // Tracking Code Requests
-    match /trackingCodeRequests/{requestId} {
-      allow create: if true;
-      allow read, write: if isSuperAdmin();
-    }
-
-    // System Settings
-    match /system/settings {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
     }
 
     // Activity Logs
     match /activityLogs/{logId} {
       allow create: if isAuthenticated();
-      allow read: if isAuthenticated() && (
-        isSuperAdmin() || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         resource.data != null && 
-         resource.data.hotelId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.hotelId)
-      );
-      allow write: if isSuperAdmin();
+      allow read, write: if isSuperAdmin();
     }
 
-    // Global Deny (except for SuperAdmin)
+    // Global Deny
     match /{document=**} {
       allow read, write: if isSuperAdmin();
     }

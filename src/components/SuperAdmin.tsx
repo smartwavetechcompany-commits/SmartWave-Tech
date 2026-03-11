@@ -47,6 +47,9 @@ export function SuperAdmin() {
     type: 'Standard',
   });
 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
@@ -270,6 +273,19 @@ export function SuperAdmin() {
     setExtendingHotel(null);
   };
 
+  const filteredHotels = hotels.filter(hotel => {
+    const matchesSearch = hotel.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         hotel.trackingCode?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || hotel.status === statusFilter;
+    
+    // Check for expired status if needed
+    if (statusFilter === 'expired') {
+      return matchesSearch && new Date(hotel.expiryDate) < new Date();
+    }
+    
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -482,15 +498,29 @@ export function SuperAdmin() {
         <div className="xl:col-span-2 space-y-8">
           {/* Hotels List */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+            <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <h3 className="font-bold text-white">Registered Hotels</h3>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Search hotels..."
-                  className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
-                />
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                  <input 
+                    type="text" 
+                    placeholder="Search name or code..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <select 
+                  className="w-full sm:w-auto bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                  <option value="expired">Expired</option>
+                </select>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -505,66 +535,82 @@ export function SuperAdmin() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800">
-                  {hotels.map(hotel => (
-                    <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-white">{hotel.name}</div>
-                        <div className="text-xs text-zinc-500">{hotel.subscriptionType}</div>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
-                      <td className="px-6 py-4 text-xs text-zinc-400">{format(new Date(hotel.expiryDate), 'MMM d, yyyy')}</td>
-                      <td className="px-6 py-4">
-                        <span className={cn(
-                          "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                          hotel.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
-                        )}>
-                          {hotel.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button 
-                            onClick={() => setManagingStaffHotel(hotel)}
-                            className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all active:scale-90"
-                            title="Manage Staff"
-                          >
-                            <Users size={18} />
-                          </button>
-                          <button 
-                            onClick={() => giveLiveAccess(hotel)}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
-                            title="Give Live Access"
-                          >
-                            <CheckCircle2 size={18} />
-                          </button>
-                          <button 
-                            onClick={() => setExtendingHotel(hotel)}
-                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
-                            title="Extend Subscription"
-                          >
-                            <RefreshCw size={18} />
-                          </button>
-                          <button 
-                            onClick={() => toggleHotelStatus(hotel)}
-                            className={cn(
-                              "p-2 rounded-lg transition-all active:scale-90",
-                              hotel.status === 'active' ? "text-zinc-500 hover:text-red-500" : "text-emerald-500 hover:text-emerald-400"
-                            )}
-                            title={hotel.status === 'active' ? "Suspend Hotel" : "Activate Hotel"}
-                          >
-                            <ShieldAlert size={18} />
-                          </button>
-                          <button 
-                            onClick={() => deleteHotel(hotel)}
-                            className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all active:scale-90"
-                            title="Delete Hotel"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
+                  {filteredHotels.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-zinc-500 text-sm">
+                        No hotels found matching your filters
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredHotels.map(hotel => {
+                      const isExpired = new Date(hotel.expiryDate) < new Date();
+                      return (
+                        <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="text-sm font-medium text-white">{hotel.name}</div>
+                            <div className="text-xs text-zinc-500">{hotel.subscriptionType}</div>
+                          </td>
+                          <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-400">
+                            <div className={cn(isExpired && "text-red-400 font-medium")}>
+                              {format(new Date(hotel.expiryDate), 'MMM d, yyyy')}
+                              {isExpired && <span className="ml-2 text-[10px] uppercase tracking-tighter">(Expired)</span>}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                              hotel.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                            )}>
+                              {hotel.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => setManagingStaffHotel(hotel)}
+                                className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all active:scale-90"
+                                title="Manage Staff"
+                              >
+                                <Users size={18} />
+                              </button>
+                              <button 
+                                onClick={() => giveLiveAccess(hotel)}
+                                className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                                title="Give Live Access"
+                              >
+                                <CheckCircle2 size={18} />
+                              </button>
+                              <button 
+                                onClick={() => setExtendingHotel(hotel)}
+                                className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                                title="Extend Subscription"
+                              >
+                                <RefreshCw size={18} />
+                              </button>
+                              <button 
+                                onClick={() => toggleHotelStatus(hotel)}
+                                className={cn(
+                                  "p-2 rounded-lg transition-all active:scale-90",
+                                  hotel.status === 'active' ? "text-zinc-500 hover:text-red-500" : "text-emerald-500 hover:text-emerald-400"
+                                )}
+                                title={hotel.status === 'active' ? "Suspend Hotel" : "Activate Hotel"}
+                              >
+                                <ShieldAlert size={18} />
+                              </button>
+                              <button 
+                                onClick={() => deleteHotel(hotel)}
+                                className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all active:scale-90"
+                                title="Delete Hotel"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

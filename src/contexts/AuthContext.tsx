@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { UserProfile, Hotel } from '../types';
+
+const SUPER_ADMIN_EMAIL = 'smartwavetechcompany@gmail.com';
 
 interface AuthContextType {
   user: User | null;
@@ -52,9 +54,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const profileRef = doc(db, 'users', user.uid);
     const unsubscribe = onSnapshot(profileRef, 
-      (snap) => {
+      async (snap) => {
         if (snap.exists()) {
           setProfile(snap.data() as UserProfile);
+        } else if (user.email === SUPER_ADMIN_EMAIL && user.emailVerified) {
+          // Auto-bootstrap Super Admin profile if it doesn't exist
+          const bootstrapProfile: UserProfile = {
+            uid: user.uid,
+            email: user.email,
+            hotelId: 'system',
+            role: 'superAdmin',
+            permissions: ['all'],
+            status: 'active',
+            displayName: user.displayName || 'System Owner',
+          };
+          try {
+            await setDoc(profileRef, bootstrapProfile);
+            setProfile(bootstrapProfile);
+          } catch (e) {
+            console.error("Failed to bootstrap Super Admin profile:", e);
+            setProfile(null);
+          }
         } else {
           setProfile(null);
         }

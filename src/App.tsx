@@ -15,8 +15,6 @@ import { Finance } from './components/Finance';
 import { Reports } from './components/Reports';
 import { motion, AnimatePresence } from 'motion/react';
 
-import { DevTools } from './components/DevTools';
-
 function AppContent() {
   const { user, loading, profile } = useAuth();
 
@@ -32,7 +30,6 @@ function AppContent() {
     return (
       <>
         <AuthPage />
-        {window.location.search.includes('debug=true') && <DevTools />}
       </>
     );
   }
@@ -61,7 +58,6 @@ function AppContent() {
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>
         </AnimatePresence>
-        {profile?.role === 'superAdmin' && <DevTools />}
       </main>
     </div>
   );
