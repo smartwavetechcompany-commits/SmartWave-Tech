@@ -69,6 +69,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     return () => unsubscribe();
   }, [hotelId, profile?.uid, hasPermissionError]);
 
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  };
+
   const addStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotelId) return;
@@ -100,30 +108,40 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
       setIsAddingStaff(false);
       setNewStaff({ email: '', displayName: '', role: 'staff', staffRole: 'frontDesk' });
-    } catch (err) {
+      showNotification('Staff member added successfully');
+    } catch (err: any) {
       console.error("Error adding staff:", err);
-      alert("Failed to add staff. Check permissions.");
+      showNotification(err.message || "Failed to add staff", 'error');
     }
   };
 
   const removeStaff = async (staffUid: string, staffEmail: string) => {
-    if (!hotelId || !window.confirm(`Are you sure you want to remove ${staffEmail}?`)) return;
+    if (!hotelId) return;
 
-    try {
-      await deleteDoc(doc(db, 'users', staffUid));
-      
-      // Log the action
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        action: 'DELETE_STAFF',
-        resource: `Staff: ${staffEmail}`,
-        hotelId: hotelId
-      });
-    } catch (err) {
-      console.error("Error removing staff:", err);
-    }
+    setConfirmAction({
+      title: 'Remove Staff',
+      message: `Are you sure you want to remove ${staffEmail}?`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'users', staffUid));
+          
+          // Log the action
+          await addDoc(collection(db, 'activityLogs'), {
+            timestamp: new Date().toISOString(),
+            userId: profile?.uid,
+            userEmail: profile?.email,
+            action: 'DELETE_STAFF',
+            resource: `Staff: ${staffEmail}`,
+            hotelId: hotelId
+          });
+          showNotification('Staff member removed');
+          setConfirmAction(null);
+        } catch (err: any) {
+          console.error("Error removing staff:", err);
+          showNotification(err.message || "Failed to remove staff", 'error');
+        }
+      }
+    });
   };
 
   const togglePermission = async (member: UserProfile, permissionId: string) => {
@@ -155,7 +173,42 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   };
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 relative">
+      {/* Notification Toast */}
+      {notification && (
+        <div className={cn(
+          "fixed top-4 right-4 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
+          notification.type === 'success' ? "bg-emerald-500 text-black" : "bg-red-500 text-white"
+        )}>
+          {notification.type === 'success' ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+          <span className="font-bold">{notification.message}</span>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-2">{confirmAction.title}</h3>
+            <p className="text-zinc-400 text-sm mb-8 leading-relaxed">{confirmAction.message}</p>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setConfirmAction(null)}
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmAction.onConfirm}
+                className="flex-1 bg-red-500 text-white font-bold py-2 rounded-lg hover:bg-red-400 transition-all active:scale-95"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">Staff Management</h1>

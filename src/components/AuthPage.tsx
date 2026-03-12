@@ -4,7 +4,8 @@ import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnaps
 import { auth, db } from '../firebase';
 import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile } from '../types';
-import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
+import { cn } from '../utils';
 
 export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -42,6 +43,13 @@ export function AuthPage() {
     return () => clearInterval(timer);
   }, [resetCooldown]);
 
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  };
+
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (resetCooldown > 0) return;
@@ -52,10 +60,11 @@ export function AuthPage() {
 
     try {
       await sendPasswordResetEmail(auth, formData.email);
-      setSuccess('Password reset email sent! Please check your inbox.');
+      showNotification('Password reset email sent! Please check your inbox.');
       setResetCooldown(60);
     } catch (err: any) {
       setError(err.message);
+      showNotification(err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -86,20 +95,12 @@ export function AuthPage() {
         status: 'pending',
         timestamp: new Date().toISOString(),
       });
-      setSuccess('Request submitted! Our team will contact you with payment instructions shortly.');
+      showNotification('Request submitted! Our team will contact you with payment instructions shortly.');
       
-      // If there's a payment link, offer to redirect or do it automatically
-      if (settings.paymentLink) {
-        setTimeout(() => {
-          if (window.confirm('Would you like to proceed to the payment page now?')) {
-            window.open(settings.paymentLink, '_blank');
-          }
-        }, 1000);
-      }
-
       setFormData({ ...formData, hotelName: '', email: '', phone: '' });
     } catch (err: any) {
       setError(err.message);
+      showNotification(err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -171,16 +172,29 @@ export function AuthPage() {
         };
 
         await setDoc(doc(db, 'users', user.uid), profile);
+        showNotification('Registration successful!');
       }
     } catch (err: any) {
       setError(err.message);
+      showNotification(err.message, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 relative">
+      {/* Notification Toast */}
+      {notification && (
+        <div className={cn(
+          "fixed top-4 right-4 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
+          notification.type === 'success' ? "bg-emerald-500 text-black" : "bg-red-500 text-white"
+        )}>
+          {notification.type === 'success' ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+          <span className="font-bold">{notification.message}</span>
+        </div>
+      )}
+
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

@@ -53,6 +53,29 @@ export function SuperAdmin() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000);
+  };
+
+  const handleFirestoreError = (error: any, operation: string, path: string) => {
+    console.error(`Firestore Error [${operation}] at ${path}:`, error);
+    const errInfo = {
+      error: error.message,
+      operationType: operation,
+      path,
+      authInfo: {
+        userId: profile?.uid,
+        email: profile?.email,
+      }
+    };
+    showNotification(`Error: ${error.message}`, 'error');
+    throw new Error(JSON.stringify(errInfo));
+  };
+
   // Real-time listeners
   useEffect(() => {
     if (profile?.role !== 'superAdmin') return;
@@ -66,7 +89,7 @@ export function SuperAdmin() {
         setLoading(false);
       },
       (err) => {
-        console.error("Tracking codes listener error:", err);
+        handleFirestoreError(err, 'list', 'trackingCodes');
         if (err.code === 'permission-denied') setHasPermissionError(true);
       }
     );
@@ -76,7 +99,7 @@ export function SuperAdmin() {
       (snap) => {
         setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
       },
-      (err) => console.error("Hotels listener error:", err)
+      (err) => handleFirestoreError(err, 'list', 'hotels')
     );
 
     // 3. Requests Listener
@@ -84,7 +107,7 @@ export function SuperAdmin() {
       (snap) => {
         setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCodeRequest)));
       },
-      (err) => console.error("Requests listener error:", err)
+      (err) => handleFirestoreError(err, 'list', 'trackingCodeRequests')
     );
 
     // 4. Settings Listener
@@ -94,7 +117,7 @@ export function SuperAdmin() {
           setSettings(snap.data() as any);
         }
       },
-      (err) => console.error("Settings listener error:", err)
+      (err) => handleFirestoreError(err, 'get', 'system/settings')
     );
 
     return () => {
@@ -106,177 +129,210 @@ export function SuperAdmin() {
   }, [profile?.role]);
 
   const updateSettings = async () => {
-    await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
-    alert('Settings updated successfully');
+    try {
+      await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
+      showNotification('System settings updated successfully');
+    } catch (err) {
+      handleFirestoreError(err, 'write', 'system/settings');
+    }
   };
 
   const generateCodeForRequest = async (request: TrackingCodeRequest) => {
-    const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-    const expiryDate = new Date();
-    // Default to 1 month for requests unless specified
-    expiryDate.setMonth(expiryDate.getMonth() + 1);
+    try {
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const expiryDate = new Date();
+      expiryDate.setMonth(expiryDate.getMonth() + 1);
 
-    const tc: Omit<TrackingCode, 'id'> = {
-      code,
-      expiryDate: expiryDate.toISOString(),
-      duration: '1 month',
-      type: request.plan,
-      status: 'active',
-    };
+      const tc: Omit<TrackingCode, 'id'> = {
+        code,
+        expiryDate: expiryDate.toISOString(),
+        duration: '1 month',
+        type: request.plan,
+        status: 'active',
+      };
 
-    // 1. Create tracking code
-    await addDoc(collection(db, 'trackingCodes'), tc);
+      await addDoc(collection(db, 'trackingCodes'), tc);
+      await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
+        status: 'approved',
+        generatedCode: code
+      });
 
-    // 2. Update request status
-    await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
-      status: 'approved',
-      generatedCode: code
-    });
-
-    // 3. Log action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: 'system',
-      userEmail: 'superadmin@system.com',
-      action: 'APPROVE_CODE_REQUEST',
-      resource: `Hotel: ${request.hotelName}, Code: ${code}`,
-      hotelId: 'system'
-    });
-
-    alert(`Code ${code} generated for ${request.hotelName}. Please send it to ${request.email}`);
-  };
-
-  const rejectRequest = async (requestId: string) => {
-    await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
-  };
-
-  const generateCode = async () => {
-    const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-    const expiryDate = new Date();
-    if (newCode.duration === '1 month') expiryDate.setMonth(expiryDate.getMonth() + 1);
-    else if (newCode.duration === '6 months') expiryDate.setMonth(expiryDate.getMonth() + 6);
-    else if (newCode.duration === '1 year') expiryDate.setFullYear(expiryDate.getFullYear() + 1);
-
-    const tc: Omit<TrackingCode, 'id'> = {
-      code,
-      expiryDate: expiryDate.toISOString(),
-      duration: newCode.duration,
-      type: newCode.type,
-      status: 'active',
-    };
-
-    await addDoc(collection(db, 'trackingCodes'), tc);
-
-    // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: profile?.uid || 'system',
-      userEmail: profile?.email || 'superadmin@system.com',
-      action: 'GENERATE_TRACKING_CODE',
-      resource: `Code: ${code} (${newCode.duration})`,
-      hotelId: 'system'
-    });
-
-    setGeneratedCode(code);
-  };
-
-  const extendTrackingCode = async (code: TrackingCode, months: number) => {
-    const currentExpiry = new Date(code.expiryDate);
-    const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
-    
-    await updateDoc(doc(db, 'trackingCodes', code.id), { 
-      expiryDate: newExpiry.toISOString()
-    });
-
-    // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: profile?.uid || 'system',
-      userEmail: profile?.email || 'superadmin@system.com',
-      action: 'EXTEND_TRACKING_CODE',
-      resource: `Code ${code.code}: +${months} months`,
-      hotelId: 'system'
-    });
-    
-    setExtendingCode(null);
-  };
-
-  const giveLiveAccess = async (hotel: Hotel) => {
-    const now = new Date();
-    const currentExpiry = new Date(hotel.expiryDate);
-    const newExpiry = currentExpiry > now ? currentExpiry : new Date(now.setMonth(now.getMonth() + 1));
-    
-    await setDoc(doc(db, 'hotels', hotel.id), { 
-      expiryDate: newExpiry.toISOString(),
-      status: 'active' 
-    }, { merge: true });
-
-    // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: profile?.uid || 'system',
-      userEmail: profile?.email || 'superadmin@system.com',
-      action: 'GIVE_LIVE_ACCESS',
-      resource: `Hotel: ${hotel.name}`,
-      hotelId: 'system'
-    });
-    
-    alert(`Live access granted to ${hotel.name}. Expiry: ${format(newExpiry, 'MMM d, yyyy')}`);
-  };
-
-  const deleteHotel = async (hotel: Hotel) => {
-    if (window.confirm(`Are you sure you want to delete ${hotel.name}? This will delete all hotel data including rooms, reservations, and staff profiles. This action cannot be undone.`)) {
-      await deleteDoc(doc(db, 'hotels', hotel.id));
-      
-      // Log the action
       await addDoc(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'superadmin@system.com',
-        action: 'DELETE_HOTEL',
+        action: 'APPROVE_CODE_REQUEST',
+        resource: `Hotel: ${request.hotelName}, Code: ${code}`,
+        hotelId: 'system'
+      });
+
+      showNotification(`Code ${code} generated and approved for ${request.hotelName}`);
+    } catch (err) {
+      handleFirestoreError(err, 'write', 'trackingCodes/requests');
+    }
+  };
+
+  const rejectRequest = async (requestId: string) => {
+    try {
+      await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
+      showNotification('Request rejected');
+    } catch (err) {
+      handleFirestoreError(err, 'update', `trackingCodeRequests/${requestId}`);
+    }
+  };
+
+  const generateCode = async () => {
+    try {
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const expiryDate = new Date();
+      if (newCode.duration === '1 month') expiryDate.setMonth(expiryDate.getMonth() + 1);
+      else if (newCode.duration === '6 months') expiryDate.setMonth(expiryDate.getMonth() + 6);
+      else if (newCode.duration === '1 year') expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+
+      const tc: Omit<TrackingCode, 'id'> = {
+        code,
+        expiryDate: expiryDate.toISOString(),
+        duration: newCode.duration,
+        type: newCode.type,
+        status: 'active',
+      };
+
+      await addDoc(collection(db, 'trackingCodes'), tc);
+
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'superadmin@system.com',
+        action: 'GENERATE_TRACKING_CODE',
+        resource: `Code: ${code} (${newCode.duration})`,
+        hotelId: 'system'
+      });
+
+      setGeneratedCode(code);
+      showNotification('Tracking code generated successfully');
+    } catch (err) {
+      handleFirestoreError(err, 'write', 'trackingCodes');
+    }
+  };
+
+  const extendTrackingCode = async (code: TrackingCode, months: number) => {
+    try {
+      const currentExpiry = new Date(code.expiryDate);
+      const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
+      
+      await updateDoc(doc(db, 'trackingCodes', code.id), { 
+        expiryDate: newExpiry.toISOString()
+      });
+
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'superadmin@system.com',
+        action: 'EXTEND_TRACKING_CODE',
+        resource: `Code ${code.code}: +${months} months`,
+        hotelId: 'system'
+      });
+      
+      setExtendingCode(null);
+      showNotification(`Code ${code.code} extended by ${months} months`);
+    } catch (err) {
+      handleFirestoreError(err, 'update', `trackingCodes/${code.id}`);
+    }
+  };
+
+  const giveLiveAccess = async (hotel: Hotel) => {
+    try {
+      const now = new Date();
+      const currentExpiry = new Date(hotel.expiryDate);
+      const newExpiry = currentExpiry > now ? currentExpiry : new Date(now.setMonth(now.getMonth() + 1));
+      
+      await setDoc(doc(db, 'hotels', hotel.id), { 
+        expiryDate: newExpiry.toISOString(),
+        status: 'active' 
+      }, { merge: true });
+
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'superadmin@system.com',
+        action: 'GIVE_LIVE_ACCESS',
         resource: `Hotel: ${hotel.name}`,
         hotelId: 'system'
       });
       
-      alert(`Hotel ${hotel.name} deleted.`);
+      showNotification(`Live access granted to ${hotel.name}`);
+    } catch (err) {
+      handleFirestoreError(err, 'write', `hotels/${hotel.id}`);
     }
   };
 
-  const toggleHotelStatus = async (hotel: Hotel) => {
-    const newStatus = hotel.status === 'active' ? 'suspended' : 'active';
-    await setDoc(doc(db, 'hotels', hotel.id), { ...hotel, status: newStatus }, { merge: true });
-
-    // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: 'system',
-      userEmail: 'superadmin@system.com',
-      action: 'TOGGLE_HOTEL_STATUS',
-      resource: `Hotel ${hotel.name}: ${newStatus}`,
-      hotelId: 'system'
+  const deleteHotel = async (hotel: Hotel) => {
+    setConfirmAction({
+      title: 'Delete Hotel',
+      message: `Are you sure you want to delete ${hotel.name}? This will delete all hotel data including rooms, reservations, and staff profiles. This action cannot be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'hotels', hotel.id));
+          await addDoc(collection(db, 'activityLogs'), {
+            timestamp: new Date().toISOString(),
+            userId: profile?.uid || 'system',
+            userEmail: profile?.email || 'superadmin@system.com',
+            action: 'DELETE_HOTEL',
+            resource: `Hotel: ${hotel.name}`,
+            hotelId: 'system'
+          });
+          showNotification(`Hotel ${hotel.name} deleted`);
+          setConfirmAction(null);
+        } catch (err) {
+          handleFirestoreError(err, 'delete', `hotels/${hotel.id}`);
+        }
+      }
     });
   };
 
-  const extendSubscription = async (hotel: Hotel, months: number) => {
-    const currentExpiry = new Date(hotel.expiryDate);
-    const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
-    
-    await setDoc(doc(db, 'hotels', hotel.id), { 
-      expiryDate: newExpiry.toISOString(),
-      status: 'active' 
-    }, { merge: true });
+  const toggleHotelStatus = async (hotel: Hotel) => {
+    try {
+      const newStatus = hotel.status === 'active' ? 'suspended' : 'active';
+      await setDoc(doc(db, 'hotels', hotel.id), { status: newStatus }, { merge: true });
 
-    // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: 'system',
-      userEmail: 'superadmin@system.com',
-      action: 'EXTEND_SUBSCRIPTION',
-      resource: `Hotel ${hotel.name}: +${months} months`,
-      hotelId: 'system'
-    });
-    
-    setExtendingHotel(null);
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'superadmin@system.com',
+        action: 'TOGGLE_HOTEL_STATUS',
+        resource: `Hotel ${hotel.name}: ${newStatus}`,
+        hotelId: 'system'
+      });
+      showNotification(`Hotel ${hotel.name} ${newStatus}`);
+    } catch (err) {
+      handleFirestoreError(err, 'write', `hotels/${hotel.id}`);
+    }
+  };
+
+  const extendSubscription = async (hotel: Hotel, months: number) => {
+    try {
+      const currentExpiry = new Date(hotel.expiryDate);
+      const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
+      
+      await setDoc(doc(db, 'hotels', hotel.id), { 
+        expiryDate: newExpiry.toISOString(),
+        status: 'active' 
+      }, { merge: true });
+
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'superadmin@system.com',
+        action: 'EXTEND_SUBSCRIPTION',
+        resource: `Hotel ${hotel.name}: +${months} months`,
+        hotelId: 'system'
+      });
+      
+      setExtendingHotel(null);
+      showNotification(`Subscription for ${hotel.name} extended by ${months} months`);
+    } catch (err) {
+      handleFirestoreError(err, 'write', `hotels/${hotel.id}`);
+    }
   };
 
   const filteredHotels = hotels.filter(hotel => {
@@ -293,7 +349,42 @@ export function SuperAdmin() {
   });
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 relative">
+      {/* Notification Toast */}
+      {notification && (
+        <div className={cn(
+          "fixed top-4 right-4 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
+          notification.type === 'success' ? "bg-emerald-500 text-black" : "bg-red-500 text-white"
+        )}>
+          {notification.type === 'success' ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+          <span className="font-bold">{notification.message}</span>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-2">{confirmAction.title}</h3>
+            <p className="text-zinc-400 text-sm mb-8 leading-relaxed">{confirmAction.message}</p>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setConfirmAction(null)}
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmAction.onConfirm}
+                className="flex-1 bg-red-500 text-white font-bold py-2 rounded-lg hover:bg-red-400 transition-all active:scale-95"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">System Control</h1>
