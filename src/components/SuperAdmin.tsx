@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { auth, db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { TrackingCode, Hotel, TrackingCodeRequest } from '../types';
+import { TrackingCode, Hotel, TrackingCodeRequest, OperationType } from '../types';
 import { 
   Plus, 
   Search, 
@@ -61,24 +61,12 @@ export function SuperAdmin() {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  const handleFirestoreError = (error: any, operation: string, path: string) => {
-    console.error(`Firestore Error [${operation}] at ${path}:`, error);
-    const errInfo = {
-      error: error.message,
-      operationType: operation,
-      path,
-      authInfo: {
-        userId: profile?.uid,
-        email: profile?.email,
-      }
-    };
-    showNotification(`Error: ${error.message}`, 'error');
-    throw new Error(JSON.stringify(errInfo));
-  };
-
   // Real-time listeners
   useEffect(() => {
-    if (profile?.role !== 'superAdmin') return;
+    // Wait for both auth and profile to be ready
+    if (!auth.currentUser || profile?.role !== 'superAdmin') {
+      return;
+    }
 
     setLoading(true);
     
@@ -89,7 +77,7 @@ export function SuperAdmin() {
         setLoading(false);
       },
       (err) => {
-        handleFirestoreError(err, 'list', 'trackingCodes');
+        handleFirestoreError(err, OperationType.LIST, 'trackingCodes');
         if (err.code === 'permission-denied') setHasPermissionError(true);
       }
     );
@@ -99,7 +87,7 @@ export function SuperAdmin() {
       (snap) => {
         setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
       },
-      (err) => handleFirestoreError(err, 'list', 'hotels')
+      (err) => handleFirestoreError(err, OperationType.LIST, 'hotels')
     );
 
     // 3. Requests Listener
@@ -107,7 +95,7 @@ export function SuperAdmin() {
       (snap) => {
         setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCodeRequest)));
       },
-      (err) => handleFirestoreError(err, 'list', 'trackingCodeRequests')
+      (err) => handleFirestoreError(err, OperationType.LIST, 'trackingCodeRequests')
     );
 
     // 4. Settings Listener
@@ -117,7 +105,7 @@ export function SuperAdmin() {
           setSettings(snap.data() as any);
         }
       },
-      (err) => handleFirestoreError(err, 'get', 'system/settings')
+      (err) => handleFirestoreError(err, OperationType.GET, 'system/settings')
     );
 
     return () => {
@@ -133,11 +121,17 @@ export function SuperAdmin() {
       await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
       showNotification('System settings updated successfully');
     } catch (err) {
-      handleFirestoreError(err, 'write', 'system/settings');
+      handleFirestoreError(err, OperationType.WRITE, 'system/settings');
     }
   };
 
   const generateCodeForRequest = async (request: TrackingCodeRequest) => {
+    if (!auth.currentUser || profile?.role !== 'superAdmin') {
+      showNotification('Unauthorized: Please wait for authentication to complete', 'error');
+      return;
+    }
+
+    setLoading(true);
     try {
       const code = Math.random().toString(36).substring(2, 10).toUpperCase();
       const expiryDate = new Date();
@@ -159,8 +153,8 @@ export function SuperAdmin() {
 
       await addDoc(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'superadmin@system.com',
+        userId: auth.currentUser.uid,
+        userEmail: auth.currentUser.email || 'superadmin@system.com',
         action: 'APPROVE_CODE_REQUEST',
         resource: `Hotel: ${request.hotelName}, Code: ${code}`,
         hotelId: 'system'
@@ -168,7 +162,9 @@ export function SuperAdmin() {
 
       showNotification(`Code ${code} generated and approved for ${request.hotelName}`);
     } catch (err) {
-      handleFirestoreError(err, 'write', 'trackingCodes/requests');
+      handleFirestoreError(err, OperationType.WRITE, 'trackingCodes/requests');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -177,11 +173,17 @@ export function SuperAdmin() {
       await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
       showNotification('Request rejected');
     } catch (err) {
-      handleFirestoreError(err, 'update', `trackingCodeRequests/${requestId}`);
+      handleFirestoreError(err, OperationType.UPDATE, `trackingCodeRequests/${requestId}`);
     }
   };
 
   const generateCode = async () => {
+    if (!auth.currentUser || profile?.role !== 'superAdmin') {
+      showNotification('Unauthorized: Please wait for authentication to complete', 'error');
+      return;
+    }
+
+    setLoading(true);
     try {
       const code = Math.random().toString(36).substring(2, 10).toUpperCase();
       const expiryDate = new Date();
@@ -201,8 +203,8 @@ export function SuperAdmin() {
 
       await addDoc(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'superadmin@system.com',
+        userId: auth.currentUser.uid,
+        userEmail: auth.currentUser.email || 'superadmin@system.com',
         action: 'GENERATE_TRACKING_CODE',
         resource: `Code: ${code} (${newCode.duration})`,
         hotelId: 'system'
@@ -211,11 +213,16 @@ export function SuperAdmin() {
       setGeneratedCode(code);
       showNotification('Tracking code generated successfully');
     } catch (err) {
-      handleFirestoreError(err, 'write', 'trackingCodes');
+      handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
+    } finally {
+      setLoading(false);
     }
   };
 
   const extendTrackingCode = async (code: TrackingCode, months: number) => {
+    if (!auth.currentUser || profile?.role !== 'superAdmin') return;
+
+    setLoading(true);
     try {
       const currentExpiry = new Date(code.expiryDate);
       const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
@@ -226,8 +233,8 @@ export function SuperAdmin() {
 
       await addDoc(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'superadmin@system.com',
+        userId: auth.currentUser.uid,
+        userEmail: auth.currentUser.email || 'superadmin@system.com',
         action: 'EXTEND_TRACKING_CODE',
         resource: `Code ${code.code}: +${months} months`,
         hotelId: 'system'
@@ -236,7 +243,9 @@ export function SuperAdmin() {
       setExtendingCode(null);
       showNotification(`Code ${code.code} extended by ${months} months`);
     } catch (err) {
-      handleFirestoreError(err, 'update', `trackingCodes/${code.id}`);
+      handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${code.id}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -284,7 +293,7 @@ export function SuperAdmin() {
           showNotification(`Hotel ${hotel.name} deleted`);
           setConfirmAction(null);
         } catch (err) {
-          handleFirestoreError(err, 'delete', `hotels/${hotel.id}`);
+          handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}`);
         }
       }
     });
@@ -305,7 +314,7 @@ export function SuperAdmin() {
       });
       showNotification(`Hotel ${hotel.name} ${newStatus}`);
     } catch (err) {
-      handleFirestoreError(err, 'write', `hotels/${hotel.id}`);
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
     }
   };
 
@@ -331,7 +340,7 @@ export function SuperAdmin() {
       setExtendingHotel(null);
       showNotification(`Subscription for ${hotel.name} extended by ${months} months`);
     } catch (err) {
-      handleFirestoreError(err, 'write', `hotels/${hotel.id}`);
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
     }
   };
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, addDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room } from '../types';
+import { Room, OperationType } from '../types';
 import { 
   Plus, 
   Search, 
@@ -49,11 +49,9 @@ export function Rooms() {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
       },
       (err) => {
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
         if (err.code === 'permission-denied') {
-          console.warn("Rooms access restricted.");
           setHasPermissionError(true);
-        } else {
-          console.error("Rooms listener error:", err);
         }
       }
     );
@@ -63,27 +61,35 @@ export function Rooms() {
   const addRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
-    await addDoc(collection(db, 'hotels', hotel.id, 'rooms'), {
-      ...newRoom,
-      status: 'clean',
-    });
-    setIsAddingRoom(false);
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'rooms'), {
+        ...newRoom,
+        status: 'clean',
+      });
+      setIsAddingRoom(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms`);
+    }
   };
 
   const updateStatus = async (roomId: string, status: Room['status']) => {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
-    await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
 
-    // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: profile?.uid,
-      userEmail: profile?.email,
-      action: 'UPDATE_ROOM_STATUS',
-      resource: `Room ${room?.number}: ${status}`,
-      hotelId: hotel.id
-    });
+      // Log the action
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        action: 'UPDATE_ROOM_STATUS',
+        resource: `Room ${room?.number}: ${status}`,
+        hotelId: hotel.id
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
+    }
   };
 
   const statusColors = {
@@ -327,7 +333,13 @@ export function Rooms() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button 
-                      onClick={() => deleteDoc(doc(db, 'hotels', hotel!.id, 'rooms', room.id))}
+                      onClick={async () => {
+                        try {
+                          await deleteDoc(doc(db, 'hotels', hotel!.id, 'rooms', room.id));
+                        } catch (err) {
+                          handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel!.id}/rooms/${room.id}`);
+                        }
+                      }}
                       className="text-zinc-600 hover:text-red-500 transition-colors"
                     >
                       <XCircle size={18} />

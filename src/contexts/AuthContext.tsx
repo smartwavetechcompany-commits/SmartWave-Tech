@@ -56,8 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onSnapshot(profileRef, 
       async (snap) => {
         if (snap.exists()) {
-          setProfile(snap.data() as UserProfile);
-        } else if (user.email === SUPER_ADMIN_EMAIL && user.emailVerified) {
+          const data = snap.data() as UserProfile;
+          setProfile(data);
+          setLoading(false);
+        } else if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
           // Auto-bootstrap Super Admin profile if it doesn't exist
           const bootstrapProfile: UserProfile = {
             uid: user.uid,
@@ -71,14 +73,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             await setDoc(profileRef, bootstrapProfile);
             setProfile(bootstrapProfile);
+            setLoading(false);
           } catch (e) {
             console.error("Failed to bootstrap Super Admin profile:", e);
             setProfile(null);
+            setLoading(false);
           }
         } else {
           setProfile(null);
+          setLoading(false);
         }
-        setLoading(false);
       },
       (err) => {
         if (err.code === 'permission-denied') {

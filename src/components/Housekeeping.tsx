@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, doc, setDoc, addDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room } from '../types';
+import { Room, OperationType } from '../types';
 import { 
   ClipboardList, 
   CheckCircle2, 
@@ -32,11 +32,9 @@ export function Housekeeping() {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
       },
       (error) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
         if (error.code === 'permission-denied') {
-          console.warn("Housekeeping rooms access restricted.");
           setHasPermissionError(true);
-        } else {
-          console.error("Housekeeping rooms listener error:", error);
         }
       }
     );
@@ -46,17 +44,21 @@ export function Housekeeping() {
   const updateRoomStatus = async (roomId: string, status: Room['status']) => {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
-    await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
 
-    // Log action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: profile?.uid,
-      userEmail: profile?.email,
-      action: 'HOUSEKEEPING_UPDATE',
-      resource: `Room ${room?.number}: ${status}`,
-      hotelId: hotel.id
-    });
+      // Log action
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        action: 'HOUSEKEEPING_UPDATE',
+        resource: `Room ${room?.number}: ${status}`,
+        hotelId: hotel.id
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
+    }
   };
 
   const filteredRooms = rooms.filter(r => {

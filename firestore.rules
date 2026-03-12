@@ -10,11 +10,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Check if the user is the hardcoded bootstrap admin
+    // Check if the user is the hardcoded bootstrap admin (case-insensitive)
     function isBootstrapAdmin() {
       return isAuthenticated() && 
-             request.auth.token.email == "smartwavetechcompany@gmail.com" &&
-             request.auth.token.email_verified == true;
+             request.auth.token.email != null &&
+             request.auth.token.email.lower() == "smartwavetechcompany@gmail.com";
+    }
+
+    function isSuperAdmin() {
+      return isBootstrapAdmin() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin");
     }
 
     // Get user data from the users collection
@@ -29,8 +33,11 @@ service cloud.firestore {
              getUserData().role == role;
     }
 
-    function isSuperAdmin() {
-      return isBootstrapAdmin() || hasRole("superAdmin");
+    // ===============================================================
+    // Global Super Admin Access - MUST BE FIRST
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if isSuperAdmin();
     }
 
     function isHotelAdmin() {
@@ -108,11 +115,6 @@ service cloud.firestore {
     // Activity Logs
     match /activityLogs/{logId} {
       allow create: if isAuthenticated();
-      allow read, write: if isSuperAdmin();
-    }
-
-    // Global Deny
-    match /{document=**} {
       allow read, write: if isSuperAdmin();
     }
   }

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, doc, setDoc, deleteDoc, addDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { UserProfile, StaffRole } from '../types';
+import { UserProfile, StaffRole, OperationType } from '../types';
 import { 
   UserPlus, 
   Search, 
@@ -57,11 +57,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
       }, 
       (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'users');
         if (err.code === 'permission-denied') {
-          console.warn("Staff access restricted.");
           setHasPermissionError(true);
-        } else {
-          console.error("Staff listener error:", err);
         }
       }
     );
@@ -110,8 +108,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       setNewStaff({ email: '', displayName: '', role: 'staff', staffRole: 'frontDesk' });
       showNotification('Staff member added successfully');
     } catch (err: any) {
-      console.error("Error adding staff:", err);
-      showNotification(err.message || "Failed to add staff", 'error');
+      handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
     }
   };
 
@@ -137,8 +134,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           showNotification('Staff member removed');
           setConfirmAction(null);
         } catch (err: any) {
-          console.error("Error removing staff:", err);
-          showNotification(err.message || "Failed to remove staff", 'error');
+          handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
         }
       }
     });
@@ -168,7 +164,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelId: hotelId
       });
     } catch (err) {
-      console.error("Error updating permissions:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${member.uid}`);
     }
   };
 
