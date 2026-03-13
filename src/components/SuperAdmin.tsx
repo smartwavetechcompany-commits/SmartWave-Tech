@@ -21,7 +21,7 @@ import {
   Link as LinkIcon,
   Users
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { cn } from '../utils';
 
 import { AuditLogs } from './AuditLogs';
@@ -347,6 +347,16 @@ export function SuperAdmin() {
     }
   };
 
+  const safeFormat = (date: any, formatStr: string) => {
+    try {
+      const d = new Date(date);
+      if (!isValid(d)) return 'N/A';
+      return format(d, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
   const filteredHotels = hotels.filter(hotel => {
     const matchesSearch = hotel.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          hotel.trackingCode?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -661,7 +671,7 @@ export function SuperAdmin() {
                           <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400">
                             <div className={cn(isExpired && "text-red-400 font-medium")}>
-                              {format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy')}
+                              {safeFormat(hotel.subscriptionExpiry, 'MMM d, yyyy')}
                               {isExpired && <span className="ml-2 text-[10px] uppercase tracking-tighter">(Expired)</span>}
                             </div>
                           </td>
@@ -757,7 +767,7 @@ export function SuperAdmin() {
                           </div>
                           <div className="flex items-center gap-1">
                             <Calendar size={12} />
-                            {format(new Date(request.timestamp), 'MMM d, yyyy HH:mm')}
+                            {safeFormat(request.timestamp, 'MMM d, yyyy HH:mm')}
                           </div>
                         </div>
                       </div>
@@ -870,7 +880,7 @@ export function SuperAdmin() {
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
                     <span>{code.duration} • {code.type}</span>
-                    <span>Exp: {format(new Date(code.expiryDate), 'MMM d, yyyy')}</span>
+                    <span>Exp: {safeFormat(code.expiryDate, 'MMM d, yyyy')}</span>
                   </div>
                 </div>
               ))}

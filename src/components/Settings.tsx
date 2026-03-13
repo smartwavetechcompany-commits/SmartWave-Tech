@@ -17,7 +17,7 @@ import {
   CreditCard
 } from 'lucide-react';
 import { cn } from '../utils';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 
 export function Settings() {
   const { profile, hotel, isSubscriptionActive } = useAuth();
@@ -216,7 +216,11 @@ export function Settings() {
                   
                   <div className="flex items-center gap-3 text-xs text-zinc-400">
                     <Calendar size={14} />
-                    Expires on {hotel?.expiryDate ? format(new Date(hotel.expiryDate), 'MMMM d, yyyy') : 'N/A'}
+                    Expires on {hotel?.subscriptionExpiry ? (
+                      isValid(new Date(hotel.subscriptionExpiry)) 
+                        ? format(new Date(hotel.subscriptionExpiry), 'MMMM d, yyyy') 
+                        : 'N/A'
+                    ) : 'N/A'}
                   </div>
 
                   <div className="flex items-center gap-3 text-xs text-zinc-400">

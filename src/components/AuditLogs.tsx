@@ -3,7 +3,7 @@ import { collection, getDocs, query, orderBy, limit, where, onSnapshot } from 'f
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AuditLog, OperationType } from '../types';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { ClipboardList, User, Clock, Tag, RefreshCw } from 'lucide-react';
 
 export function AuditLogs() {
@@ -12,6 +12,16 @@ export function AuditLogs() {
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   const { hotel, profile } = useAuth();
+
+  const safeFormat = (date: any, formatStr: string) => {
+    try {
+      const d = new Date(date);
+      if (!isValid(d)) return 'N/A';
+      return format(d, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
+  };
 
   const fetchLogs = useCallback(() => {
     if (!profile || hasPermissionError) return () => {};
@@ -83,7 +93,7 @@ export function AuditLogs() {
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-zinc-500 uppercase font-bold">
                   <Clock size={12} />
-                  {format(new Date(log.timestamp), 'MMM d, HH:mm:ss')}
+                  {safeFormat(log.timestamp, 'MMM d, HH:mm:ss')}
                 </div>
               </div>
               <div className="flex items-center gap-2 text-xs text-zinc-400">

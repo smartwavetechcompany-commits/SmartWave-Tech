@@ -13,7 +13,7 @@ import {
   Filter
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
-import { format, isToday } from 'date-fns';
+import { format, isToday, isValid } from 'date-fns';
 
 export function Finance() {
   const { hotel, profile } = useAuth();
@@ -70,6 +70,16 @@ export function Finance() {
 
     setIsAdding(false);
     setNewRecord({ description: '', amount: 0, type: 'income', category: 'Room Revenue' });
+  };
+
+  const safeFormat = (date: any, formatStr: string) => {
+    try {
+      const d = new Date(date);
+      if (!isValid(d)) return 'N/A';
+      return format(d, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
   };
 
   const totalIncome = records.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
@@ -222,7 +232,7 @@ export function Finance() {
               {records.map(record => (
                 <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
                   <td className="px-6 py-4 text-sm text-zinc-400">
-                    {format(new Date(record.timestamp), 'MMM d, yyyy')}
+                    {safeFormat(record.timestamp, 'MMM d, yyyy')}
                   </td>
                   <td className="px-6 py-4 text-sm text-white font-medium">{record.description}</td>
                   <td className="px-6 py-4 text-sm text-zinc-500">{record.category}</td>

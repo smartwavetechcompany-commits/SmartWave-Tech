@@ -136,9 +136,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [profile?.hotelId, profile?.role, hasHotelError]);
 
-  const isSubscriptionActive = hotel 
-    ? (hotel.subscriptionStatus === 'active' && hotel.subscriptionExpiry > Date.now())
-    : profile?.role === 'superAdmin';
+  const isSubscriptionActive = profile?.role === 'superAdmin' 
+    ? true 
+    : (hotel ? (hotel.subscriptionStatus === 'active' && hotel.subscriptionExpiry > Date.now()) : false);
 
   return (
     <AuthContext.Provider value={{ user, profile, hotel, loading, isSubscriptionActive }}>
