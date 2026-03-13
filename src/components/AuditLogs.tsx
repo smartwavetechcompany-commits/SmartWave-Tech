@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, limit, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { AuditLog } from '../types';
+import { AuditLog, OperationType } from '../types';
 import { format } from 'date-fns';
 import { ClipboardList, User, Clock, Tag, RefreshCw } from 'lucide-react';
 
@@ -32,10 +32,9 @@ export function AuditLogs() {
         setLoading(false);
       },
       (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'activityLogs');
         if (err.code === 'permission-denied') {
           setHasPermissionError(true);
-        } else {
-          console.error("Audit logs listener error:", err);
         }
         setLoading(false);
       }

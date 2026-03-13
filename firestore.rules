@@ -3,6 +3,27 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, email, hotelId, role, staffRole, permissions, status, displayName, assignedModules
+    //
+    // Collection: hotels
+    // Fields: id, name, trackingCode, expiryDate, status, subscriptionType, createdAt, adminUIDs
+    //
+    // Collection: trackingCodes
+    // Fields: id, code, expiryDate, duration, type, status, hotelId
+    //
+    // Collection: trackingCodeRequests
+    // Fields: id, hotelName, email, phone, plan, status, timestamp, generatedCode
+    //
+    // Collection: activityLogs
+    // Fields: timestamp, userId, userEmail, action, resource, hotelId
+    //
+    // ===============================================================
+
+    // ===============================================================
     // Helper Functions
     // ===============================================================
 
@@ -10,100 +31,118 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Check if the user is the hardcoded bootstrap admin (case-insensitive)
-    function isBootstrapAdmin() {
-      return isAuthenticated() && 
-             request.auth.token.email != null &&
-             request.auth.token.email.lower() == "smartwavetechcompany@gmail.com";
-    }
-
     function isSuperAdmin() {
-      return isBootstrapAdmin() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin");
+      return isAuthenticated() && (
+        request.auth.token.email == "smartwavetechcompany@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin")
+      );
     }
 
-    // Get user data from the users collection
     function getUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Check if user has a specific role in their profile
-    function hasRole(role) {
+    function isHotelAdmin(hotelId) {
+      let userData = getUserData();
       return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-             getUserData().role == role;
+             userData.role == "hotelAdmin" && 
+             userData.hotelId == hotelId;
+    }
+
+    function isStaff(hotelId) {
+      let userData = getUserData();
+      return isAuthenticated() && 
+             userData.role == "staff" && 
+             userData.hotelId == hotelId;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is string && ts.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z$");
     }
 
     // ===============================================================
-    // Global Super Admin Access - MUST BE FIRST
+    // Domain Validators
     // ===============================================================
-    match /{document=**} {
-      allow read, write: if isSuperAdmin();
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'hotelId', 'status']) &&
+             data.uid == request.auth.uid &&
+             data.email is string &&
+             data.role in ['superAdmin', 'hotelAdmin', 'staff'] &&
+             data.status in ['active', 'inactive'];
     }
 
-    function isHotelAdmin() {
-      return hasRole("hotelAdmin");
+    function isValidHotel(data) {
+      return data.keys().hasAll(['id', 'name', 'status', 'expiryDate', 'adminUIDs']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.status in ['active', 'suspended', 'expired'] &&
+             data.adminUIDs is list;
     }
 
-    function isStaff() {
-      return hasRole("staff");
+    function isValidTrackingCode(data) {
+      return data.keys().hasAll(['id', 'code', 'expiryDate', 'status']) &&
+             data.code is string && data.code.size() == 8 &&
+             data.status in ['active', 'suspended', 'expired'];
+    }
+
+    function isValidTrackingCodeRequest(data) {
+      return data.keys().hasAll(['id', 'hotelName', 'email', 'status', 'timestamp']) &&
+             data.hotelName is string && data.hotelName.size() > 0 && data.hotelName.size() < 100 &&
+             isValidEmail(data.email) &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             isValidTimestamp(data.timestamp);
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll(['timestamp', 'userId', 'action', 'hotelId']) &&
+             isValidTimestamp(data.timestamp) &&
+             data.userId == request.auth.uid;
     }
 
     // ===============================================================
     // Collection Rules
     // ===============================================================
 
-    // 🔓 Allow public hotel requests
-    match /trackingCodeRequests/{requestId} {
-      allow create: if true;
+    // Global Super Admin Access
+    match /{document=**} {
       allow read, write: if isSuperAdmin();
     }
 
-    // 🔓 Public system settings
-    match /system/settings {
-      allow read: if true;
-      allow write: if isSuperAdmin();
-    }
-
-    // Users collection - CRITICAL SECURITY
+    // Users
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
-      
-      // Only allow creation if it's the user's own profile
-      // Role MUST be 'hotelAdmin' or 'staff' unless they are already a SuperAdmin
-      allow create: if isAuthenticated() && request.auth.uid == userId && (
-        (request.resource.data.role in ['hotelAdmin', 'staff']) || 
-        isSuperAdmin()
-      );
-
-      // Only SuperAdmin can change roles. Users can only update their own non-role fields.
-      allow update: if isAuthenticated() && (
-        isSuperAdmin() || 
-        (request.auth.uid == userId && request.resource.data.role == resource.data.role)
-      );
-
-      allow delete: if isSuperAdmin();
+      allow read: if isOwner(userId) || isSuperAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role != "superAdmin" || isSuperAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.role == resource.data.role &&
+                    request.resource.data.hotelId == resource.data.hotelId;
     }
 
-    // Hotels collection
+    // Hotels
     match /hotels/{hotelId} {
-      allow read, write: if isSuperAdmin();
+      allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || isStaff(hotelId);
+      allow update: if isSuperAdmin() || (isHotelAdmin(hotelId) && isValidHotel(request.resource.data));
       
-      allow read: if isAuthenticated() && (
-        (isHotelAdmin() && request.auth.uid in resource.data.adminUIDs) ||
-        (isStaff() && getUserData().hotelId == hotelId)
-      );
-
-      // Only admins can update hotel details
-      allow update: if isHotelAdmin() && request.auth.uid in resource.data.adminUIDs;
-
-      // Subcollections (rooms, reservations, etc.)
+      // Subcollections
       match /{subCollection}/{docId} {
-        allow read, write: if isSuperAdmin() || (
-          isAuthenticated() && 
-          getUserData().hotelId == hotelId && 
-          (isHotelAdmin() || isStaff())
-        );
+        allow read, write: if isSuperAdmin() || isHotelAdmin(hotelId) || isStaff(hotelId);
       }
+    }
+
+    // Tracking Code Requests
+    match /trackingCodeRequests/{requestId} {
+      allow create: if isValidTrackingCodeRequest(request.resource.data);
+      allow read, write: if isSuperAdmin();
     }
 
     // Tracking Codes
@@ -114,8 +153,14 @@ service cloud.firestore {
 
     // Activity Logs
     match /activityLogs/{logId} {
-      allow create: if isAuthenticated();
-      allow read, write: if isSuperAdmin();
+      allow create: if isAuthenticated() && isValidActivityLog(request.resource.data);
+      allow read: if isSuperAdmin() || (isAuthenticated() && getUserData().hotelId == resource.data.hotelId);
+    }
+
+    // System Settings
+    match /system/settings {
+      allow read: if true;
+      allow write: if isSuperAdmin();
     }
   }
 }

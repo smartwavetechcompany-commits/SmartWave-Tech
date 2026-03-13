@@ -271,7 +271,7 @@ export function SuperAdmin() {
       
       showNotification(`Live access granted to ${hotel.name}`);
     } catch (err) {
-      handleFirestoreError(err, 'write', `hotels/${hotel.id}`);
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
     }
   };
 
