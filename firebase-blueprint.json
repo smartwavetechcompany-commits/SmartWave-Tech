@@ -161,6 +161,20 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["action", "actor", "timestamp"]
+    },
+    "FinanceRecord": {
+      "title": "Finance Record",
+      "description": "Hotel financial transaction",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "amount", "category", "date", "timestamp"]
     }
   },
   "firestore": {
@@ -195,6 +209,10 @@
     "/hotels/{hotelId}/activityLogs/{logId}": {
       "schema": "HotelActivityLog",
       "description": "Hotel activity logs"
+    },
+    "/hotels/{hotelId}/finance/{recordId}": {
+      "schema": "FinanceRecord",
+      "description": "Hotel financial records"
     },
     "/trackingCodes/{code}": {
       "schema": "TrackingCode",

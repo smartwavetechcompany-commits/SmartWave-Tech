@@ -69,6 +69,7 @@ export function SuperAdmin() {
     }
 
     setLoading(true);
+    setHasPermissionError(false);
     
     // 1. Tracking Codes Listener
     const unsubscribeCodes = onSnapshot(collection(db, 'trackingCodes'), 
@@ -77,8 +78,13 @@ export function SuperAdmin() {
         setLoading(false);
       },
       (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'trackingCodes');
-        if (err.code === 'permission-denied') setHasPermissionError(true);
+        console.error("Tracking codes listener error:", err);
+        if (err.code === 'permission-denied') {
+          setHasPermissionError(true);
+        } else {
+          handleFirestoreError(err, OperationType.LIST, 'trackingCodes');
+        }
+        setLoading(false);
       }
     );
 
@@ -127,14 +133,15 @@ export function SuperAdmin() {
 
   const generateCodeForRequest = async (request: TrackingCodeRequest) => {
     if (!auth.currentUser || profile?.role !== 'superAdmin') {
-      showNotification('Unauthorized: Please wait for authentication to complete', 'error');
+      showNotification('Unauthorized', 'error');
       return;
     }
 
     setLoading(true);
     try {
-      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const expiryDate = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
+      // Use the code if it was already generated but not approved, or generate new
+      const code = request.generatedCode || Math.random().toString(36).substring(2, 10).toUpperCase();
+      const expiryDate = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days default
 
       const tc: TrackingCode = {
         code,
@@ -145,21 +152,25 @@ export function SuperAdmin() {
         issuedBy: auth.currentUser.uid
       };
 
+      // 1. Create the tracking code
       await setDoc(doc(db, 'trackingCodes', code), tc);
+      
+      // 2. Approve the request
       await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
         status: 'approved',
         generatedCode: code
       });
 
+      // 3. Log the action
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
-        actor: auth.currentUser.email || auth.currentUser.uid,
+        actor: profile?.email || auth.currentUser.email || auth.currentUser.uid,
         action: 'APPROVE_CODE_REQUEST',
         target: `Hotel: ${request.hotelName}, Code: ${code}`
       };
       await addDoc(collection(db, 'auditLogs'), log);
 
-      showNotification(`Code ${code} generated and approved for ${request.hotelName}`);
+      showNotification(`Code ${code} approved for ${request.hotelName}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
     } finally {
@@ -348,6 +359,29 @@ export function SuperAdmin() {
     
     return matchesSearch && matchesStatus;
   });
+
+  if (hasPermissionError) {
+    return (
+      <div className="p-8 flex flex-col items-center justify-center min-h-[400px] text-center space-y-4">
+        <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center">
+          <ShieldAlert size={32} />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-white">Access Denied</h2>
+          <p className="text-zinc-400 max-w-md mx-auto mt-2">
+            You do not have the required permissions to access the SuperAdmin panel. 
+            If you believe this is an error, please contact the system administrator.
+          </p>
+        </div>
+        <button 
+          onClick={() => window.location.reload()}
+          className="px-6 py-2 bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 transition-all"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8 relative">

@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { AuthPage } from './components/AuthPage';
 import { Dashboard } from './components/Dashboard';
 import { SuperAdmin } from './components/SuperAdmin';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Rooms } from './components/Rooms';
 import { FrontDesk } from './components/FrontDesk';
 import { StaffManagement } from './components/StaffManagement';
@@ -48,7 +49,11 @@ function AppContent() {
             <Route path="/finance" element={<Finance />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/super-admin" element={
-              profile?.role === 'superAdmin' ? <SuperAdmin /> : <Navigate to="/" />
+              profile?.role === 'superAdmin' ? (
+                <ErrorBoundary>
+                  <SuperAdmin />
+                </ErrorBoundary>
+              ) : <Navigate to="/" />
             } />
             <Route path="/staff" element={
               profile?.role === 'hotelAdmin' ? <StaffManagement /> : <Navigate to="/" />

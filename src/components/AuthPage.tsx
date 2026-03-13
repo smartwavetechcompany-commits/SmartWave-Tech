@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+import { auth, db, handleFirestoreError } from '../firebase';
 import { motion } from 'motion/react';
-import { Hotel, TrackingCode, UserProfile } from '../types';
+import { Hotel, TrackingCode, UserProfile, OperationType } from '../types';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '../utils';
 
@@ -99,6 +99,7 @@ export function AuthPage() {
       
       setFormData({ ...formData, hotelName: '', email: '', phone: '' });
     } catch (err: any) {
+      handleFirestoreError(err, OperationType.CREATE, 'trackingCodeRequests');
       setError(err.message);
       showNotification(err.message, 'error');
     } finally {
@@ -155,10 +156,20 @@ export function AuthPage() {
           adminUIDs: [user.uid],
         };
 
-        await setDoc(doc(db, 'hotels', hotelId), hotelData);
+        try {
+          await setDoc(doc(db, 'hotels', hotelId), hotelData);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `hotels/${hotelId}`);
+          throw err;
+        }
 
         // 4. Update Tracking Code
-        await setDoc(doc(db, 'trackingCodes', tcDoc.id), { ...tcData, hotelId }, { merge: true });
+        try {
+          await setDoc(doc(db, 'trackingCodes', tcDoc.id), { ...tcData, hotelId }, { merge: true });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${tcDoc.id}`);
+          throw err;
+        }
 
         // 5. Create User Profile
         const profile: UserProfile = {
@@ -173,10 +184,19 @@ export function AuthPage() {
           permissions: ['all'],
         };
 
-        await setDoc(doc(db, 'users', user.uid), profile);
+        try {
+          await setDoc(doc(db, 'users', user.uid), profile);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
+          throw err;
+        }
+        
         showNotification('Registration successful!');
       }
     } catch (err: any) {
+      if (err.code === 'permission-denied') {
+        handleFirestoreError(err, OperationType.WRITE, 'registration');
+      }
       setError(err.message);
       showNotification(err.message, 'error');
     } finally {
