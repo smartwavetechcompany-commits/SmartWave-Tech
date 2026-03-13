@@ -82,13 +82,11 @@ export function FrontDesk() {
     });
 
     // Log the action
-    await addDoc(collection(db, 'activityLogs'), {
+    await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
       timestamp: new Date().toISOString(),
-      userId: profile?.uid,
-      userEmail: profile?.email,
+      user: profile?.email || profile?.uid || 'Unknown',
       action: 'CREATE_BOOKING',
-      resource: `Booking for ${newBooking.guestName} (Room ${selectedRoom.number})`,
-      hotelId: hotel.id
+      module: `Booking for ${newBooking.guestName} (Room ${selectedRoom.roomNumber || selectedRoom.number})`
     });
 
     setIsBooking(false);

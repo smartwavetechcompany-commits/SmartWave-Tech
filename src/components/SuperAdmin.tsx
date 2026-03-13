@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { TrackingCode, Hotel, TrackingCodeRequest, OperationType } from '../types';
+import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings } from '../types';
 import { 
   Plus, 
   Search, 
@@ -33,9 +33,9 @@ export function SuperAdmin() {
   const [trackingCodes, setTrackingCodes] = useState<TrackingCode[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [requests, setRequests] = useState<TrackingCodeRequest[]>([]);
-  const [settings, setSettings] = useState({
-    paymentLink: '',
-    bankDetails: '',
+  const [settings, setSettings] = useState<SystemSettings>({
+    paymentInstructions: '',
+    supportEmail: '',
   });
   const [isAddingCode, setIsAddingCode] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
@@ -134,35 +134,34 @@ export function SuperAdmin() {
     setLoading(true);
     try {
       const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const expiryDate = new Date();
-      expiryDate.setMonth(expiryDate.getMonth() + 1);
+      const expiryDate = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
 
-      const tc: Omit<TrackingCode, 'id'> = {
+      const tc: TrackingCode = {
         code,
-        expiryDate: expiryDate.toISOString(),
-        duration: '1 month',
-        type: request.plan,
-        status: 'active',
+        expiryDate,
+        active: true,
+        plan: request.plan,
+        maxHotels: 1,
+        issuedBy: auth.currentUser.uid
       };
 
-      await addDoc(collection(db, 'trackingCodes'), tc);
+      await setDoc(doc(db, 'trackingCodes', code), tc);
       await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
         status: 'approved',
         generatedCode: code
       });
 
-      await addDoc(collection(db, 'activityLogs'), {
+      const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
-        userId: auth.currentUser.uid,
-        userEmail: auth.currentUser.email || 'superadmin@system.com',
+        actor: auth.currentUser.email || auth.currentUser.uid,
         action: 'APPROVE_CODE_REQUEST',
-        resource: `Hotel: ${request.hotelName}, Code: ${code}`,
-        hotelId: 'system'
-      });
+        target: `Hotel: ${request.hotelName}, Code: ${code}`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
 
       showNotification(`Code ${code} generated and approved for ${request.hotelName}`);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'trackingCodes/requests');
+      handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
     } finally {
       setLoading(false);
     }
@@ -186,29 +185,28 @@ export function SuperAdmin() {
     setLoading(true);
     try {
       const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const expiryDate = new Date();
-      if (newCode.duration === '1 month') expiryDate.setMonth(expiryDate.getMonth() + 1);
-      else if (newCode.duration === '6 months') expiryDate.setMonth(expiryDate.getMonth() + 6);
-      else if (newCode.duration === '1 year') expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+      let durationMs = 30 * 24 * 60 * 60 * 1000;
+      if (newCode.duration === '6 months') durationMs = 6 * 30 * 24 * 60 * 60 * 1000;
+      else if (newCode.duration === '1 year') durationMs = 365 * 24 * 60 * 60 * 1000;
 
-      const tc: Omit<TrackingCode, 'id'> = {
+      const tc: TrackingCode = {
         code,
-        expiryDate: expiryDate.toISOString(),
-        duration: newCode.duration,
-        type: newCode.type,
-        status: 'active',
+        expiryDate: Date.now() + durationMs,
+        active: true,
+        plan: newCode.type,
+        maxHotels: 1,
+        issuedBy: auth.currentUser.uid
       };
 
-      await addDoc(collection(db, 'trackingCodes'), tc);
+      await setDoc(doc(db, 'trackingCodes', code), tc);
 
-      await addDoc(collection(db, 'activityLogs'), {
+      const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
-        userId: auth.currentUser.uid,
-        userEmail: auth.currentUser.email || 'superadmin@system.com',
+        actor: auth.currentUser.email || auth.currentUser.uid,
         action: 'GENERATE_TRACKING_CODE',
-        resource: `Code: ${code} (${newCode.duration})`,
-        hotelId: 'system'
-      });
+        target: `Code: ${code} (${newCode.duration})`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
 
       setGeneratedCode(code);
       showNotification('Tracking code generated successfully');
@@ -224,26 +222,24 @@ export function SuperAdmin() {
 
     setLoading(true);
     try {
-      const currentExpiry = new Date(code.expiryDate);
-      const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
+      const newExpiry = code.expiryDate + (months * 30 * 24 * 60 * 60 * 1000);
       
-      await updateDoc(doc(db, 'trackingCodes', code.id), { 
-        expiryDate: newExpiry.toISOString()
+      await updateDoc(doc(db, 'trackingCodes', code.code), { 
+        expiryDate: newExpiry
       });
 
-      await addDoc(collection(db, 'activityLogs'), {
+      const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
-        userId: auth.currentUser.uid,
-        userEmail: auth.currentUser.email || 'superadmin@system.com',
+        actor: auth.currentUser.email || auth.currentUser.uid,
         action: 'EXTEND_TRACKING_CODE',
-        resource: `Code ${code.code}: +${months} months`,
-        hotelId: 'system'
-      });
+        target: `Code ${code.code}: +${months} months`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
       
       setExtendingCode(null);
       showNotification(`Code ${code.code} extended by ${months} months`);
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${code.id}`);
+      handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${code.code}`);
     } finally {
       setLoading(false);
     }
@@ -251,23 +247,22 @@ export function SuperAdmin() {
 
   const giveLiveAccess = async (hotel: Hotel) => {
     try {
-      const now = new Date();
-      const currentExpiry = new Date(hotel.expiryDate);
-      const newExpiry = currentExpiry > now ? currentExpiry : new Date(now.setMonth(now.getMonth() + 1));
+      const now = Date.now();
+      const currentExpiry = hotel.subscriptionExpiry;
+      const newExpiry = currentExpiry > now ? currentExpiry + (30 * 24 * 60 * 60 * 1000) : now + (30 * 24 * 60 * 60 * 1000);
       
-      await setDoc(doc(db, 'hotels', hotel.id), { 
-        expiryDate: newExpiry.toISOString(),
-        status: 'active' 
-      }, { merge: true });
-
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'superadmin@system.com',
-        action: 'GIVE_LIVE_ACCESS',
-        resource: `Hotel: ${hotel.name}`,
-        hotelId: 'system'
+      await updateDoc(doc(db, 'hotels', hotel.id), { 
+        subscriptionExpiry: newExpiry,
+        subscriptionStatus: 'active' 
       });
+
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
+        actor: profile?.email || profile?.uid || 'system',
+        action: 'GIVE_LIVE_ACCESS',
+        target: `Hotel: ${hotel.name}`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
       
       showNotification(`Live access granted to ${hotel.name}`);
     } catch (err) {
@@ -282,14 +277,13 @@ export function SuperAdmin() {
       onConfirm: async () => {
         try {
           await deleteDoc(doc(db, 'hotels', hotel.id));
-          await addDoc(collection(db, 'activityLogs'), {
+          const log: Omit<GlobalAuditLog, 'id'> = {
             timestamp: new Date().toISOString(),
-            userId: profile?.uid || 'system',
-            userEmail: profile?.email || 'superadmin@system.com',
+            actor: profile?.email || profile?.uid || 'system',
             action: 'DELETE_HOTEL',
-            resource: `Hotel: ${hotel.name}`,
-            hotelId: 'system'
-          });
+            target: `Hotel: ${hotel.name}`
+          };
+          await addDoc(collection(db, 'auditLogs'), log);
           showNotification(`Hotel ${hotel.name} deleted`);
           setConfirmAction(null);
         } catch (err) {
@@ -301,17 +295,16 @@ export function SuperAdmin() {
 
   const toggleHotelStatus = async (hotel: Hotel) => {
     try {
-      const newStatus = hotel.status === 'active' ? 'suspended' : 'active';
-      await setDoc(doc(db, 'hotels', hotel.id), { status: newStatus }, { merge: true });
+      const newStatus = hotel.subscriptionStatus === 'active' ? 'suspended' : 'active';
+      await updateDoc(doc(db, 'hotels', hotel.id), { subscriptionStatus: newStatus });
 
-      await addDoc(collection(db, 'activityLogs'), {
+      const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'superadmin@system.com',
+        actor: profile?.email || profile?.uid || 'system',
         action: 'TOGGLE_HOTEL_STATUS',
-        resource: `Hotel ${hotel.name}: ${newStatus}`,
-        hotelId: 'system'
-      });
+        target: `Hotel ${hotel.name}: ${newStatus}`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
       showNotification(`Hotel ${hotel.name} ${newStatus}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
@@ -320,22 +313,21 @@ export function SuperAdmin() {
 
   const extendSubscription = async (hotel: Hotel, months: number) => {
     try {
-      const currentExpiry = new Date(hotel.expiryDate);
-      const newExpiry = new Date(currentExpiry.setMonth(currentExpiry.getMonth() + months));
+      const currentExpiry = hotel.subscriptionExpiry;
+      const newExpiry = currentExpiry + (months * 30 * 24 * 60 * 60 * 1000);
       
-      await setDoc(doc(db, 'hotels', hotel.id), { 
-        expiryDate: newExpiry.toISOString(),
-        status: 'active' 
-      }, { merge: true });
-
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'superadmin@system.com',
-        action: 'EXTEND_SUBSCRIPTION',
-        resource: `Hotel ${hotel.name}: +${months} months`,
-        hotelId: 'system'
+      await updateDoc(doc(db, 'hotels', hotel.id), { 
+        subscriptionExpiry: newExpiry,
+        subscriptionStatus: 'active' 
       });
+
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
+        actor: profile?.email || profile?.uid || 'system',
+        action: 'EXTEND_SUBSCRIPTION',
+        target: `Hotel ${hotel.name}: +${months} months`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
       
       setExtendingHotel(null);
       showNotification(`Subscription for ${hotel.name} extended by ${months} months`);
@@ -347,11 +339,11 @@ export function SuperAdmin() {
   const filteredHotels = hotels.filter(hotel => {
     const matchesSearch = hotel.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          hotel.trackingCode?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || hotel.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || hotel.subscriptionStatus === statusFilter;
     
     // Check for expired status if needed
     if (statusFilter === 'expired') {
-      return matchesSearch && new Date(hotel.expiryDate) < new Date();
+      return matchesSearch && hotel.subscriptionExpiry < Date.now();
     }
     
     return matchesSearch && matchesStatus;
@@ -625,26 +617,26 @@ export function SuperAdmin() {
                     </tr>
                   ) : (
                     filteredHotels.map(hotel => {
-                      const isExpired = new Date(hotel.expiryDate) < new Date();
+                      const isExpired = hotel.subscriptionExpiry < Date.now();
                       return (
                         <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4">
                             <div className="text-sm font-medium text-white">{hotel.name}</div>
-                            <div className="text-xs text-zinc-500">{hotel.subscriptionType}</div>
+                            <div className="text-xs text-zinc-500">{hotel.plan}</div>
                           </td>
                           <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400">
                             <div className={cn(isExpired && "text-red-400 font-medium")}>
-                              {format(new Date(hotel.expiryDate), 'MMM d, yyyy')}
+                              {format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy')}
                               {isExpired && <span className="ml-2 text-[10px] uppercase tracking-tighter">(Expired)</span>}
                             </div>
                           </td>
                           <td className="px-6 py-4">
                             <span className={cn(
                               "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                              hotel.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                              hotel.subscriptionStatus === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
                             )}>
-                              {hotel.status}
+                              {hotel.subscriptionStatus}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -674,9 +666,9 @@ export function SuperAdmin() {
                                 onClick={() => toggleHotelStatus(hotel)}
                                 className={cn(
                                   "p-2 rounded-lg transition-all active:scale-90",
-                                  hotel.status === 'active' ? "text-zinc-500 hover:text-red-500" : "text-emerald-500 hover:text-emerald-400"
+                                  hotel.subscriptionStatus === 'active' ? "text-zinc-500 hover:text-red-500" : "text-emerald-500 hover:text-emerald-400"
                                 )}
-                                title={hotel.status === 'active' ? "Suspend Hotel" : "Activate Hotel"}
+                                title={hotel.subscriptionStatus === 'active' ? "Suspend Hotel" : "Activate Hotel"}
                               >
                                 <ShieldAlert size={18} />
                               </button>
@@ -776,27 +768,27 @@ export function SuperAdmin() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
                   <LinkIcon size={12} />
-                  Payment Link
+                  Support Email
                 </label>
                 <input 
-                  type="text" 
-                  placeholder="https://payment.link/..."
+                  type="email" 
+                  placeholder="support@example.com"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
-                  value={settings.paymentLink}
-                  onChange={(e) => setSettings({ ...settings, paymentLink: e.target.value })}
+                  value={settings.supportEmail}
+                  onChange={(e) => setSettings({ ...settings, supportEmail: e.target.value })}
                 />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
                   <CreditCard size={12} />
-                  Bank Details
+                  Payment Instructions
                 </label>
                 <textarea 
                   placeholder="Bank: Example Bank&#10;Account: 1234567890&#10;Name: SmartWave PMS"
                   rows={4}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none resize-none"
-                  value={settings.bankDetails}
-                  onChange={(e) => setSettings({ ...settings, bankDetails: e.target.value })}
+                  value={settings.paymentInstructions}
+                  onChange={(e) => setSettings({ ...settings, paymentInstructions: e.target.value })}
                 />
               </div>
               <button 

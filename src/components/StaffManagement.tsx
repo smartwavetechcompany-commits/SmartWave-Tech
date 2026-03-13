@@ -85,6 +85,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       email: newStaff.email,
       hotelId: hotelId,
       role: 'staff',
+      name: newStaff.displayName,
+      createdAt: new Date().toISOString(),
       staffRole: newStaff.staffRole,
       permissions: [newStaff.staffRole],
       status: 'active',
@@ -95,13 +97,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       await setDoc(doc(db, 'users', tempUid), staffProfile);
       
       // Log the action
-      await addDoc(collection(db, 'activityLogs'), {
+      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
+        user: profile?.email || profile?.uid || 'Unknown',
         action: 'CREATE_STAFF',
-        resource: `Staff: ${newStaff.email} (${newStaff.staffRole})`,
-        hotelId: hotelId
+        module: `Staff: ${newStaff.email} (${newStaff.staffRole})`
       });
 
       setIsAddingStaff(false);

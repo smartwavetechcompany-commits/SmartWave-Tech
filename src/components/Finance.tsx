@@ -61,13 +61,11 @@ export function Finance() {
     });
 
     // Log action
-    await addDoc(collection(db, 'activityLogs'), {
+    await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
       timestamp: new Date().toISOString(),
-      userId: profile?.uid,
-      userEmail: profile?.email,
+      user: profile?.email || profile?.uid || 'Unknown',
       action: 'FINANCE_RECORD_CREATED',
-      resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount)})`,
-      hotelId: hotel.id
+      module: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount)})`
     });
 
     setIsAdding(false);

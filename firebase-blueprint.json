@@ -5,114 +5,166 @@
       "description": "User profile and role information",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
         "email": { "type": "string" },
-        "hotelId": { "type": "string" },
         "role": { "type": "string", "enum": ["superAdmin", "hotelAdmin", "staff"] },
-        "staffRole": { "type": "string", "enum": ["frontDesk", "housekeeping", "kitchen", "it", "management"] },
-        "permissions": { "type": "array", "items": { "type": "string" } },
-        "status": { "type": "string", "enum": ["active", "inactive"] },
-        "displayName": { "type": "string" },
-        "assignedModules": { "type": "array", "items": { "type": "string" } }
+        "hotelId": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
       },
-      "required": ["uid", "email", "role", "hotelId", "status"]
+      "required": ["email", "role", "hotelId", "status"]
     },
     "Hotel": {
       "title": "Hotel",
       "description": "Hotel property information",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "name": { "type": "string" },
         "trackingCode": { "type": "string" },
-        "expiryDate": { "type": "string", "format": "date-time" },
-        "status": { "type": "string", "enum": ["active", "suspended", "expired"] },
-        "subscriptionType": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "adminUIDs": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["id", "name", "status", "expiryDate", "adminUIDs"]
-    },
-    "TrackingCode": {
-      "title": "Tracking Code",
-      "description": "Subscription tracking codes",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "code": { "type": "string" },
-        "expiryDate": { "type": "string", "format": "date-time" },
-        "duration": { "type": "string" },
-        "type": { "type": "string" },
-        "status": { "type": "string", "enum": ["active", "suspended", "expired"] },
-        "hotelId": { "type": "string" }
-      },
-      "required": ["id", "code", "expiryDate", "status"]
-    },
-    "TrackingCodeRequest": {
-      "title": "Tracking Code Request",
-      "description": "Requests for new tracking codes",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "hotelName": { "type": "string" },
-        "email": { "type": "string" },
-        "phone": { "type": "string" },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "suspended", "expired"] },
+        "subscriptionExpiry": { "type": "integer" },
         "plan": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "generatedCode": { "type": "string" }
+        "adminUIDs": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "hotelName", "email", "status", "timestamp"]
-    },
-    "ActivityLog": {
-      "title": "Activity Log",
-      "description": "Audit log of system actions",
-      "type": "object",
-      "properties": {
-        "timestamp": { "type": "string", "format": "date-time" },
-        "userId": { "type": "string" },
-        "userEmail": { "type": "string" },
-        "action": { "type": "string" },
-        "resource": { "type": "string" },
-        "hotelId": { "type": "string" }
-      },
-      "required": ["timestamp", "userId", "action", "hotelId"]
+      "required": ["name", "subscriptionStatus", "subscriptionExpiry", "plan", "adminUIDs"]
     },
     "Room": {
       "title": "Room",
       "description": "Hotel room",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "number": { "type": "string" },
+        "roomNumber": { "type": "string" },
         "type": { "type": "string" },
-        "status": { "type": "string", "enum": ["vacant", "occupied", "dirty", "clean", "maintenance", "out_of_service"] },
         "price": { "type": "number" },
-        "floor": { "type": "string" },
-        "capacity": { "type": "number" }
+        "status": { "type": "string", "enum": ["available", "occupied", "dirty", "maintenance"] },
+        "floor": { "type": "integer" }
       },
-      "required": ["id", "number", "type", "status", "price"]
+      "required": ["roomNumber", "type", "price", "status"]
     },
     "Reservation": {
       "title": "Reservation",
       "description": "Guest reservation",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "guestName": { "type": "string" },
         "roomId": { "type": "string" },
-        "roomNumber": { "type": "string" },
-        "checkIn": { "type": "string", "format": "date" },
-        "checkOut": { "type": "string", "format": "date" },
-        "status": { "type": "string", "enum": ["pending", "checked_in", "checked_out", "cancelled"] },
-        "totalAmount": { "type": "number" },
-        "paidAmount": { "type": "number" }
+        "checkIn": { "type": "string", "format": "date-time" },
+        "checkOut": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["booked", "checked_in", "checked_out", "cancelled"] },
+        "createdBy": { "type": "string" }
       },
-      "required": ["id", "guestName", "roomId", "checkIn", "checkOut", "status"]
+      "required": ["guestName", "roomId", "checkIn", "checkOut", "status", "createdBy"]
+    },
+    "HousekeepingTask": {
+      "title": "Housekeeping Task",
+      "description": "Room cleaning task",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "status": { "type": "string", "enum": ["dirty", "cleaning", "clean"] },
+        "assignedTo": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "status", "updatedAt"]
+    },
+    "StaffMember": {
+      "title": "Staff Member",
+      "description": "Hotel staff record",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "modules": { "type": "array", "items": { "type": "string" } },
+        "uid": { "type": "string" }
+      },
+      "required": ["name", "role", "uid"]
+    },
+    "Module": {
+      "title": "Module",
+      "description": "System module permissions",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "assignedUIDs": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "assignedUIDs"]
+    },
+    "HotelActivityLog": {
+      "title": "Hotel Activity Log",
+      "description": "Activity log at hotel level",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "user": { "type": "string" },
+        "module": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "user", "timestamp"]
+    },
+    "TrackingCode": {
+      "title": "Tracking Code",
+      "description": "Subscription tracking codes",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "active": { "type": "boolean" },
+        "expiryDate": { "type": "integer" },
+        "plan": { "type": "string" },
+        "maxHotels": { "type": "integer" },
+        "issuedBy": { "type": "string" }
+      },
+      "required": ["code", "active", "expiryDate", "plan", "issuedBy"]
+    },
+    "TrackingCodeRequest": {
+      "title": "Tracking Code Request",
+      "description": "Requests for new tracking codes",
+      "type": "object",
+      "properties": {
+        "hotelName": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hotelName", "email", "status", "createdAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "SaaS subscription details",
+      "type": "object",
+      "properties": {
+        "plan": { "type": "string" },
+        "roomLimit": { "type": "integer" },
+        "staffLimit": { "type": "integer" },
+        "expiresAt": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "suspended", "expired"] }
+      },
+      "required": ["plan", "expiresAt", "status"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Global system configuration",
+      "type": "object",
+      "properties": {
+        "paymentInstructions": { "type": "string" },
+        "supportEmail": { "type": "string" }
+      }
+    },
+    "GlobalAuditLog": {
+      "title": "Global Audit Log",
+      "description": "Critical system actions",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "actor": { "type": "string" },
+        "target": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "actor", "timestamp"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
+    "/users/{uid}": {
       "schema": "UserProfile",
       "description": "User profiles"
     },
@@ -128,7 +180,23 @@
       "schema": "Reservation",
       "description": "Hotel reservations"
     },
-    "/trackingCodes/{codeId}": {
+    "/hotels/{hotelId}/housekeeping/{taskId}": {
+      "schema": "HousekeepingTask",
+      "description": "Housekeeping tasks"
+    },
+    "/hotels/{hotelId}/staff/{staffId}": {
+      "schema": "StaffMember",
+      "description": "Hotel staff records"
+    },
+    "/hotels/{hotelId}/modules/{moduleId}": {
+      "schema": "Module",
+      "description": "Module permissions"
+    },
+    "/hotels/{hotelId}/activityLogs/{logId}": {
+      "schema": "HotelActivityLog",
+      "description": "Hotel activity logs"
+    },
+    "/trackingCodes/{code}": {
       "schema": "TrackingCode",
       "description": "Subscription tracking codes"
     },
@@ -136,9 +204,17 @@
       "schema": "TrackingCodeRequest",
       "description": "Requests for tracking codes"
     },
-    "/activityLogs/{logId}": {
-      "schema": "ActivityLog",
-      "description": "System activity logs"
+    "/subscriptions/{hotelId}": {
+      "schema": "Subscription",
+      "description": "SaaS subscriptions"
+    },
+    "/system/settings": {
+      "schema": "SystemSettings",
+      "description": "Global system settings"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "GlobalAuditLog",
+      "description": "Global audit logs"
     }
   }
 }

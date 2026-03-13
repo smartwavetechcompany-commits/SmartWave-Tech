@@ -74,9 +74,9 @@ export function Dashboard() {
   const stats = profile?.role === 'superAdmin' 
     ? [
         { label: 'Total Hotels', value: allHotels.length, icon: BedDouble, color: 'text-blue-500' },
-        { label: 'Active Subscriptions', value: allHotels.filter(h => h.status === 'active').length, icon: CheckCircle2, color: 'text-emerald-500' },
-        { label: 'Suspended', value: allHotels.filter(h => h.status === 'suspended').length, icon: AlertCircle, color: 'text-red-500' },
-        { label: 'Expired', value: allHotels.filter(h => h.status === 'expired').length, icon: Clock, color: 'text-amber-500' },
+        { label: 'Active Subscriptions', value: allHotels.filter(h => h.subscriptionStatus === 'active').length, icon: CheckCircle2, color: 'text-emerald-500' },
+        { label: 'Suspended', value: allHotels.filter(h => h.subscriptionStatus === 'suspended').length, icon: AlertCircle, color: 'text-red-500' },
+        { label: 'Expired', value: allHotels.filter(h => h.subscriptionStatus === 'expired').length, icon: Clock, color: 'text-amber-500' },
       ]
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
@@ -168,13 +168,13 @@ export function Dashboard() {
                     </div>
                     <div>
                       <div className="text-sm font-medium text-white">{res.guestName}</div>
-                      <div className="text-xs text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
+                      <div className="text-xs text-zinc-500">Room {res.roomNumber || (res as any).roomNumber} • {res.checkIn}</div>
                     </div>
                   </div>
                   <div className={cn(
                     "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
                     res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                    res.status === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
+                    (res.status as string) === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
                   )}>
                     {res.status.replace('_', ' ')}
                   </div>

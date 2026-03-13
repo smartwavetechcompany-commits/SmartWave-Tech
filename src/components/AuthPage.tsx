@@ -148,9 +148,9 @@ export function AuthPage() {
           id: hotelId,
           name: formData.hotelName,
           trackingCode: formData.trackingCode,
-          expiryDate: tcData.expiryDate,
-          status: 'active',
-          subscriptionType: tcData.type,
+          subscriptionStatus: 'active',
+          subscriptionExpiry: tcData.expiryDate,
+          plan: tcData.plan || 'Standard',
           createdAt: new Date().toISOString(),
           adminUIDs: [user.uid],
         };
@@ -166,9 +166,11 @@ export function AuthPage() {
           email: formData.email,
           hotelId: hotelId,
           role: 'hotelAdmin',
-          permissions: ['all'],
+          name: formData.hotelName + ' Admin',
+          createdAt: new Date().toISOString(),
           status: 'active',
           displayName: formData.hotelName + ' Admin',
+          permissions: ['all'],
         };
 
         await setDoc(doc(db, 'users', user.uid), profile);

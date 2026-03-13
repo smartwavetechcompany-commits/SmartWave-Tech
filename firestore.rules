@@ -3,27 +3,6 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Fields: uid, email, hotelId, role, staffRole, permissions, status, displayName, assignedModules
-    //
-    // Collection: hotels
-    // Fields: id, name, trackingCode, expiryDate, status, subscriptionType, createdAt, adminUIDs
-    //
-    // Collection: trackingCodes
-    // Fields: id, code, expiryDate, duration, type, status, hotelId
-    //
-    // Collection: trackingCodeRequests
-    // Fields: id, hotelName, email, phone, plan, status, timestamp, generatedCode
-    //
-    // Collection: activityLogs
-    // Fields: timestamp, userId, userEmail, action, resource, hotelId
-    //
-    // ===============================================================
-
-    // ===============================================================
     // Helper Functions
     // ===============================================================
 
@@ -61,106 +40,112 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidTimestamp(ts) {
-      return ts is string && ts.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z$");
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'role', 'hotelId', 'status']) &&
-             data.uid == request.auth.uid &&
-             data.email is string &&
-             data.role in ['superAdmin', 'hotelAdmin', 'staff'] &&
-             data.status in ['active', 'inactive'];
-    }
-
-    function isValidHotel(data) {
-      return data.keys().hasAll(['id', 'name', 'status', 'expiryDate', 'adminUIDs']) &&
-             data.id is string &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.status in ['active', 'suspended', 'expired'] &&
-             data.adminUIDs is list;
-    }
-
-    function isValidTrackingCode(data) {
-      return data.keys().hasAll(['id', 'code', 'expiryDate', 'status']) &&
-             data.code is string && data.code.size() == 8 &&
-             data.status in ['active', 'suspended', 'expired'];
-    }
-
-    function isValidTrackingCodeRequest(data) {
-      return data.keys().hasAll(['id', 'hotelName', 'email', 'status', 'timestamp']) &&
-             data.hotelName is string && data.hotelName.size() > 0 && data.hotelName.size() < 100 &&
-             isValidEmail(data.email) &&
-             data.status in ['pending', 'approved', 'rejected'] &&
-             isValidTimestamp(data.timestamp);
-    }
-
-    function isValidActivityLog(data) {
-      return data.keys().hasAll(['timestamp', 'userId', 'action', 'hotelId']) &&
-             isValidTimestamp(data.timestamp) &&
-             data.userId == request.auth.uid;
+    // Check if staff has access to a specific module
+    function hasModuleAccess(hotelId, moduleName) {
+      return isStaff(hotelId) && 
+             exists(/databases/$(database)/documents/hotels/$(hotelId)/modules/$(moduleName)) &&
+             request.auth.uid in get(/databases/$(database)/documents/hotels/$(hotelId)/modules/$(moduleName)).data.assignedUIDs;
     }
 
     // ===============================================================
-    // Collection Rules
+    // Global Rules
     // ===============================================================
 
-    // Global Super Admin Access
+    // Super Admin can do anything
     match /{document=**} {
       allow read, write: if isSuperAdmin();
     }
 
+    // ===============================================================
+    // Root Collections
+    // ===============================================================
+
     // Users
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isSuperAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                    (request.resource.data.role != "superAdmin" || isSuperAdmin());
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
-                    request.resource.data.role == resource.data.role &&
-                    request.resource.data.hotelId == resource.data.hotelId;
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isSuperAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) && 
+                    (request.resource.data.role == resource.data.role || isSuperAdmin());
     }
 
     // Hotels
     match /hotels/{hotelId} {
       allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || isStaff(hotelId);
-      allow update: if isSuperAdmin() || (isHotelAdmin(hotelId) && isValidHotel(request.resource.data));
-      
-      // Subcollections
-      match /{subCollection}/{docId} {
-        allow read, write: if isSuperAdmin() || isHotelAdmin(hotelId) || isStaff(hotelId);
+      allow write: if isSuperAdmin(); // Only SuperAdmin creates/deletes hotels
+
+      // Hotel Subcollections
+      match /rooms/{roomId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "rooms");
+        allow write: if isSuperAdmin() || isHotelAdmin(hotelId);
+      }
+
+      match /reservations/{resId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "reservations");
+        allow write: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "reservations");
+      }
+
+      match /housekeeping/{taskId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "housekeeping");
+        allow write: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "housekeeping");
+      }
+
+      match /staff/{staffId} {
+        allow read, write: if isSuperAdmin() || isHotelAdmin(hotelId);
+      }
+
+      match /modules/{moduleId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || isStaff(hotelId);
+        allow write: if isSuperAdmin() || isHotelAdmin(hotelId);
+      }
+
+      match /activityLogs/{logId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId);
+        allow create: if isAuthenticated() && getUserData().hotelId == hotelId;
+      }
+
+      match /inventory/{itemId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "inventory");
+        allow write: if isSuperAdmin() || isHotelAdmin(hotelId) || hasModuleAccess(hotelId, "inventory");
+      }
+
+      match /payments/{paymentId} {
+        allow read, write: if isSuperAdmin() || isHotelAdmin(hotelId);
+      }
+
+      match /reports/{reportId} {
+        allow read: if isSuperAdmin() || isHotelAdmin(hotelId);
+        allow write: if isSuperAdmin() || isHotelAdmin(hotelId);
       }
     }
 
-    // Tracking Code Requests
-    match /trackingCodeRequests/{requestId} {
-      allow create: if isValidTrackingCodeRequest(request.resource.data);
-      allow read, write: if isSuperAdmin();
-    }
-
     // Tracking Codes
-    match /trackingCodes/{codeId} {
+    match /trackingCodes/{code} {
       allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
     }
 
-    // Activity Logs
-    match /activityLogs/{logId} {
-      allow create: if isAuthenticated() && isValidActivityLog(request.resource.data);
-      allow read: if isSuperAdmin() || (isAuthenticated() && getUserData().hotelId == resource.data.hotelId);
+    // Tracking Code Requests
+    match /trackingCodeRequests/{requestId} {
+      allow create: if true; // Public
+      allow read, write: if isSuperAdmin();
+    }
+
+    // Subscriptions
+    match /subscriptions/{hotelId} {
+      allow read: if isSuperAdmin() || isHotelAdmin(hotelId);
+      allow write: if isSuperAdmin();
     }
 
     // System Settings
     match /system/settings {
-      allow read: if true;
+      allow read: if true; // Public
       allow write: if isSuperAdmin();
+    }
+
+    // Global Audit Logs
+    match /auditLogs/{logId} {
+      allow read: if isSuperAdmin();
+      allow create: if isAuthenticated();
     }
   }
 }

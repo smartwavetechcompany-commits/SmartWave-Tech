@@ -62,13 +62,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
           // Auto-bootstrap Super Admin profile if it doesn't exist
           const bootstrapProfile: UserProfile = {
-            uid: user.uid,
             email: user.email,
             hotelId: 'system',
             role: 'superAdmin',
-            permissions: ['all'],
+            name: user.displayName || 'System Owner',
+            createdAt: new Date().toISOString(),
             status: 'active',
-            displayName: user.displayName || 'System Owner',
+            uid: user.uid
           };
           try {
             await setDoc(profileRef, bootstrapProfile);
@@ -137,7 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [profile?.hotelId, profile?.role, hasHotelError]);
 
   const isSubscriptionActive = hotel 
-    ? (hotel.status === 'active' && new Date(hotel.expiryDate) > new Date())
+    ? (hotel.subscriptionStatus === 'active' && hotel.subscriptionExpiry > Date.now())
     : profile?.role === 'superAdmin';
 
   return (

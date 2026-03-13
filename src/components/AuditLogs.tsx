@@ -21,9 +21,9 @@ export function AuditLogs() {
     setLoading(true);
     let q;
     if (profile.role === 'superAdmin') {
-      q = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
+      q = query(collection(db, 'auditLogs'), orderBy('timestamp', 'desc'), limit(50));
     } else {
-      q = query(collection(db, 'activityLogs'), where('hotelId', '==', hotel?.id), orderBy('timestamp', 'desc'), limit(50));
+      q = query(collection(db, 'hotels', hotel?.id || '', 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
     }
 
     const unsubscribe = onSnapshot(q, 
@@ -32,7 +32,8 @@ export function AuditLogs() {
         setLoading(false);
       },
       (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'activityLogs');
+        const path = profile.role === 'superAdmin' ? 'auditLogs' : `hotels/${hotel?.id}/activityLogs`;
+        handleFirestoreError(err, OperationType.LIST, path);
         if (err.code === 'permission-denied') {
           setHasPermissionError(true);
         }
@@ -78,7 +79,7 @@ export function AuditLogs() {
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2 text-sm font-medium text-white">
                   <User size={14} className="text-zinc-500" />
-                  {log.userEmail}
+                  {(log as any).actor || (log as any).user || (log as any).userEmail || 'Unknown'}
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-zinc-500 uppercase font-bold">
                   <Clock size={12} />
@@ -89,7 +90,7 @@ export function AuditLogs() {
                 <Tag size={12} className="text-emerald-500" />
                 <span className="font-semibold text-emerald-500/80 uppercase tracking-wider">{log.action}</span>
                 <span>on</span>
-                <span className="text-zinc-300">{log.resource}</span>
+                <span className="text-zinc-300">{(log as any).target || (log as any).resource || (log as any).module || 'System'}</span>
               </div>
             </div>
           ))

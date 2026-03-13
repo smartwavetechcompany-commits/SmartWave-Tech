@@ -79,13 +79,11 @@ export function Rooms() {
       await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
 
       // Log the action
-      await addDoc(collection(db, 'activityLogs'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
+        user: profile?.email || profile?.uid || 'Unknown',
         action: 'UPDATE_ROOM_STATUS',
-        resource: `Room ${room?.number}: ${status}`,
-        hotelId: hotel.id
+        module: `Room ${room?.roomNumber || roomId}: ${status}`
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
