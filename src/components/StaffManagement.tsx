@@ -85,7 +85,6 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       email: newStaff.email,
       hotelId: hotelId,
       role: 'staff',
-      name: newStaff.displayName,
       createdAt: new Date().toISOString(),
       staffRole: newStaff.staffRole,
       permissions: [newStaff.staffRole],

@@ -76,7 +76,7 @@ export function FrontDesk() {
 
     const resRef = await addDoc(collection(db, 'hotels', hotel.id, 'reservations'), {
       ...newBooking,
-      roomNumber: selectedRoom.number,
+      roomNumber: selectedRoom.roomNumber,
       status: 'pending',
       paidAmount: 0,
     });
@@ -86,7 +86,7 @@ export function FrontDesk() {
       timestamp: new Date().toISOString(),
       user: profile?.email || profile?.uid || 'Unknown',
       action: 'CREATE_BOOKING',
-      module: `Booking for ${newBooking.guestName} (Room ${selectedRoom.roomNumber || selectedRoom.number})`
+      module: `Booking for ${newBooking.guestName} (Room ${selectedRoom.roomNumber})`
     });
 
     setIsBooking(false);
@@ -156,7 +156,7 @@ export function FrontDesk() {
                 >
                   <option value="">Select a room</option>
                   {rooms.filter(r => r.status === 'clean').map(room => (
-                    <option key={room.id} value={room.id}>Room {room.number} ({room.type} - {formatCurrency(room.price)})</option>
+                    <option key={room.id} value={room.id}>Room {room.roomNumber} ({room.type} - {formatCurrency(room.price)})</option>
                   ))}
                 </select>
               </div>

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings } from '../types';
+import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings, PlanType } from '../types';
 import { 
   Plus, 
   Search, 
@@ -34,6 +34,9 @@ export function SuperAdmin() {
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [requests, setRequests] = useState<TrackingCodeRequest[]>([]);
   const [settings, setSettings] = useState<SystemSettings>({
+    bankName: '',
+    accountNumber: '',
+    accountName: '',
     paymentInstructions: '',
     supportEmail: '',
   });
@@ -141,15 +144,22 @@ export function SuperAdmin() {
     try {
       // Use the code if it was already generated but not approved, or generate new
       const code = request.generatedCode || Math.random().toString(36).substring(2, 10).toUpperCase();
-      const expiryDate = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days default
+      
+      // Calculate expiry based on plan or default 30 days
+      let durationMs = 30 * 24 * 60 * 60 * 1000;
+      if (request.message?.includes('6 months')) durationMs = 6 * 30 * 24 * 60 * 60 * 1000;
+      else if (request.message?.includes('1 year')) durationMs = 365 * 24 * 60 * 60 * 1000;
+
+      const expiryDate = new Date(Date.now() + durationMs).toISOString();
 
       const tc: TrackingCode = {
         code,
         expiryDate,
-        active: true,
-        plan: request.plan,
+        status: 'active',
+        plan: (request.plan?.toLowerCase() as PlanType) || 'standard',
         maxHotels: 1,
-        issuedBy: auth.currentUser.uid
+        issuedBy: auth.currentUser.uid,
+        createdAt: new Date().toISOString()
       };
 
       // 1. Create the tracking code
@@ -202,11 +212,12 @@ export function SuperAdmin() {
 
       const tc: TrackingCode = {
         code,
-        expiryDate: Date.now() + durationMs,
-        active: true,
-        plan: newCode.type,
+        expiryDate: new Date(Date.now() + durationMs).toISOString(),
+        status: 'active',
+        plan: newCode.type.toLowerCase() as PlanType,
         maxHotels: 1,
-        issuedBy: auth.currentUser.uid
+        issuedBy: auth.currentUser.uid,
+        createdAt: new Date().toISOString()
       };
 
       await setDoc(doc(db, 'trackingCodes', code), tc);
@@ -233,7 +244,8 @@ export function SuperAdmin() {
 
     setLoading(true);
     try {
-      const newExpiry = code.expiryDate + (months * 30 * 24 * 60 * 60 * 1000);
+      const currentExpiry = new Date(code.expiryDate).getTime();
+      const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
       
       await updateDoc(doc(db, 'trackingCodes', code.code), { 
         expiryDate: newExpiry
@@ -259,8 +271,8 @@ export function SuperAdmin() {
   const giveLiveAccess = async (hotel: Hotel) => {
     try {
       const now = Date.now();
-      const currentExpiry = hotel.subscriptionExpiry;
-      const newExpiry = currentExpiry > now ? currentExpiry + (30 * 24 * 60 * 60 * 1000) : now + (30 * 24 * 60 * 60 * 1000);
+      const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
+      const newExpiry = new Date((currentExpiry > now ? currentExpiry : now) + (30 * 24 * 60 * 60 * 1000)).toISOString();
       
       await updateDoc(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
@@ -324,8 +336,8 @@ export function SuperAdmin() {
 
   const extendSubscription = async (hotel: Hotel, months: number) => {
     try {
-      const currentExpiry = hotel.subscriptionExpiry;
-      const newExpiry = currentExpiry + (months * 30 * 24 * 60 * 60 * 1000);
+      const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
+      const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
       
       await updateDoc(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
@@ -364,7 +376,7 @@ export function SuperAdmin() {
     
     // Check for expired status if needed
     if (statusFilter === 'expired') {
-      return matchesSearch && hotel.subscriptionExpiry < Date.now();
+      return matchesSearch && new Date(hotel.subscriptionExpiry).getTime() < Date.now();
     }
     
     return matchesSearch && matchesStatus;
@@ -755,15 +767,19 @@ export function SuperAdmin() {
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-500">
                             {request.plan}
                           </span>
+                          {request.type === 'extension' && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-500">
+                              Extension
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-4 text-xs text-zinc-500">
                           <div className="flex items-center gap-1">
                             <Mail size={12} />
                             {request.email}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <Phone size={12} />
-                            {request.phone}
+                          <div className="flex items-center gap-1 text-zinc-400 italic">
+                            "{request.message}"
                           </div>
                           <div className="flex items-center gap-1">
                             <Calendar size={12} />
@@ -824,6 +840,39 @@ export function SuperAdmin() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                  Bank Name
+                </label>
+                <input 
+                  type="text" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  value={settings.bankName}
+                  onChange={(e) => setSettings({ ...settings, bankName: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                  Account Number
+                </label>
+                <input 
+                  type="text" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  value={settings.accountNumber}
+                  onChange={(e) => setSettings({ ...settings, accountNumber: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                  Account Name
+                </label>
+                <input 
+                  type="text" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  value={settings.accountName}
+                  onChange={(e) => setSettings({ ...settings, accountName: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
                   <CreditCard size={12} />
                   Payment Instructions
                 </label>
@@ -853,37 +902,37 @@ export function SuperAdmin() {
               </h3>
             </div>
             <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
-              {trackingCodes.filter(c => !c.hotelId).map(code => (
-                <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono text-emerald-500 font-bold tracking-widest">{code.code}</span>
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                      <button 
-                        onClick={() => setExtendingCode(code)}
-                        className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
-                        title="Extend Expiry"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                      <button 
-                        onClick={async () => {
-                          if (window.confirm('Are you sure you want to delete this code?')) {
-                            await deleteDoc(doc(db, 'trackingCodes', code.id));
-                          }
-                        }}
-                        className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
-                        title="Delete Code"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                  {trackingCodes.filter(c => c.status !== 'used').map(code => (
+                    <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-mono text-emerald-500 font-bold tracking-widest">{code.code}</span>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          <button 
+                            onClick={() => setExtendingCode(code)}
+                            className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
+                            title="Extend Expiry"
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                          <button 
+                            onClick={async () => {
+                              if (window.confirm('Are you sure you want to delete this code?')) {
+                                await deleteDoc(doc(db, 'trackingCodes', code.id));
+                              }
+                            }}
+                            className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
+                            title="Delete Code"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
+                        <span>{code.plan}</span>
+                        <span>Exp: {safeFormat(code.expiryDate, 'MMM d, yyyy')}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
-                    <span>{code.duration} • {code.type}</span>
-                    <span>Exp: {safeFormat(code.expiryDate, 'MMM d, yyyy')}</span>
-                  </div>
-                </div>
-              ))}
+                  ))}
             </div>
           </div>
         </div>

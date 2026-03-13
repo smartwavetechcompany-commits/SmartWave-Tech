@@ -18,7 +18,7 @@ import { cn } from '../utils';
 import { auth } from '../firebase';
 
 export function Sidebar() {
-  const { profile, isSubscriptionActive } = useAuth();
+  const { profile, hotel, isSubscriptionActive } = useAuth();
   const location = useLocation();
 
   const menuItems = [
@@ -42,20 +42,23 @@ export function Sidebar() {
       return item.roles.includes('superAdmin');
     }
 
-    // Hotel Admin sees everything except Super Admin items
-    if (profile.role === 'hotelAdmin') {
-      return item.roles.includes('hotelAdmin');
-    }
+    // Hotel Admin and Staff checks
+    if (profile.role === 'hotelAdmin' || profile.role === 'staff') {
+      // Check if role is allowed
+      if (!item.roles.includes(profile.role)) return false;
 
-    // Staff see items based on their permissions
-    if (profile.role === 'staff') {
-      if (!item.roles.includes('staff')) return false;
-      
-      // Dashboard is usually allowed for everyone
-      if (item.permission === 'dashboard') return true;
-      
-      // Check explicit permissions
-      return (profile.permissions || []).includes(item.permission || '');
+      // Check if module is enabled for the hotel
+      if (item.permission && hotel?.modulesEnabled) {
+        if (!hotel.modulesEnabled.includes(item.permission)) return false;
+      }
+
+      // Staff specific permission check
+      if (profile.role === 'staff') {
+        if (item.permission === 'dashboard') return true;
+        return (profile.permissions || []).includes(item.permission || '');
+      }
+
+      return true;
     }
     
     return false;

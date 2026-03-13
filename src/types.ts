@@ -1,123 +1,111 @@
 export type UserRole = 'superAdmin' | 'hotelAdmin' | 'staff';
-export type StaffRole = 'frontDesk' | 'housekeeping' | 'kitchen' | 'it' | 'management';
-export type SubscriptionStatus = 'active' | 'suspended' | 'expired';
+export type StaffRole = 'receptionist' | 'housekeeper' | 'manager' | 'accountant' | 'frontDesk';
+export type SubscriptionStatus = 'active' | 'expired' | 'suspended';
+export type PlanType = 'standard' | 'premium' | 'enterprise';
 
 export interface UserProfile {
+  uid: string;
   email: string;
   role: UserRole;
-  hotelId: string | 'system';
-  name: string;
+  hotelId: string;
   createdAt: string;
   status: 'active' | 'inactive';
-  uid?: string;
-  displayName?: string; // For compatibility
-  permissions?: string[]; // For compatibility
-  staffRole?: string; // For compatibility
+  displayName?: string;
+  permissions?: string[]; // For staff module access
+  staffRole?: StaffRole;
 }
 
 export interface Hotel {
   id: string;
   name: string;
-  trackingCode: string;
+  plan: PlanType;
   subscriptionStatus: SubscriptionStatus;
-  subscriptionExpiry: number; // timestamp
-  plan: string;
-  adminUIDs: string[];
+  subscriptionExpiry: string; // ISO string
+  trackingCode: string;
   createdAt: string;
-  status?: string; // For compatibility
-  expiryDate?: string; // For compatibility
-  subscriptionType?: string; // For compatibility
-}
-
-export interface Room {
-  id: string;
-  roomNumber: string;
-  number?: string; // For compatibility
-  type: string;
-  price: number;
-  status: 'available' | 'occupied' | 'dirty' | 'maintenance' | 'clean';
-  floor: number;
-  capacity?: number; // For compatibility
-}
-
-export interface Reservation {
-  id: string;
-  guestName: string;
-  roomId: string;
-  roomNumber?: string; // For compatibility
-  checkIn: string;
-  checkOut: string;
-  status: 'booked' | 'checked_in' | 'checked_out' | 'cancelled' | 'pending';
-  createdBy: string;
-  totalAmount?: number; // For compatibility
-}
-
-export interface HousekeepingTask {
-  id: string;
-  roomId: string;
-  status: 'dirty' | 'cleaning' | 'clean';
-  assignedTo: string;
-  updatedAt: string;
-}
-
-export interface StaffMember {
-  id: string;
-  name: string;
-  role: string;
-  modules: string[];
-  uid: string;
-}
-
-export interface Module {
-  id: string;
-  name: string;
-  assignedUIDs: string[];
-}
-
-export interface HotelActivityLog {
-  id: string;
-  action: string;
-  user: string;
-  module: string;
-  timestamp: string;
+  roomLimit: number;
+  staffLimit: number;
+  modulesEnabled: string[];
+  limits?: {
+    rooms: number;
+    staff: number;
+  };
+  adminUIDs?: string[];
 }
 
 export interface TrackingCode {
-  id?: string; // For compatibility
+  id?: string;
   code: string;
-  active: boolean;
-  expiryDate: number;
-  plan: string;
+  plan: PlanType;
+  expiryDate: string; // ISO string
+  status: 'active' | 'used' | 'expired';
   maxHotels: number;
   issuedBy: string;
-  status?: string; // For compatibility
-  hotelId?: string; // For compatibility
-  duration?: string; // For compatibility
-  type?: string; // For compatibility
+  createdAt: string;
+  usedByHotel?: string;
+  hotelId?: string; // For backward compatibility or tracking usage
+}
+
+export interface GlobalAuditLog {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  target: string;
+}
+
+export interface SystemSettings {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  paymentInstructions: string;
+  supportEmail: string;
 }
 
 export interface TrackingCodeRequest {
   id: string;
   hotelName: string;
   email: string;
-  phone: string;
-  plan: string;
+  phone?: string;
+  plan: PlanType;
   status: 'pending' | 'approved' | 'rejected';
   timestamp: string;
+  paymentReceiptUrl?: string;
+  message?: string;
+  type?: 'new' | 'extension';
   generatedCode?: string;
 }
 
-export interface Subscription {
-  plan: string;
-  roomLimit: number;
-  staffLimit: number;
-  expiresAt: number;
-  status: SubscriptionStatus;
+export interface AuditLog {
+  id: string;
+  action: string;
+  userId: string;
+  userEmail: string;
+  hotelId: string;
+  timestamp: string;
+  details: string;
 }
 
-export interface SystemSettings {
-  paymentInstructions: string;
-  supportEmail: string;
+export interface Room {
+  id: string;
+  roomNumber: string;
+  type: string;
+  price: number;
+  status: 'clean' | 'dirty' | 'occupied' | 'maintenance' | 'vacant' | 'out_of_service';
+  floor: string;
+  capacity: number;
+}
+
+export interface Reservation {
+  id: string;
+  guestName: string;
+  roomId: string;
+  roomNumber: string;
+  checkIn: string;
+  checkOut: string;
+  status: 'pending' | 'checked_in' | 'checked_out' | 'cancelled';
+  totalAmount: number;
+  paidAmount: number;
 }
 
 export interface FinanceRecord {
@@ -126,20 +114,8 @@ export interface FinanceRecord {
   amount: number;
   category: string;
   description: string;
-  date: string;
-  timestamp: string;
-  hotelId: string;
-}
-
-export interface GlobalAuditLog {
-  id: string;
-  action: string;
-  actor: string;
-  target: string;
   timestamp: string;
 }
-
-export type AuditLog = GlobalAuditLog | HotelActivityLog;
 
 export enum OperationType {
   CREATE = 'create',

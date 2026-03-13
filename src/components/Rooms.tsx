@@ -28,7 +28,7 @@ export function Rooms() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
-    number: '',
+    roomNumber: '',
     type: 'Standard',
     price: 100,
     floor: '1',
@@ -102,7 +102,7 @@ export function Rooms() {
   const filteredRooms = rooms.filter(room => {
     const query = searchQuery.toLowerCase();
     const matchesSearch = (
-      room.number.toLowerCase().includes(query) ||
+      room.roomNumber.toLowerCase().includes(query) ||
       room.type.toLowerCase().includes(query) ||
       room.status.toLowerCase().includes(query) ||
       room.status.replace('_', ' ').toLowerCase().includes(query)
@@ -206,8 +206,8 @@ export function Rooms() {
                   type="text" 
                   placeholder="e.g. 101, 204A"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                  value={newRoom.number}
-                  onChange={(e) => setNewRoom({ ...newRoom, number: e.target.value })}
+                  value={newRoom.roomNumber}
+                  onChange={(e) => setNewRoom({ ...newRoom, roomNumber: e.target.value })}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -285,7 +285,7 @@ export function Rooms() {
               )}
             >
               <div className="flex justify-between items-start">
-                <span className="text-lg font-bold">{room.number}</span>
+                <span className="text-lg font-bold">{room.roomNumber}</span>
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
                   <button onClick={() => updateStatus(room.id, 'clean')} className="p-1 hover:bg-white/10 rounded"><CheckCircle2 size={14} /></button>
                   <button onClick={() => updateStatus(room.id, 'dirty')} className="p-1 hover:bg-white/10 rounded"><AlertCircle size={14} /></button>
@@ -316,7 +316,7 @@ export function Rooms() {
             <tbody className="divide-y divide-zinc-800">
               {filteredRooms.map(room => (
                 <tr key={room.id} className="hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-6 py-4 font-bold text-white">{room.number}</td>
+                  <td className="px-6 py-4 font-bold text-white">{room.roomNumber}</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.type}</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.capacity} Pax</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.floor}</td>

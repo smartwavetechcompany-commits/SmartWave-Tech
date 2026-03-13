@@ -203,14 +203,14 @@ export function Settings() {
                       <CreditCard size={18} className="text-emerald-500" />
                       <div>
                         <p className="text-sm font-medium text-white">Subscription Status</p>
-                        <p className="text-xs text-zinc-500">{hotel?.subscriptionType} Plan</p>
+                        <p className="text-xs text-zinc-500">{hotel?.plan} Plan</p>
                       </div>
                     </div>
                     <span className={cn(
                       "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
                       isSubscriptionActive ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
                     )}>
-                      {hotel?.status}
+                      {hotel?.subscriptionStatus}
                     </span>
                   </div>
                   

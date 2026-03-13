@@ -3,7 +3,8 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswor
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { motion } from 'motion/react';
-import { Hotel, TrackingCode, UserProfile, OperationType } from '../types';
+import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '../utils';
 
@@ -21,6 +22,16 @@ export function AuthPage() {
     paymentLink: '',
     bankDetails: '',
   });
+
+  const { user, profile } = useAuth();
+
+  useEffect(() => {
+    // If user is logged in but has no profile, force registration mode
+    if (user && !profile) {
+      setIsLogin(false);
+      setFormData(prev => ({ ...prev, email: user.email || '' }));
+    }
+  }, [user, profile]);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'system', 'settings'), (snap) => {
@@ -117,7 +128,7 @@ export function AuthPage() {
         await signInWithEmailAndPassword(auth, formData.email, formData.password);
       } else {
         // Registration Flow
-        if (formData.password !== formData.confirmPassword) {
+        if (!user && formData.password !== formData.confirmPassword) {
           throw new Error('Passwords do not match');
         }
         // 1. Verify Tracking Code
@@ -139,21 +150,48 @@ export function AuthPage() {
           throw new Error('Tracking code already used');
         }
 
-        // 2. Create User
-        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-        const user = userCredential.user;
+        // 2. Create User if not already logged in
+        let currentUser = user;
+        if (!currentUser) {
+          const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+          currentUser = userCredential.user;
+        }
 
         // 3. Create Hotel
         const hotelId = `hotel_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Define plan features
+        const planFeatures = {
+          Standard: {
+            modules: ['dashboard', 'rooms', 'frontDesk', 'settings'],
+            limits: { rooms: 30, staff: 5 }
+          },
+          Premium: {
+            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings'],
+            limits: { rooms: 100, staff: 20 }
+          },
+          Enterprise: {
+            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings'],
+            limits: { rooms: 1000, staff: 100 }
+          }
+        };
+
+        const selectedPlan = (tcData.plan.toLowerCase() as PlanType) || 'standard';
+        const features = planFeatures[selectedPlan === 'standard' ? 'Standard' : selectedPlan === 'premium' ? 'Premium' : 'Enterprise'];
+
         const hotelData: Hotel = {
           id: hotelId,
           name: formData.hotelName,
           trackingCode: formData.trackingCode,
           subscriptionStatus: 'active',
           subscriptionExpiry: tcData.expiryDate,
-          plan: tcData.plan || 'Standard',
+          plan: selectedPlan,
+          modulesEnabled: features.modules,
+          limits: features.limits,
+          roomLimit: features.limits.rooms,
+          staffLimit: features.limits.staff,
           createdAt: new Date().toISOString(),
-          adminUIDs: [user.uid],
+          adminUIDs: [currentUser.uid],
         };
 
         try {
@@ -165,19 +203,24 @@ export function AuthPage() {
 
         // 4. Update Tracking Code
         try {
-          await setDoc(doc(db, 'trackingCodes', tcDoc.id), { ...tcData, hotelId }, { merge: true });
+          await setDoc(doc(db, 'trackingCodes', tcDoc.id), { 
+            ...tcData, 
+            hotelId, 
+            status: 'used',
+            usedAt: new Date().toISOString(),
+            usedByHotel: hotelId
+          }, { merge: true });
         } catch (err) {
           handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${tcDoc.id}`);
           throw err;
         }
 
         // 5. Create User Profile
-        const profile: UserProfile = {
-          uid: user.uid,
+        const profileData: UserProfile = {
+          uid: currentUser.uid,
           email: formData.email,
           hotelId: hotelId,
           role: 'hotelAdmin',
-          name: formData.hotelName + ' Admin',
           createdAt: new Date().toISOString(),
           status: 'active',
           displayName: formData.hotelName + ' Admin',
@@ -185,9 +228,9 @@ export function AuthPage() {
         };
 
         try {
-          await setDoc(doc(db, 'users', user.uid), profile);
+          await setDoc(doc(db, 'users', currentUser.uid), profileData);
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}`);
+          handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
           throw err;
         }
         
@@ -409,33 +452,36 @@ export function AuthPage() {
             <input
               required
               type="email"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+              disabled={!!user}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors disabled:opacity-50"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Password</label>
-            <div className="relative">
-              <input
-                required
-                type={showPassword ? "text" : "password"}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors pr-10"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+          {!user && (
+            <div>
+              <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Password</label>
+              <div className="relative">
+                <input
+                  required
+                  type={showPassword ? "text" : "password"}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors pr-10"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          {!isLogin && (
+          {!isLogin && !user && (
             <div>
               <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Confirm Password</label>
               <div className="relative">
@@ -480,23 +526,33 @@ export function AuthPage() {
             type="submit"
             className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-lg transition-all active:scale-95 mt-6 disabled:opacity-50 disabled:active:scale-100"
           >
-            {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Register Hotel')}
+            {loading ? 'Processing...' : (isLogin ? 'Sign In' : (user ? 'Complete Registration' : 'Register Hotel'))}
           </button>
             </form>
 
             <div className="mt-6 text-center space-y-2">
-          <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setIsResetting(false);
-              setError('');
-              setSuccess('');
-            }}
-            className="block w-full text-zinc-500 text-sm hover:text-white transition-all active:opacity-70"
-          >
-            {isLogin ? "Don't have an account? Register" : "Already have an account? Sign in"}
-          </button>
-          {isLogin && (
+          {!user && (
+            <button
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setIsResetting(false);
+                setError('');
+                setSuccess('');
+              }}
+              className="block w-full text-zinc-500 text-sm hover:text-white transition-all active:opacity-70"
+            >
+              {isLogin ? "Don't have an account? Register" : "Already have an account? Sign in"}
+            </button>
+          )}
+          {user && (
+            <button
+              onClick={() => auth.signOut()}
+              className="block w-full text-zinc-500 text-sm hover:text-white transition-all active:opacity-70"
+            >
+              Sign out and try another account
+            </button>
+          )}
+          {isLogin && !user && (
             <button
               onClick={() => setIsRequesting(true)}
               className="block w-full text-emerald-500/80 text-xs font-bold uppercase tracking-widest hover:text-emerald-400 transition-all active:opacity-70"

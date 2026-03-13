@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email: user.email,
             hotelId: 'system',
             role: 'superAdmin',
-            name: user.displayName || 'System Owner',
+            displayName: user.displayName || 'System Owner',
             createdAt: new Date().toISOString(),
             status: 'active',
             uid: user.uid
@@ -138,7 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isSubscriptionActive = profile?.role === 'superAdmin' 
     ? true 
-    : (hotel ? (hotel.subscriptionStatus === 'active' && hotel.subscriptionExpiry > Date.now()) : false);
+    : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry).getTime() > Date.now()) : false);
 
   return (
     <AuthContext.Provider value={{ user, profile, hotel, loading, isSubscriptionActive }}>

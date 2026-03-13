@@ -98,7 +98,7 @@ export function Housekeeping() {
         {filteredRooms.map(room => (
           <div key={room.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-2xl font-bold text-white">Room {room.number}</span>
+              <span className="text-2xl font-bold text-white">Room {room.roomNumber}</span>
               <span className={cn(
                 "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
                 room.status === 'clean' ? "bg-emerald-500/10 text-emerald-500" :
