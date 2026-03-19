@@ -44,6 +44,7 @@ export function SuperAdmin() {
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [extendingHotel, setExtendingHotel] = useState<Hotel | null>(null);
   const [extendingCode, setExtendingCode] = useState<TrackingCode | null>(null);
+  const [changingPlanHotel, setChangingPlanHotel] = useState<Hotel | null>(null);
   const [managingStaffHotel, setManagingStaffHotel] = useState<Hotel | null>(null);
   const [newCode, setNewCode] = useState({
     duration: '1 month',
@@ -359,6 +360,53 @@ export function SuperAdmin() {
     }
   };
 
+  const changeHotelPlan = async (hotel: Hotel, newPlan: PlanType) => {
+    if (!auth.currentUser || profile?.role !== 'superAdmin') return;
+
+    setLoading(true);
+    try {
+      const planFeatures = {
+        standard: {
+          modules: ['dashboard', 'rooms', 'frontDesk', 'settings'],
+          limits: { rooms: 30, staff: 5 }
+        },
+        premium: {
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings'],
+          limits: { rooms: 100, staff: 20 }
+        },
+        enterprise: {
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings'],
+          limits: { rooms: 1000, staff: 100 }
+        }
+      };
+
+      const features = planFeatures[newPlan];
+      
+      await updateDoc(doc(db, 'hotels', hotel.id), { 
+        plan: newPlan,
+        modulesEnabled: features.modules,
+        roomLimit: features.limits.rooms,
+        staffLimit: features.limits.staff,
+        limits: features.limits
+      });
+
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
+        actor: auth.currentUser.email || auth.currentUser.uid,
+        action: 'CHANGE_HOTEL_PLAN',
+        target: `Hotel ${hotel.name}: ${hotel.plan} -> ${newPlan}`
+      };
+      await addDoc(collection(db, 'auditLogs'), log);
+      
+      setChangingPlanHotel(null);
+      showNotification(`Plan for ${hotel.name} changed to ${newPlan}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const safeFormat = (date: any, formatStr: string) => {
     try {
       const d = new Date(date);
@@ -601,6 +649,39 @@ export function SuperAdmin() {
         </div>
       )}
 
+      {changingPlanHotel && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+            <h3 className="text-xl font-bold text-white mb-2">Change Subscription Plan</h3>
+            <p className="text-zinc-400 text-sm mb-6">Updating plan for {changingPlanHotel.name}</p>
+            <div className="grid grid-cols-1 gap-3">
+              {(['standard', 'premium', 'enterprise'] as PlanType[]).map(plan => (
+                <button 
+                  key={plan}
+                  onClick={() => changeHotelPlan(changingPlanHotel, plan)}
+                  disabled={changingPlanHotel.plan === plan}
+                  className={cn(
+                    "w-full py-3 rounded-lg font-medium transition-all active:scale-95 flex items-center justify-between px-6",
+                    changingPlanHotel.plan === plan 
+                      ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 cursor-default"
+                      : "bg-zinc-800 hover:bg-zinc-700 text-white"
+                  )}
+                >
+                  <span className="capitalize">{plan}</span>
+                  {changingPlanHotel.plan === plan && <CheckCircle2 size={16} />}
+                </button>
+              ))}
+            </div>
+            <button 
+              onClick={() => setChangingPlanHotel(null)}
+              className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Manage Staff Modal */}
       {managingStaffHotel && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -703,6 +784,13 @@ export function SuperAdmin() {
                                 title="Manage Staff"
                               >
                                 <Users size={18} />
+                              </button>
+                              <button 
+                                onClick={() => setChangingPlanHotel(hotel)}
+                                className="p-2 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all active:scale-90"
+                                title="Change Plan"
+                              >
+                                <Settings size={18} />
                               </button>
                               <button 
                                 onClick={() => giveLiveAccess(hotel)}
