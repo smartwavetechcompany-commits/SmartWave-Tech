@@ -52,6 +52,7 @@ export function SuperAdmin() {
   });
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [codeSearchTerm, setCodeSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [loading, setLoading] = useState(false);
@@ -430,6 +431,19 @@ export function SuperAdmin() {
     return matchesSearch && matchesStatus;
   });
 
+  const filteredCodes = trackingCodes.filter(code => {
+    const matchesSearch = code.code.toLowerCase().includes(codeSearchTerm.toLowerCase());
+    return matchesSearch;
+  });
+
+  const stats = {
+    totalHotels: hotels.length,
+    activeHotels: hotels.filter(h => h.subscriptionStatus === 'active' && new Date(h.subscriptionExpiry).getTime() > Date.now()).length,
+    expiredHotels: hotels.filter(h => new Date(h.subscriptionExpiry).getTime() < Date.now()).length,
+    pendingRequests: requests.filter(r => r.status === 'pending').length,
+    activeCodes: trackingCodes.filter(c => c.status === 'active').length,
+  };
+
   if (hasPermissionError) {
     return (
       <div className="p-8 flex flex-col items-center justify-center min-h-[400px] text-center space-y-4">
@@ -513,6 +527,30 @@ export function SuperAdmin() {
           </button>
         </div>
       </header>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Hotels</div>
+          <div className="text-3xl font-bold text-white">{stats.totalHotels}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active</div>
+          <div className="text-3xl font-bold text-white">{stats.activeHotels}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired</div>
+          <div className="text-3xl font-bold text-white">{stats.expiredHotels}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">Pending Requests</div>
+          <div className="text-3xl font-bold text-white">{stats.pendingRequests}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Active Codes</div>
+          <div className="text-3xl font-bold text-white">{stats.activeCodes}</div>
+        </div>
+      </div>
 
       {isAddingCode && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -983,44 +1021,68 @@ export function SuperAdmin() {
 
           {/* Tracking Codes List */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800">
+            <div className="p-6 border-b border-zinc-800 space-y-4">
               <h3 className="font-bold text-white flex items-center gap-2">
                 <Key size={18} className="text-emerald-500" />
                 Active Tracking Codes
               </h3>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                <input 
+                  type="text" 
+                  placeholder="Search codes..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  value={codeSearchTerm}
+                  onChange={(e) => setCodeSearchTerm(e.target.value)}
+                />
+              </div>
             </div>
             <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
-                  {trackingCodes.filter(c => c.status !== 'used').map(code => (
-                    <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-mono text-emerald-500 font-bold tracking-widest">{code.code}</span>
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                          <button 
-                            onClick={() => setExtendingCode(code)}
-                            className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
-                            title="Extend Expiry"
-                          >
-                            <RefreshCw size={14} />
-                          </button>
-                          <button 
-                            onClick={async () => {
-                              if (window.confirm('Are you sure you want to delete this code?')) {
-                                await deleteDoc(doc(db, 'trackingCodes', code.id));
-                              }
-                            }}
-                            className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
-                            title="Delete Code"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                  {filteredCodes.filter(c => c.status !== 'used').length === 0 ? (
+                    <div className="p-8 text-center text-zinc-500 text-xs">No active codes found</div>
+                  ) : (
+                    filteredCodes.filter(c => c.status !== 'used').map(code => {
+                      const isCodeExpired = new Date(code.expiryDate).getTime() < Date.now();
+                      return (
+                        <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={cn(
+                              "font-mono font-bold tracking-widest",
+                              isCodeExpired ? "text-red-500" : "text-emerald-500"
+                            )}>
+                              {code.code}
+                            </span>
+                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                              <button 
+                                onClick={() => setExtendingCode(code)}
+                                className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
+                                title="Extend Expiry"
+                              >
+                                <RefreshCw size={14} />
+                              </button>
+                              <button 
+                                onClick={async () => {
+                                  if (window.confirm('Are you sure you want to delete this code?')) {
+                                    await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
+                                  }
+                                }}
+                                className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
+                                title="Delete Code"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
+                            <span>{code.plan}</span>
+                            <span className={isCodeExpired ? "text-red-500" : ""}>
+                              {isCodeExpired ? 'Expired' : `Exp: ${safeFormat(code.expiryDate, 'MMM d, yyyy')}`}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
-                        <span>{code.plan}</span>
-                        <span>Exp: {safeFormat(code.expiryDate, 'MMM d, yyyy')}</span>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })
+                  )}
             </div>
           </div>
         </div>

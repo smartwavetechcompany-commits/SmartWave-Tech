@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, where } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { 
@@ -49,6 +49,20 @@ export function FrontDesk() {
 
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredReservations = reservations.filter(res => 
+    res.guestName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    res.roomNumber.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const roomStats = {
+    total: rooms.length,
+    available: rooms.filter(r => r.status === 'clean').length,
+    occupied: rooms.filter(r => r.status === 'occupied').length,
+    dirty: rooms.filter(r => r.status === 'dirty').length,
+    maintenance: rooms.filter(r => r.status === 'maintenance').length,
+  };
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -65,6 +79,7 @@ export function FrontDesk() {
       (err) => {
         console.error("Reservations listener error:", err);
         if (err.code === 'permission-denied') setHasPermissionError(true);
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
       }
     );
 
@@ -72,21 +87,30 @@ export function FrontDesk() {
       (snap) => {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
       },
-      (err) => console.error("Rooms listener error:", err)
+      (err) => {
+        console.error("Rooms listener error:", err);
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+      }
     );
 
     const unsubscribeGuests = onSnapshot(collection(db, 'hotels', hotel.id, 'guests'), 
       (snap) => {
         setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
       },
-      (err) => console.error("Guests listener error:", err)
+      (err) => {
+        console.error("Guests listener error:", err);
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/guests`);
+      }
     );
 
     const unsubscribeCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), 
       (snap) => {
         setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
       },
-      (err) => console.error("Corporate accounts listener error:", err)
+      (err) => {
+        console.error("Corporate accounts listener error:", err);
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts`);
+      }
     );
 
     return () => {
@@ -291,11 +315,10 @@ export function FrontDesk() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => window.location.reload()}
-            disabled={loading}
-            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
             title="Refresh Page"
           >
-            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            <RefreshCw size={18} />
           </button>
           <button 
             onClick={() => setIsBooking(true)}
@@ -306,6 +329,30 @@ export function FrontDesk() {
           </button>
         </div>
       </header>
+
+      {/* Room Status Legend */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Rooms</div>
+          <div className="text-xl font-bold text-white">{roomStats.total}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Available</div>
+          <div className="text-xl font-bold text-white">{roomStats.available}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Occupied</div>
+          <div className="text-xl font-bold text-white">{roomStats.occupied}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1">Dirty</div>
+          <div className="text-xl font-bold text-white">{roomStats.dirty}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-1">Maintenance</div>
+          <div className="text-xl font-bold text-white">{roomStats.maintenance}</div>
+        </div>
+      </div>
 
       {isBooking && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -506,8 +553,10 @@ export function FrontDesk() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
             <input 
               type="text" 
-              placeholder="Search guests..."
+              placeholder="Search guests or rooms..."
               className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
         </div>
@@ -524,7 +573,7 @@ export function FrontDesk() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {reservations.map(res => (
+              {filteredReservations.map(res => (
                 <tr key={res.id} className="hover:bg-zinc-800/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
