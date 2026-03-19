@@ -122,7 +122,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           await deleteDoc(doc(db, 'users', staffUid));
           
           // Log the action
-          await addDoc(collection(db, 'activityLogs'), {
+          await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
             timestamp: new Date().toISOString(),
             userId: profile?.uid,
             userEmail: profile?.email,
@@ -154,7 +154,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       setEditingPermissions(prev => prev ? { ...prev, permissions: newPermissions } : null);
       
       // Log the action
-      await addDoc(collection(db, 'activityLogs'), {
+      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,

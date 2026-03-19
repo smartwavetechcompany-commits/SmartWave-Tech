@@ -13,6 +13,7 @@ export interface UserProfile {
   displayName?: string;
   permissions?: string[]; // For staff module access
   staffRole?: StaffRole;
+  subscriptionExpiry?: string;
 }
 
 export interface Hotel {

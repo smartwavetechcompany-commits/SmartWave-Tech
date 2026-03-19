@@ -673,7 +673,7 @@ export function SuperAdmin() {
                     </tr>
                   ) : (
                     filteredHotels.map(hotel => {
-                      const isExpired = hotel.subscriptionExpiry < Date.now();
+                      const isExpired = new Date(hotel.subscriptionExpiry).getTime() < Date.now();
                       return (
                         <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4">

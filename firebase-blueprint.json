@@ -162,6 +162,20 @@
       },
       "required": ["action", "actor", "timestamp"]
     },
+    "Registration": {
+      "title": "Registration Record",
+      "description": "A record of a new hotel registration attempt",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "hotelName": { "type": "string" },
+        "trackingCode": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] }
+      },
+      "required": ["uid", "email", "hotelName", "trackingCode", "timestamp"]
+    },
     "FinanceRecord": {
       "title": "Finance Record",
       "description": "Hotel financial transaction",
@@ -233,6 +247,10 @@
     "/auditLogs/{logId}": {
       "schema": "GlobalAuditLog",
       "description": "Global audit logs"
+    },
+    "/registration/{regId}": {
+      "schema": "Registration",
+      "description": "Hotel registration records"
     }
   }
 }

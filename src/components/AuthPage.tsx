@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
@@ -131,15 +131,21 @@ export function AuthPage() {
         if (!user && formData.password !== formData.confirmPassword) {
           throw new Error('Passwords do not match');
         }
-        // 1. Verify Tracking Code
-        const tcQuery = query(collection(db, 'trackingCodes'), where('code', '==', formData.trackingCode));
-        const tcSnap = await getDocs(tcQuery);
+        // 1. Verify Tracking Code (Direct Fetch by ID)
+        let tcDoc;
+        try {
+          // We use the code itself as the document ID for direct 'get' access
+          const tcRef = doc(db, 'trackingCodes', formData.trackingCode.toUpperCase());
+          tcDoc = await getDoc(tcRef);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, `trackingCodes/${formData.trackingCode}`);
+          throw err;
+        }
 
-        if (tcSnap.empty) {
+        if (!tcDoc.exists()) {
           throw new Error('Invalid tracking code');
         }
 
-        const tcDoc = tcSnap.docs[0];
         const tcData = tcDoc.data() as TrackingCode;
 
         if (tcData.status !== 'active' || new Date(tcData.expiryDate) < new Date()) {
@@ -157,8 +163,24 @@ export function AuthPage() {
           currentUser = userCredential.user;
         }
 
-        // 3. Create Hotel
+        // 2.5 Record Registration Attempt
+        try {
+          await addDoc(collection(db, 'registration'), {
+            uid: currentUser.uid,
+            email: formData.email,
+            hotelName: formData.hotelName,
+            trackingCode: formData.trackingCode,
+            timestamp: new Date().toISOString(),
+            status: 'pending'
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'registration');
+          // Don't throw here, we can still proceed with registration
+        }
+
+        // 3. Generate IDs and Prepare Data
         const hotelId = `hotel_${Math.random().toString(36).substr(2, 9)}`;
+        const selectedPlan = (tcData.plan.toLowerCase() as PlanType) || 'standard';
         
         // Define plan features
         const planFeatures = {
@@ -176,8 +198,29 @@ export function AuthPage() {
           }
         };
 
-        const selectedPlan = (tcData.plan.toLowerCase() as PlanType) || 'standard';
         const features = planFeatures[selectedPlan === 'standard' ? 'Standard' : selectedPlan === 'premium' ? 'Premium' : 'Enterprise'];
+
+        // 4. Create User Profile (FIRST - so userExists() is true for subsequent steps)
+        const profileData: UserProfile = {
+          uid: currentUser.uid,
+          email: formData.email,
+          hotelId: hotelId,
+          role: 'hotelAdmin',
+          createdAt: new Date().toISOString(),
+          status: 'active',
+          displayName: formData.hotelName + ' Admin',
+          permissions: ['all'],
+          subscriptionExpiry: tcData.expiryDate
+        };
+
+        try {
+          await setDoc(doc(db, 'users', currentUser.uid), profileData);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
+          throw err;
+        }
+
+        // 5. Create Hotel
 
         const hotelData: Hotel = {
           id: hotelId,
@@ -201,47 +244,46 @@ export function AuthPage() {
           throw err;
         }
 
-        // 4. Update Tracking Code
+        // 6. Update Tracking Code
         try {
-          await setDoc(doc(db, 'trackingCodes', tcDoc.id), { 
-            ...tcData, 
-            hotelId, 
+          await updateDoc(doc(db, 'trackingCodes', tcDoc.id), { 
             status: 'used',
             usedAt: new Date().toISOString(),
             usedByHotel: hotelId
-          }, { merge: true });
+          });
         } catch (err) {
           handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${tcDoc.id}`);
           throw err;
         }
 
-        // 5. Create User Profile
-        const profileData: UserProfile = {
-          uid: currentUser.uid,
-          email: formData.email,
-          hotelId: hotelId,
-          role: 'hotelAdmin',
-          createdAt: new Date().toISOString(),
-          status: 'active',
-          displayName: formData.hotelName + ' Admin',
-          permissions: ['all'],
-        };
-
+        // 7. Record Registration Attempt
         try {
-          await setDoc(doc(db, 'users', currentUser.uid), profileData);
+          await addDoc(collection(db, 'registration'), {
+            uid: currentUser.uid,
+            email: formData.email,
+            hotelName: formData.hotelName,
+            trackingCode: formData.trackingCode,
+            timestamp: new Date().toISOString(),
+            status: 'completed'
+          });
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
-          throw err;
+          handleFirestoreError(err, OperationType.CREATE, 'registration');
         }
         
         showNotification('Registration successful!');
       }
     } catch (err: any) {
-      if (err.code === 'permission-denied') {
-        handleFirestoreError(err, OperationType.WRITE, 'registration');
+      // If the error is already a JSON string from handleFirestoreError, use it directly
+      let errorMessage = err.message;
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed.error) errorMessage = parsed.error;
+      } catch (e) {
+        // Not a JSON error, use raw message
       }
-      setError(err.message);
-      showNotification(err.message, 'error');
+      
+      setError(errorMessage);
+      showNotification(errorMessage, 'error');
     } finally {
       setLoading(false);
     }
