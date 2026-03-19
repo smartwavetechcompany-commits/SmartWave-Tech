@@ -1,32 +1,51 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, addDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, onSnapshot, query, where, addDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { KitchenOrder, OperationType } from '../types';
 import { 
   ChefHat, 
   Clock, 
   CheckCircle2, 
   AlertCircle,
   UtensilsCrossed,
-  Plus
+  Plus,
+  History,
+  Search,
+  Filter,
+  ChevronRight,
+  Utensils,
+  Coffee,
+  Pizza,
+  MoreHorizontal,
+  Bell,
+  RefreshCw
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
-
-interface Order {
-  id: string;
-  roomNumber: string;
-  items: string;
-  status: 'pending' | 'preparing' | 'delivered';
-  timestamp: string;
-}
 
 export function Kitchen() {
   const { hotel, profile } = useAuth();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [isAddingOrder, setIsAddingOrder] = useState(false);
-  const [newOrder, setNewOrder] = useState({ roomNumber: '', items: '' });
+  const [orders, setOrders] = useState<KitchenOrder[]>([]);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'food' | 'drink' | 'other'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [now, setNow] = useState(new Date());
+  const [newOrder, setNewOrder] = useState({
+    roomNumber: '',
+    items: '',
+    notes: '',
+    category: 'food' as 'food' | 'drink' | 'other'
+  });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -34,155 +53,360 @@ export function Kitchen() {
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
-    const q = query(collection(db, 'hotels', hotel.id, 'kitchen_orders'));
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'kitchen_orders'),
+      orderBy('timestamp', 'desc')
+    );
     const unsubscribe = onSnapshot(q, 
       (snap) => {
-        setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+        setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder)));
       },
       (error) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/kitchen_orders`);
         if (error.code === 'permission-denied') {
-          console.warn("Kitchen orders access restricted.");
           setHasPermissionError(true);
-        } else {
-          console.error("Kitchen orders listener error:", error);
         }
       }
     );
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
-  const addOrder = async (e: React.FormEvent) => {
+  const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
 
-    await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), {
-      ...newOrder,
-      status: 'pending',
-      timestamp: new Date().toISOString()
-    });
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), {
+        ...newOrder,
+        status: 'pending',
+        timestamp: new Date().toISOString()
+      });
 
-    setIsAddingOrder(false);
-    setNewOrder({ roomNumber: '', items: '' });
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        action: 'KITCHEN_ORDER_CREATED',
+        resource: `Room ${newOrder.roomNumber}: ${newOrder.items}`,
+        hotelId: hotel.id,
+        module: 'Kitchen'
+      });
+
+      setShowAddModal(false);
+      setNewOrder({ roomNumber: '', items: '', notes: '', category: 'food' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/kitchen_orders`);
+    }
   };
 
-  const updateOrderStatus = async (orderId: string, status: Order['status']) => {
+  const updateOrderStatus = async (orderId: string, status: KitchenOrder['status']) => {
     if (!hotel?.id) return;
-    await updateDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), { status });
     
-    // Log action
-    await addDoc(collection(db, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      userId: profile?.uid,
-      userEmail: profile?.email,
-      action: 'KITCHEN_ORDER_STATUS_UPDATE',
-      resource: `Order ${orderId}: ${status}`,
-      hotelId: hotel.id
-    });
+    const updates: any = { status };
+    if (status === 'preparing') updates.preparedAt = new Date().toISOString();
+    if (status === 'ready') updates.readyAt = new Date().toISOString();
+    if (status === 'delivered') updates.deliveredAt = new Date().toISOString();
+
+    try {
+      await updateDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), updates);
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        action: 'KITCHEN_ORDER_STATUS_UPDATE',
+        resource: `Order ${orderId}: ${status}`,
+        hotelId: hotel.id,
+        module: 'Kitchen'
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
+    }
+  };
+
+  const activeOrders = orders.filter(o => o.status !== 'delivered');
+  const historyOrders = orders.filter(o => o.status === 'delivered');
+
+  const filteredOrders = (showHistory ? historyOrders : activeOrders).filter(o => {
+    const matchesFilter = filter === 'all' || o.status === filter;
+    const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
+    const matchesSearch = o.roomNumber.includes(searchQuery) || o.items.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesFilter && matchesCategory && matchesSearch;
+  });
+
+  const stats = [
+    { label: 'Active Orders', count: activeOrders.length, icon: Utensils, color: 'text-blue-500' },
+    { label: 'Preparing', count: orders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
+    { label: 'Ready for Pickup', count: orders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
+  ];
+
+  const getWaitTime = (timestamp: string) => {
+    const diff = Math.floor((now.getTime() - new Date(timestamp).getTime()) / 60000);
+    if (diff < 1) return 'Just now';
+    if (diff < 60) return `${diff}m ago`;
+    return `${Math.floor(diff / 60)}h ${diff % 60}m ago`;
   };
 
   return (
     <div className="p-8 space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Kitchen & Room Service</h1>
-          <p className="text-zinc-400">Manage food orders and delivery</p>
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Kitchen Management</h1>
+          <p className="text-zinc-400">Manage room service orders and kitchen workflow</p>
         </div>
-        <button 
-          onClick={() => setIsAddingOrder(true)}
-          className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-        >
-          <Plus size={18} />
-          New Order
-        </button>
-      </header>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all active:scale-95",
+              showHistory ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+            )}
+          >
+            <History size={18} />
+            {showHistory ? 'View Active' : 'Order History'}
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Plus size={18} />
+            New Order
+          </button>
+        </div>
+      </div>
 
-      {isAddingOrder && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">Create Kitchen Order</h3>
-            <form onSubmit={addOrder} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room Number</label>
-                <input 
-                  required
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                  value={newOrder.roomNumber}
-                  onChange={(e) => setNewOrder({ ...newOrder, roomNumber: e.target.value })}
-                />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {stats.map((stat) => (
+          <div key={stat.label} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
+              <stat.icon className={stat.color} size={20} />
+            </div>
+            <div className="text-2xl font-bold text-white">{stat.count}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+          <input
+            type="text"
+            placeholder="Search by room or items..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
+          {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
+                filter === f ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              {f}
+            </button>
+          ))}
+          <div className="w-px h-4 bg-zinc-800 mx-1" />
+          {(['all', 'food', 'drink', 'other'] as const).map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategoryFilter(c)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
+                categoryFilter === c ? "bg-emerald-500/10 text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <AnimatePresence mode="popLayout">
+          {filteredOrders.length === 0 ? (
+            <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
+              <UtensilsCrossed size={48} className="mx-auto text-zinc-700 mb-4" />
+              <p>No orders found</p>
+            </div>
+          ) : (
+            filteredOrders.map((order) => (
+              <motion.div
+                key={order.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col"
+              >
+                <div className="p-5 flex-1">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-white font-bold">
+                        {order.roomNumber}
+                      </div>
+                      <div>
+                        <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Room</div>
+                        <div className="text-xs text-zinc-400 flex items-center gap-1">
+                          <Clock size={10} />
+                          {getWaitTime(order.timestamp)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1",
+                      order.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
+                      order.status === 'preparing' ? "bg-amber-500/10 text-amber-500" :
+                      order.status === 'ready' ? "bg-emerald-500/10 text-emerald-500" :
+                      "bg-zinc-800 text-zinc-500"
+                    )}>
+                      {order.status === 'preparing' && <RefreshCw size={10} className="animate-spin" />}
+                      {order.status}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      {order.category === 'food' ? <Pizza size={14} className="text-amber-500" /> :
+                       order.category === 'drink' ? <Coffee size={14} className="text-blue-500" /> :
+                       <MoreHorizontal size={14} className="text-zinc-500" />}
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{order.category}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm text-white leading-relaxed font-medium">{order.items}</p>
+                    </div>
+                    {order.notes && (
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Notes</div>
+                        <p className="text-xs text-zinc-400 italic">{order.notes}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {!showHistory && (
+                  <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
+                    {order.status === 'pending' && (
+                      <button
+                        onClick={() => updateOrderStatus(order.id, 'preparing')}
+                        className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                      >
+                        <ChefHat size={14} />
+                        Start Preparing
+                      </button>
+                    )}
+                    {order.status === 'preparing' && (
+                      <button
+                        onClick={() => updateOrderStatus(order.id, 'ready')}
+                        className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                      >
+                        <Bell size={14} />
+                        Mark as Ready
+                      </button>
+                    )}
+                    {order.status === 'ready' && (
+                      <button
+                        onClick={() => updateOrderStatus(order.id, 'delivered')}
+                        className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                      >
+                        <CheckCircle2 size={14} />
+                        Confirm Delivery
+                      </button>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            ))
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Add Order Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">New Kitchen Order</h2>
+            </div>
+            <form onSubmit={handleAddOrder}>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Room Number</label>
+                    <input
+                      required
+                      type="text"
+                      value={newOrder.roomNumber}
+                      onChange={(e) => setNewOrder({ ...newOrder, roomNumber: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      placeholder="e.g. 101"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
+                    <select
+                      value={newOrder.category}
+                      onChange={(e) => setNewOrder({ ...newOrder, category: e.target.value as any })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="food">Food</option>
+                      <option value="drink">Drink</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Items</label>
+                  <textarea
+                    required
+                    value={newOrder.items}
+                    onChange={(e) => setNewOrder({ ...newOrder, items: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
+                    placeholder="e.g. 2x Club Sandwich, 1x Orange Juice"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Special Notes</label>
+                  <input
+                    type="text"
+                    value={newOrder.notes}
+                    onChange={(e) => setNewOrder({ ...newOrder, notes: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    placeholder="e.g. No onions, extra ice"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Items / Instructions</label>
-                <textarea 
-                  required
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none min-h-[100px]"
-                  value={newOrder.items}
-                  onChange={(e) => setNewOrder({ ...newOrder, items: e.target.value })}
-                />
-              </div>
-              <div className="flex gap-4 mt-8">
-                <button 
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
                   type="button"
-                  onClick={() => setIsAddingOrder(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
-                  className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                  disabled={!newOrder.roomNumber || !newOrder.items}
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
-                  Place Order
+                  Create Order
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {orders.length === 0 ? (
-          <div className="col-span-full p-12 text-center bg-zinc-900/50 border border-zinc-800 border-dashed rounded-2xl">
-            <UtensilsCrossed size={48} className="mx-auto text-zinc-700 mb-4" />
-            <p className="text-zinc-500">No active kitchen orders</p>
-          </div>
-        ) : (
-          orders.map(order => (
-            <div key={order.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-bold text-white">Room {order.roomNumber}</span>
-                <span className={cn(
-                  "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                  order.status === 'delivered' ? "bg-emerald-500/10 text-emerald-500" :
-                  order.status === 'preparing' ? "bg-blue-500/10 text-blue-500" : "bg-amber-500/10 text-amber-500"
-                )}>
-                  {order.status}
-                </span>
-              </div>
-              
-              <p className="text-sm text-zinc-400 line-clamp-3">{order.items}</p>
-
-              <div className="pt-4 border-t border-zinc-800 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase font-bold">
-                  <Clock size={12} />
-                  {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-                <div className="flex gap-2">
-                  {order.status !== 'delivered' && (
-                    <button 
-                      onClick={() => updateOrderStatus(order.id, order.status === 'pending' ? 'preparing' : 'delivered')}
-                      className="p-2 text-zinc-500 hover:text-emerald-500 transition-all active:scale-90"
-                      title={order.status === 'pending' ? 'Start Preparing' : 'Mark as Delivered'}
-                    >
-                      <CheckCircle2 size={18} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
     </div>
   );
 }

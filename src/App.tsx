@@ -12,6 +12,9 @@ import { StaffManagement } from './components/StaffManagement';
 import { Settings } from './components/Settings';
 import { Housekeeping } from './components/Housekeeping';
 import { Kitchen } from './components/Kitchen';
+import { Inventory } from './components/Inventory';
+import { Maintenance } from './components/Maintenance';
+import { GuestManagement } from './components/GuestManagement';
 import { Finance } from './components/Finance';
 import { Reports } from './components/Reports';
 import { motion, AnimatePresence } from 'motion/react';
@@ -55,6 +58,9 @@ function AppContent() {
             <Route path="/front-desk" element={<FrontDesk />} />
             <Route path="/housekeeping" element={<Housekeeping />} />
             <Route path="/kitchen" element={<Kitchen />} />
+            <Route path="/inventory" element={<Inventory />} />
+            <Route path="/maintenance" element={<Maintenance />} />
+            <Route path="/guests" element={<GuestManagement />} />
             <Route path="/finance" element={<Finance />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/super-admin" element={

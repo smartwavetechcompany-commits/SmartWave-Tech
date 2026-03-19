@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, addDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord } from '../types';
+import { FinanceRecord, OperationType } from '../types';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -10,20 +10,36 @@ import {
   Plus,
   Search,
   Calendar,
-  Filter
+  Filter,
+  Download,
+  Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  PieChart,
+  BarChart3,
+  ChevronRight,
+  CreditCard,
+  Banknote,
+  Send
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
-import { format, isToday, isValid } from 'date-fns';
+import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths } from 'date-fns';
+import { motion, AnimatePresence } from 'motion/react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export function Finance() {
   const { hotel, profile } = useAuth();
   const [records, setRecords] = useState<FinanceRecord[]>([]);
-  const [isAdding, setIsAdding] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  const [timeRange, setTimeRange] = useState<'today' | 'month' | 'all'>('month');
   const [newRecord, setNewRecord] = useState({
     description: '',
     amount: 0,
     type: 'income' as 'income' | 'expense',
-    category: 'Room Revenue'
+    category: 'Room Revenue',
+    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer'
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -40,11 +56,9 @@ export function Finance() {
         setRecords(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord)));
       },
       (error) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/finance`);
         if (error.code === 'permission-denied') {
-          console.warn("Finance access restricted.");
           setHasPermissionError(true);
-        } else {
-          console.error("Finance records listener error:", error);
         }
       }
     );
@@ -55,207 +69,376 @@ export function Finance() {
     e.preventDefault();
     if (!hotel?.id) return;
 
-    await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-      ...newRecord,
-      timestamp: new Date().toISOString()
-    });
-
-    // Log action
-    await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      user: profile?.email || profile?.uid || 'Unknown',
-      action: 'FINANCE_RECORD_CREATED',
-      module: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount)})`
-    });
-
-    setIsAdding(false);
-    setNewRecord({ description: '', amount: 0, type: 'income', category: 'Room Revenue' });
-  };
-
-  const safeFormat = (date: any, formatStr: string) => {
     try {
-      const d = new Date(date);
-      if (!isValid(d)) return 'N/A';
-      return format(d, formatStr);
-    } catch (e) {
-      return 'N/A';
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+        ...newRecord,
+        timestamp: new Date().toISOString()
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        action: 'FINANCE_RECORD_CREATED',
+        resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount)})`,
+        hotelId: hotel.id,
+        module: 'Finance'
+      });
+
+      setShowAddModal(false);
+      setNewRecord({ description: '', amount: 0, type: 'income', category: 'Room Revenue', paymentMethod: 'cash' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/finance`);
     }
   };
 
-  const totalIncome = records.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
-  const totalExpense = records.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+  const exportToCSV = () => {
+    const headers = ['Date', 'Type', 'Description', 'Category', 'Method', 'Amount'];
+    const rows = filteredRecords.map(r => [
+      new Date(r.timestamp).toLocaleString(),
+      r.type,
+      r.description,
+      r.category,
+      r.paymentMethod,
+      r.amount
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `finance_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const filteredRecords = records.filter(r => {
+    const matchesSearch = r.description.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         r.category.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesType = filterType === 'all' || r.type === filterType;
+    
+    let matchesTime = true;
+    if (timeRange === 'today') matchesTime = isToday(new Date(r.timestamp));
+    if (timeRange === 'month') {
+      const start = startOfMonth(new Date());
+      const end = endOfMonth(new Date());
+      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
+    }
+
+    return matchesSearch && matchesType && matchesTime;
+  });
+
+  const totalIncome = filteredRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+  const totalExpense = filteredRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
   const balance = totalIncome - totalExpense;
 
-  const todayRecords = records.filter(r => isToday(new Date(r.timestamp)));
-  const todayIncome = todayRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
-  const todayExpense = todayRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+  const stats = [
+    { label: 'Net Balance', value: formatCurrency(balance), icon: Wallet, color: 'text-white', bg: 'bg-zinc-900' },
+    { label: 'Total Income', value: formatCurrency(totalIncome), icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
+    { label: 'Total Expenses', value: formatCurrency(totalExpense), icon: TrendingDown, color: 'text-red-500', bg: 'bg-red-500/5' },
+    { label: "Transactions", value: filteredRecords.length, icon: BarChart3, color: 'text-amber-500', bg: 'bg-amber-500/5' },
+  ];
+
+  const categories = {
+    income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
+    expense: ['Salaries', 'Maintenance', 'Utilities', 'Supplies', 'Marketing', 'Taxes', 'Other']
+  };
+
+  const chartData = [
+    { name: 'Income', value: totalIncome, color: '#10b981' },
+    { name: 'Expense', value: totalExpense, color: '#ef4444' }
+  ];
 
   return (
     <div className="p-8 space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Finance</h1>
-          <p className="text-zinc-400">Track income, expenses, and cash flow</p>
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Financial Management</h1>
+          <p className="text-zinc-400">Track income, expenses and overall hotel performance</p>
         </div>
-        <button 
-          onClick={() => setIsAdding(true)}
-          className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-        >
-          <Plus size={18} />
-          Add Record
-        </button>
-      </header>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
-              <TrendingUp size={20} />
-            </div>
-            <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider bg-emerald-500/5 px-2 py-1 rounded">
-              Today: {formatCurrency(todayIncome)}
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(totalIncome)}</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Income</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-red-500/10 text-red-500">
-              <TrendingDown size={20} />
-            </div>
-            <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider bg-red-500/5 px-2 py-1 rounded">
-              Today: {formatCurrency(todayExpense)}
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(totalExpense)}</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Expenses</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-              <DollarSign size={20} />
-            </div>
-            <div className="text-[10px] font-bold text-blue-500 uppercase tracking-wider bg-blue-500/5 px-2 py-1 rounded">
-              Today: {formatCurrency(todayIncome - todayExpense)}
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(balance)}</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Net Balance</div>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={exportToCSV}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Plus size={18} />
+            Add Record
+          </button>
         </div>
       </div>
 
-      {isAdding && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">Add Finance Record</h3>
-            <form onSubmit={handleAddRecord} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Description</label>
-                <input 
-                  required
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                  value={newRecord.description}
-                  onChange={(e) => setNewRecord({ ...newRecord, description: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Amount</label>
-                  <input 
-                    required
-                    type="number" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                    value={newRecord.amount}
-                    onChange={(e) => setNewRecord({ ...newRecord, amount: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type</label>
-                  <select 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                    value={newRecord.type}
-                    onChange={(e) => setNewRecord({ ...newRecord, type: e.target.value as 'income' | 'expense' })}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {stats.map((stat) => (
+          <div key={stat.label} className={cn("border border-zinc-800 p-6 rounded-2xl", stat.bg)}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
+              <stat.icon className={stat.color} size={20} />
+            </div>
+            <div className="text-2xl font-bold text-white">{stat.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <h3 className="font-bold text-white">Transaction History</h3>
+              <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                {(['all', 'income', 'expense'] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setFilterType(type)}
+                    className={cn(
+                      "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
+                      filterType === type ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                    )}
                   >
-                    <option value="income">Income</option>
-                    <option value="expense">Expense</option>
+                    {type}
+                  </button>
+                ))}
+              </div>
+              <select
+                value={timeRange}
+                onChange={(e) => setTimeRange(e.target.value as any)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1 text-xs text-zinc-400 outline-none focus:border-emerald-500/50"
+              >
+                <option value="today">Today</option>
+                <option value="month">This Month</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
+            <div className="relative w-full md:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+              <input
+                type="text"
+                placeholder="Search transactions..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+              />
+            </div>
+          </div>
+          <div className="overflow-x-auto max-h-[400px]">
+            <table className="w-full text-left">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                  <th className="px-6 py-4">Date</th>
+                  <th className="px-6 py-4">Description</th>
+                  <th className="px-6 py-4">Category</th>
+                  <th className="px-6 py-4">Method</th>
+                  <th className="px-6 py-4 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {filteredRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
+                      No transactions found
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRecords.map((record) => (
+                    <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-white">{new Date(record.timestamp).toLocaleDateString()}</div>
+                        <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-white font-medium">{record.description}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">
+                          {record.category}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1 text-xs text-zinc-500 capitalize">
+                          {record.paymentMethod === 'card' ? <CreditCard size={12} /> : 
+                           record.paymentMethod === 'cash' ? <Banknote size={12} /> : 
+                           <Send size={12} />}
+                          {record.paymentMethod}
+                        </div>
+                      </td>
+                      <td className={cn(
+                        "px-6 py-4 text-right font-bold text-sm",
+                        record.type === 'income' ? "text-emerald-500" : "text-red-500"
+                      )}>
+                        {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+            <PieChart size={18} className="text-emerald-500" />
+            Income vs Expense
+          </h3>
+          <div className="h-[200px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                <XAxis dataKey="name" stroke="#71717a" fontSize={10} axisLine={false} tickLine={false} />
+                <YAxis hide />
+                <Tooltip 
+                  cursor={{ fill: 'transparent' }}
+                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-6 space-y-3">
+            <div className="flex items-center justify-between p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+              <span className="text-xs text-zinc-500">Income Share</span>
+              <span className="text-sm font-bold text-emerald-500">
+                {totalIncome + totalExpense > 0 ? Math.round((totalIncome / (totalIncome + totalExpense)) * 100) : 0}%
+              </span>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+              <span className="text-xs text-zinc-500">Expense Share</span>
+              <span className="text-sm font-bold text-red-500">
+                {totalIncome + totalExpense > 0 ? Math.round((totalExpense / (totalIncome + totalExpense)) * 100) : 0}%
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Add Record Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">Add Financial Record</h2>
+            </div>
+            <form onSubmit={handleAddRecord}>
+              <div className="p-6 space-y-4">
+                <div className="flex p-1 bg-zinc-950 rounded-xl border border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setNewRecord({ ...newRecord, type: 'income', category: categories.income[0] })}
+                    className={cn(
+                      "flex-1 py-2 rounded-lg text-sm font-bold transition-all",
+                      newRecord.type === 'income' ? "bg-emerald-500 text-white" : "text-zinc-500"
+                    )}
+                  >
+                    Income
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewRecord({ ...newRecord, type: 'expense', category: categories.expense[0] })}
+                    className={cn(
+                      "flex-1 py-2 rounded-lg text-sm font-bold transition-all",
+                      newRecord.type === 'expense' ? "bg-red-500 text-white" : "text-zinc-500"
+                    )}
+                  >
+                    Expense
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">$</span>
+                      <input
+                        required
+                        type="number"
+                        value={newRecord.amount}
+                        onChange={(e) => setNewRecord({ ...newRecord, amount: parseFloat(e.target.value) })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
+                    <select
+                      value={newRecord.category}
+                      onChange={(e) => setNewRecord({ ...newRecord, category: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      {categories[newRecord.type].map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
+                  <select
+                    value={newRecord.paymentMethod}
+                    onChange={(e) => setNewRecord({ ...newRecord, paymentMethod: e.target.value as any })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                    <option value="transfer">Bank Transfer</option>
                   </select>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Description</label>
+                  <input
+                    required
+                    type="text"
+                    value={newRecord.description}
+                    onChange={(e) => setNewRecord({ ...newRecord, description: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    placeholder="e.g. Room 102 stay payment"
+                  />
+                </div>
               </div>
-              <div className="flex gap-4 mt-8">
-                <button 
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
                   type="button"
-                  onClick={() => setIsAdding(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
-                  className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                  disabled={!newRecord.amount || !newRecord.description}
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
                   Save Record
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
-
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="font-bold text-white">Transaction History</h3>
-          <div className="flex gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search..."
-                className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
-                <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Description</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Amount</th>
-                <th className="px-6 py-4">Type</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800">
-              {records.map(record => (
-                <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-zinc-400">
-                    {safeFormat(record.timestamp, 'MMM d, yyyy')}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-white font-medium">{record.description}</td>
-                  <td className="px-6 py-4 text-sm text-zinc-500">{record.category}</td>
-                  <td className={cn(
-                    "px-6 py-4 text-sm font-bold",
-                    record.type === 'income' ? "text-emerald-500" : "text-red-500"
-                  )}>
-                    {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount)}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                      record.type === 'income' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
-                    )}>
-                      {record.type}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

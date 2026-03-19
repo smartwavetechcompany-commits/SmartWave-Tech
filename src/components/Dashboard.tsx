@@ -12,9 +12,23 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  RefreshCw
+  RefreshCw,
+  ArrowUpRight,
+  ArrowDownRight,
+  Calendar,
+  DollarSign,
+  Activity
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer 
+} from 'recharts';
 import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -27,6 +41,7 @@ export function Dashboard() {
 
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [revenueChartData, setRevenueChartData] = useState<{ name: string; amount: number }[]>([]);
 
   const fetchData = React.useCallback(async () => {
     // This is now handled by real-time listeners in useEffect
@@ -58,8 +73,27 @@ export function Dashboard() {
       const unsubReservations = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), limit(5)), (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       });
-      const unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(10)), (snap) => {
-        setFinance(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord)));
+      const unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
+        const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
+        setFinance(records);
+
+        // Process revenue chart data for last 7 days
+        const last7Days = Array.from({ length: 7 }, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          return d.toISOString().split('T')[0];
+        }).reverse();
+
+        const chartData = last7Days.map(date => {
+          const dayRevenue = records
+            .filter(r => r.type === 'income' && r.timestamp.startsWith(date))
+            .reduce((acc, curr) => acc + curr.amount, 0);
+          return {
+            name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
+            amount: dayRevenue
+          };
+        });
+        setRevenueChartData(chartData);
       });
       unsubs.push(unsubRooms, unsubReservations, unsubFinance);
     }
@@ -81,9 +115,13 @@ export function Dashboard() {
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
-        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0)), icon: TrendingUp, color: 'text-amber-500' },
+        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0)), icon: TrendingUp, color: 'text-amber-500' },
         { label: 'Dirty Rooms', value: rooms.filter(r => r.status === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
       ];
+
+  const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+  const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
+  const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
   if (!isSubscriptionActive && profile?.role !== 'superAdmin') {
     return (
@@ -141,77 +179,137 @@ export function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {profile?.role === 'superAdmin' ? (
-          <div className="lg:col-span-2">
-            <ErrorBoundary>
-              <AuditLogs />
-            </ErrorBoundary>
-          </div>
-        ) : (
-          <>
-            {/* Recent Reservations */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-          <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-            <h3 className="font-bold text-white">Recent Reservations</h3>
-            <Link to="/front-desk" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
-          </div>
-          <div className="divide-y divide-zinc-800">
-            {reservations.length === 0 ? (
-              <div className="p-8 text-center text-zinc-500 text-sm">No recent reservations</div>
-            ) : (
-              reservations.map(res => (
-                <div key={res.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                      <Users size={18} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-white">{res.guestName}</div>
-                      <div className="text-xs text-zinc-500">Room {res.roomNumber || (res as any).roomNumber} • {res.checkIn}</div>
-                    </div>
-                  </div>
-                  <div className={cn(
-                    "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                    res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                    (res.status as string) === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
-                  )}>
-                    {res.status.replace('_', ' ')}
-                  </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-8">
+          {/* Revenue Chart */}
+          {profile?.role !== 'superAdmin' && (
+            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="font-bold text-white">Revenue Overview</h3>
+                  <p className="text-xs text-zinc-500">Last 7 days performance</p>
                 </div>
-              ))
-            )}
+                <div className="flex items-center gap-2 text-emerald-500 text-sm font-bold">
+                  {revenueGrowth >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
+                  {Math.abs(Math.round(revenueGrowth))}%
+                </div>
+              </div>
+              <div className="h-[240px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={revenueChartData}>
+                    <defs>
+                      <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                      itemStyle={{ color: '#10b981' }}
+                    />
+                    <Area type="monotone" dataKey="amount" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Reservations */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <h3 className="font-bold text-white">Recent Reservations</h3>
+              <Link to="/front-desk" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
+            </div>
+            <div className="divide-y divide-zinc-800">
+              {reservations.length === 0 ? (
+                <div className="p-8 text-center text-zinc-500 text-sm">No recent reservations</div>
+              ) : (
+                reservations.map(res => (
+                  <div key={res.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
+                        <Users size={18} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-white">{res.guestName}</div>
+                        <div className="text-xs text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                      res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
+                      res.status === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {res.status.replace('_', ' ')}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Audit Logs Section */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Activity size={18} className="text-emerald-500" />
+                <h3 className="font-bold text-white">Recent Activity</h3>
+              </div>
+            </div>
+            <div className="max-h-[400px] overflow-y-auto">
+              <AuditLogs />
+            </div>
           </div>
         </div>
 
-        {/* Room Status Summary */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-          <h3 className="font-bold text-white mb-6">Room Status</h3>
-          <div className="space-y-4">
-            {[
-              { label: 'Vacant Clean', count: rooms.filter(r => r.status === 'clean').length, color: 'bg-emerald-500' },
-              { label: 'Occupied', count: rooms.filter(r => r.status === 'occupied').length, color: 'bg-blue-500' },
-              { label: 'Dirty', count: rooms.filter(r => r.status === 'dirty').length, color: 'bg-red-500' },
-              { label: 'Maintenance', count: rooms.filter(r => r.status === 'maintenance').length, color: 'bg-amber-500' },
-            ].map(item => (
-              <div key={item.label} className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-zinc-400">{item.label}</span>
-                  <span className="text-white font-medium">{item.count}</span>
+        <div className="space-y-8">
+          {/* Room Status Summary */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+            <h3 className="font-bold text-white mb-6">Room Status</h3>
+            <div className="space-y-4">
+              {[
+                { label: 'Vacant Clean', count: rooms.filter(r => r.status === 'clean').length, color: 'bg-emerald-500' },
+                { label: 'Occupied', count: rooms.filter(r => r.status === 'occupied').length, color: 'bg-blue-500' },
+                { label: 'Dirty', count: rooms.filter(r => r.status === 'dirty').length, color: 'bg-red-500' },
+                { label: 'Maintenance', count: rooms.filter(r => r.status === 'maintenance').length, color: 'bg-amber-500' },
+              ].map(item => (
+                <div key={item.label} className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-zinc-400">{item.label}</span>
+                    <span className="text-white font-medium">{item.count}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                    <div 
+                      className={cn("h-full rounded-full transition-all duration-500", item.color)} 
+                      style={{ width: `${rooms.length ? (item.count / rooms.length) * 100 : 0}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                  <div 
-                    className={cn("h-full rounded-full transition-all duration-500", item.color)} 
-                    style={{ width: `${rooms.length ? (item.count / rooms.length) * 100 : 0}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
+
+          {/* Quick Actions */}
+          {profile?.role !== 'superAdmin' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+              <h3 className="font-bold text-white mb-4">Quick Actions</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <Link to="/front-desk" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-emerald-500/50 transition-colors text-center">
+                  <Calendar size={20} className="mx-auto mb-2 text-emerald-500" />
+                  <span className="text-xs font-medium text-zinc-400">New Booking</span>
+                </Link>
+                <Link to="/rooms" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-blue-500/50 transition-colors text-center">
+                  <BedDouble size={20} className="mx-auto mb-2 text-blue-500" />
+                  <span className="text-xs font-medium text-zinc-400">Room Status</span>
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
-      </>
-    )}
-  </div>
+      </div>
 </div>
   );
 }

@@ -25,10 +25,15 @@ export function FrontDesk() {
   const [isBooking, setIsBooking] = useState(false);
   const [newBooking, setNewBooking] = useState({
     guestName: '',
+    guestEmail: '',
+    guestPhone: '',
     roomId: '',
     checkIn: format(new Date(), 'yyyy-MM-dd'),
     checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
     totalAmount: 0,
+    paidAmount: 0,
+    paymentStatus: 'unpaid' as const,
+    notes: '',
   });
 
   const [loading, setLoading] = useState(false);
@@ -74,33 +79,117 @@ export function FrontDesk() {
     const selectedRoom = rooms.find(r => r.id === newBooking.roomId);
     if (!selectedRoom) return;
 
-    const resRef = await addDoc(collection(db, 'hotels', hotel.id, 'reservations'), {
-      ...newBooking,
-      roomNumber: selectedRoom.roomNumber,
-      status: 'pending',
-      paidAmount: 0,
-    });
+    // Basic availability check (simplified for now)
+    const isRoomTaken = reservations.some(res => 
+      res.roomId === newBooking.roomId && 
+      res.status !== 'cancelled' && 
+      res.status !== 'checked_out' &&
+      ((newBooking.checkIn >= res.checkIn && newBooking.checkIn < res.checkOut) ||
+       (newBooking.checkOut > res.checkIn && newBooking.checkOut <= res.checkOut))
+    );
 
-    // Log the action
-    await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-      timestamp: new Date().toISOString(),
-      user: profile?.email || profile?.uid || 'Unknown',
-      action: 'CREATE_BOOKING',
-      module: `Booking for ${newBooking.guestName} (Room ${selectedRoom.roomNumber})`
-    });
+    if (isRoomTaken) {
+      alert("This room is already booked for the selected dates.");
+      return;
+    }
 
-    setIsBooking(false);
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'reservations'), {
+        ...newBooking,
+        roomNumber: selectedRoom.roomNumber,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
+
+      // Log the action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        action: 'CREATE_BOOKING',
+        resource: `Booking for ${newBooking.guestName}`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
+
+      setIsBooking(false);
+      setNewBooking({
+        guestName: '',
+        guestEmail: '',
+        guestPhone: '',
+        roomId: '',
+        checkIn: format(new Date(), 'yyyy-MM-dd'),
+        checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
+        totalAmount: 0,
+        paidAmount: 0,
+        paymentStatus: 'unpaid',
+        notes: '',
+      });
+    } catch (err) {
+      console.error("Booking error:", err);
+    }
   };
 
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
     if (!hotel?.id) return;
-    await setDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { status }, { merge: true });
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { status }, { merge: true });
+      
+      // If checking in, mark room as occupied
+      if (status === 'checked_in') {
+        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' }, { merge: true });
+      } else if (status === 'checked_out') {
+        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' }, { merge: true });
+      }
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        action: 'UPDATE_BOOKING_STATUS',
+        resource: `Booking ${res.id}: ${status}`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
+    } catch (err) {
+      console.error("Update status error:", err);
+    }
+  };
+
+  const updatePayment = async (res: Reservation, amount: number) => {
+    if (!hotel?.id) return;
+    const newPaidAmount = (res.paidAmount || 0) + amount;
+    const paymentStatus = newPaidAmount >= res.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
     
-    // If checking in, mark room as occupied
-    if (status === 'checked_in') {
-      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' }, { merge: true });
-    } else if (status === 'checked_out') {
-      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' }, { merge: true });
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
+        paidAmount: newPaidAmount,
+        paymentStatus 
+      }, { merge: true });
+
+      // Add to finance records
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+        type: 'income',
+        amount: amount,
+        category: 'Room Revenue',
+        description: `Payment for booking ${res.id} (${res.guestName})`,
+        timestamp: new Date().toISOString(),
+        paymentMethod: 'cash' // Default to cash for now
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        action: 'UPDATE_PAYMENT',
+        resource: `Payment for ${res.guestName}: ${formatCurrency(amount)}`,
+        hotelId: hotel.id,
+        module: 'Finance'
+      });
+    } catch (err) {
+      console.error("Payment update error:", err);
     }
   };
 
@@ -135,13 +224,33 @@ export function FrontDesk() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-white mb-6">New Reservation</h3>
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Guest Name</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={newBooking.guestName}
+                    onChange={(e) => setNewBooking({ ...newBooking, guestName: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Phone Number</label>
+                  <input 
+                    type="tel" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={newBooking.guestPhone}
+                    onChange={(e) => setNewBooking({ ...newBooking, guestPhone: e.target.value })}
+                  />
+                </div>
+              </div>
               <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Guest Name</label>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Email Address</label>
                 <input 
-                  type="text" 
+                  type="email" 
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                  value={newBooking.guestName}
-                  onChange={(e) => setNewBooking({ ...newBooking, guestName: e.target.value })}
+                  value={newBooking.guestEmail}
+                  onChange={(e) => setNewBooking({ ...newBooking, guestEmail: e.target.value })}
                 />
               </div>
               <div>
@@ -179,6 +288,14 @@ export function FrontDesk() {
                     onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
+                <textarea 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                  value={newBooking.notes}
+                  onChange={(e) => setNewBooking({ ...newBooking, notes: e.target.value })}
+                />
               </div>
             </div>
             <div className="flex gap-4 mt-8">
@@ -239,7 +356,16 @@ export function FrontDesk() {
                     <div className="flex items-center gap-1"><Clock size={12} /> {res.checkIn}</div>
                     <div className="flex items-center gap-1 opacity-50"><Clock size={12} /> {res.checkOut}</div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">{formatCurrency(res.totalAmount)}</td>
+                  <td className="px-6 py-4 text-sm text-zinc-400">
+                    <div>{formatCurrency(res.totalAmount)}</div>
+                    <div className={cn(
+                      "text-[10px] font-bold uppercase",
+                      res.paymentStatus === 'paid' ? "text-emerald-500" :
+                      res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
+                    )}>
+                      {res.paymentStatus} ({formatCurrency(res.paidAmount || 0)})
+                    </div>
+                  </td>
                   <td className="px-6 py-4">
                     <span className={cn(
                       "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
@@ -252,6 +378,20 @@ export function FrontDesk() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
+                      {res.paymentStatus !== 'paid' && (
+                        <button 
+                          onClick={() => {
+                            const amount = prompt(`Enter payment amount for ${res.guestName} (Total: ${formatCurrency(res.totalAmount)}):`, (res.totalAmount - (res.paidAmount || 0)).toString());
+                            if (amount && !isNaN(Number(amount))) {
+                              updatePayment(res, Number(amount));
+                            }
+                          }}
+                          className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                          title="Record Payment"
+                        >
+                          <CreditCard size={18} />
+                        </button>
+                      )}
                       {res.status === 'pending' && (
                         <button 
                           onClick={() => updateReservationStatus(res, 'checked_in')}

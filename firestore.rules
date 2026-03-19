@@ -46,13 +46,18 @@ service cloud.firestore {
       return getHotelId() == hotelId;
     }
 
+    function isStaffOf(hotelId) {
+      let data = getUserData();
+      return data != null && data.hotelId == hotelId && (data.role == "staff" || data.role == "hotelAdmin");
+    }
+
     function subscriptionActive(hotelId) {
       let path = /databases/$(database)/documents/hotels/$(hotelId);
       return exists(path) && get(path).data.subscriptionStatus == "active";
     }
 
     //////////////////////////////
-    // TRACKING CODES (Validation & One-Time Use)
+    // TRACKING CODES
     //////////////////////////////
 
     match /trackingCodes/{codeId} {
@@ -90,8 +95,7 @@ service cloud.firestore {
       allow read, update: if isAuthenticated() && (
         request.auth.uid == userId || 
         isSuperAdmin() || 
-        (isHotelAdmin() && resource.data.hotelId == getHotelId()) ||
-        (userExists() && resource.data.hotelId == getHotelId())
+        (isHotelAdmin() && resource.data.hotelId == getHotelId())
       );
 
       allow delete: if isSuperAdmin();
@@ -112,9 +116,9 @@ service cloud.firestore {
 
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
-        allow read: if isSuperAdmin() || sameHotel(hotelId);
+        allow read: if isSuperAdmin() || isStaffOf(hotelId);
         allow create, update: if isSuperAdmin() || (
-          sameHotel(hotelId) && subscriptionActive(hotelId) && (isHotelAdmin() || isStaff())
+          isStaffOf(hotelId) && subscriptionActive(hotelId)
         );
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }

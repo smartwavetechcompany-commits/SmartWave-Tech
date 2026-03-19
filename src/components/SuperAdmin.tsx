@@ -371,11 +371,11 @@ export function SuperAdmin() {
           limits: { rooms: 30, staff: 5 }
         },
         premium: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings'],
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings', 'guests', 'maintenance'],
           limits: { rooms: 100, staff: 20 }
         },
         enterprise: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings'],
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'guests', 'maintenance', 'inventory'],
           limits: { rooms: 1000, staff: 100 }
         }
       };

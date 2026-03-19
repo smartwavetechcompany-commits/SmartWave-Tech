@@ -11,7 +11,10 @@ import {
   LogOut,
   ShieldCheck,
   DollarSign,
-  BarChart3
+  BarChart3,
+  Package,
+  Wrench,
+  UserCog
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../utils';
@@ -27,9 +30,12 @@ export function Sidebar() {
     { icon: Bed, label: 'Rooms', path: '/rooms', roles: ['hotelAdmin', 'staff'], permission: 'rooms' },
     { icon: ClipboardList, label: 'Housekeeping', path: '/housekeeping', roles: ['hotelAdmin', 'staff'], permission: 'housekeeping' },
     { icon: ChefHat, label: 'Kitchen', path: '/kitchen', roles: ['hotelAdmin', 'staff'], permission: 'kitchen' },
+    { icon: Package, label: 'Inventory', path: '/inventory', roles: ['hotelAdmin', 'staff'], permission: 'inventory' },
+    { icon: Wrench, label: 'Maintenance', path: '/maintenance', roles: ['hotelAdmin', 'staff'], permission: 'maintenance' },
+    { icon: Users, label: 'Guests', path: '/guests', roles: ['hotelAdmin', 'staff'], permission: 'guests' },
     { icon: DollarSign, label: 'Finance', path: '/finance', roles: ['hotelAdmin', 'staff'], permission: 'finance' },
     { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['hotelAdmin', 'staff'], permission: 'reports' },
-    { icon: Users, label: 'Staff', path: '/staff', roles: ['hotelAdmin', 'staff'], permission: 'staff' },
+    { icon: UserCog, label: 'Staff', path: '/staff', roles: ['hotelAdmin', 'staff'], permission: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', roles: ['superAdmin'] },
     { icon: Settings, label: 'Settings', path: '/settings', roles: ['hotelAdmin', 'superAdmin', 'staff'], permission: 'settings' },
   ];

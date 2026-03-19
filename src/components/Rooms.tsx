@@ -33,7 +33,22 @@ export function Rooms() {
     price: 100,
     floor: '1',
     capacity: 2,
+    amenities: [] as string[],
+    description: '',
   });
+
+  const amenitiesOptions = [
+    'WiFi', 'AC', 'TV', 'Mini Bar', 'Safe', 'Balcony', 'Sea View', 'Bathtub'
+  ];
+
+  const toggleAmenity = (amenity: string) => {
+    setNewRoom(prev => ({
+      ...prev,
+      amenities: prev.amenities.includes(amenity)
+        ? prev.amenities.filter(a => a !== amenity)
+        : [...prev.amenities, amenity]
+    }));
+  };
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
@@ -252,6 +267,34 @@ export function Rooms() {
                     onChange={(e) => setNewRoom({ ...newRoom, price: Number(e.target.value) })}
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Amenities</label>
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  {amenitiesOptions.map(amenity => (
+                    <button
+                      key={amenity}
+                      type="button"
+                      onClick={() => toggleAmenity(amenity)}
+                      className={cn(
+                        "px-2 py-1 rounded text-[10px] font-bold border transition-all",
+                        newRoom.amenities.includes(amenity)
+                          ? "bg-emerald-500/10 border-emerald-500 text-emerald-500"
+                          : "bg-zinc-950 border-zinc-800 text-zinc-500"
+                      )}
+                    >
+                      {amenity}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Description</label>
+                <textarea 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                  value={newRoom.description}
+                  onChange={(e) => setNewRoom({ ...newRoom, description: e.target.value })}
+                />
               </div>
               <div className="flex gap-4 mt-8">
                 <button 
