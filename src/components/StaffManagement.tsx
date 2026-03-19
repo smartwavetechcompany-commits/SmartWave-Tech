@@ -17,15 +17,17 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils';
 
-const AVAILABLE_PERMISSIONS = [
+const AVAILABLE_ROLES = [
   { id: 'frontDesk', label: 'Front Desk' },
-  { id: 'rooms', label: 'Rooms' },
   { id: 'housekeeping', label: 'Housekeeping' },
   { id: 'kitchen', label: 'Kitchen' },
   { id: 'finance', label: 'Finance' },
   { id: 'reports', label: 'Reports' },
   { id: 'staff', label: 'Staff Management' },
   { id: 'settings', label: 'Settings' },
+  { id: 'maintenance', label: 'Maintenance' },
+  { id: 'inventory', label: 'Inventory' },
+  { id: 'manager', label: 'Manager' },
 ];
 
 export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) {
@@ -38,7 +40,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     email: '',
     displayName: '',
     role: 'staff' as const,
-    staffRole: 'frontDesk' as StaffRole,
+    roles: ['frontDesk'] as StaffRole[],
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -86,8 +88,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       hotelId: hotelId,
       role: 'staff',
       createdAt: new Date().toISOString(),
-      staffRole: newStaff.staffRole,
-      permissions: [newStaff.staffRole],
+      roles: newStaff.roles,
+      permissions: newStaff.roles, // Keep for backward compatibility
       status: 'active',
       displayName: newStaff.displayName,
     };
@@ -100,11 +102,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         timestamp: new Date().toISOString(),
         user: profile?.email || profile?.uid || 'Unknown',
         action: 'CREATE_STAFF',
-        module: `Staff: ${newStaff.email} (${newStaff.staffRole})`
+        module: `Staff: ${newStaff.email} (${newStaff.roles.join(', ')})`
       });
 
       setIsAddingStaff(false);
-      setNewStaff({ email: '', displayName: '', role: 'staff', staffRole: 'frontDesk' });
+      setNewStaff({ email: '', displayName: '', role: 'staff', roles: ['frontDesk'] });
       showNotification('Staff member added successfully');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
@@ -139,28 +141,34 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     });
   };
 
-  const togglePermission = async (member: UserProfile, permissionId: string) => {
+  const toggleRole = async (member: UserProfile, roleId: StaffRole) => {
     if (!hotelId) return;
     
-    const currentPermissions = member.permissions || [];
-    const newPermissions = currentPermissions.includes(permissionId)
-      ? currentPermissions.filter(p => p !== permissionId)
-      : [...currentPermissions, permissionId];
+    const currentRoles: StaffRole[] = (member.roles || member.permissions || []) as StaffRole[];
+    const newRoles = currentRoles.includes(roleId)
+      ? currentRoles.filter(r => r !== roleId)
+      : [...currentRoles, roleId];
       
     try {
-      await setDoc(doc(db, 'users', member.uid), { permissions: newPermissions }, { merge: true });
+      await setDoc(doc(db, 'users', member.uid), { 
+        roles: newRoles,
+        permissions: newRoles // Keep sync
+      }, { merge: true });
       
       // Update local state for immediate feedback
-      setEditingPermissions(prev => prev ? { ...prev, permissions: newPermissions } : null);
+      if (editingPermissions) {
+        setEditingPermissions({ ...editingPermissions, roles: newRoles, permissions: newRoles });
+      }
       
-      // Log the action
+      // Log the action (Audit Trail)
       await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
-        action: 'UPDATE_STAFF_PERMISSIONS',
-        resource: `Staff: ${member.email}, Permission: ${permissionId}`,
-        hotelId: hotelId
+        action: 'UPDATE_STAFF_ROLES',
+        resource: `Staff: ${member.email}, Roles: ${newRoles.join(', ')}`,
+        hotelId: hotelId,
+        module: 'Staff'
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${member.uid}`);
@@ -244,18 +252,29 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Staff Role</label>
-                <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
-                  value={newStaff.staffRole}
-                  onChange={(e) => setNewStaff({ ...newStaff, staffRole: e.target.value as StaffRole })}
-                >
-                  <option value="frontDesk">Front Desk</option>
-                  <option value="housekeeping">Housekeeping</option>
-                  <option value="kitchen">Kitchen</option>
-                  <option value="it">IT Support</option>
-                  <option value="management">Management</option>
-                </select>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Primary Roles</label>
+                <div className="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
+                  {AVAILABLE_ROLES.map(role => (
+                    <button
+                      key={role.id}
+                      type="button"
+                      onClick={() => {
+                        const roles = newStaff.roles.includes(role.id as StaffRole)
+                          ? newStaff.roles.filter(r => r !== role.id)
+                          : [...newStaff.roles, role.id as StaffRole];
+                        setNewStaff({ ...newStaff, roles });
+                      }}
+                      className={cn(
+                        "px-2 py-1.5 rounded text-[10px] font-bold uppercase transition-all",
+                        newStaff.roles.includes(role.id as StaffRole)
+                          ? "bg-emerald-500 text-black"
+                          : "bg-zinc-800 text-zinc-500 hover:text-white"
+                      )}
+                    >
+                      {role.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex gap-4 mt-8">
                 <button 
@@ -320,9 +339,15 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-xs text-zinc-400">
                       <Shield size={14} className="text-emerald-500" />
-                      <span className="capitalize">
-                        {member.role === 'hotelAdmin' ? 'Hotel Admin' : (member.staffRole || 'Staff')}
-                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {member.role === 'hotelAdmin' ? (
+                          <span className="capitalize">Hotel Admin</span>
+                        ) : (
+                          (member.roles || member.permissions || ['Staff']).map(r => (
+                            <span key={r} className="capitalize">{r}</span>
+                          )).reduce((prev, curr) => [prev, ', ', curr] as any)
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -381,12 +406,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
             <p className="text-zinc-400 text-sm mb-6">Setting permissions for {editingPermissions.displayName || editingPermissions.email}</p>
             
             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-              {AVAILABLE_PERMISSIONS.map(permission => {
-                const isGranted = (editingPermissions.permissions || []).includes(permission.id);
+              {AVAILABLE_ROLES.map(role => {
+                const isGranted = (editingPermissions.roles || editingPermissions.permissions || []).includes(role.id);
                 return (
                   <button
-                    key={permission.id}
-                    onClick={() => togglePermission(editingPermissions, permission.id)}
+                    key={role.id}
+                    onClick={() => toggleRole(editingPermissions, role.id as StaffRole)}
                     className={cn(
                       "w-full flex items-center justify-between p-3 rounded-xl border transition-all active:scale-[0.98]",
                       isGranted 
@@ -394,7 +419,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                         : "bg-zinc-950 border-zinc-800 text-zinc-500 hover:border-zinc-700"
                     )}
                   >
-                    <span className="text-sm font-medium">{permission.label}</span>
+                    <span className="text-sm font-medium">{role.label}</span>
                     {isGranted ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
                   </button>
                 );

@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room } from '../types';
+import { Reservation, Room, Guest } from '../types';
+import { postToLedger } from '../services/ledgerService';
+import { ReceiptGenerator } from './ReceiptGenerator';
 import { 
   Plus, 
   Search, 
@@ -13,7 +15,8 @@ import {
   XCircle,
   Clock,
   LogOut,
-  RefreshCw
+  RefreshCw,
+  Receipt
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
@@ -22,8 +25,11 @@ export function FrontDesk() {
   const { hotel, profile } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   const [isBooking, setIsBooking] = useState(false);
+  const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [newBooking, setNewBooking] = useState({
+    guestId: '',
     guestName: '',
     guestEmail: '',
     guestPhone: '',
@@ -64,9 +70,17 @@ export function FrontDesk() {
       (err) => console.error("Rooms listener error:", err)
     );
 
+    const unsubscribeGuests = onSnapshot(collection(db, 'hotels', hotel.id, 'guests'), 
+      (snap) => {
+        setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+      },
+      (err) => console.error("Guests listener error:", err)
+    );
+
     return () => {
       unsubscribeRes();
       unsubscribeRooms();
+      unsubscribeGuests();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -94,12 +108,19 @@ export function FrontDesk() {
     }
 
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'reservations'), {
+      const resData = {
         ...newBooking,
         roomNumber: selectedRoom.roomNumber,
         status: 'pending',
+        ledgerEntries: [],
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      const docRef = await addDoc(collection(db, 'hotels', hotel.id, 'reservations'), resData);
+
+      // If guest is linked, we could post the initial room charge to ledger
+      // But usually we do it on check-in or daily.
+      // For now, let's just create the booking.
 
       // Log the action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
@@ -114,6 +135,7 @@ export function FrontDesk() {
 
       setIsBooking(false);
       setNewBooking({
+        guestId: '',
         guestName: '',
         guestEmail: '',
         guestPhone: '',
@@ -135,9 +157,20 @@ export function FrontDesk() {
     try {
       await setDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { status }, { merge: true });
       
-      // If checking in, mark room as occupied
+      // If checking in, mark room as occupied and post room charge to ledger if guest is linked
       if (status === 'checked_in') {
         await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' }, { merge: true });
+        
+        if (res.guestId) {
+          await postToLedger(hotel.id, res.guestId, res.id, {
+            amount: res.totalAmount,
+            type: 'debit',
+            category: 'room',
+            description: `Room Charge: ${res.roomNumber} (${res.checkIn} to ${res.checkOut})`,
+            referenceId: res.id,
+            postedBy: profile.uid
+          }, profile.uid);
+        }
       } else if (status === 'checked_out') {
         await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' }, { merge: true });
       }
@@ -224,6 +257,32 @@ export function FrontDesk() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-white mb-6">New Reservation</h3>
             <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Select Existing Guest</label>
+                <select 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  value={newBooking.guestId}
+                  onChange={(e) => {
+                    const guest = guests.find(g => g.id === e.target.value);
+                    if (guest) {
+                      setNewBooking({
+                        ...newBooking,
+                        guestId: guest.id,
+                        guestName: guest.name,
+                        guestEmail: guest.email,
+                        guestPhone: guest.phone
+                      });
+                    } else {
+                      setNewBooking({ ...newBooking, guestId: '', guestName: '', guestEmail: '', guestPhone: '' });
+                    }
+                  }}
+                >
+                  <option value="">New Guest</option>
+                  {guests.map(g => (
+                    <option key={g.id} value={g.id}>{g.name} ({g.phone})</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Guest Name</label>
@@ -365,6 +424,11 @@ export function FrontDesk() {
                     )}>
                       {res.paymentStatus} ({formatCurrency(res.paidAmount || 0)})
                     </div>
+                    {res.guestId && (
+                      <div className="text-[10px] text-zinc-500 mt-1">
+                        Ledger: {formatCurrency((res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0))}
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span className={cn(
@@ -392,6 +456,13 @@ export function FrontDesk() {
                           <CreditCard size={18} />
                         </button>
                       )}
+                      <button 
+                        onClick={() => setShowReceipt({ res, type: 'comprehensive' })}
+                        className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                        title="Generate Receipt"
+                      >
+                        <Receipt size={18} />
+                      </button>
                       {res.status === 'pending' && (
                         <button 
                           onClick={() => updateReservationStatus(res, 'checked_in')}
@@ -427,6 +498,28 @@ export function FrontDesk() {
           </table>
         </div>
       </div>
+
+      {showReceipt && hotel && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="relative w-full max-w-lg my-8">
+            <button 
+              onClick={() => setShowReceipt(null)}
+              className="absolute -top-12 right-0 text-white hover:text-zinc-400 font-bold flex items-center gap-2 print:hidden"
+            >
+              <XCircle size={20} />
+              Close
+            </button>
+            <div className="bg-white rounded-2xl overflow-hidden">
+              <ReceiptGenerator 
+                hotel={hotel} 
+                reservation={showReceipt.res} 
+                type={showReceipt.type} 
+                ledgerEntries={showReceipt.res.ledgerEntries || []}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

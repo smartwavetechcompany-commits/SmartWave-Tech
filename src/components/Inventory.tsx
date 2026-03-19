@@ -3,25 +3,11 @@ import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteD
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { InventoryItem, OperationType } from '../types';
-import { 
-  Package, 
-  Plus, 
-  Search, 
-  Filter, 
-  AlertTriangle, 
-  History, 
-  ArrowUp, 
-  ArrowDown, 
-  Trash2, 
-  Edit2,
-  MoreHorizontal,
-  ChevronRight,
-  Box,
-  ShoppingCart
-} from 'lucide-react';
+import { Package, Plus, Search, Filter, AlertTriangle, History, ArrowUp, ArrowDown, Trash2, Edit2, MoreHorizontal, ChevronRight, Box, ShoppingCart } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 import { format } from 'date-fns';
+import { createNotification } from './Notifications';
 
 export function Inventory() {
   const { hotel, profile } = useAuth();
@@ -45,7 +31,20 @@ export function Inventory() {
     const q = query(collection(db, 'hotels', hotel.id, 'inventory'), orderBy('name', 'asc'));
     const unsubscribe = onSnapshot(q, 
       (snap) => {
-        setItems(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+        const newItems = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem));
+        setItems(newItems);
+
+        // Check for low stock and notify
+        newItems.forEach(item => {
+          if (item.quantity <= item.minThreshold) {
+            createNotification(hotel.id, {
+              title: 'Low Stock Alert',
+              message: `${item.name} is low on stock (${item.quantity} ${item.unit} remaining).`,
+              type: 'warning',
+              userId: 'all'
+            });
+          }
+        });
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);

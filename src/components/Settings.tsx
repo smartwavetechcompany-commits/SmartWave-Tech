@@ -22,11 +22,20 @@ import { format, isValid } from 'date-fns';
 export function Settings() {
   const { profile, hotel, isSubscriptionActive } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'security'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security'>('profile');
   
   const [formData, setFormData] = useState({
     displayName: profile?.displayName || '',
     hotelName: hotel?.name || '',
+    branding: {
+      logoUrl: hotel?.branding?.logoUrl || '',
+      primaryColor: hotel?.branding?.primaryColor || '#10b981',
+      secondaryColor: hotel?.branding?.secondaryColor || '#18181b',
+      address: hotel?.branding?.address || '',
+      phone: hotel?.branding?.phone || '',
+      email: hotel?.branding?.email || '',
+      footerNotes: hotel?.branding?.footerNotes || '',
+    }
   });
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -87,6 +96,35 @@ export function Settings() {
     }
   };
 
+  const handleSaveBranding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
+
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id), {
+        branding: formData.branding,
+      }, { merge: true });
+
+      // Log action
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        action: 'UPDATE_HOTEL_BRANDING',
+        resource: `Hotel Branding: ${hotel.name}`,
+        hotelId: hotel.id
+      });
+
+      alert('Hotel branding updated!');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update hotel branding.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-8">
       <header>
@@ -118,6 +156,19 @@ export function Settings() {
             >
               <Building2 size={18} />
               Hotel Settings
+            </button>
+          )}
+
+          {profile?.role === 'hotelAdmin' && (
+            <button 
+              onClick={() => setActiveTab('branding')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
+                activeTab === 'branding' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              )}
+            >
+              <Smartphone size={18} />
+              Branding
             </button>
           )}
 
@@ -237,6 +288,140 @@ export function Settings() {
                 >
                   <Save size={18} />
                   {isSaving ? 'Saving...' : 'Update Hotel'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {activeTab === 'branding' && profile?.role === 'hotelAdmin' && (
+            <form onSubmit={handleSaveBranding} className="space-y-6">
+              <div className="mb-8">
+                <h3 className="text-lg font-bold text-white mb-1">Hotel Branding</h3>
+                <p className="text-sm text-zinc-500">Customize your hotel's visual identity and receipt details</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Logo URL</label>
+                  <input 
+                    type="url" 
+                    placeholder="https://example.com/logo.png"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={formData.branding.logoUrl}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, logoUrl: e.target.value } 
+                    })}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Primary Color</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="color" 
+                      className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
+                      value={formData.branding.primaryColor}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        branding: { ...formData.branding, primaryColor: e.target.value } 
+                      })}
+                    />
+                    <input 
+                      type="text" 
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none font-mono text-sm"
+                      value={formData.branding.primaryColor}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        branding: { ...formData.branding, primaryColor: e.target.value } 
+                      })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Secondary Color</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="color" 
+                      className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
+                      value={formData.branding.secondaryColor}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        branding: { ...formData.branding, secondaryColor: e.target.value } 
+                      })}
+                    />
+                    <input 
+                      type="text" 
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none font-mono text-sm"
+                      value={formData.branding.secondaryColor}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        branding: { ...formData.branding, secondaryColor: e.target.value } 
+                      })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Contact Phone</label>
+                  <input 
+                    type="tel" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={formData.branding.phone}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, phone: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Contact Email</label>
+                  <input 
+                    type="email" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={formData.branding.email}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, email: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Address</label>
+                  <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                    value={formData.branding.address}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, address: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Receipt Footer Notes</label>
+                  <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                    placeholder="Thank you for staying with us!"
+                    value={formData.branding.footerNotes}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, footerNotes: e.target.value } 
+                    })}
+                  />
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-zinc-800 flex justify-end">
+                <button 
+                  disabled={isSaving}
+                  className="bg-emerald-500 text-black px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
+                >
+                  <Save size={18} />
+                  {isSaving ? 'Saving...' : 'Save Branding'}
                 </button>
               </div>
             </form>

@@ -10,7 +10,8 @@
         "hotelId": { "type": "string" },
         "name": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "status": { "type": "string", "enum": ["active", "inactive"] }
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "roles": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["email", "role", "hotelId", "status"]
     },
@@ -25,7 +26,19 @@
         "subscriptionExpiry": { "type": "integer" },
         "plan": { "type": "string" },
         "adminUIDs": { "type": "array", "items": { "type": "string" } },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "branding": {
+          "type": "object",
+          "properties": {
+            "logoUrl": { "type": "string" },
+            "primaryColor": { "type": "string" },
+            "secondaryColor": { "type": "string" },
+            "address": { "type": "string" },
+            "phone": { "type": "string" },
+            "email": { "type": "string" },
+            "footerNotes": { "type": "string" }
+          }
+        }
       },
       "required": ["name", "subscriptionStatus", "subscriptionExpiry", "plan", "adminUIDs"]
     },
@@ -52,7 +65,10 @@
         "checkIn": { "type": "string", "format": "date-time" },
         "checkOut": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["booked", "checked_in", "checked_out", "cancelled"] },
-        "createdBy": { "type": "string" }
+        "createdBy": { "type": "string" },
+        "guestId": { "type": "string" },
+        "corporateId": { "type": "string" },
+        "ledgerEntries": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["guestName", "roomId", "checkIn", "checkOut", "status", "createdBy"]
     },
@@ -162,6 +178,55 @@
       },
       "required": ["action", "actor", "timestamp"]
     },
+    "Guest": {
+      "title": "Guest",
+      "description": "Guest profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "preferences": { "type": "array", "items": { "type": "string" } },
+        "ledgerBalance": { "type": "number" },
+        "stayHistory": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "email", "phone", "ledgerBalance"]
+    },
+    "LedgerEntry": {
+      "title": "Ledger Entry",
+      "description": "Guest financial transaction",
+      "type": "object",
+      "properties": {
+        "guestId": { "type": "string" },
+        "hotelId": { "type": "string" },
+        "type": { "type": "string", "enum": ["debit", "credit"] },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "referenceId": { "type": "string" },
+        "category": { "type": "string", "enum": ["room", "restaurant", "service", "payment"] },
+        "postedBy": { "type": "string" }
+      },
+      "required": ["guestId", "hotelId", "type", "amount", "description", "timestamp", "category", "postedBy"]
+    },
+    "CorporateAccount": {
+      "title": "Corporate Account",
+      "description": "Company account for bookings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "creditLimit": { "type": "number" },
+        "currentBalance": { "type": "number" },
+        "billingCycle": { "type": "string", "enum": ["weekly", "monthly"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "phone", "creditLimit", "currentBalance", "billingCycle", "status", "createdAt"]
+    },
     "Registration": {
       "title": "Registration Record",
       "description": "A record of a new hotel registration attempt",
@@ -227,6 +292,18 @@
     "/hotels/{hotelId}/finance/{recordId}": {
       "schema": "FinanceRecord",
       "description": "Hotel financial records"
+    },
+    "/hotels/{hotelId}/guests/{guestId}": {
+      "schema": "Guest",
+      "description": "Guest profiles"
+    },
+    "/hotels/{hotelId}/ledger/{entryId}": {
+      "schema": "LedgerEntry",
+      "description": "Guest ledger entries"
+    },
+    "/hotels/{hotelId}/corporate/{accountId}": {
+      "schema": "CorporateAccount",
+      "description": "Corporate accounts"
     },
     "/trackingCodes/{code}": {
       "schema": "TrackingCode",

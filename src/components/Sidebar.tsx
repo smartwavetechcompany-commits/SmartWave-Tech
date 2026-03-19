@@ -14,7 +14,9 @@ import {
   BarChart3,
   Package,
   Wrench,
-  UserCog
+  UserCog,
+  Building2,
+  Activity
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../utils';
@@ -26,6 +28,7 @@ export function Sidebar() {
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['hotelAdmin', 'staff', 'superAdmin'], permission: 'dashboard' },
+    { icon: Activity, label: 'Operations', path: '/operations', roles: ['hotelAdmin', 'staff'], permission: 'dashboard' },
     { icon: CalendarDays, label: 'Front Desk', path: '/front-desk', roles: ['hotelAdmin', 'staff'], permission: 'frontDesk' },
     { icon: Bed, label: 'Rooms', path: '/rooms', roles: ['hotelAdmin', 'staff'], permission: 'rooms' },
     { icon: ClipboardList, label: 'Housekeeping', path: '/housekeeping', roles: ['hotelAdmin', 'staff'], permission: 'housekeeping' },
@@ -33,6 +36,7 @@ export function Sidebar() {
     { icon: Package, label: 'Inventory', path: '/inventory', roles: ['hotelAdmin', 'staff'], permission: 'inventory' },
     { icon: Wrench, label: 'Maintenance', path: '/maintenance', roles: ['hotelAdmin', 'staff'], permission: 'maintenance' },
     { icon: Users, label: 'Guests', path: '/guests', roles: ['hotelAdmin', 'staff'], permission: 'guests' },
+    { icon: Building2, label: 'Corporate', path: '/corporate', roles: ['hotelAdmin', 'staff'], permission: 'corporate' },
     { icon: DollarSign, label: 'Finance', path: '/finance', roles: ['hotelAdmin', 'staff'], permission: 'finance' },
     { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['hotelAdmin', 'staff'], permission: 'reports' },
     { icon: UserCog, label: 'Staff', path: '/staff', roles: ['hotelAdmin', 'staff'], permission: 'staff' },

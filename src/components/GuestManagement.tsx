@@ -38,7 +38,10 @@ export function GuestManagement() {
     idType: 'Passport',
     idNumber: '',
     address: '',
-    notes: ''
+    notes: '',
+    tags: [] as string[],
+    preferences: [] as string[],
+    ledgerBalance: 0
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -72,6 +75,8 @@ export function GuestManagement() {
           ...newGuest,
           totalStays: 0,
           totalSpent: 0,
+          ledgerBalance: 0,
+          stayHistory: [],
           createdAt: new Date().toISOString()
         });
       }
@@ -89,7 +94,18 @@ export function GuestManagement() {
 
       setShowAddModal(false);
       setEditingGuest(null);
-      setNewGuest({ name: '', email: '', phone: '', idType: 'Passport', idNumber: '', address: '', notes: '' });
+      setNewGuest({ 
+        name: '', 
+        email: '', 
+        phone: '', 
+        idType: 'Passport', 
+        idNumber: '', 
+        address: '', 
+        notes: '',
+        tags: [],
+        preferences: [],
+        ledgerBalance: 0
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/guests`);
     }
@@ -121,7 +137,18 @@ export function GuestManagement() {
         <button
           onClick={() => {
             setEditingGuest(null);
-            setNewGuest({ name: '', email: '', phone: '', idType: 'Passport', idNumber: '', address: '', notes: '' });
+            setNewGuest({ 
+              name: '', 
+              email: '', 
+              phone: '', 
+              idType: 'Passport', 
+              idNumber: '', 
+              address: '', 
+              notes: '',
+              tags: [],
+              preferences: [],
+              ledgerBalance: 0
+            });
             setShowAddModal(true);
           }}
           className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
@@ -145,8 +172,8 @@ export function GuestManagement() {
           <div className="text-2xl font-bold text-blue-500">{formatCurrency(guests.reduce((acc, g) => acc + g.totalSpent, 0))}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Loyalty Points</div>
-          <div className="text-2xl font-bold text-amber-500">{(guests.reduce((acc, g) => acc + g.totalStays, 0) * 100).toLocaleString()}</div>
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Balance</div>
+          <div className="text-2xl font-bold text-red-500">{formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0))}</div>
         </div>
       </div>
 
@@ -189,8 +216,15 @@ export function GuestManagement() {
                       <div>
                         <h3 className="text-white font-bold">{guest.name}</h3>
                         <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                          <Star size={10} className={cn(guest.totalStays > 5 ? "text-amber-500" : "text-zinc-600")} />
-                          {guest.totalStays > 5 ? 'VIP Guest' : 'Standard'}
+                          <Star size={10} className={cn(guest.totalStays > 5 || guest.tags?.includes('VIP') ? "text-amber-500" : "text-zinc-600")} />
+                          {guest.totalStays > 5 || guest.tags?.includes('VIP') ? 'VIP Guest' : 'Standard'}
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(guest.tags || []).map(tag => (
+                            <span key={tag} className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[8px] font-bold uppercase">
+                              {tag}
+                            </span>
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -205,7 +239,10 @@ export function GuestManagement() {
                             idType: guest.idType || 'Passport',
                             idNumber: guest.idNumber || '',
                             address: guest.address || '',
-                            notes: guest.notes || ''
+                            notes: guest.notes || '',
+                            tags: guest.tags || [],
+                            preferences: guest.preferences || [],
+                            ledgerBalance: guest.ledgerBalance || 0
                           });
                           setShowAddModal(true);
                         }}
@@ -237,8 +274,13 @@ export function GuestManagement() {
                         <div className="text-lg font-bold text-white">{guest.totalStays}</div>
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Spent</div>
-                        <div className="text-lg font-bold text-emerald-500">{formatCurrency(guest.totalSpent)}</div>
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Ledger Balance</div>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                        )}>
+                          {formatCurrency(guest.ledgerBalance || 0)}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -335,6 +377,26 @@ export function GuestManagement() {
                     onChange={(e) => setNewGuest({ ...newGuest, address: e.target.value })}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
                     placeholder="Home or Business address"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Tags (comma separated)</label>
+                  <input
+                    type="text"
+                    value={newGuest.tags.join(', ')}
+                    onChange={(e) => setNewGuest({ ...newGuest, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    placeholder="VIP, Corporate, Regular"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Preferences (comma separated)</label>
+                  <input
+                    type="text"
+                    value={newGuest.preferences.join(', ')}
+                    onChange={(e) => setNewGuest({ ...newGuest, preferences: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    placeholder="High floor, Extra towels"
                   />
                 </div>
               </div>

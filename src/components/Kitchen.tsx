@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, addDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType } from '../types';
+import { KitchenOrder, OperationType, Reservation } from '../types';
+import { postToLedger } from '../services/ledgerService';
+import { createNotification } from './Notifications';
 import { 
   ChefHat, 
   Clock, 
@@ -27,6 +29,7 @@ import { cn } from '../utils';
 export function Kitchen() {
   const { hotel, profile } = useAuth();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
@@ -37,7 +40,9 @@ export function Kitchen() {
     roomNumber: '',
     items: '',
     notes: '',
-    category: 'food' as 'food' | 'drink' | 'other'
+    category: 'food' as 'food' | 'drink' | 'other',
+    price: 0,
+    paymentMethod: 'cash' as 'cash' | 'room'
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -71,16 +76,63 @@ export function Kitchen() {
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('status', '==', 'checked_in')
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    });
+    return () => unsubscribe();
+  }, [hotel?.id, profile?.uid]);
+
   const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
 
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), {
+      const orderData = {
         ...newOrder,
         status: 'pending',
         timestamp: new Date().toISOString()
+      };
+
+      const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
+
+      // Create notification for kitchen staff
+      await createNotification(hotel.id, {
+        title: 'New Kitchen Order',
+        message: `New order for Room ${newOrder.roomNumber}: ${newOrder.items}`,
+        type: 'info',
+        userId: 'all'
       });
+
+      // If posting to room, find reservation and post to ledger
+      if (newOrder.paymentMethod === 'room' && newOrder.price > 0) {
+        const res = reservations.find(r => r.roomNumber === newOrder.roomNumber);
+        if (res && res.guestId) {
+          await postToLedger(hotel.id, res.guestId, res.id, {
+            amount: newOrder.price,
+            type: 'debit',
+            category: 'restaurant',
+            description: `Room Service: ${newOrder.items}`,
+            referenceId: orderRef.id,
+            postedBy: profile.uid
+          }, profile.uid);
+        }
+      } else if (newOrder.paymentMethod === 'cash' && newOrder.price > 0) {
+        // Add to finance records
+        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'income',
+          amount: newOrder.price,
+          category: 'Restaurant Revenue',
+          description: `Cash payment for order ${orderRef.id} (Room ${newOrder.roomNumber})`,
+          timestamp: new Date().toISOString(),
+          paymentMethod: 'cash'
+        });
+      }
 
       // Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
@@ -88,13 +140,13 @@ export function Kitchen() {
         userId: profile?.uid,
         userEmail: profile?.email,
         action: 'KITCHEN_ORDER_CREATED',
-        resource: `Room ${newOrder.roomNumber}: ${newOrder.items}`,
+        resource: `Room ${newOrder.roomNumber}: ${newOrder.items} (${newOrder.paymentMethod})`,
         hotelId: hotel.id,
         module: 'Kitchen'
       });
 
       setShowAddModal(false);
-      setNewOrder({ roomNumber: '', items: '', notes: '', category: 'food' });
+      setNewOrder({ roomNumber: '', items: '', notes: '', category: 'food', price: 0, paymentMethod: 'cash' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/kitchen_orders`);
     }
@@ -363,6 +415,29 @@ export function Kitchen() {
                       <option value="food">Food</option>
                       <option value="drink">Drink</option>
                       <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Price</label>
+                    <input
+                      type="number"
+                      value={newOrder.price}
+                      onChange={(e) => setNewOrder({ ...newOrder, price: Number(e.target.value) })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Payment</label>
+                    <select
+                      value={newOrder.paymentMethod}
+                      onChange={(e) => setNewOrder({ ...newOrder, paymentMethod: e.target.value as any })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="room">Post to Room</option>
                     </select>
                   </div>
                 </div>

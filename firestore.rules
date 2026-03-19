@@ -48,7 +48,11 @@ service cloud.firestore {
 
     function isStaffOf(hotelId) {
       let data = getUserData();
-      return data != null && data.hotelId == hotelId && (data.role == "staff" || data.role == "hotelAdmin");
+      return data != null && data.hotelId == hotelId && (
+        data.role == "hotelAdmin" || 
+        data.role == "staff" ||
+        (data.roles != null && data.roles.size() > 0)
+      );
     }
 
     function subscriptionActive(hotelId) {
