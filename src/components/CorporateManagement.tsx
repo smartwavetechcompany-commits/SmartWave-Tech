@@ -13,15 +13,25 @@ import {
   Users,
   FileText,
   TrendingUp,
-  Briefcase
+  Briefcase,
+  Tag,
+  Calendar,
+  DollarSign,
+  X,
+  Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
+import { Room, CorporateRate } from '../types';
+import { format } from 'date-fns';
 
 export function CorporateManagement() {
   const { hotel, profile } = useAuth();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showRatesModal, setShowRatesModal] = useState<CorporateAccount | null>(null);
+  const [rates, setRates] = useState<CorporateRate[]>([]);
   const [editingAccount, setEditingAccount] = useState<CorporateAccount | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [newAccount, setNewAccount] = useState({
@@ -33,11 +43,28 @@ export function CorporateManagement() {
     taxId: '',
     creditLimit: 0,
     currentBalance: 0,
-    billingCycle: 'monthly' as 'weekly' | 'monthly' | 'quarterly',
-    contractRates: {} as Record<string, number>
+    billingCycle: 'monthly' as 'weekly' | 'monthly' | 'quarterly'
+  });
+
+  const [newRate, setNewRate] = useState({
+    roomType: '',
+    rate: 0,
+    currency: 'NGN' as 'NGN' | 'USD',
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(new Date(Date.now() + 31536000000), 'yyyy-MM-dd'), // 1 year
+    discountType: 'fixed' as 'percentage' | 'fixed',
+    discountValue: 0,
+    conditions: ''
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
+
+  const hasPermission = () => {
+    if (!profile) return false;
+    if (profile.role === 'hotelAdmin') return true;
+    const roles = (profile.roles || profile.permissions || []) as string[];
+    return roles.includes('manager') || roles.includes('corporate');
+  };
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -53,6 +80,31 @@ export function CorporateManagement() {
     );
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id) return;
+    const unsubscribe = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
+      setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    });
+    return () => unsubscribe();
+  }, [hotel?.id]);
+
+  useEffect(() => {
+    if (!hotel?.id || !showRatesModal) {
+      setRates([]);
+      return;
+    }
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setRates(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateRate)));
+    });
+    return () => unsubscribe();
+  }, [hotel?.id, showRatesModal]);
+
+  const roomTypes = Array.from(new Set(rooms.map(r => r.type)));
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,11 +145,57 @@ export function CorporateManagement() {
         taxId: '',
         creditLimit: 0, 
         currentBalance: 0, 
-        billingCycle: 'monthly', 
-        contractRates: {}
+        billingCycle: 'monthly'
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/corporate_accounts`);
+    }
+  };
+
+  const handleSaveRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !showRatesModal || !profile) return;
+
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'), {
+        ...newRate,
+        corporateId: showRatesModal.id,
+        status: 'active',
+        createdAt: new Date().toISOString()
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        action: 'CORPORATE_RATE_CREATED',
+        resource: `Rate for ${showRatesModal.name} - ${newRate.roomType}`,
+        hotelId: hotel.id,
+        module: 'Corporate'
+      });
+
+      setNewRate({
+        roomType: '',
+        rate: 0,
+        currency: 'NGN',
+        startDate: format(new Date(), 'yyyy-MM-dd'),
+        endDate: format(new Date(Date.now() + 31536000000), 'yyyy-MM-dd'),
+        discountType: 'fixed',
+        discountValue: 0,
+        conditions: ''
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates`);
+    }
+  };
+
+  const deleteRate = async (rateId: string) => {
+    if (!hotel?.id || !showRatesModal || !window.confirm('Delete this rate?')) return;
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', rateId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates/${rateId}`);
     }
   };
 
@@ -113,20 +211,22 @@ export function CorporateManagement() {
           <h1 className="text-3xl font-bold text-white tracking-tight">Corporate Accounts</h1>
           <p className="text-zinc-400">Manage corporate partnerships and billing</p>
         </div>
-        <button 
-          onClick={() => {
-            setEditingAccount(null);
-            setNewAccount({
-              name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
-              creditLimit: 0, currentBalance: 0, billingCycle: 'monthly', contractRates: {}
-            });
-            setShowAddModal(true);
-          }}
-          className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-        >
-          <Plus size={18} />
-          Add Account
-        </button>
+        {hasPermission() && (
+          <button 
+            onClick={() => {
+              setEditingAccount(null);
+              setNewAccount({
+                name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
+                creditLimit: 0, currentBalance: 0, billingCycle: 'monthly'
+              });
+              setShowAddModal(true);
+            }}
+            className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+          >
+            <Plus size={18} />
+            Add Account
+          </button>
+        )}
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -203,26 +303,34 @@ export function CorporateManagement() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
                       <button 
-                        onClick={() => {
-                          setEditingAccount(account);
-                          setNewAccount({
-                            name: account.name,
-                            email: account.email,
-                            phone: account.phone,
-                            address: account.address,
-                            contactPerson: account.contactPerson,
-                            taxId: account.taxId,
-                            creditLimit: account.creditLimit,
-                            currentBalance: account.currentBalance,
-                            billingCycle: account.billingCycle,
-                            contractRates: account.contractRates || {}
-                          });
-                          setShowAddModal(true);
-                        }}
-                        className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                        onClick={() => setShowRatesModal(account)}
+                        className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                        title="Manage Rates"
                       >
-                        <Edit2 size={18} />
+                        <Tag size={18} />
                       </button>
+                      {hasPermission() && (
+                        <button 
+                          onClick={() => {
+                            setEditingAccount(account);
+                            setNewAccount({
+                              name: account.name,
+                              email: account.email,
+                              phone: account.phone,
+                              address: account.address,
+                              contactPerson: account.contactPerson,
+                              taxId: account.taxId,
+                              creditLimit: account.creditLimit,
+                              currentBalance: account.currentBalance,
+                              billingCycle: account.billingCycle
+                            });
+                            setShowAddModal(true);
+                          }}
+                          className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -342,6 +450,173 @@ export function CorporateManagement() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Rates Modal */}
+      {showRatesModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Negotiated Rates</h2>
+                <p className="text-sm text-zinc-500">{showRatesModal.name}</p>
+              </div>
+              <button onClick={() => setShowRatesModal(null)} className="text-zinc-500 hover:text-white">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-3">
+              {/* Add Rate Form */}
+              {hasPermission() ? (
+                <div className="p-6 border-r border-zinc-800 bg-zinc-950/50">
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                    <Plus size={16} className="text-emerald-500" />
+                    Add New Rate
+                  </h3>
+                  <form onSubmit={handleSaveRate} className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Room Type</label>
+                      <select
+                        required
+                        value={newRate.roomType}
+                        onChange={(e) => setNewRate({ ...newRate, roomType: e.target.value })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                      >
+                        <option value="">Select Type</option>
+                        {roomTypes.map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Rate</label>
+                        <input
+                          required
+                          type="number"
+                          value={newRate.rate}
+                          onChange={(e) => setNewRate({ ...newRate, rate: Number(e.target.value) })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Currency</label>
+                        <select
+                          value={newRate.currency}
+                          onChange={(e) => setNewRate({ ...newRate, currency: e.target.value as any })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                        >
+                          <option value="NGN">₦ (NGN)</option>
+                          <option value="USD">$ (USD)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Start Date</label>
+                        <input
+                          required
+                          type="date"
+                          value={newRate.startDate}
+                          onChange={(e) => setNewRate({ ...newRate, startDate: e.target.value })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">End Date</label>
+                        <input
+                          required
+                          type="date"
+                          value={newRate.endDate}
+                          onChange={(e) => setNewRate({ ...newRate, endDate: e.target.value })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">Conditions (Optional)</label>
+                      <textarea
+                        value={newRate.conditions}
+                        onChange={(e) => setNewRate({ ...newRate, conditions: e.target.value })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50 h-16 resize-none"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2 bg-emerald-500 text-black font-bold rounded-lg hover:bg-emerald-400 transition-all active:scale-95 text-sm"
+                    >
+                      Add Rate
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="p-6 border-r border-zinc-800 bg-zinc-950/50 flex flex-col items-center justify-center text-center">
+                  <Lock size={32} className="text-zinc-700 mb-2" />
+                  <p className="text-xs text-zinc-500">You don't have permission to manage rates.</p>
+                </div>
+              )}
+
+              {/* Rates List */}
+              <div className="lg:col-span-2 p-6 max-h-[60vh] overflow-y-auto">
+                <div className="space-y-4">
+                  {rates.length === 0 ? (
+                    <div className="text-center py-12 text-zinc-500">
+                      <Tag size={48} className="mx-auto mb-4 opacity-20" />
+                      <p>No negotiated rates found for this account.</p>
+                    </div>
+                  ) : (
+                    rates.map(rate => {
+                      const isActive = new Date() >= new Date(rate.startDate) && new Date() <= new Date(rate.endDate);
+                      return (
+                        <div key={rate.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between group">
+                          <div className="flex items-center gap-4">
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center",
+                              isActive ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                            )}>
+                              <DollarSign size={20} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold text-white">{rate.roomType}</span>
+                                <span className={cn(
+                                  "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase",
+                                  isActive ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                                )}>
+                                  {isActive ? 'Active' : 'Inactive'}
+                                </span>
+                              </div>
+                              <div className="text-lg font-bold text-white">
+                                {rate.currency === 'NGN' ? '₦' : '$'}{rate.rate.toLocaleString()}
+                              </div>
+                              <div className="text-[10px] text-zinc-500 flex items-center gap-1">
+                                <Calendar size={10} />
+                                {format(new Date(rate.startDate), 'MMM d, yyyy')} - {format(new Date(rate.endDate), 'MMM d, yyyy')}
+                              </div>
+                            </div>
+                          </div>
+                          {hasPermission() && (
+                            <button 
+                              onClick={() => deleteRate(rate.id)}
+                              className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
           </motion.div>
         </div>
       )}

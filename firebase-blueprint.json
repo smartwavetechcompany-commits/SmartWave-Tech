@@ -219,13 +219,34 @@
         "email": { "type": "string" },
         "phone": { "type": "string" },
         "address": { "type": "string" },
+        "contactPerson": { "type": "string" },
+        "taxId": { "type": "string" },
         "creditLimit": { "type": "number" },
         "currentBalance": { "type": "number" },
-        "billingCycle": { "type": "string", "enum": ["weekly", "monthly"] },
+        "billingCycle": { "type": "string", "enum": ["weekly", "monthly", "quarterly"] },
         "status": { "type": "string", "enum": ["active", "suspended"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "email", "phone", "creditLimit", "currentBalance", "billingCycle", "status", "createdAt"]
+    },
+    "CorporateRate": {
+      "title": "Corporate Rate",
+      "description": "Negotiated room rate for a corporate account",
+      "type": "object",
+      "properties": {
+        "corporateId": { "type": "string" },
+        "roomType": { "type": "string" },
+        "rate": { "type": "number" },
+        "currency": { "type": "string", "enum": ["NGN", "USD"] },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "discountType": { "type": "string", "enum": ["percentage", "fixed"] },
+        "discountValue": { "type": "number" },
+        "conditions": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["corporateId", "roomType", "rate", "currency", "startDate", "endDate", "status", "createdAt"]
     },
     "Registration": {
       "title": "Registration Record",
@@ -301,9 +322,13 @@
       "schema": "LedgerEntry",
       "description": "Guest ledger entries"
     },
-    "/hotels/{hotelId}/corporate/{accountId}": {
+    "/hotels/{hotelId}/corporate_accounts/{accountId}": {
       "schema": "CorporateAccount",
       "description": "Corporate accounts"
+    },
+    "/hotels/{hotelId}/corporate_accounts/{accountId}/rates/{rateId}": {
+      "schema": "CorporateRate",
+      "description": "Negotiated rates for a corporate account"
     },
     "/trackingCodes/{code}": {
       "schema": "TrackingCode",

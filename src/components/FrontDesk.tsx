@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { 
@@ -16,7 +16,9 @@ import {
   Clock,
   LogOut,
   RefreshCw,
-  Receipt
+  Receipt,
+  Building2,
+  Tag
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
@@ -26,10 +28,13 @@ export function FrontDesk() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
+  const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
   const [isBooking, setIsBooking] = useState(false);
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [newBooking, setNewBooking] = useState({
     guestId: '',
+    corporateId: '',
     guestName: '',
     guestEmail: '',
     guestPhone: '',
@@ -77,12 +82,61 @@ export function FrontDesk() {
       (err) => console.error("Guests listener error:", err)
     );
 
+    const unsubscribeCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), 
+      (snap) => {
+        setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+      },
+      (err) => console.error("Corporate accounts listener error:", err)
+    );
+
     return () => {
       unsubscribeRes();
       unsubscribeRooms();
       unsubscribeGuests();
+      unsubscribeCorp();
     };
   }, [hotel?.id, profile?.uid]);
+
+  // Fetch rates when corporate account is selected
+  useEffect(() => {
+    if (!hotel?.id || !newBooking.corporateId) {
+      setActiveCorporateRates([]);
+      return;
+    }
+
+    const ratesRef = collection(db, 'hotels', hotel.id, 'corporate_accounts', newBooking.corporateId, 'rates');
+    const q = query(ratesRef, where('status', '==', 'active'));
+
+    getDocs(q).then(snap => {
+      setActiveCorporateRates(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateRate)));
+    });
+  }, [hotel?.id, newBooking.corporateId]);
+
+  // Recalculate price when room, dates or corporate account changes
+  useEffect(() => {
+    const selectedRoom = rooms.find(r => r.id === newBooking.roomId);
+    if (!selectedRoom) return;
+
+    let pricePerNight = selectedRoom.price;
+
+    if (newBooking.corporateId) {
+      const activeRate = activeCorporateRates.find(r => 
+        r.roomType === selectedRoom.type &&
+        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+        new Date(newBooking.checkIn) <= new Date(r.endDate)
+      );
+
+      if (activeRate) {
+        pricePerNight = activeRate.rate;
+      }
+    }
+
+    const checkIn = new Date(newBooking.checkIn);
+    const checkOut = new Date(newBooking.checkOut);
+    const nights = Math.max(1, Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
+    
+    setNewBooking(prev => ({ ...prev, totalAmount: pricePerNight * nights }));
+  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, activeCorporateRates, rooms]);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -136,6 +190,7 @@ export function FrontDesk() {
       setIsBooking(false);
       setNewBooking({
         guestId: '',
+        corporateId: '',
         guestName: '',
         guestEmail: '',
         guestPhone: '',
@@ -169,7 +224,7 @@ export function FrontDesk() {
             description: `Room Charge: ${res.roomNumber} (${res.checkIn} to ${res.checkOut})`,
             referenceId: res.id,
             postedBy: profile.uid
-          }, profile.uid);
+          }, profile.uid, res.corporateId);
         }
       } else if (status === 'checked_out') {
         await setDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' }, { merge: true });
@@ -256,7 +311,47 @@ export function FrontDesk() {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-white mb-6">New Reservation</h3>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Guest Type</label>
+                  <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                    <button 
+                      onClick={() => setNewBooking({ ...newBooking, corporateId: '' })}
+                      className={cn(
+                        "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-bold transition-all",
+                        !newBooking.corporateId ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                      )}
+                    >
+                      <User size={14} /> Individual
+                    </button>
+                    <button 
+                      onClick={() => setNewBooking({ ...newBooking, corporateId: corporateAccounts[0]?.id || '' })}
+                      className={cn(
+                        "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-bold transition-all",
+                        newBooking.corporateId ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                      )}
+                    >
+                      <Building2 size={14} /> Corporate
+                    </button>
+                  </div>
+                </div>
+                {newBooking.corporateId && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Corporate Account</label>
+                    <select 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      value={newBooking.corporateId}
+                      onChange={(e) => setNewBooking({ ...newBooking, corporateId: e.target.value })}
+                    >
+                      {corporateAccounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>{acc.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Select Existing Guest</label>
                 <select 
@@ -318,14 +413,33 @@ export function FrontDesk() {
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                   value={newBooking.roomId}
                   onChange={(e) => {
-                    const room = rooms.find(r => r.id === e.target.value);
-                    setNewBooking({ ...newBooking, roomId: e.target.value, totalAmount: room?.price || 0 });
+                    setNewBooking({ ...newBooking, roomId: e.target.value });
                   }}
                 >
                   <option value="">Select a room</option>
-                  {rooms.filter(r => r.status === 'clean').map(room => (
-                    <option key={room.id} value={room.id}>Room {room.roomNumber} ({room.type} - {formatCurrency(room.price)})</option>
-                  ))}
+                  {rooms.filter(r => r.status === 'clean').map(room => {
+                    const selectedRoom = rooms.find(r => r.id === room.id);
+                    let displayPrice = room.price;
+                    let isNegotiated = false;
+
+                    if (newBooking.corporateId) {
+                      const activeRate = activeCorporateRates.find(r => 
+                        r.roomType === room.type &&
+                        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+                        new Date(newBooking.checkIn) <= new Date(r.endDate)
+                      );
+                      if (activeRate) {
+                        displayPrice = activeRate.rate;
+                        isNegotiated = true;
+                      }
+                    }
+
+                    return (
+                      <option key={room.id} value={room.id}>
+                        Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice)}{isNegotiated ? ' [Negotiated]' : ''})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -355,6 +469,16 @@ export function FrontDesk() {
                   value={newBooking.notes}
                   onChange={(e) => setNewBooking({ ...newBooking, notes: e.target.value })}
                 />
+              </div>
+              <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
+                <div className="flex justify-between text-xs text-zinc-500 uppercase font-bold">
+                  <span>Summary</span>
+                  <span>Amount</span>
+                </div>
+                <div className="flex justify-between text-sm text-white">
+                  <span>Total Amount</span>
+                  <span className="font-bold text-emerald-500">{formatCurrency(newBooking.totalAmount)}</span>
+                </div>
               </div>
             </div>
             <div className="flex gap-4 mt-8">
@@ -405,9 +529,17 @@ export function FrontDesk() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-500">
-                        <User size={14} />
+                        {res.corporateId ? <Building2 size={14} /> : <User size={14} />}
                       </div>
-                      <div className="text-sm font-medium text-white">{res.guestName}</div>
+                      <div>
+                        <div className="text-sm font-medium text-white">{res.guestName}</div>
+                        {res.corporateId && (
+                          <div className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
+                            <Building2 size={10} />
+                            {corporateAccounts.find(a => a.id === res.corporateId)?.name || 'Corporate'}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-sm text-zinc-400">Room {res.roomNumber}</td>

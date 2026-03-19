@@ -120,7 +120,7 @@ export function Kitchen() {
             description: `Room Service: ${newOrder.items}`,
             referenceId: orderRef.id,
             postedBy: profile.uid
-          }, profile.uid);
+          }, profile.uid, res.corporateId);
         }
       } else if (newOrder.paymentMethod === 'cash' && newOrder.price > 0) {
         // Add to finance records

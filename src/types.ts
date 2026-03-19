@@ -1,5 +1,5 @@
 export type UserRole = 'superAdmin' | 'hotelAdmin' | 'staff';
-export type StaffRole = 'receptionist' | 'housekeeper' | 'manager' | 'accountant' | 'frontDesk' | 'kitchen' | 'maintenance' | 'admin';
+export type StaffRole = 'receptionist' | 'housekeeper' | 'manager' | 'accountant' | 'frontDesk' | 'kitchen' | 'maintenance' | 'admin' | 'corporate';
 export type SubscriptionStatus = 'active' | 'expired' | 'suspended';
 export type PlanType = 'standard' | 'premium' | 'enterprise';
 
@@ -221,8 +221,22 @@ export interface CorporateAccount {
   creditLimit: number;
   currentBalance: number;
   billingCycle: 'weekly' | 'monthly' | 'quarterly';
-  contractRates?: { [roomType: string]: number };
   status: 'active' | 'suspended';
+  createdAt: string;
+}
+
+export interface CorporateRate {
+  id: string;
+  corporateId: string;
+  roomType: string;
+  rate: number;
+  currency: 'NGN' | 'USD';
+  startDate: string;
+  endDate: string;
+  discountType?: 'percentage' | 'fixed';
+  discountValue?: number;
+  conditions?: string;
+  status: 'active' | 'inactive';
   createdAt: string;
 }
 

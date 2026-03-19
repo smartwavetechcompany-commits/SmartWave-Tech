@@ -7,7 +7,8 @@ export const postToLedger = async (
   guestId: string,
   reservationId: string,
   entry: Omit<LedgerEntry, 'id' | 'timestamp' | 'hotelId' | 'guestId'>,
-  postedBy: string
+  postedBy: string,
+  corporateId?: string
 ) => {
   const timestamp = new Date().toISOString();
   const ledgerEntry: LedgerEntry = {
@@ -25,14 +26,21 @@ export const postToLedger = async (
     ledgerEntries: arrayUnion(ledgerEntry)
   });
 
-  // 2. Update Guest ledgerBalance and totalSpent
-  const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
+  // 2. Update Guest or Corporate Account balance
   const amount = entry.type === 'debit' ? entry.amount : -entry.amount;
-  
-  await updateDoc(guestRef, {
-    ledgerBalance: increment(amount),
-    totalSpent: increment(entry.type === 'debit' ? entry.amount : 0)
-  });
+
+  if (corporateId) {
+    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
+    await updateDoc(corpRef, {
+      currentBalance: increment(amount)
+    });
+  } else {
+    const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
+    await updateDoc(guestRef, {
+      ledgerBalance: increment(amount),
+      totalSpent: increment(entry.type === 'debit' ? entry.amount : 0)
+    });
+  }
 
   return ledgerEntry;
 };

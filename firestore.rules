@@ -27,6 +27,14 @@ service cloud.firestore {
       );
     }
 
+    function isAdmin() {
+      let data = getUserData();
+      return isAuthenticated() && (
+        (data != null && (data.role == "hotelAdmin" || (data.roles != null && data.roles.hasAny(['manager', 'corporate'])))) ||
+        request.auth.token.email == "smartwavetechcompany@gmail.com"
+      );
+    }
+
     function isHotelAdmin() {
       let data = getUserData();
       return data != null && data.role == "hotelAdmin";
@@ -51,7 +59,7 @@ service cloud.firestore {
       return data != null && data.hotelId == hotelId && (
         data.role == "hotelAdmin" || 
         data.role == "staff" ||
-        (data.roles != null && data.roles.size() > 0)
+        (data.roles != null && data.roles.hasAny(['frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'maintenance', 'inventory', 'corporate', 'manager']))
       );
     }
 
@@ -117,6 +125,19 @@ service cloud.firestore {
       allow read: if isSuperAdmin() || sameHotel(hotelId);
       allow update: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       allow delete: if isSuperAdmin();
+
+      // Corporate Accounts
+      match /corporate_accounts/{accountId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId);
+        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId) && subscriptionActive(hotelId));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+
+        match /rates/{rateId} {
+          allow read: if isSuperAdmin() || isStaffOf(hotelId);
+          allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId) && subscriptionActive(hotelId));
+          allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        }
+      }
 
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {

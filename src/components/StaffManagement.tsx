@@ -27,6 +27,7 @@ const AVAILABLE_ROLES = [
   { id: 'settings', label: 'Settings' },
   { id: 'maintenance', label: 'Maintenance' },
   { id: 'inventory', label: 'Inventory' },
+  { id: 'corporate', label: 'Corporate Management' },
   { id: 'manager', label: 'Manager' },
 ];
 

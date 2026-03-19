@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { UserProfile, Hotel, Room, FinanceRecord } from '../types';
+import { UserProfile, Hotel, Room, FinanceRecord, CorporateAccount, Reservation } from '../types';
 import { 
   BarChart3, 
   PieChart, 
@@ -10,7 +10,8 @@ import {
   Users, 
   Bed,
   Download,
-  Calendar
+  Calendar,
+  Building2
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { 
@@ -24,7 +25,9 @@ import {
   LineChart,
   Line,
   AreaChart,
-  Area
+  Area,
+  Cell,
+  Pie
 } from 'recharts';
 
 export function Reports() {
@@ -33,8 +36,12 @@ export function Reports() {
     occupancy: 0,
     revPar: 0,
     adr: 0,
-    totalGuests: 0
+    totalGuests: 0,
+    corporateRevenue: 0,
+    individualRevenue: 0
   });
+
+  const [corporateData, setCorporateData] = useState<{ name: string; value: number }[]>([]);
 
   // Mock data for charts - in a real app, this would be aggregated from Firestore
   const revenueData = [
@@ -91,8 +98,29 @@ export function Reports() {
     });
     unsubs.push(unsubFinance);
 
+    // Corporate vs Individual Revenue
+    const unsubReservations = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
+      const res = snap.docs.map(doc => doc.data() as Reservation);
+      const corpRev = res.filter(r => r.corporateId && r.status !== 'cancelled').reduce((acc, r) => acc + r.totalAmount, 0);
+      const indivRev = res.filter(r => !r.corporateId && r.status !== 'cancelled').reduce((acc, r) => acc + r.totalAmount, 0);
+      
+      setStats(prev => ({
+        ...prev,
+        corporateRevenue: corpRev,
+        individualRevenue: indivRev
+      }));
+
+      setCorporateData([
+        { name: 'Corporate', value: corpRev },
+        { name: 'Individual', value: indivRev }
+      ]);
+    });
+    unsubs.push(unsubReservations);
+
     return () => unsubs.forEach(unsub => unsub());
   }, [hotel?.id, stats.occupancy]);
+
+  const COLORS = ['#10b981', '#3b82f6'];
 
   return (
     <div className="p-8 space-y-8">
@@ -168,6 +196,41 @@ export function Reports() {
                 <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
               </AreaChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <h3 className="font-bold text-white mb-6">Revenue Mix</h3>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={corporateData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {corporateData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                  formatter={(value: number) => formatCurrency(value)}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex justify-center gap-6 mt-4">
+            {corporateData.map((entry, index) => (
+              <div key={entry.name} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
+                <span className="text-xs text-zinc-400">{entry.name}</span>
+              </div>
+            ))}
           </div>
         </div>
 
