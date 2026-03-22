@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { UserProfile, Hotel } from '../types';
+import { UserProfile, Hotel, SystemSettings } from '../types';
 
 const SUPER_ADMIN_EMAIL = 'smartwavetechcompany@gmail.com';
 
@@ -12,6 +12,9 @@ interface AuthContextType {
   hotel: Hotel | null;
   loading: boolean;
   isSubscriptionActive: boolean;
+  currency: 'NGN' | 'USD';
+  setCurrency: (currency: 'NGN' | 'USD') => void;
+  exchangeRate: number;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,6 +26,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [hasProfileError, setHasProfileError] = useState(false);
   const [hasHotelError, setHasHotelError] = useState(false);
+  const [currency, setCurrencyState] = useState<'NGN' | 'USD'>(() => {
+    return (localStorage.getItem('pms_currency') as 'NGN' | 'USD') || 'NGN';
+  });
+  const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
+
+  const setCurrency = (newCurrency: 'NGN' | 'USD') => {
+    setCurrencyState(newCurrency);
+    localStorage.setItem('pms_currency', newCurrency);
+  };
 
   // 1. Auth State Listener
   useEffect(() => {
@@ -136,12 +148,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [profile?.hotelId, profile?.role, hasHotelError]);
 
+  // 4. System Settings Listener
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'system', 'settings'), 
+      (snap) => {
+        if (snap.exists()) {
+          setSystemSettings(snap.data() as SystemSettings);
+        }
+      },
+      (err) => console.error("System settings listener error:", err)
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   const isSubscriptionActive = profile?.role === 'superAdmin' 
     ? true 
     : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry).getTime() > Date.now()) : false);
 
+  const exchangeRate = systemSettings?.exchangeRate || 1500;
+
   return (
-    <AuthContext.Provider value={{ user, profile, hotel, loading, isSubscriptionActive }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      profile, 
+      hotel, 
+      loading, 
+      isSubscriptionActive,
+      currency,
+      setCurrency,
+      exchangeRate
+    }}>
       {children}
     </AuthContext.Provider>
   );

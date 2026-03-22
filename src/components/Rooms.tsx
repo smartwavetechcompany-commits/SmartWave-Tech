@@ -19,7 +19,7 @@ import { cn, formatCurrency } from '../utils';
 import { motion } from 'motion/react';
 
 export function Rooms() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -117,10 +117,10 @@ export function Rooms() {
   const filteredRooms = rooms.filter(room => {
     const query = searchQuery.toLowerCase();
     const matchesSearch = (
-      room.roomNumber.toLowerCase().includes(query) ||
-      room.type.toLowerCase().includes(query) ||
-      room.status.toLowerCase().includes(query) ||
-      room.status.replace('_', ' ').toLowerCase().includes(query)
+      (room.roomNumber?.toLowerCase() || '').includes(query) ||
+      (room.type?.toLowerCase() || '').includes(query) ||
+      (room.status?.toLowerCase() || '').includes(query) ||
+      (room.status?.replace('_', ' ').toLowerCase() || '').includes(query)
     );
     
     const matchesStatus = statusFilter === 'all' || room.status === statusFilter;
@@ -318,13 +318,19 @@ export function Rooms() {
 
       {view === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
-          {filteredRooms.map((room) => (
+          {filteredRooms.length === 0 ? (
+            <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
+              <Bed size={48} className="mx-auto text-zinc-700 mb-4" />
+              <p>No rooms found matching your filters</p>
+            </div>
+          ) : (
+            filteredRooms.map((room) => (
             <motion.div
               layout
               key={room.id}
               className={cn(
                 "aspect-square rounded-xl border-2 p-4 flex flex-col justify-between transition-all group relative overflow-hidden",
-                statusColors[room.status]
+                room.status ? statusColors[room.status] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5'
               )}
             >
               <div className="flex justify-between items-start">
@@ -337,10 +343,10 @@ export function Rooms() {
               </div>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider opacity-60">{room.type} • {room.capacity} Pax</div>
-                <div className="text-xs font-medium">{room.status.replace('_', ' ')}</div>
+                <div className="text-xs font-medium">{(room.status || 'unknown').replace('_', ' ')}</div>
               </div>
             </motion.div>
-          ))}
+          )))}
         </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -363,13 +369,13 @@ export function Rooms() {
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.type}</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.capacity} Pax</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.floor}</td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">{formatCurrency(room.price)}</td>
+                  <td className="px-6 py-4 text-sm text-zinc-400">{formatCurrency(room.price, currency, exchangeRate)}</td>
                   <td className="px-6 py-4">
                     <span className={cn(
                       "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border",
-                      statusColors[room.status]
+                      room.status ? statusColors[room.status] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5'
                     )}>
-                      {room.status.replace('_', ' ')}
+                      {(room.status || 'unknown').replace('_', ' ')}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">

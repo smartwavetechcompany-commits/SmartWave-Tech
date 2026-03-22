@@ -2,6 +2,7 @@ import React from 'react';
 import { Reservation, Hotel, LedgerEntry } from '../types';
 import { formatCurrency } from '../utils';
 import { format } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ReceiptProps {
   hotel: Hotel;
@@ -11,6 +12,7 @@ interface ReceiptProps {
 }
 
 export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] }: ReceiptProps) {
+  const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
   
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
@@ -58,19 +60,19 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
           ledgerEntries.filter(e => e.category === 'restaurant').map(e => (
             <div key={e.id} className="flex justify-between">
               <span className="flex-1">{e.description}</span>
-              <span>{formatCurrency(e.amount)}</span>
+              <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
             </div>
           ))
         ) : (
           <>
             <div className="flex justify-between font-bold">
               <span>Room Charges</span>
-              <span>{formatCurrency(reservation.totalAmount)}</span>
+              <span>{formatCurrency(reservation.totalAmount, currency, exchangeRate)}</span>
             </div>
             {ledgerEntries.filter(e => e.category !== 'room' && e.type === 'debit').map(e => (
               <div key={e.id} className="flex justify-between text-[12px]">
                 <span className="flex-1 pl-2">- {e.description}</span>
-                <span>{formatCurrency(e.amount)}</span>
+                <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>
             ))}
           </>
@@ -83,17 +85,17 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
       <div className="space-y-1">
         <div className="flex justify-between font-bold text-lg">
           <span>TOTAL</span>
-          <span>{formatCurrency(type === 'restaurant' ? totalDebits : (reservation.totalAmount + totalDebits - reservation.totalAmount))}</span>
+          <span>{formatCurrency(type === 'restaurant' ? totalDebits : (reservation.totalAmount + totalDebits - reservation.totalAmount), currency, exchangeRate)}</span>
         </div>
         {type === 'comprehensive' && (
           <>
             <div className="flex justify-between text-emerald-700">
               <span>Paid</span>
-              <span>{formatCurrency(totalCredits + (reservation.paidAmount || 0))}</span>
+              <span>{formatCurrency(totalCredits + (reservation.paidAmount || 0), currency, exchangeRate)}</span>
             </div>
             <div className="flex justify-between font-bold border-t border-black pt-1">
               <span>BALANCE DUE</span>
-              <span>{formatCurrency(Math.max(0, (reservation.totalAmount + totalDebits - (reservation.paidAmount || 0) - totalCredits)))}</span>
+              <span>{formatCurrency(Math.max(0, (reservation.totalAmount + totalDebits - (reservation.paidAmount || 0) - totalCredits)), currency, exchangeRate)}</span>
             </div>
           </>
         )}

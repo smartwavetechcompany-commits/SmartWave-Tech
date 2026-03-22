@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, addDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation } from '../types';
+import { KitchenOrder, OperationType, Reservation, Guest } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { 
@@ -30,6 +30,7 @@ export function Kitchen() {
   const { hotel, profile } = useAuth();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
@@ -88,6 +89,15 @@ export function Kitchen() {
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid]);
 
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = collection(db, 'hotels', hotel.id, 'guests');
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+    });
+    return () => unsubscribe();
+  }, [hotel?.id, profile?.uid]);
+
   const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
@@ -121,6 +131,15 @@ export function Kitchen() {
             referenceId: orderRef.id,
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
+
+          // Update guest ledger balance
+          const guest = guests.find(g => g.id === res.guestId);
+          if (guest) {
+            const guestRef = doc(db, 'hotels', hotel.id, 'guests', guest.id);
+            await updateDoc(guestRef, {
+              ledgerBalance: (guest.ledgerBalance || 0) + newOrder.price
+            });
+          }
         }
       } else if (newOrder.paymentMethod === 'cash' && newOrder.price > 0) {
         // Add to finance records
@@ -184,7 +203,7 @@ export function Kitchen() {
   const filteredOrders = (showHistory ? historyOrders : activeOrders).filter(o => {
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
-    const matchesSearch = o.roomNumber.includes(searchQuery) || o.items.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (o.roomNumber || '').includes(searchQuery) || (o.items?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     return matchesFilter && matchesCategory && matchesSearch;
   });
 

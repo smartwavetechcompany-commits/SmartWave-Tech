@@ -108,7 +108,7 @@ export function Maintenance() {
   const filteredRequests = requests.filter(r => {
     const matchesStatus = filter === 'all' || r.status === filter;
     const matchesPriority = priorityFilter === 'all' || r.priority === priorityFilter;
-    const matchesSearch = r.roomNumber.includes(searchQuery) || r.issue.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (r.roomNumber || '').includes(searchQuery) || (r.issue?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     return matchesStatus && matchesPriority && matchesSearch;
   });
 

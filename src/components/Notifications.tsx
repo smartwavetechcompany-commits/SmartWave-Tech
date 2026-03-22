@@ -37,20 +37,21 @@ export function Notifications() {
     const q = query(
       collection(db, 'hotels', hotel.id, 'notifications'),
       where('userId', 'in', [profile.uid, 'all']),
-      orderBy('timestamp', 'desc'),
-      limit(20)
+      limit(50)
     );
 
-    const unsubscribe = onSnapshot(q, 
+    getDocs(q).then(
       (snap) => {
-        setNotifications(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification)));
+        const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification));
+        // Sort client-side to avoid index error
+        setNotifications(docs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/notifications`);
       }
     );
 
-    return () => unsubscribe();
+    return () => {};
   }, [hotel?.id, profile?.uid]);
 
   const markAsRead = async (id: string) => {

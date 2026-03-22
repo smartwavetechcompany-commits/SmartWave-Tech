@@ -20,6 +20,7 @@ import { OperationsDashboard } from './components/OperationsDashboard';
 import { Finance } from './components/Finance';
 import { Reports } from './components/Reports';
 import { Notifications } from './components/Notifications';
+import { TopBar } from './components/TopBar';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
@@ -53,11 +54,10 @@ function AppContent() {
   return (
     <div className="flex h-screen bg-zinc-950 overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto relative">
-        <div className="absolute top-8 right-8 z-50">
-          <Notifications />
-        </div>
-        <AnimatePresence mode="wait">
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <TopBar />
+        <div className="flex-1 overflow-y-auto relative">
+          <AnimatePresence mode="wait">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/rooms" element={<Rooms />} />
@@ -85,9 +85,10 @@ function AppContent() {
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>
         </AnimatePresence>
-      </main>
-    </div>
-  );
+      </div>
+    </main>
+  </div>
+);
 }
 
 export default function App() {

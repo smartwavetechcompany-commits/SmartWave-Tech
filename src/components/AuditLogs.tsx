@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { collection, getDocs, query, orderBy, limit, where, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit, where, onSnapshot, collectionGroup } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AuditLog, OperationType } from '../types';
 import { format, isValid } from 'date-fns';
-import { ClipboardList, User, Clock, Tag, RefreshCw } from 'lucide-react';
+import { ClipboardList, User, Clock, Tag, RefreshCw, Building2 } from 'lucide-react';
 
 export function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -29,20 +29,17 @@ export function AuditLogs() {
     if (profile.role === 'hotelAdmin' && !hotel?.id) return () => {};
 
     setLoading(true);
-    let q;
-    if (profile.role === 'superAdmin') {
-      q = query(collection(db, 'auditLogs'), orderBy('timestamp', 'desc'), limit(50));
-    } else {
-      q = query(collection(db, 'hotels', hotel?.id || '', 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
-    }
+    const q = profile.role === 'superAdmin' 
+      ? query(collectionGroup(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(100))
+      : query(collection(db, 'hotels', hotel?.id || '', 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
 
-    const unsubscribe = onSnapshot(q, 
+    getDocs(q).then(
       (snap) => {
         setLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
         setLoading(false);
       },
       (err) => {
-        const path = profile.role === 'superAdmin' ? 'auditLogs' : `hotels/${hotel?.id}/activityLogs`;
+        const path = profile.role === 'superAdmin' ? 'activityLogs_group' : `hotels/${hotel?.id}/activityLogs`;
         handleFirestoreError(err, OperationType.LIST, path);
         if (err.code === 'permission-denied') {
           setHasPermissionError(true);
@@ -51,7 +48,7 @@ export function AuditLogs() {
       }
     );
 
-    return unsubscribe;
+    return () => {};
   }, [hotel?.id, profile?.role, hasPermissionError]);
 
   useEffect(() => {
@@ -101,6 +98,15 @@ export function AuditLogs() {
                 <span className="font-semibold text-emerald-500/80 uppercase tracking-wider">{log.action}</span>
                 <span>on</span>
                 <span className="text-zinc-300">{(log as any).target || (log as any).resource || (log as any).module || 'System'}</span>
+                {profile.role === 'superAdmin' && (log as any).hotelId && (
+                  <>
+                    <span className="text-zinc-600">•</span>
+                    <span className="flex items-center gap-1 text-blue-400">
+                      <Building2 size={10} />
+                      {(log as any).hotelId}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           ))

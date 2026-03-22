@@ -176,6 +176,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     }
   };
 
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredStaff = staff.filter(member => {
+    const search = searchTerm.toLowerCase();
+    return (member.displayName?.toLowerCase() || '').includes(search) || 
+           (member.email?.toLowerCase() || '').includes(search);
+  });
+
   return (
     <div className="p-8 space-y-8 relative">
       {/* Notification Toast */}
@@ -305,6 +313,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
             <input 
               type="text" 
               placeholder="Search staff..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -321,7 +331,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {staff.map(member => (
+              {filteredStaff.map(member => (
                 <tr key={member.uid} className="hover:bg-zinc-800/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">

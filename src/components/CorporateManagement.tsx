@@ -26,7 +26,7 @@ import { Room, CorporateRate } from '../types';
 import { format } from 'date-fns';
 
 export function CorporateManagement() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -200,8 +200,8 @@ export function CorporateManagement() {
   };
 
   const filteredAccounts = accounts.filter(a => 
-    a.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    a.contactPerson.toLowerCase().includes(searchQuery.toLowerCase())
+    (a.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) || 
+    (a.contactPerson?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -236,11 +236,11 @@ export function CorporateManagement() {
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Credit Limit</div>
-          <div className="text-2xl font-bold text-blue-500">{formatCurrency(accounts.reduce((acc, a) => acc + a.creditLimit, 0))}</div>
+          <div className="text-2xl font-bold text-blue-500">{formatCurrency(accounts.reduce((acc, a) => acc + a.creditLimit, 0), currency, exchangeRate)}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Outstanding Balance</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0))}</div>
+          <div className="text-2xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0), currency, exchangeRate)}</div>
         </div>
       </div>
 
@@ -287,12 +287,12 @@ export function CorporateManagement() {
                     <div className="text-xs text-zinc-500">{account.email}</div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm text-white">Limit: {formatCurrency(account.creditLimit)}</div>
+                    <div className="text-sm text-white">Limit: {formatCurrency(account.creditLimit, currency, exchangeRate)}</div>
                     <div className={cn(
                       "text-xs font-bold",
                       (account.currentBalance || 0) > account.creditLimit * 0.8 ? "text-red-500" : "text-emerald-500"
                     )}>
-                      Balance: {formatCurrency(account.currentBalance || 0)}
+                      Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -406,7 +406,7 @@ export function CorporateManagement() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Credit Limit</label>
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Credit Limit ({currency})</label>
                   <input
                     type="number"
                     value={newAccount.creditLimit}
@@ -595,6 +595,11 @@ export function CorporateManagement() {
                               </div>
                               <div className="text-lg font-bold text-white">
                                 {rate.currency === 'NGN' ? '₦' : '$'}{rate.rate.toLocaleString()}
+                                {rate.currency !== currency && (
+                                  <span className="text-[10px] text-zinc-500 ml-2">
+                                    ≈ {formatCurrency(rate.currency === 'NGN' ? rate.rate / exchangeRate : rate.rate * exchangeRate, currency, exchangeRate)}
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-zinc-500 flex items-center gap-1">
                                 <Calendar size={10} />

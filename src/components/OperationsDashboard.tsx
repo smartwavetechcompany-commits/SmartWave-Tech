@@ -58,8 +58,8 @@ export function OperationsDashboard() {
       case 'inhouse': data = inhouse; break;
     }
     return data.filter(r => 
-      r.guestName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.roomNumber.toLowerCase().includes(searchTerm.toLowerCase())
+      (r.guestName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (r.roomNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase())
     );
   };
 

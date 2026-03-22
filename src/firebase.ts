@@ -18,7 +18,6 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 // Use initializeFirestore to enable experimentalForceLongPolling
 // This helps prevent "INTERNAL ASSERTION FAILED" errors in certain environments
-// Note: experimentalForceLongPolling and experimentalAutoDetectLongPolling are mutually exclusive.
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   experimentalAutoDetectLongPolling: false,

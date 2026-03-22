@@ -31,7 +31,7 @@ import {
 } from 'recharts';
 
 export function Reports() {
-  const { hotel } = useAuth();
+  const { hotel, currency, exchangeRate } = useAuth();
   const [stats, setStats] = useState({
     occupancy: 0,
     revPar: 0,
@@ -151,7 +151,7 @@ export function Reports() {
               <TrendingUp size={20} />
             </div>
           </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.revPar)}</div>
+          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
           <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
@@ -160,7 +160,7 @@ export function Reports() {
               <TrendingUp size={20} />
             </div>
           </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.adr)}</div>
+          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
           <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
@@ -188,10 +188,11 @@ export function Reports() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                 <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
                   itemStyle={{ color: '#10b981' }}
+                  formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
                 />
                 <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
               </AreaChart>
@@ -219,7 +220,7 @@ export function Reports() {
                 </Pie>
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                  formatter={(value: number) => formatCurrency(value)}
+                  formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
                 />
               </PieChart>
             </ResponsiveContainer>

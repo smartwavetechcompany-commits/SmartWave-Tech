@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Guest, OperationType } from '../types';
+import { Guest, OperationType, Reservation } from '../types';
 import { 
   Users, 
   Plus, 
@@ -19,17 +19,26 @@ import {
   Trash2,
   ChevronRight,
   UserCheck,
-  Calendar
+  Calendar,
+  Download,
+  Clock,
+  DollarSign,
+  XCircle,
+  Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
+import { ReceiptGenerator } from './ReceiptGenerator';
 
 export function GuestManagement() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [guests, setGuests] = useState<Guest[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
+  const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);
+  const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
+  const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [newGuest, setNewGuest] = useState({
     name: '',
@@ -60,6 +69,21 @@ export function GuestManagement() {
     );
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!viewingHistory || !hotel?.id) return;
+    
+    const fetchHistory = async () => {
+      const q = query(
+        collection(db, 'hotels', hotel.id, 'reservations'),
+        where('guestEmail', '==', viewingHistory.email)
+      );
+      const snap = await getDocs(q);
+      setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    };
+    
+    fetchHistory();
+  }, [viewingHistory, hotel?.id]);
 
   const handleSaveGuest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,11 +144,39 @@ export function GuestManagement() {
     }
   };
 
+  const exportGuests = () => {
+    const headers = ['Name', 'Email', 'Phone', 'ID Type', 'ID Number', 'Address', 'Total Stays', 'Total Spent', 'Balance'];
+    const csvContent = [
+      headers.join(','),
+      ...guests.map(g => [
+        `"${g.name}"`,
+        `"${g.email}"`,
+        `"${g.phone}"`,
+        `"${g.idType}"`,
+        `"${g.idNumber}"`,
+        `"${g.address}"`,
+        g.totalStays || 0,
+        g.totalSpent || 0,
+        g.ledgerBalance || 0
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `guests_export_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const filteredGuests = guests.filter(guest => {
     const query = searchQuery.toLowerCase();
-    return guest.name.toLowerCase().includes(query) || 
-           guest.email.toLowerCase().includes(query) || 
-           guest.phone.includes(query);
+    return (guest.name?.toLowerCase() || '').includes(query) || 
+           (guest.email?.toLowerCase() || '').includes(query) || 
+           (guest.phone || '').includes(query);
   });
 
   return (
@@ -134,9 +186,17 @@ export function GuestManagement() {
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Guest Management</h1>
           <p className="text-zinc-400">Manage guest profiles, history, and loyalty</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingGuest(null);
+        <div className="flex gap-3">
+          <button
+            onClick={exportGuests}
+            className="flex items-center gap-2 bg-zinc-800 text-white px-4 py-2 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+          <button
+            onClick={() => {
+              setEditingGuest(null);
             setNewGuest({ 
               name: '', 
               email: '', 
@@ -157,8 +217,9 @@ export function GuestManagement() {
           Add Guest
         </button>
       </div>
+    </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Guests</div>
           <div className="text-2xl font-bold text-white">{guests.length}</div>
@@ -169,11 +230,11 @@ export function GuestManagement() {
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Revenue</div>
-          <div className="text-2xl font-bold text-blue-500">{formatCurrency(guests.reduce((acc, g) => acc + g.totalSpent, 0))}</div>
+          <div className="text-2xl font-bold text-blue-500">{formatCurrency(guests.reduce((acc, g) => acc + g.totalSpent, 0), currency, exchangeRate)}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Balance</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0))}</div>
+          <div className="text-2xl font-bold text-red-500">{formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}</div>
         </div>
       </div>
 
@@ -230,6 +291,13 @@ export function GuestManagement() {
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
+                        onClick={() => setViewingHistory(guest)}
+                        className="p-2 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
+                        title="View History"
+                      >
+                        <History size={16} />
+                      </button>
+                      <button 
                         onClick={() => {
                           setEditingGuest(guest);
                           setNewGuest({
@@ -279,7 +347,7 @@ export function GuestManagement() {
                           "text-lg font-bold",
                           (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                         )}>
-                          {formatCurrency(guest.ledgerBalance || 0)}
+                          {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
                         </div>
                       </div>
                     </div>
@@ -296,6 +364,121 @@ export function GuestManagement() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* History Modal */}
+      {viewingHistory && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]"
+          >
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Stay History</h2>
+                <p className="text-sm text-zinc-500">{viewingHistory.name}</p>
+              </div>
+              <button 
+                onClick={() => setViewingHistory(null)}
+                className="p-2 text-zinc-500 hover:text-white transition-colors"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Stays</div>
+                  <div className="text-2xl font-bold text-white">{viewingHistory.totalStays || 0}</div>
+                </div>
+                <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Spent</div>
+                  <div className="text-2xl font-bold text-emerald-500">{formatCurrency(viewingHistory.totalSpent || 0, currency, exchangeRate)}</div>
+                </div>
+                <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Ledger Balance</div>
+                  <div className="text-2xl font-bold text-blue-500">{formatCurrency(viewingHistory.ledgerBalance || 0, currency, exchangeRate)}</div>
+                </div>
+              </div>
+
+              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Recent Reservations</h3>
+              {guestHistory.length === 0 ? (
+                <div className="text-center py-12 text-zinc-500 bg-zinc-950 rounded-2xl border border-dashed border-zinc-800">
+                  <Clock size={32} className="mx-auto mb-2 opacity-20" />
+                  <p>No reservation history found</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
+                    <div key={res.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-emerald-500">
+                          <Calendar size={20} />
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-white">Room {res.roomNumber}</div>
+                          <div className="text-xs text-zinc-500">
+                            {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                          </div>
+                          <button 
+                            onClick={() => setShowReceipt({ res, type: 'comprehensive' })}
+                            className="mt-2 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
+                          >
+                            <Receipt size={10} />
+                            Print Receipt
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-bold text-white">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
+                        <div className={cn(
+                          "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block",
+                          res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
+                        )}>
+                          {res.status.replace('_', ' ')}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div className="p-6 bg-zinc-950 border-t border-zinc-800">
+              <button
+                onClick={() => setViewingHistory(null)}
+                className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all"
+              >
+                Close History
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Receipt Modal */}
+      {showReceipt && hotel && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="relative w-full max-w-lg">
+            <button 
+              onClick={() => setShowReceipt(null)}
+              className="absolute -top-12 right-0 text-white hover:text-emerald-500 transition-colors flex items-center gap-2 font-bold uppercase text-xs print:hidden"
+            >
+              <XCircle size={20} />
+              Close
+            </button>
+            <div className="bg-white rounded-2xl overflow-hidden">
+              <ReceiptGenerator 
+                hotel={hotel} 
+                reservation={showReceipt.res} 
+                type={showReceipt.type}
+                ledgerEntries={showReceipt.res.ledgerEntries || []}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {showAddModal && (

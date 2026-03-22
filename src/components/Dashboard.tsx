@@ -33,7 +33,7 @@ import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
 
 export function Dashboard() {
-  const { hotel, profile, isSubscriptionActive } = useAuth();
+  const { hotel, profile, isSubscriptionActive, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
@@ -56,7 +56,7 @@ export function Dashboard() {
     const unsubs: (() => void)[] = [];
 
     if (profile.role === 'superAdmin') {
-      const unsub = onSnapshot(collection(db, 'hotels'), 
+      getDocs(collection(db, 'hotels')).then(
         (snap) => {
           setAllHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
         },
@@ -65,7 +65,6 @@ export function Dashboard() {
           else console.error("SuperAdmin hotels listener error:", err);
         }
       );
-      unsubs.push(unsub);
     } else if (hotel?.id) {
       const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
@@ -115,7 +114,7 @@ export function Dashboard() {
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
-        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0)), icon: TrendingUp, color: 'text-amber-500' },
+        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
         { label: 'Dirty Rooms', value: rooms.filter(r => r.status === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
       ];
 
@@ -205,7 +204,7 @@ export function Dashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                     <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
                       itemStyle={{ color: '#10b981' }}

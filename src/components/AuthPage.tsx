@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
@@ -131,32 +131,50 @@ export function AuthPage() {
         if (!user && formData.password !== formData.confirmPassword) {
           throw new Error('Passwords do not match');
         }
-        // 1. Verify Tracking Code (Direct Fetch by ID)
-        let tcDoc;
-        try {
-          // We use the code itself as the document ID for direct 'get' access
-          const tcRef = doc(db, 'trackingCodes', formData.trackingCode.toUpperCase());
-          tcDoc = await getDoc(tcRef);
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `trackingCodes/${formData.trackingCode}`);
-          throw err;
+        // 1. Check for existing staff profile by email
+        const staffQuery = query(collection(db, 'users'), where('email', '==', formData.email.toLowerCase()), where('role', '==', 'staff'));
+        const staffSnap = await getDocs(staffQuery);
+        let existingStaffProfile: UserProfile | null = null;
+        let staffDocId: string | null = null;
+
+        if (!staffSnap.empty) {
+          // Found a pre-created staff profile
+          const doc = staffSnap.docs[0];
+          existingStaffProfile = doc.data() as UserProfile;
+          staffDocId = doc.id;
         }
 
-        if (!tcDoc.exists()) {
-          throw new Error('Invalid tracking code');
+        // 2. Verify Tracking Code (Only if not already a staff member)
+        let tcData: TrackingCode | null = null;
+        if (!existingStaffProfile) {
+          if (!formData.trackingCode) {
+            throw new Error('Tracking code is required for new hotel registration');
+          }
+          try {
+            const tcRef = doc(db, 'trackingCodes', formData.trackingCode.toUpperCase());
+            const tcDoc = await getDoc(tcRef);
+            
+            if (!tcDoc.exists()) {
+              throw new Error('Invalid tracking code');
+            }
+            tcData = tcDoc.data() as TrackingCode;
+            
+            if (tcData.status !== 'active' || new Date(tcData.expiryDate) < new Date()) {
+              throw new Error('Tracking code expired or inactive');
+            }
+            if (tcData.hotelId) {
+              throw new Error('Tracking code already used');
+            }
+          } catch (err: any) {
+            if (err.message.includes('Invalid tracking code') || err.message.includes('expired') || err.message.includes('used')) {
+              throw err;
+            }
+            handleFirestoreError(err, OperationType.GET, `trackingCodes/${formData.trackingCode}`);
+            throw err;
+          }
         }
 
-        const tcData = tcDoc.data() as TrackingCode;
-
-        if (tcData.status !== 'active' || new Date(tcData.expiryDate) < new Date()) {
-          throw new Error('Tracking code expired or inactive');
-        }
-
-        if (tcData.hotelId) {
-          throw new Error('Tracking code already used');
-        }
-
-        // 2. Create User if not already logged in
+        // 3. Create User if not already logged in
         let currentUser = user;
         if (!currentUser) {
           const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
@@ -168,19 +186,19 @@ export function AuthPage() {
           await addDoc(collection(db, 'registration'), {
             uid: currentUser.uid,
             email: formData.email,
-            hotelName: formData.hotelName,
+            hotelName: formData.hotelName || (existingStaffProfile ? 'Staff Registration' : ''),
             trackingCode: formData.trackingCode,
             timestamp: new Date().toISOString(),
             status: 'pending'
           });
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, 'registration');
-          // Don't throw here, we can still proceed with registration
         }
 
         // 3. Generate IDs and Prepare Data
-        const hotelId = `hotel_${Math.random().toString(36).substr(2, 9)}`;
-        const selectedPlan = (tcData.plan.toLowerCase() as PlanType) || 'standard';
+        // If it's a staff member, they already have a hotelId from the existing profile
+        const hotelId = existingStaffProfile ? existingStaffProfile.hotelId : `hotel_${Math.random().toString(36).substr(2, 9)}`;
+        const selectedPlan = (tcData.plan?.toLowerCase() as PlanType) || 'standard';
         
         // Define plan features
         const planFeatures = {
@@ -200,8 +218,13 @@ export function AuthPage() {
 
         const features = planFeatures[selectedPlan === 'standard' ? 'Standard' : selectedPlan === 'premium' ? 'Premium' : 'Enterprise'];
 
-        // 4. Create User Profile (FIRST - so userExists() is true for subsequent steps)
-        const profileData: UserProfile = {
+        // 4. Create User Profile
+        const profileData: UserProfile = existingStaffProfile ? {
+          ...existingStaffProfile,
+          uid: currentUser.uid, // Update with real UID
+          status: 'active',
+          displayName: formData.hotelName || existingStaffProfile.displayName || currentUser.displayName || formData.email.split('@')[0]
+        } : {
           uid: currentUser.uid,
           email: formData.email,
           hotelId: hotelId,
@@ -214,46 +237,51 @@ export function AuthPage() {
         };
 
         try {
+          // If we found an existing staff doc with a different ID (like tempUid), delete it first
+          if (staffDocId && staffDocId !== currentUser.uid) {
+            await deleteDoc(doc(db, 'users', staffDocId));
+          }
           await setDoc(doc(db, 'users', currentUser.uid), profileData);
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
           throw err;
         }
 
-        // 5. Create Hotel
+        // 5. Create Hotel (Only if not staff)
+        if (!existingStaffProfile) {
+          const hotelData: Hotel = {
+            id: hotelId,
+            name: formData.hotelName,
+            trackingCode: formData.trackingCode,
+            subscriptionStatus: 'active',
+            subscriptionExpiry: tcData.expiryDate,
+            plan: selectedPlan,
+            modulesEnabled: features.modules,
+            limits: features.limits,
+            roomLimit: features.limits.rooms,
+            staffLimit: features.limits.staff,
+            createdAt: new Date().toISOString(),
+            adminUIDs: [currentUser.uid],
+          };
 
-        const hotelData: Hotel = {
-          id: hotelId,
-          name: formData.hotelName,
-          trackingCode: formData.trackingCode,
-          subscriptionStatus: 'active',
-          subscriptionExpiry: tcData.expiryDate,
-          plan: selectedPlan,
-          modulesEnabled: features.modules,
-          limits: features.limits,
-          roomLimit: features.limits.rooms,
-          staffLimit: features.limits.staff,
-          createdAt: new Date().toISOString(),
-          adminUIDs: [currentUser.uid],
-        };
+          try {
+            await setDoc(doc(db, 'hotels', hotelId), hotelData);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, `hotels/${hotelId}`);
+            throw err;
+          }
 
-        try {
-          await setDoc(doc(db, 'hotels', hotelId), hotelData);
-        } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `hotels/${hotelId}`);
-          throw err;
-        }
-
-        // 6. Update Tracking Code
-        try {
-          await updateDoc(doc(db, 'trackingCodes', tcDoc.id), { 
-            status: 'used',
-            usedAt: new Date().toISOString(),
-            usedByHotel: hotelId
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${tcDoc.id}`);
-          throw err;
+          // 6. Update Tracking Code
+          try {
+            await updateDoc(doc(db, 'trackingCodes', formData.trackingCode.toUpperCase()), { 
+              status: 'used',
+              usedAt: new Date().toISOString(),
+              usedByHotel: hotelId
+            });
+          } catch (err) {
+            handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${formData.trackingCode}`);
+            throw err;
+          }
         }
 
         // 7. Record Registration Attempt

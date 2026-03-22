@@ -39,6 +39,7 @@ export function SuperAdmin() {
     accountName: '',
     paymentInstructions: '',
     supportEmail: '',
+    exchangeRate: 1500,
   });
   const [isAddingCode, setIsAddingCode] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
@@ -419,8 +420,8 @@ export function SuperAdmin() {
   };
 
   const filteredHotels = hotels.filter(hotel => {
-    const matchesSearch = hotel.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         hotel.trackingCode?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (hotel.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
+                         (hotel.trackingCode?.toLowerCase() || '').includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || hotel.subscriptionStatus === statusFilter;
     
     // Check for expired status if needed
@@ -432,7 +433,7 @@ export function SuperAdmin() {
   });
 
   const filteredCodes = trackingCodes.filter(code => {
-    const matchesSearch = code.code.toLowerCase().includes(codeSearchTerm.toLowerCase());
+    const matchesSearch = (code.code?.toLowerCase() || '').includes(codeSearchTerm.toLowerCase());
     return matchesSearch;
   });
 
@@ -951,6 +952,18 @@ export function SuperAdmin() {
               </h3>
             </div>
             <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                  <Settings size={12} />
+                  Exchange Rate (1 USD = ? NGN)
+                </label>
+                <input 
+                  type="number" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  value={settings.exchangeRate}
+                  onChange={(e) => setSettings({ ...settings, exchangeRate: Number(e.target.value) })}
+                />
+              </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
                   <LinkIcon size={12} />

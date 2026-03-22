@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, where, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, 
   Search, 
@@ -18,19 +19,22 @@ import {
   RefreshCw,
   Receipt,
   Building2,
-  Tag
+  Tag,
+  AlertCircle
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
 
 export function FrontDesk() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
   const [isBooking, setIsBooking] = useState(false);
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [showNightAuditModal, setShowNightAuditModal] = useState(false);
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [newBooking, setNewBooking] = useState({
     guestId: '',
@@ -52,8 +56,8 @@ export function FrontDesk() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredReservations = reservations.filter(res => 
-    res.guestName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    res.roomNumber.toLowerCase().includes(searchTerm.toLowerCase())
+    (res.guestName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+    (res.roomNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase())
   );
 
   const roomStats = {
@@ -165,6 +169,72 @@ export function FrontDesk() {
   useEffect(() => {
     setHasPermissionError(false);
   }, [profile?.uid, hotel?.id]);
+
+  const runNightlyAudit = async () => {
+    if (!hotel?.id || !profile) return;
+    if (!window.confirm('Run nightly audit? This will post room charges for all checked-in guests for the current date.')) return;
+
+    setIsAuditing(true);
+    try {
+      const checkedInReservations = reservations.filter(res => res.status === 'checked_in');
+      const today = format(new Date(), 'yyyy-MM-dd');
+
+      for (const res of checkedInReservations) {
+        const room = rooms.find(r => r.id === res.roomId);
+        if (!room) continue;
+
+        // Calculate nightly rate (could be corporate rate)
+        let nightlyRate = room.price;
+        if (res.corporateId) {
+          const ratesRef = collection(db, 'hotels', hotel.id, 'corporate_accounts', res.corporateId, 'rates');
+          const q = query(ratesRef, where('status', '==', 'active'), where('roomType', '==', room.type));
+          const snap = await getDocs(q);
+          const activeRate = snap.docs.find(doc => {
+            const data = doc.data();
+            return new Date(today) >= new Date(data.startDate) && new Date(today) <= new Date(data.endDate);
+          });
+          if (activeRate) nightlyRate = activeRate.data().rate;
+        }
+
+        // Post to ledger
+        await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
+          amount: nightlyRate,
+          type: 'debit',
+          category: 'room',
+          description: `Nightly room charge - Room ${res.roomNumber} (${res.guestName})`,
+          referenceId: res.id,
+          postedBy: profile.uid
+        }, profile.uid, res.corporateId);
+
+        // Update guest ledger balance
+        const guest = guests.find(g => g.email === res.guestEmail);
+        if (guest) {
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', guest.id);
+          await setDoc(guestRef, {
+            ...guest,
+            ledgerBalance: (guest.ledgerBalance || 0) + nightlyRate
+          });
+        }
+      }
+
+      // Log audit
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        action: 'NIGHTLY_AUDIT_RUN',
+        resource: `Audit for ${today}`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
+
+      alert(`Nightly audit completed for ${checkedInReservations.length} guests.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/audit`);
+    } finally {
+      setIsAuditing(false);
+    }
+  };
 
   const handleBooking = async () => {
     if (!hotel?.id) return;
@@ -290,13 +360,24 @@ export function FrontDesk() {
         paymentMethod: 'cash' // Default to cash for now
       });
 
+      // Update guest ledger balance if linked
+      if (res.guestId) {
+        const guest = guests.find(g => g.id === res.guestId);
+        if (guest) {
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', guest.id);
+          await updateDoc(guestRef, {
+            ledgerBalance: (guest.ledgerBalance || 0) - amount
+          });
+        }
+      }
+
       // Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
         action: 'UPDATE_PAYMENT',
-        resource: `Payment for ${res.guestName}: ${formatCurrency(amount)}`,
+        resource: `Payment for ${res.guestName}: ${formatCurrency(amount, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Finance'
       });
@@ -314,11 +395,12 @@ export function FrontDesk() {
         </div>
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => window.location.reload()}
-            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
-            title="Refresh Page"
+            onClick={() => setShowNightAuditModal(true)}
+            disabled={isAuditing}
+            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            title="Run Nightly Audit"
           >
-            <RefreshCw size={18} />
+            <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
           </button>
           <button 
             onClick={() => setIsBooking(true)}
@@ -353,6 +435,48 @@ export function FrontDesk() {
           <div className="text-xl font-bold text-white">{roomStats.maintenance}</div>
         </div>
       </div>
+
+      {/* Night Audit Modal */}
+      {showNightAuditModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md text-center"
+          >
+            <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <RefreshCw size={32} className={cn("text-emerald-500", isAuditing && "animate-spin")} />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Run Nightly Audit</h3>
+            <p className="text-zinc-400 text-sm mb-8">
+              This will post nightly room charges for all {reservations.filter(r => r.status === 'checked_in').length} checked-in guests for the current date.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowNightAuditModal(false)}
+                disabled={isAuditing}
+                className="flex-1 py-3 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={runNightlyAudit}
+                disabled={isAuditing}
+                className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isAuditing ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  'Run Audit'
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {isBooking && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -483,7 +607,7 @@ export function FrontDesk() {
 
                     return (
                       <option key={room.id} value={room.id}>
-                        Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice)}{isNegotiated ? ' [Negotiated]' : ''})
+                        Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
                       </option>
                     );
                   })}
@@ -524,7 +648,7 @@ export function FrontDesk() {
                 </div>
                 <div className="flex justify-between text-sm text-white">
                   <span>Total Amount</span>
-                  <span className="font-bold text-emerald-500">{formatCurrency(newBooking.totalAmount)}</span>
+                  <span className="font-bold text-emerald-500">{formatCurrency(newBooking.totalAmount, currency, exchangeRate)}</span>
                 </div>
               </div>
             </div>
@@ -597,17 +721,17 @@ export function FrontDesk() {
                     <div className="flex items-center gap-1 opacity-50"><Clock size={12} /> {res.checkOut}</div>
                   </td>
                   <td className="px-6 py-4 text-sm text-zinc-400">
-                    <div>{formatCurrency(res.totalAmount)}</div>
+                    <div>{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
                     <div className={cn(
                       "text-[10px] font-bold uppercase",
                       res.paymentStatus === 'paid' ? "text-emerald-500" :
                       res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
                     )}>
-                      {res.paymentStatus} ({formatCurrency(res.paidAmount || 0)})
+                      {res.paymentStatus} ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)})
                     </div>
                     {res.guestId && (
                       <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {formatCurrency((res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0))}
+                        Ledger: {formatCurrency((res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0), currency, exchangeRate)}
                       </div>
                     )}
                   </td>
@@ -626,7 +750,7 @@ export function FrontDesk() {
                       {res.paymentStatus !== 'paid' && (
                         <button 
                           onClick={() => {
-                            const amount = prompt(`Enter payment amount for ${res.guestName} (Total: ${formatCurrency(res.totalAmount)}):`, (res.totalAmount - (res.paidAmount || 0)).toString());
+                            const amount = prompt(`Enter payment amount for ${res.guestName} (Total: ${formatCurrency(res.totalAmount, currency, exchangeRate)}):`, (res.totalAmount - (res.paidAmount || 0)).toString());
                             if (amount && !isNaN(Number(amount))) {
                               updatePayment(res, Number(amount));
                             }
@@ -683,13 +807,22 @@ export function FrontDesk() {
       {showReceipt && hotel && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto">
           <div className="relative w-full max-w-lg my-8">
-            <button 
-              onClick={() => setShowReceipt(null)}
-              className="absolute -top-12 right-0 text-white hover:text-zinc-400 font-bold flex items-center gap-2 print:hidden"
-            >
-              <XCircle size={20} />
-              Close
-            </button>
+            <div className="absolute -top-12 right-0 flex gap-4 print:hidden">
+              <button 
+                onClick={() => window.print()}
+                className="text-white hover:text-emerald-400 font-bold flex items-center gap-2"
+              >
+                <Receipt size={20} />
+                Print
+              </button>
+              <button 
+                onClick={() => setShowReceipt(null)}
+                className="text-white hover:text-zinc-400 font-bold flex items-center gap-2"
+              >
+                <XCircle size={20} />
+                Close
+              </button>
+            </div>
             <div className="bg-white rounded-2xl overflow-hidden">
               <ReceiptGenerator 
                 hotel={hotel} 

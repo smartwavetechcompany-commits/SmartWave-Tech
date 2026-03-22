@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord, OperationType } from '../types';
+import { FinanceRecord, OperationType, Guest } from '../types';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -28,7 +28,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export function Finance() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [records, setRecords] = useState<FinanceRecord[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,6 +43,8 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [activeTab, setActiveTab] = useState<'transactions' | 'ledger'>('transactions');
+  const [guests, setGuests] = useState<Guest[]>([]);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -65,6 +67,20 @@ export function Finance() {
     return () => unsubscribe();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
+  useEffect(() => {
+    if (!hotel?.id || !profile || hasPermissionError) return;
+    const q = query(collection(db, 'hotels', hotel.id, 'guests'), where('ledgerBalance', '!=', 0));
+    const unsubscribe = onSnapshot(q, 
+      (snap) => {
+        setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
+      }
+    );
+    return () => unsubscribe();
+  }, [hotel?.id, profile?.uid, hasPermissionError]);
+
   const handleAddRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
@@ -81,7 +97,7 @@ export function Finance() {
         userId: profile?.uid,
         userEmail: profile?.email,
         action: 'FINANCE_RECORD_CREATED',
-        resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount)})`,
+        resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
       });
@@ -121,8 +137,8 @@ export function Finance() {
   };
 
   const filteredRecords = records.filter(r => {
-    const matchesSearch = r.description.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                         r.category.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (r.description?.toLowerCase() || '').includes(searchQuery.toLowerCase()) || 
+                         (r.category?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     const matchesType = filterType === 'all' || r.type === filterType;
     
     let matchesTime = true;
@@ -141,9 +157,9 @@ export function Finance() {
   const balance = totalIncome - totalExpense;
 
   const stats = [
-    { label: 'Net Balance', value: formatCurrency(balance), icon: Wallet, color: 'text-white', bg: 'bg-zinc-900' },
-    { label: 'Total Income', value: formatCurrency(totalIncome), icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
-    { label: 'Total Expenses', value: formatCurrency(totalExpense), icon: TrendingDown, color: 'text-red-500', bg: 'bg-red-500/5' },
+    { label: 'Net Balance', value: formatCurrency(balance, currency, exchangeRate), icon: Wallet, color: 'text-white', bg: 'bg-zinc-900' },
+    { label: 'Total Income', value: formatCurrency(totalIncome, currency, exchangeRate), icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
+    { label: 'Total Expenses', value: formatCurrency(totalExpense, currency, exchangeRate), icon: TrendingDown, color: 'text-red-500', bg: 'bg-red-500/5' },
     { label: "Transactions", value: filteredRecords.length, icon: BarChart3, color: 'text-amber-500', bg: 'bg-amber-500/5' },
   ];
 
@@ -194,8 +210,32 @@ export function Finance() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-        <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+      <div className="flex items-center gap-4 border-b border-zinc-800 mb-8">
+        <button
+          onClick={() => setActiveTab('transactions')}
+          className={cn(
+            "px-4 py-2 font-bold text-sm transition-all relative",
+            activeTab === 'transactions' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          Transactions
+          {activeTab === 'transactions' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+        </button>
+        <button
+          onClick={() => setActiveTab('ledger')}
+          className={cn(
+            "px-4 py-2 font-bold text-sm transition-all relative",
+            activeTab === 'ledger' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          City Ledger
+          {activeTab === 'ledger' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+        </button>
+      </div>
+
+      {activeTab === 'transactions' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+          <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <h3 className="font-bold text-white">Transaction History</h3>
@@ -279,7 +319,7 @@ export function Finance() {
                         "px-6 py-4 text-right font-bold text-sm",
                         record.type === 'income' ? "text-emerald-500" : "text-red-500"
                       )}>
-                        {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount)}
+                        {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
                       </td>
                     </tr>
                   ))
@@ -328,8 +368,69 @@ export function Finance() {
           </div>
         </div>
       </div>
+      ) : (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-white">City Ledger (Guest Balances)</h3>
+              <p className="text-xs text-zinc-500">Guests with outstanding balances or credits</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="px-3 py-1 bg-emerald-500/10 text-emerald-500 rounded-full text-[10px] font-bold uppercase">
+                Total Credit: {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + Math.abs(g.ledgerBalance || 0), 0), currency, exchangeRate)}
+              </div>
+              <div className="px-3 py-1 bg-red-500/10 text-red-500 rounded-full text-[10px] font-bold uppercase">
+                Total Debt: {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) > 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                  <th className="px-6 py-4">Guest Name</th>
+                  <th className="px-6 py-4">Contact</th>
+                  <th className="px-6 py-4">Last Stay</th>
+                  <th className="px-6 py-4 text-right">Balance</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {guests.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-12 text-center text-zinc-500">
+                      No outstanding balances found
+                    </td>
+                  </tr>
+                ) : (
+                  guests.map((guest) => (
+                    <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-white font-medium">{guest.name}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-xs text-zinc-400">{guest.email}</div>
+                        <div className="text-[10px] text-zinc-500">{guest.phone}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-xs text-zinc-400">
+                          {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yyyy') : 'N/A'}
+                        </div>
+                      </td>
+                      <td className={cn(
+                        "px-6 py-4 text-right font-bold text-sm",
+                        (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                      )}>
+                        {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-      {/* Add Record Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <motion.div
@@ -367,9 +468,9 @@ export function Finance() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Amount</label>
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{currency === 'NGN' ? '₦' : '$'}</span>
                       <input
                         required
                         type="number"

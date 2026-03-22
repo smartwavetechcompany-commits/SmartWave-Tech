@@ -20,10 +20,10 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      let data = getUserData();
       return isAuthenticated() && (
-        (data != null && data.role == "superAdmin") ||
-        request.auth.token.email == "smartwavetechcompany@gmail.com"
+        request.auth.token.email == "smartwavetechcompany@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin")
       );
     }
 
@@ -100,17 +100,25 @@ service cloud.firestore {
     //////////////////////////////
 
     match /users/{userId} {
-      // Allow self-creation during signup
-      allow create: if isAuthenticated() && request.auth.uid == userId;
+      // Allow self-creation during signup, or creation by Hotel Admin/Manager
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isSuperAdmin() || 
+        (isAdmin() && request.resource.data.hotelId == getHotelId())
+      );
       
       // Read/Update for self, SuperAdmin, or HotelAdmin of the same hotel
       allow read, update: if isAuthenticated() && (
         request.auth.uid == userId || 
         isSuperAdmin() || 
-        (isHotelAdmin() && resource.data.hotelId == getHotelId())
+        (isAdmin() && resource.data.hotelId == getHotelId())
       );
 
-      allow delete: if isSuperAdmin();
+      // Allow deletion by SuperAdmin or Hotel Admin of the same hotel
+      allow delete: if isAuthenticated() && (
+        isSuperAdmin() || 
+        (isAdmin() && resource.data.hotelId == getHotelId())
+      );
     }
 
     //////////////////////////////
@@ -158,9 +166,14 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
-    match /auditLogs/{logId} {
+    match /activityLogs/{logId} {
       allow read: if isSuperAdmin();
       allow create: if isAuthenticated();
+    }
+
+    // Support for collection group queries on activityLogs
+    match /{path=**}/activityLogs/{logId} {
+      allow read: if isSuperAdmin();
     }
 
     match /registration/{docId} {

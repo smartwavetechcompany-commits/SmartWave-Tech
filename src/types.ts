@@ -73,6 +73,7 @@ export interface SystemSettings {
   accountName: string;
   paymentInstructions: string;
   supportEmail: string;
+  exchangeRate: number;
 }
 
 export interface TrackingCodeRequest {

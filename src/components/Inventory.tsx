@@ -28,10 +28,12 @@ export function Inventory() {
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
-    const q = query(collection(db, 'hotels', hotel.id, 'inventory'), orderBy('name', 'asc'));
+    const q = collection(db, 'hotels', hotel.id, 'inventory');
     const unsubscribe = onSnapshot(q, 
       (snap) => {
-        const newItems = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem));
+        const newItems = snap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         setItems(newItems);
 
         // Check for low stock and notify
@@ -114,7 +116,7 @@ export function Inventory() {
 
   const filteredItems = items.filter(item => {
     const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (item.name?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
