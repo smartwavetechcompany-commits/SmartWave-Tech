@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest } from '../types';
@@ -52,33 +52,31 @@ export function Finance() {
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
+    
     const q = query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setRecords(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/finance`);
-        if (error.code === 'permission-denied') {
-          setHasPermissionError(true);
-        }
+    const unsub = onSnapshot(q, (snap) => {
+      setRecords(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/finance`);
+      if (error.code === 'permission-denied') {
+        setHasPermissionError(true);
       }
-    );
-    return () => unsubscribe();
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
+    
     const q = query(collection(db, 'hotels', hotel.id, 'guests'), where('ledgerBalance', '!=', 0));
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
-      }
-    );
-    return () => unsubscribe();
+    const unsub = onSnapshot(q, (snap) => {
+      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   const handleAddRecord = async (e: React.FormEvent) => {

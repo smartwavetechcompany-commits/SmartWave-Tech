@@ -10,6 +10,7 @@ import {
   Trash2, 
   RefreshCw, 
   ShieldAlert,
+  History,
   Calendar,
   Key,
   Mail,
@@ -27,6 +28,8 @@ import { cn } from '../utils';
 import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { StaffManagement } from './StaffManagement';
+
+import { toast } from 'sonner';
 
 export function SuperAdmin() {
   const { profile } = useAuth();
@@ -47,9 +50,13 @@ export function SuperAdmin() {
   const [extendingCode, setExtendingCode] = useState<TrackingCode | null>(null);
   const [changingPlanHotel, setChangingPlanHotel] = useState<Hotel | null>(null);
   const [managingStaffHotel, setManagingStaffHotel] = useState<Hotel | null>(null);
+  const [showHistoryHotel, setShowHistoryHotel] = useState<Hotel | null>(null);
+  const [planChangeAmount, setPlanChangeAmount] = useState<number>(0);
+  const [planChangeReason, setPlanChangeReason] = useState<string>('');
   const [newCode, setNewCode] = useState({
     duration: '1 month',
     type: 'Standard',
+    price: 0,
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -59,13 +66,7 @@ export function SuperAdmin() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
-
-  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
-  };
 
   // Real-time listeners
   useEffect(() => {
@@ -75,71 +76,56 @@ export function SuperAdmin() {
     }
 
     setLoading(true);
-    setHasPermissionError(false);
     
-    // 1. Tracking Codes Listener
-    const unsubscribeCodes = onSnapshot(collection(db, 'trackingCodes'), 
-      (snap) => {
-        setTrackingCodes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCode)));
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Tracking codes listener error:", err);
-        if (err.code === 'permission-denied') {
-          setHasPermissionError(true);
-        } else {
-          handleFirestoreError(err, OperationType.LIST, 'trackingCodes');
-        }
-        setLoading(false);
+    const unsubCodes = onSnapshot(collection(db, 'trackingCodes'), (snap) => {
+      setTrackingCodes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCode)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, 'trackingCodes');
+    });
+
+    const unsubHotels = onSnapshot(collection(db, 'hotels'), (snap) => {
+      setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, 'hotels');
+    });
+
+    const unsubRequests = onSnapshot(collection(db, 'trackingCodeRequests'), (snap) => {
+      setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCodeRequest)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, 'trackingCodeRequests');
+    });
+
+    const unsubSettings = onSnapshot(doc(db, 'system', 'settings'), (snap) => {
+      if (snap.exists()) {
+        setSettings(snap.data() as any);
       }
-    );
-
-    // 2. Hotels Listener
-    const unsubscribeHotels = onSnapshot(collection(db, 'hotels'), 
-      (snap) => {
-        setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'hotels')
-    );
-
-    // 3. Requests Listener
-    const unsubscribeRequests = onSnapshot(collection(db, 'trackingCodeRequests'), 
-      (snap) => {
-        setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCodeRequest)));
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'trackingCodeRequests')
-    );
-
-    // 4. Settings Listener
-    const unsubscribeSettings = onSnapshot(doc(db, 'system', 'settings'), 
-      (snap) => {
-        if (snap.exists()) {
-          setSettings(snap.data() as any);
-        }
-      },
-      (err) => handleFirestoreError(err, OperationType.GET, 'system/settings')
-    );
+      setLoading(false);
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.GET, 'system/settings');
+      setLoading(false);
+    });
 
     return () => {
-      unsubscribeCodes();
-      unsubscribeHotels();
-      unsubscribeRequests();
-      unsubscribeSettings();
+      unsubCodes();
+      unsubHotels();
+      unsubRequests();
+      unsubSettings();
     };
   }, [profile?.role]);
 
   const updateSettings = async () => {
     try {
       await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
-      showNotification('System settings updated successfully');
+      toast.success('System settings updated successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'system/settings');
+      toast.error('Failed to update settings');
     }
   };
 
   const generateCodeForRequest = async (request: TrackingCodeRequest) => {
     if (!auth.currentUser || profile?.role !== 'superAdmin') {
-      showNotification('Unauthorized', 'error');
+      toast.error('Unauthorized');
       return;
     }
 
@@ -181,11 +167,12 @@ export function SuperAdmin() {
         action: 'APPROVE_CODE_REQUEST',
         target: `Hotel: ${request.hotelName}, Code: ${code}`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
+      await addDoc(collection(db, 'activityLogs'), log);
 
-      showNotification(`Code ${code} approved for ${request.hotelName}`);
+      toast.success(`Code ${code} approved for ${request.hotelName}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
+      toast.error('Failed to approve request');
     } finally {
       setLoading(false);
     }
@@ -194,15 +181,16 @@ export function SuperAdmin() {
   const rejectRequest = async (requestId: string) => {
     try {
       await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
-      showNotification('Request rejected');
+      toast.success('Request rejected');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `trackingCodeRequests/${requestId}`);
+      toast.error('Failed to reject request');
     }
   };
 
   const generateCode = async () => {
     if (!auth.currentUser || profile?.role !== 'superAdmin') {
-      showNotification('Unauthorized: Please wait for authentication to complete', 'error');
+      toast.error('Unauthorized: Please wait for authentication to complete');
       return;
     }
 
@@ -220,7 +208,8 @@ export function SuperAdmin() {
         plan: newCode.type.toLowerCase() as PlanType,
         maxHotels: 1,
         issuedBy: auth.currentUser.uid,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        price: newCode.price
       };
 
       await setDoc(doc(db, 'trackingCodes', code), tc);
@@ -231,12 +220,13 @@ export function SuperAdmin() {
         action: 'GENERATE_TRACKING_CODE',
         target: `Code: ${code} (${newCode.duration})`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
+      await addDoc(collection(db, 'activityLogs'), log);
 
       setGeneratedCode(code);
-      showNotification('Tracking code generated successfully');
+      toast.success('Tracking code generated successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
+      toast.error('Failed to generate code');
     } finally {
       setLoading(false);
     }
@@ -260,12 +250,13 @@ export function SuperAdmin() {
         action: 'EXTEND_TRACKING_CODE',
         target: `Code ${code.code}: +${months} months`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
+      await addDoc(collection(db, 'activityLogs'), log);
       
       setExtendingCode(null);
-      showNotification(`Code ${code.code} extended by ${months} months`);
+      toast.success(`Code ${code.code} extended by ${months} months`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${code.code}`);
+      toast.error('Failed to extend code');
     } finally {
       setLoading(false);
     }
@@ -288,11 +279,12 @@ export function SuperAdmin() {
         action: 'GIVE_LIVE_ACCESS',
         target: `Hotel: ${hotel.name}`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
+      await addDoc(collection(db, 'activityLogs'), log);
       
-      showNotification(`Live access granted to ${hotel.name}`);
+      toast.success(`Live access granted to ${hotel.name}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
+      toast.error('Failed to grant live access');
     }
   };
 
@@ -309,11 +301,12 @@ export function SuperAdmin() {
             action: 'DELETE_HOTEL',
             target: `Hotel: ${hotel.name}`
           };
-          await addDoc(collection(db, 'auditLogs'), log);
-          showNotification(`Hotel ${hotel.name} deleted`);
+          await addDoc(collection(db, 'activityLogs'), log);
+          toast.success(`Hotel ${hotel.name} deleted`);
           setConfirmAction(null);
         } catch (err) {
           handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}`);
+          toast.error('Failed to delete hotel');
         }
       }
     });
@@ -330,10 +323,11 @@ export function SuperAdmin() {
         action: 'TOGGLE_HOTEL_STATUS',
         target: `Hotel ${hotel.name}: ${newStatus}`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
-      showNotification(`Hotel ${hotel.name} ${newStatus}`);
+      await addDoc(collection(db, 'activityLogs'), log);
+      toast.success(`Hotel ${hotel.name} ${newStatus}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
+      toast.error('Failed to update hotel status');
     }
   };
 
@@ -353,12 +347,13 @@ export function SuperAdmin() {
         action: 'EXTEND_SUBSCRIPTION',
         target: `Hotel ${hotel.name}: +${months} months`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
+      await addDoc(collection(db, 'activityLogs'), log);
       
       setExtendingHotel(null);
-      showNotification(`Subscription for ${hotel.name} extended by ${months} months`);
+      toast.success(`Subscription for ${hotel.name} extended by ${months} months`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
+      toast.error('Failed to extend subscription');
     }
   };
 
@@ -384,26 +379,55 @@ export function SuperAdmin() {
 
       const features = planFeatures[newPlan];
       
+      const planHistoryItem = {
+        plan: newPlan,
+        previousPlan: hotel.plan,
+        changedAt: new Date().toISOString(),
+        amount: planChangeAmount,
+        reason: planChangeReason
+      };
+
       await updateDoc(doc(db, 'hotels', hotel.id), { 
         plan: newPlan,
         modulesEnabled: features.modules,
         roomLimit: features.limits.rooms,
         staffLimit: features.limits.staff,
-        limits: features.limits
+        limits: features.limits,
+        planHistory: [...(hotel.planHistory || []), planHistoryItem]
       });
+
+      // Update the tracking code associated with the hotel if it exists
+      if (hotel.trackingCode) {
+        try {
+          const tcRef = doc(db, 'trackingCodes', hotel.trackingCode.toUpperCase());
+          const tcDoc = await getDoc(tcRef);
+          if (tcDoc.exists()) {
+            await updateDoc(tcRef, { 
+              plan: newPlan,
+              price: (tcDoc.data() as TrackingCode).price || 0 + planChangeAmount
+            });
+          }
+        } catch (err) {
+          console.error("Failed to update tracking code plan:", err);
+          // Don't fail the whole operation if tracking code update fails
+        }
+      }
 
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
         action: 'CHANGE_HOTEL_PLAN',
-        target: `Hotel ${hotel.name}: ${hotel.plan} -> ${newPlan}`
+        target: `Hotel ${hotel.name}: ${hotel.plan} -> ${newPlan} (Amount: ${planChangeAmount})`
       };
-      await addDoc(collection(db, 'auditLogs'), log);
+      await addDoc(collection(db, 'activityLogs'), log);
       
       setChangingPlanHotel(null);
-      showNotification(`Plan for ${hotel.name} changed to ${newPlan}`);
+      setPlanChangeAmount(0);
+      setPlanChangeReason('');
+      toast.success(`Plan for ${hotel.name} changed to ${newPlan}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}`);
+      toast.error('Failed to change plan');
     } finally {
       setLoading(false);
     }
@@ -470,17 +494,6 @@ export function SuperAdmin() {
 
   return (
     <div className="p-8 space-y-8 relative">
-      {/* Notification Toast */}
-      {notification && (
-        <div className={cn(
-          "fixed top-4 right-4 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
-          notification.type === 'success' ? "bg-emerald-500 text-black" : "bg-red-500 text-white"
-        )}>
-          {notification.type === 'success' ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
-          <span className="font-bold">{notification.message}</span>
-        </div>
-      )}
-
       {/* Confirmation Modal */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
@@ -584,6 +597,16 @@ export function SuperAdmin() {
                       <option>Enterprise</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Price (Optional)</label>
+                    <input 
+                      type="number" 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                      value={newCode.price}
+                      onChange={(e) => setNewCode({ ...newCode, price: Number(e.target.value) })}
+                      placeholder="Enter amount paid"
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-4 mt-8">
                   <button 
@@ -613,7 +636,7 @@ export function SuperAdmin() {
                   <button 
                     onClick={() => {
                       navigator.clipboard.writeText(generatedCode);
-                      alert('Code copied to clipboard!');
+                      toast.success('Code copied to clipboard!');
                     }}
                     className="mt-4 text-xs font-bold text-zinc-500 hover:text-emerald-500 transition-colors uppercase tracking-widest"
                   >
@@ -693,6 +716,30 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-white mb-2">Change Subscription Plan</h3>
             <p className="text-zinc-400 text-sm mb-6">Updating plan for {changingPlanHotel.name}</p>
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Upgrade Amount</label>
+                <input 
+                  type="number" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                  value={planChangeAmount}
+                  onChange={(e) => setPlanChangeAmount(Number(e.target.value))}
+                  placeholder="Enter amount paid for upgrade"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Reason / Reference</label>
+                <input 
+                  type="text" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                  value={planChangeReason}
+                  onChange={(e) => setPlanChangeReason(e.target.value)}
+                  placeholder="e.g. Upgrade to Premium"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 gap-3">
               {(['standard', 'premium', 'enterprise'] as PlanType[]).map(plan => (
                 <button 
@@ -831,6 +878,15 @@ export function SuperAdmin() {
                               >
                                 <Settings size={18} />
                               </button>
+                              {hotel.planHistory && hotel.planHistory.length > 0 && (
+                                <button 
+                                  onClick={() => setShowHistoryHotel(hotel)}
+                                  className="p-2 text-zinc-500 hover:text-indigo-500 rounded-lg transition-all active:scale-90"
+                                  title="View Plan History"
+                                >
+                                  <History size={18} />
+                                </button>
+                              )}
                               <button 
                                 onClick={() => giveLiveAccess(hotel)}
                                 className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
@@ -1074,10 +1130,21 @@ export function SuperAdmin() {
                                 <RefreshCw size={14} />
                               </button>
                               <button 
-                                onClick={async () => {
-                                  if (window.confirm('Are you sure you want to delete this code?')) {
-                                    await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
-                                  }
+                                onClick={() => {
+                                  setConfirmAction({
+                                    title: 'Delete Tracking Code',
+                                    message: `Are you sure you want to delete code ${code.code}? This action cannot be undone.`,
+                                    onConfirm: async () => {
+                                      try {
+                                        await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
+                                        toast.success('Tracking code deleted');
+                                        setConfirmAction(null);
+                                      } catch (err) {
+                                        handleFirestoreError(err, OperationType.DELETE, `trackingCodes/${code.code}`);
+                                        toast.error('Failed to delete code');
+                                      }
+                                    }
+                                  });
                                 }}
                                 className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
                                 title="Delete Code"
@@ -1087,7 +1154,12 @@ export function SuperAdmin() {
                             </div>
                           </div>
                           <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
-                            <span>{code.plan}</span>
+                            <div className="flex items-center gap-2">
+                              <span>{code.plan}</span>
+                              {code.price !== undefined && code.price > 0 && (
+                                <span className="text-emerald-500/80">({code.price.toLocaleString()})</span>
+                              )}
+                            </div>
                             <span className={isCodeExpired ? "text-red-500" : ""}>
                               {isCodeExpired ? 'Expired' : `Exp: ${safeFormat(code.expiryDate, 'MMM d, yyyy')}`}
                             </span>
@@ -1100,6 +1172,61 @@ export function SuperAdmin() {
           </div>
         </div>
       </div>
+      {/* Plan History Modal */}
+      {showHistoryHotel && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-white">Plan History</h3>
+                <p className="text-zinc-400 text-sm">Subscription changes for {showHistoryHotel.name}</p>
+              </div>
+              <button 
+                onClick={() => setShowHistoryHotel(null)}
+                className="p-2 text-zinc-500 hover:text-white rounded-lg"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {showHistoryHotel.planHistory?.slice().reverse().map((history, idx) => (
+                <div key={idx} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400">
+                        {history.previousPlan || 'Initial'}
+                      </span>
+                      <span className="text-zinc-600">→</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
+                        {history.plan}
+                      </span>
+                    </div>
+                    <span className="text-xs text-zinc-500">
+                      {safeFormat(history.changedAt, 'MMM d, yyyy HH:mm')}
+                    </span>
+                  </div>
+                  {history.amount !== undefined && history.amount > 0 && (
+                    <div className="text-sm font-bold text-emerald-500 mb-1">
+                      Amount: {history.amount.toLocaleString()}
+                    </div>
+                  )}
+                  {history.reason && (
+                    <p className="text-xs text-zinc-400 italic">"{history.reason}"</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button 
+              onClick={() => setShowHistoryHotel(null)}
+              className="w-full mt-8 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

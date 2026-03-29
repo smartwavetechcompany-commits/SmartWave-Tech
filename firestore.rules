@@ -21,17 +21,18 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuthenticated() && (
-        request.auth.token.email == "smartwavetechcompany@gmail.com" ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin")
+        request.auth.uid == "ighGTXpOuehSqh1pTwSXLPz0Akk1" ||
+        (request.auth.token.email != null && request.auth.token.email.toLower() == "smartwavetechcompany@gmail.com")
       );
     }
 
     function isAdmin() {
-      let data = getUserData();
       return isAuthenticated() && (
-        (data != null && (data.role == "hotelAdmin" || (data.roles != null && data.roles.hasAny(['manager', 'corporate'])))) ||
-        request.auth.token.email == "smartwavetechcompany@gmail.com"
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hotelAdmin" ||
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles != null && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(['manager', 'corporate']))))
       );
     }
 
@@ -100,25 +101,34 @@ service cloud.firestore {
     //////////////////////////////
 
     match /users/{userId} {
-      // Allow self-creation during signup, or creation by Hotel Admin/Manager
-      allow create: if isAuthenticated() && (
-        request.auth.uid == userId || 
-        isSuperAdmin() || 
-        (isAdmin() && request.resource.data.hotelId == getHotelId())
-      );
+      // Primary access: Self or SuperAdmin
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
       
-      // Read/Update for self, SuperAdmin, or HotelAdmin of the same hotel
-      allow read, update: if isAuthenticated() && (
-        request.auth.uid == userId || 
-        isSuperAdmin() || 
-        (isAdmin() && resource.data.hotelId == getHotelId())
-      );
+      // SuperAdmin has full control
+      allow write: if isSuperAdmin();
 
-      // Allow deletion by SuperAdmin or Hotel Admin of the same hotel
-      allow delete: if isAuthenticated() && (
-        isSuperAdmin() || 
-        (isAdmin() && resource.data.hotelId == getHotelId())
-      );
+      // Hotel Admin/Manager access for their own hotel staff
+      allow read: if isAuthenticated() && isAdmin() && 
+                    resource != null && resource.data.hotelId == getHotelId();
+      
+      allow create: if isAuthenticated() && isAdmin() && 
+                      request.resource.data.hotelId == getHotelId() &&
+                      request.resource.data.role == "staff"; // Can only create staff
+
+      allow update: if isAuthenticated() && isAdmin() && 
+                      resource != null && resource.data.hotelId == getHotelId() &&
+                      request.resource.data.hotelId == getHotelId() &&
+                      // Prevent self-editing critical fields
+                      (request.auth.uid != userId || (
+                        request.resource.data.role == resource.data.role &&
+                        request.resource.data.hotelId == resource.data.hotelId
+                      )) &&
+                      // Prevent changing roles to admin levels
+                      request.resource.data.role == "staff";
+
+      allow delete: if isAuthenticated() && isAdmin() && 
+                      resource != null && resource.data.hotelId == getHotelId() &&
+                      request.auth.uid != userId; // Cannot delete self
     }
 
     //////////////////////////////
@@ -161,7 +171,7 @@ service cloud.firestore {
     // SYSTEM SETTINGS & LOGS
     //////////////////////////////
 
-    match /system/settings {
+    match /system/{docId} {
       allow read: if true;
       allow write: if isSuperAdmin();
     }
@@ -171,9 +181,14 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
-    // Support for collection group queries on activityLogs
+    // Collection Group rule for activityLogs
     match /{path=**}/activityLogs/{logId} {
+      allow read, list: if isSuperAdmin();
+    }
+
+    match /auditLogs/{logId} {
       allow read: if isSuperAdmin();
+      allow create: if isAuthenticated();
     }
 
     match /registration/{docId} {

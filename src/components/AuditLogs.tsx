@@ -23,41 +23,79 @@ export function AuditLogs() {
     }
   };
 
-  const fetchLogs = useCallback(() => {
-    if (!profile || hasPermissionError) return () => {};
-    if (profile.role !== 'superAdmin' && profile.role !== 'hotelAdmin') return () => {};
-    if (profile.role === 'hotelAdmin' && !hotel?.id) return () => {};
+  useEffect(() => {
+    if (!profile || hasPermissionError) return;
+    if (profile.role !== 'superAdmin' && profile.role !== 'hotelAdmin') return;
+    if (profile.role === 'hotelAdmin' && !hotel?.id) return;
 
     setLoading(true);
-    const q = profile.role === 'superAdmin' 
-      ? query(collectionGroup(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(100))
-      : query(collection(db, 'hotels', hotel?.id || '', 'activityLogs'), orderBy('timestamp', 'desc'), limit(50));
+    let unsub: () => void = () => {};
 
-    getDocs(q).then(
-      (snap) => {
-        setLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
-        setLoading(false);
-      },
-      (err) => {
-        const path = profile.role === 'superAdmin' ? 'activityLogs_group' : `hotels/${hotel?.id}/activityLogs`;
-        handleFirestoreError(err, OperationType.LIST, path);
-        if (err.code === 'permission-denied') {
-          setHasPermissionError(true);
-        }
-        setLoading(false);
+    try {
+      if (profile.role === 'superAdmin') {
+        // Fetch without orderBy to avoid index requirement
+        const q = collectionGroup(db, 'activityLogs');
+        unsub = onSnapshot(q, (snap) => {
+          const allLogs = snap.docs.map(doc => ({ 
+            id: doc.id, 
+            ...doc.data(),
+            hotelId: (doc.data() as any).hotelId || (doc.ref.parent.parent?.id)
+          } as any));
+
+          // Client-side sorting and limiting
+          const sortedLogs = allLogs
+            .sort((a, b) => {
+              const getTime = (ts: any) => {
+                if (!ts) return 0;
+                if (ts.toMillis) return ts.toMillis();
+                if (ts.seconds) return ts.seconds * 1000;
+                return new Date(ts).getTime() || 0;
+              };
+              return getTime(b.timestamp) - getTime(a.timestamp);
+            })
+            .slice(0, 100);
+
+          setLogs(sortedLogs);
+          setLoading(false);
+        }, (err: any) => {
+          handleFirestoreError(err, OperationType.LIST, 'collectionGroup/activityLogs');
+          if (err.code === 'permission-denied') setHasPermissionError(true);
+          setLoading(false);
+        });
+      } else if (hotel?.id) {
+        // Fetch without orderBy to avoid index requirement
+        const q = collection(db, 'hotels', hotel.id, 'activityLogs');
+        unsub = onSnapshot(q, (snap) => {
+          const allLogs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+          
+          // Client-side sorting and limiting
+          const sortedLogs = allLogs
+            .sort((a, b) => {
+              const getTime = (ts: any) => {
+                if (!ts) return 0;
+                if (ts.toMillis) return ts.toMillis();
+                if (ts.seconds) return ts.seconds * 1000;
+                return new Date(ts).getTime() || 0;
+              };
+              return getTime(b.timestamp) - getTime(a.timestamp);
+            })
+            .slice(0, 50);
+
+          setLogs(sortedLogs);
+          setLoading(false);
+        }, (err: any) => {
+          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/activityLogs`);
+          if (err.code === 'permission-denied') setHasPermissionError(true);
+          setLoading(false);
+        });
       }
-    );
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.LIST, 'activityLogs');
+      setLoading(false);
+    }
 
-    return () => {};
-  }, [hotel?.id, profile?.role, hasPermissionError]);
-
-  useEffect(() => {
-    setHasPermissionError(false);
-    const unsubscribe = fetchLogs();
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
-  }, [profile?.uid, hotel?.id, fetchLogs]);
+    return () => unsub();
+  }, [hotel?.id, profile?.uid, profile?.role, hasPermissionError]);
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -67,7 +105,7 @@ export function AuditLogs() {
           System Activity Logs
         </h3>
         <button 
-          onClick={() => fetchLogs()}
+          onClick={() => {}}
           disabled={loading}
           className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
           title="Refresh Logs"

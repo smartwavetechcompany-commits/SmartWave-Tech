@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from '../firebase';
-import { UserProfile, Hotel, SystemSettings } from '../types';
+import { auth, db, handleFirestoreError } from '../firebase';
+import { UserProfile, Hotel, SystemSettings, OperationType } from '../types';
 
 const SUPER_ADMIN_EMAIL = 'smartwavetechcompany@gmail.com';
 
@@ -60,13 +60,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // 2. Profile Listener
+  // 2. Profile Fetcher
   useEffect(() => {
     if (!user || hasProfileError) return;
 
-    const profileRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(profileRef, 
-      async (snap) => {
+    const fetchProfile = async () => {
+      const profileRef = doc(db, 'users', user.uid);
+      try {
+        const snap = await getDoc(profileRef);
         if (snap.exists()) {
           const data = snap.data() as UserProfile;
           setProfile(data);
@@ -82,35 +83,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             status: 'active',
             uid: user.uid
           };
-          try {
-            await setDoc(profileRef, bootstrapProfile);
-            setProfile(bootstrapProfile);
-            setLoading(false);
-          } catch (e) {
-            console.error("Failed to bootstrap Super Admin profile:", e);
-            setProfile(null);
-            setLoading(false);
-          }
+          await setDoc(profileRef, bootstrapProfile);
+          setProfile(bootstrapProfile);
+          setLoading(false);
         } else {
           setProfile(null);
           setLoading(false);
         }
-      },
-      (err) => {
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
         if (err.code === 'permission-denied') {
           console.warn("Profile access restricted.");
           setHasProfileError(true);
         } else {
-          console.error("Profile listener error:", err);
+          console.error("Profile fetch error:", err);
         }
         setLoading(false);
       }
-    );
+    };
 
-    return () => unsubscribe();
+    fetchProfile();
   }, [user?.uid, hasProfileError]);
 
-  // 3. Hotel Listener
+  // 3. Hotel Fetcher
   useEffect(() => {
     const hotelId = profile?.hotelId;
     const role = profile?.role;
@@ -126,40 +121,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const hotelRef = doc(db, 'hotels', hotelId);
-    const unsubscribe = onSnapshot(hotelRef, 
-      (snap) => {
+    const fetchHotel = async () => {
+      const hotelRef = doc(db, 'hotels', hotelId);
+      try {
+        const snap = await getDoc(hotelRef);
         if (snap.exists()) {
           setHotel({ id: snap.id, ...snap.data() } as Hotel);
         } else {
           setHotel(null);
         }
-      },
-      (err) => {
+      } catch (err: any) {
         if (err.code === 'permission-denied') {
           console.warn("Hotel access restricted.");
           setHasHotelError(true);
         } else {
-          console.error("Hotel listener error:", err);
+          console.error("Hotel fetch error:", err);
         }
       }
-    );
+    };
 
-    return () => unsubscribe();
+    fetchHotel();
   }, [profile?.hotelId, profile?.role, hasHotelError]);
 
-  // 4. System Settings Listener
+  // 4. System Settings Fetcher
   useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'system', 'settings'), 
-      (snap) => {
+    const fetchSettings = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'system', 'settings'));
         if (snap.exists()) {
           setSystemSettings(snap.data() as SystemSettings);
         }
-      },
-      (err) => console.error("System settings listener error:", err)
-    );
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.GET, 'system/settings');
+        console.error("System settings fetch error:", err);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchSettings();
   }, []);
 
   const isSubscriptionActive = profile?.role === 'superAdmin' 

@@ -47,9 +47,9 @@ export function Sidebar() {
   const filteredItems = menuItems.filter(item => {
     if (!profile) return false;
     
-    // Super Admin always sees their items
+    // Super Admin always sees their items + everything else for diagnosis
     if (profile.role === 'superAdmin') {
-      return item.roles.includes('superAdmin');
+      return true;
     }
 
     // Hotel Admin and Staff checks

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { MaintenanceRequest, OperationType } from '../types';
@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 export function Maintenance() {
   const { hotel, profile } = useAuth();
@@ -39,17 +40,16 @@ export function Maintenance() {
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
+    
     const q = query(collection(db, 'hotels', hotel.id, 'maintenance'), orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MaintenanceRequest)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/maintenance`);
-        if (error.code === 'permission-denied') setHasPermissionError(true);
-      }
-    );
-    return () => unsubscribe();
+    const unsub = onSnapshot(q, (snap) => {
+      setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MaintenanceRequest)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/maintenance`);
+      if (error.code === 'permission-denied') setHasPermissionError(true);
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid]);
 
   const handleAddRequest = async (e: React.FormEvent) => {
@@ -75,10 +75,12 @@ export function Maintenance() {
         module: 'Maintenance'
       });
 
+      toast.success('Maintenance request created');
       setShowAddModal(false);
       setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/maintenance`);
+      toast.error('Failed to create request');
     }
   };
 
@@ -100,8 +102,10 @@ export function Maintenance() {
         hotelId: hotel.id,
         module: 'Maintenance'
       });
+      toast.success(`Request status updated to ${status.replace('_', ' ')}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/maintenance/${requestId}`);
+      toast.error('Failed to update request status');
     }
   };
 

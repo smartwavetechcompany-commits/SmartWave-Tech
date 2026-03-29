@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, addDoc, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, addDoc, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType } from '../types';
+import { Room, OperationType, RoomType } from '../types';
 import { 
   Plus, 
   Search, 
@@ -13,14 +13,28 @@ import {
   CheckCircle2,
   AlertCircle,
   Wrench,
-  XCircle
+  XCircle,
+  Settings2,
+  Trash2,
+  Edit2
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { motion } from 'motion/react';
+import { toast } from 'sonner';
 
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [isManagingTypes, setIsManagingTypes] = useState(false);
+  const [editingRoomType, setEditingRoomType] = useState<RoomType | null>(null);
+  const [newRoomType, setNewRoomType] = useState({
+    name: '',
+    description: '',
+    basePrice: 0,
+    capacity: 2,
+    amenities: [] as string[],
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -59,31 +73,89 @@ export function Rooms() {
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
     const roomsRef = collection(db, 'hotels', hotel.id, 'rooms');
-    const unsubscribe = onSnapshot(roomsRef, 
-      (snap) => {
-        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
-        if (err.code === 'permission-denied') {
-          setHasPermissionError(true);
-        }
+    
+    const unsub = onSnapshot(roomsRef, (snap) => {
+      setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+      if (err.code === 'permission-denied') {
+        setHasPermissionError(true);
       }
-    );
-    return () => unsubscribe();
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const typesRef = collection(db, 'hotels', hotel.id, 'room_types');
+    
+    const unsub = onSnapshot(typesRef, (snap) => {
+      setRoomTypes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomType)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/room_types`);
+    });
+
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
 
   const addRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
     try {
+      const selectedType = roomTypes.find(t => t.name === newRoom.type);
       await addDoc(collection(db, 'hotels', hotel.id, 'rooms'), {
         ...newRoom,
+        roomTypeId: selectedType?.id,
+        capacity: selectedType?.capacity || newRoom.capacity,
+        price: selectedType?.basePrice || newRoom.price,
+        amenities: selectedType?.amenities || newRoom.amenities,
         status: 'clean',
       });
       setIsAddingRoom(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms`);
+    }
+  };
+
+  const addRoomType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id) return;
+    try {
+      if (editingRoomType) {
+        await setDoc(doc(db, 'hotels', hotel.id, 'room_types', editingRoomType.id), {
+          ...newRoomType,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        toast.success('Room type updated successfully');
+      } else {
+        await addDoc(collection(db, 'hotels', hotel.id, 'room_types'), {
+          ...newRoomType,
+          createdAt: new Date().toISOString()
+        });
+        toast.success('Room type added successfully');
+      }
+      setNewRoomType({
+        name: '',
+        description: '',
+        basePrice: 0,
+        capacity: 2,
+        amenities: [],
+      });
+      setEditingRoomType(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/room_types`);
+    }
+  };
+
+  const deleteRoomType = async (id: string) => {
+    if (!hotel?.id) return;
+    if (!window.confirm('Are you sure you want to delete this room type?')) return;
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'room_types', id));
+      toast.success('Room type deleted successfully');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/room_types/${id}`);
     }
   };
 
@@ -168,9 +240,16 @@ export function Rooms() {
               onChange={(e) => setTypeFilter(e.target.value)}
             >
               <option value="all">All Types</option>
-              <option value="Standard">Standard</option>
-              <option value="Deluxe">Deluxe</option>
-              <option value="Suite">Suite</option>
+              {roomTypes.map(type => (
+                <option key={type.id} value={type.name}>{type.name}</option>
+              ))}
+              {roomTypes.length === 0 && (
+                <>
+                  <option value="Standard">Standard</option>
+                  <option value="Deluxe">Deluxe</option>
+                  <option value="Suite">Suite</option>
+                </>
+              )}
             </select>
             <select 
               className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-emerald-500"
@@ -206,6 +285,13 @@ export function Rooms() {
             <Plus size={18} />
             Add Room
           </button>
+          <button 
+            onClick={() => setIsManagingTypes(true)}
+            className="w-full sm:w-auto bg-zinc-800 text-white px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+          >
+            <Settings2 size={18} />
+            Types
+          </button>
         </div>
       </header>
 
@@ -231,11 +317,27 @@ export function Rooms() {
                   <select 
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                     value={newRoom.type}
-                    onChange={(e) => setNewRoom({ ...newRoom, type: e.target.value })}
+                    onChange={(e) => {
+                      const type = roomTypes.find(t => t.name === e.target.value);
+                      setNewRoom({ 
+                        ...newRoom, 
+                        type: e.target.value,
+                        price: type?.basePrice || newRoom.price,
+                        capacity: type?.capacity || newRoom.capacity,
+                        amenities: type?.amenities || newRoom.amenities
+                      });
+                    }}
                   >
-                    <option>Standard</option>
-                    <option>Deluxe</option>
-                    <option>Suite</option>
+                    {roomTypes.map(type => (
+                      <option key={type.id} value={type.name}>{type.name}</option>
+                    ))}
+                    {roomTypes.length === 0 && (
+                      <>
+                        <option>Standard</option>
+                        <option>Deluxe</option>
+                        <option>Suite</option>
+                      </>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -312,6 +414,168 @@ export function Rooms() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isManagingTypes && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-white">Manage Room Types</h3>
+              <button onClick={() => setIsManagingTypes(false)} className="text-zinc-500 hover:text-white">
+                <XCircle size={24} />
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto">
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">{editingRoomType ? 'Edit Type' : 'Add New Type'}</h4>
+                <form onSubmit={addRoomType} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type Name</label>
+                    <input 
+                      required
+                      type="text" 
+                      placeholder="e.g. Executive Suite"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      value={newRoomType.name}
+                      onChange={(e) => setNewRoomType({ ...newRoomType, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Capacity</label>
+                      <input 
+                        type="number" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                        value={newRoomType.capacity}
+                        onChange={(e) => setNewRoomType({ ...newRoomType, capacity: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Price</label>
+                      <input 
+                        type="number" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                        value={newRoomType.basePrice}
+                        onChange={(e) => setNewRoomType({ ...newRoomType, basePrice: Number(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Amenities</label>
+                    <div className="grid grid-cols-3 gap-2 mt-1">
+                      {amenitiesOptions.map(amenity => (
+                        <button
+                          key={amenity}
+                          type="button"
+                          onClick={() => {
+                            setNewRoomType(prev => ({
+                              ...prev,
+                              amenities: prev.amenities.includes(amenity)
+                                ? prev.amenities.filter(a => a !== amenity)
+                                : [...prev.amenities, amenity]
+                            }));
+                          }}
+                          className={cn(
+                            "px-2 py-1 rounded text-[10px] font-bold border transition-all",
+                            newRoomType.amenities.includes(amenity)
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-500"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-500"
+                          )}
+                        >
+                          {amenity}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Description</label>
+                    <textarea 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                      value={newRoomType.description}
+                      onChange={(e) => setNewRoomType({ ...newRoomType, description: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    {editingRoomType && (
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setEditingRoomType(null);
+                          setNewRoomType({
+                            name: '',
+                            description: '',
+                            basePrice: 0,
+                            capacity: 2,
+                            amenities: [],
+                          });
+                        }}
+                        className="flex-1 bg-zinc-800 text-white font-bold py-2 rounded-lg hover:bg-zinc-700 transition-all active:scale-95"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button 
+                      type="submit"
+                      className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                    >
+                      {editingRoomType ? 'Update Type' : 'Add Type'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Existing Types</h4>
+                <div className="space-y-3">
+                  {roomTypes.map(type => (
+                    <div key={type.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between group">
+                      <div>
+                        <div className="font-bold text-white">{type.name}</div>
+                        <div className="text-xs text-zinc-500">{type.capacity} Pax • {formatCurrency(type.basePrice, currency, exchangeRate)}</div>
+                        {type.amenities && type.amenities.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {type.amenities.map(a => (
+                              <span key={a} className="text-[8px] px-1 bg-zinc-900 text-zinc-500 rounded border border-zinc-800">{a}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => {
+                            setEditingRoomType(type);
+                            setNewRoomType({
+                              name: type.name,
+                              description: type.description || '',
+                              basePrice: type.basePrice,
+                              capacity: type.capacity,
+                              amenities: type.amenities || [],
+                            });
+                          }}
+                          className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button 
+                          onClick={() => deleteRoomType(type.id)}
+                          className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {roomTypes.length === 0 && (
+                    <div className="text-center py-8 text-zinc-600 border border-dashed border-zinc-800 rounded-xl">
+                      No custom room types defined yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

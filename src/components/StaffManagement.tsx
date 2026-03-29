@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, doc, setDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { collection, query, where, doc, setDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType } from '../types';
@@ -16,18 +16,22 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { cn } from '../utils';
+import { toast } from 'sonner';
 
 const AVAILABLE_ROLES = [
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'frontDesk', label: 'Front Desk' },
+  { id: 'rooms', label: 'Rooms' },
   { id: 'housekeeping', label: 'Housekeeping' },
   { id: 'kitchen', label: 'Kitchen' },
+  { id: 'inventory', label: 'Inventory' },
+  { id: 'maintenance', label: 'Maintenance' },
+  { id: 'guests', label: 'Guests' },
+  { id: 'corporate', label: 'Corporate' },
   { id: 'finance', label: 'Finance' },
   { id: 'reports', label: 'Reports' },
   { id: 'staff', label: 'Staff Management' },
   { id: 'settings', label: 'Settings' },
-  { id: 'maintenance', label: 'Maintenance' },
-  { id: 'inventory', label: 'Inventory' },
-  { id: 'corporate', label: 'Corporate Management' },
   { id: 'manager', label: 'Manager' },
 ];
 
@@ -54,29 +58,19 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId || !profile || hasPermissionError) return;
     
     const q = query(collection(db, 'users'), where('hotelId', '==', hotelId));
-    
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
-      }, 
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'users');
-        if (err.code === 'permission-denied') {
-          setHasPermissionError(true);
-        }
+    const unsub = onSnapshot(q, (snap) => {
+      setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, 'users');
+      if (err.code === 'permission-denied') {
+        setHasPermissionError(true);
       }
-    );
+    });
 
-    return () => unsubscribe();
+    return () => unsub();
   }, [hotelId, profile?.uid, hasPermissionError]);
 
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
-
-  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
-  };
 
   const addStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,9 +102,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
       setIsAddingStaff(false);
       setNewStaff({ email: '', displayName: '', role: 'staff', roles: ['frontDesk'] });
-      showNotification('Staff member added successfully');
+      toast.success('Staff member added successfully');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
+      toast.error('Failed to add staff member');
     }
   };
 
@@ -133,10 +128,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
             resource: `Staff: ${staffEmail}`,
             hotelId: hotelId
           });
-          showNotification('Staff member removed');
+          toast.success('Staff member removed');
           setConfirmAction(null);
         } catch (err: any) {
           handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
+          toast.error('Failed to remove staff member');
         }
       }
     });
@@ -171,8 +167,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelId: hotelId,
         module: 'Staff'
       });
+      toast.success('Permissions updated');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${member.uid}`);
+      toast.error('Failed to update permissions');
     }
   };
 
@@ -186,17 +184,6 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   return (
     <div className="p-8 space-y-8 relative">
-      {/* Notification Toast */}
-      {notification && (
-        <div className={cn(
-          "fixed top-4 right-4 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
-          notification.type === 'success' ? "bg-emerald-500 text-black" : "bg-red-500 text-white"
-        )}>
-          {notification.type === 'success' ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
-          <span className="font-bold">{notification.message}</span>
-        </div>
-      )}
-
       {/* Confirmation Modal */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
@@ -385,14 +372,20 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
-                      <button 
-                        onClick={() => setEditingPermissions(member)}
-                        className="p-2 text-zinc-500 hover:text-emerald-500 transition-colors"
-                        title="Manage Permissions"
-                      >
-                        <Lock size={18} />
-                      </button>
                       {member.role !== 'hotelAdmin' && (
+                        <button 
+                          onClick={() => setEditingPermissions(member)}
+                          disabled={member.uid === profile?.uid}
+                          className={cn(
+                            "p-2 transition-colors",
+                            member.uid === profile?.uid ? "text-zinc-700 cursor-not-allowed" : "text-zinc-500 hover:text-emerald-500"
+                          )}
+                          title={member.uid === profile?.uid ? "You cannot edit your own permissions" : "Manage Permissions"}
+                        >
+                          <Lock size={18} />
+                        </button>
+                      )}
+                      {member.role !== 'hotelAdmin' && member.uid !== profile?.uid && (
                         <button 
                           onClick={() => removeStaff(member.uid, member.email)}
                           className="p-2 text-zinc-500 hover:text-red-500 transition-colors"

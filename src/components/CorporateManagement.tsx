@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, addDoc, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, query, orderBy, doc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { CorporateAccount, OperationType } from '../types';
+import { CorporateAccount, CorporateRate, Room, OperationType, RoomType } from '../types';
 import { 
   Building2, 
   Plus, 
@@ -22,15 +22,21 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
-import { Room, CorporateRate } from '../types';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
+
+import { CorporateFolio } from './CorporateFolio';
 
 export function CorporateManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
+  const navigate = useNavigate();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showRatesModal, setShowRatesModal] = useState<CorporateAccount | null>(null);
+  const [showFolioModal, setShowFolioModal] = useState<CorporateAccount | null>(null);
   const [rates, setRates] = useState<CorporateRate[]>([]);
   const [editingAccount, setEditingAccount] = useState<CorporateAccount | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -68,25 +74,40 @@ export function CorporateManagement() {
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
+    
     const q = query(collection(db, 'hotels', hotel.id, 'corporate_accounts'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts`);
-        if (error.code === 'permission-denied') setHasPermissionError(true);
-      }
-    );
-    return () => unsubscribe();
+    const unsub = onSnapshot(q, (snap) => {
+      setAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts`);
+      if (error.code === 'permission-denied') setHasPermissionError(true);
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid]);
 
   useEffect(() => {
     if (!hotel?.id) return;
-    const unsubscribe = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
+    
+    const unsub = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
     });
-    return () => unsubscribe();
+
+    return () => unsub();
+  }, [hotel?.id]);
+
+  useEffect(() => {
+    if (!hotel?.id) return;
+    
+    const unsub = onSnapshot(collection(db, 'hotels', hotel.id, 'room_types'), (snap) => {
+      setRoomTypes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomType)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/room_types`);
+    });
+
+    return () => unsub();
   }, [hotel?.id]);
 
   useEffect(() => {
@@ -94,17 +115,23 @@ export function CorporateManagement() {
       setRates([]);
       return;
     }
+    
     const q = query(
       collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'),
       orderBy('createdAt', 'desc')
     );
-    const unsubscribe = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, (snap) => {
       setRates(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateRate)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates`);
     });
-    return () => unsubscribe();
+
+    return () => unsub();
   }, [hotel?.id, showRatesModal]);
 
-  const roomTypes = Array.from(new Set(rooms.map(r => r.type)));
+  const availableRoomTypes = roomTypes.length > 0 
+    ? roomTypes.map(t => t.name)
+    : Array.from(new Set(rooms.map(r => r.type)));
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,8 +174,10 @@ export function CorporateManagement() {
         currentBalance: 0, 
         billingCycle: 'monthly'
       });
+      toast.success(editingAccount ? 'Account updated successfully' : 'Account created successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/corporate_accounts`);
+      toast.error('Failed to save account');
     }
   };
 
@@ -157,8 +186,10 @@ export function CorporateManagement() {
     if (!hotel?.id || !showRatesModal || !profile) return;
 
     try {
+      const selectedType = roomTypes.find(t => t.name === newRate.roomType);
       await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'), {
         ...newRate,
+        roomTypeId: selectedType?.id,
         corporateId: showRatesModal.id,
         status: 'active',
         createdAt: new Date().toISOString()
@@ -185,17 +216,24 @@ export function CorporateManagement() {
         discountValue: 0,
         conditions: ''
       });
+      toast.success('Negotiated rate added successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates`);
+      toast.error('Failed to add rate');
     }
   };
 
   const deleteRate = async (rateId: string) => {
-    if (!hotel?.id || !showRatesModal || !window.confirm('Delete this rate?')) return;
+    if (!hotel?.id || !showRatesModal) return;
+    
+    if (!window.confirm('Are you sure you want to delete this negotiated rate?')) return;
+
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', rateId));
+      toast.success('Rate deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates/${rateId}`);
+      toast.error('Failed to delete rate');
     }
   };
 
@@ -302,6 +340,20 @@ export function CorporateManagement() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
+                      <button 
+                        onClick={() => navigate(`/front-desk?action=book&corporateId=${account.id}`)}
+                        className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
+                        title="Book Room"
+                      >
+                        <Calendar size={18} />
+                      </button>
+                      <button 
+                        onClick={() => setShowFolioModal(account)}
+                        className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                        title="View Folio"
+                      >
+                        <FileText size={18} />
+                      </button>
                       <button 
                         onClick={() => setShowRatesModal(account)}
                         className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
@@ -490,7 +542,7 @@ export function CorporateManagement() {
                         className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="">Select Type</option>
-                        {roomTypes.map(type => (
+                        {availableRoomTypes.map(type => (
                           <option key={type} value={type}>{type}</option>
                         ))}
                       </select>
@@ -624,6 +676,14 @@ export function CorporateManagement() {
             </div>
           </motion.div>
         </div>
+      )}
+
+      {/* Corporate Folio Modal */}
+      {showFolioModal && (
+        <CorporateFolio 
+          account={showFolioModal} 
+          onClose={() => setShowFolioModal(null)} 
+        />
       )}
     </div>
   );

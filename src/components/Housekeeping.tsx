@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, doc, setDoc, addDoc } from 'firebase/firestore';
+import { collection, query, where, doc, setDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType } from '../types';
@@ -12,6 +12,7 @@ import {
   Search
 } from 'lucide-react';
 import { cn } from '../utils';
+import { toast } from 'sonner';
 
 export function Housekeeping() {
   const { hotel, profile } = useAuth();
@@ -27,18 +28,17 @@ export function Housekeeping() {
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
     const q = query(collection(db, 'hotels', hotel.id, 'rooms'));
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
-        if (error.code === 'permission-denied') {
-          setHasPermissionError(true);
-        }
+    
+    const unsub = onSnapshot(q, (snap) => {
+      setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+      if (error.code === 'permission-denied') {
+        setHasPermissionError(true);
       }
-    );
-    return () => unsubscribe();
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   const updateRoomStatus = async (roomId: string, status: Room['status']) => {
@@ -54,8 +54,10 @@ export function Housekeeping() {
         action: 'HOUSEKEEPING_UPDATE',
         module: `Room ${room?.roomNumber || roomId}: ${status}`
       });
+      toast.success(`Room ${room?.roomNumber} marked as ${status}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
+      toast.error('Failed to update room status');
     }
   };
 

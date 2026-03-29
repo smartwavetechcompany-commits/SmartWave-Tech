@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, addDoc, updateDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { InventoryItem, OperationType } from '../types';
@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 import { format } from 'date-fns';
 import { createNotification } from './Notifications';
+import { toast } from 'sonner';
 
 export function Inventory() {
   const { hotel, profile } = useAuth();
@@ -29,31 +30,30 @@ export function Inventory() {
   useEffect(() => {
     if (!hotel?.id || !profile) return;
     const q = collection(db, 'hotels', hotel.id, 'inventory');
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        const newItems = snap.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem))
-          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        setItems(newItems);
+    
+    const unsub = onSnapshot(q, (snap) => {
+      const newItems = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setItems(newItems);
 
-        // Check for low stock and notify
-        newItems.forEach(item => {
-          if (item.quantity <= item.minThreshold) {
-            createNotification(hotel.id, {
-              title: 'Low Stock Alert',
-              message: `${item.name} is low on stock (${item.quantity} ${item.unit} remaining).`,
-              type: 'warning',
-              userId: 'all'
-            });
-          }
-        });
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
-        if (error.code === 'permission-denied') setHasPermissionError(true);
-      }
-    );
-    return () => unsubscribe();
+      // Check for low stock and notify
+      newItems.forEach(item => {
+        if (item.quantity <= item.minThreshold) {
+          createNotification(hotel.id, {
+            title: 'Low Stock Alert',
+            message: `${item.name} is low on stock (${item.quantity} ${item.unit} remaining).`,
+            type: 'warning',
+            userId: 'all'
+          });
+        }
+      });
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
+      if (error.code === 'permission-denied') setHasPermissionError(true);
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid]);
 
   const handleSaveItem = async (e: React.FormEvent) => {
@@ -66,11 +66,13 @@ export function Inventory() {
           ...newItem,
           lastUpdated: new Date().toISOString()
         });
+        toast.success('Inventory item updated');
       } else {
         await addDoc(collection(db, 'hotels', hotel.id, 'inventory'), {
           ...newItem,
           lastUpdated: new Date().toISOString()
         });
+        toast.success('Inventory item created');
       }
 
       // Log action
@@ -89,6 +91,7 @@ export function Inventory() {
       setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5 });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/inventory`);
+      toast.error('Failed to save item');
     }
   };
 
@@ -100,17 +103,21 @@ export function Inventory() {
         quantity: newQty,
         lastUpdated: new Date().toISOString()
       });
+      toast.success(`Quantity adjusted for ${item.name}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/inventory/${item.id}`);
+      toast.error('Failed to adjust quantity');
     }
   };
 
   const deleteItem = async (itemId: string) => {
-    if (!hotel?.id || !window.confirm('Delete this item?')) return;
+    if (!hotel?.id) return;
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'inventory', itemId));
+      toast.success('Item deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory/${itemId}`);
+      toast.error('Failed to delete item');
     }
   };
 

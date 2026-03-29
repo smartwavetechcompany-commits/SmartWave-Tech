@@ -34,14 +34,17 @@ export function AuthPage() {
   }, [user, profile]);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'system', 'settings'), (snap) => {
-      if (snap.exists()) {
-        setSettings(snap.data() as any);
+    const fetchSettings = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'system', 'settings'));
+        if (snap.exists()) {
+          setSettings(snap.data() as any);
+        }
+      } catch (err) {
+        // Silently fail for public users if permissions aren't set yet
       }
-    }, (err) => {
-      // Silently fail for public users if permissions aren't set yet
-    });
-    return () => unsub();
+    };
+    fetchSettings();
   }, []);
 
   useEffect(() => {
@@ -125,7 +128,9 @@ export function AuthPage() {
 
     try {
       if (isLogin) {
+        console.log("Attempting login for:", formData.email);
         await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        console.log("Login successful in AuthPage");
       } else {
         // Registration Flow
         if (!user && formData.password !== formData.confirmPassword) {
@@ -308,6 +313,11 @@ export function AuthPage() {
         if (parsed.error) errorMessage = parsed.error;
       } catch (e) {
         // Not a JSON error, use raw message
+        if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+        } else if (err.code === 'auth/too-many-requests') {
+          errorMessage = 'Too many failed login attempts. Please try again later or reset your password.';
+        }
       }
       
       setError(errorMessage);

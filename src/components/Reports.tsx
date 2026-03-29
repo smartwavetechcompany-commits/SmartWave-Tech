@@ -67,58 +67,49 @@ export function Reports() {
   useEffect(() => {
     if (!hotel?.id) return;
     
-    const unsubs: (() => void)[] = [];
+    const fetchData = async () => {
+      try {
+        // Fetch rooms for occupancy
+        const roomsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'rooms'));
+        const totalRooms = roomsSnap.size;
+        const occupiedRooms = roomsSnap.docs.filter(d => d.data().status === 'occupied').length;
+        
+        const occupancy = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
-    // Real-time rooms for occupancy
-    const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
-      const totalRooms = snap.size;
-      const occupiedRooms = snap.docs.filter(d => d.data().status === 'occupied').length;
-      
-      setStats(prev => ({
-        ...prev,
-        occupancy: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0,
-      }));
-    });
-    unsubs.push(unsubRooms);
+        // Fetch finance for revenue stats
+        const financeSnap = await getDocs(collection(db, 'hotels', hotel.id, 'finance'));
+        const records = financeSnap.docs.map(doc => doc.data() as FinanceRecord);
+        const today = new Date().toISOString().split('T')[0];
+        const todayIncome = records
+          .filter(r => r.type === 'income' && r.timestamp.startsWith(today))
+          .reduce((acc, curr) => acc + curr.amount, 0);
+        
+        // Fetch reservations for corporate vs individual revenue
+        const reservationsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'reservations'));
+        const res = reservationsSnap.docs.map(doc => doc.data() as Reservation);
+        const corpRev = res.filter(r => r.corporateId && r.status !== 'cancelled').reduce((acc, r) => acc + r.totalAmount, 0);
+        const indivRev = res.filter(r => !r.corporateId && r.status !== 'cancelled').reduce((acc, r) => acc + r.totalAmount, 0);
 
-    // Real-time finance for revenue stats (simplified)
-    const unsubFinance = onSnapshot(collection(db, 'hotels', hotel.id, 'finance'), (snap) => {
-      const records = snap.docs.map(doc => doc.data() as FinanceRecord);
-      const today = new Date().toISOString().split('T')[0];
-      const todayIncome = records
-        .filter(r => r.type === 'income' && r.timestamp.startsWith(today))
-        .reduce((acc, curr) => acc + curr.amount, 0);
-      
-      setStats(prev => ({
-        ...prev,
-        revPar: todayIncome / (stats.occupancy || 1), // Very simplified
-        adr: 150.00, // Still partially mocked but could be calculated
-        totalGuests: records.filter(r => r.category === 'room_revenue').length // Simplified
-      }));
-    });
-    unsubs.push(unsubFinance);
+        setStats({
+          occupancy,
+          revPar: todayIncome / (occupancy || 1), // Very simplified
+          adr: 150.00, // Still partially mocked but could be calculated
+          totalGuests: records.filter(r => r.category === 'room_revenue').length, // Simplified
+          corporateRevenue: corpRev,
+          individualRevenue: indivRev
+        });
 
-    // Corporate vs Individual Revenue
-    const unsubReservations = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
-      const res = snap.docs.map(doc => doc.data() as Reservation);
-      const corpRev = res.filter(r => r.corporateId && r.status !== 'cancelled').reduce((acc, r) => acc + r.totalAmount, 0);
-      const indivRev = res.filter(r => !r.corporateId && r.status !== 'cancelled').reduce((acc, r) => acc + r.totalAmount, 0);
-      
-      setStats(prev => ({
-        ...prev,
-        corporateRevenue: corpRev,
-        individualRevenue: indivRev
-      }));
+        setCorporateData([
+          { name: 'Corporate', value: corpRev },
+          { name: 'Individual', value: indivRev }
+        ]);
+      } catch (error) {
+        console.error("Error fetching report data:", error);
+      }
+    };
 
-      setCorporateData([
-        { name: 'Corporate', value: corpRev },
-        { name: 'Individual', value: indivRev }
-      ]);
-    });
-    unsubs.push(unsubReservations);
-
-    return () => unsubs.forEach(unsub => unsub());
-  }, [hotel?.id, stats.occupancy]);
+    fetchData();
+  }, [hotel?.id]);
 
   const COLORS = ['#10b981', '#3b82f6'];
 

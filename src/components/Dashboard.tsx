@@ -43,36 +43,33 @@ export function Dashboard() {
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [revenueChartData, setRevenueChartData] = useState<{ name: string; amount: number }[]>([]);
 
-  const fetchData = React.useCallback(async () => {
-    // This is now handled by real-time listeners in useEffect
-    // But we keep it for manual refresh if needed, though onSnapshot is automatic
-    setLoading(true);
-    setTimeout(() => setLoading(false), 500);
-  }, []);
-
   useEffect(() => {
     if (!profile || hasPermissionError) return;
+    setLoading(true);
 
-    const unsubs: (() => void)[] = [];
+    let unsubHotels = () => {};
+    let unsubRooms = () => {};
+    let unsubRes = () => {};
+    let unsubFinance = () => {};
 
     if (profile.role === 'superAdmin') {
-      getDocs(collection(db, 'hotels')).then(
-        (snap) => {
-          setAllHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
-        },
-        (err) => {
-          if (err.code === 'permission-denied') setHasPermissionError(true);
-          else console.error("SuperAdmin hotels listener error:", err);
-        }
-      );
-    } else if (hotel?.id) {
-      const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
-        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      unsubHotels = onSnapshot(collection(db, 'hotels'), (snap) => {
+        setAllHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
+        setLoading(false);
+      }, (err) => {
+        if (err.code === 'permission-denied') setHasPermissionError(true);
       });
-      const unsubReservations = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), limit(5)), (snap) => {
+    } else if (hotel?.id) {
+      unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
+        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+        setLoading(false);
+      });
+
+      unsubRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), limit(5)), (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       });
-      const unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
+
+      unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
         const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
         setFinance(records);
 
@@ -94,10 +91,14 @@ export function Dashboard() {
         });
         setRevenueChartData(chartData);
       });
-      unsubs.push(unsubRooms, unsubReservations, unsubFinance);
     }
 
-    return () => unsubs.forEach(unsub => unsub());
+    return () => {
+      unsubHotels();
+      unsubRooms();
+      unsubRes();
+      unsubFinance();
+    };
   }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError]);
 
   useEffect(() => {
@@ -149,10 +150,10 @@ export function Dashboard() {
           </p>
         </div>
         <button 
-          onClick={() => fetchData()}
+          onClick={() => window.location.reload()}
           disabled={loading}
           className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
-          title="Refresh Data"
+          title="Refresh Page"
         >
           <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
         </button>

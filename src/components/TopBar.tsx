@@ -8,16 +8,16 @@ export function TopBar() {
   const { hotel, profile } = useAuth();
 
   return (
-    <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-8 sticky top-0 z-40">
+    <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 sticky top-0 z-40">
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 text-zinc-400">
           <Building2 size={16} />
-          <span className="text-sm font-medium">{hotel?.name || 'PMS'}</span>
+          <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-4 border-r border-zinc-800 pr-6">
+      <div className="flex items-center gap-2 sm:gap-6">
+        <div className="flex items-center gap-2 sm:gap-4 border-r border-zinc-800 pr-2 sm:pr-6">
           <CurrencyToggle />
           <Notifications />
         </div>

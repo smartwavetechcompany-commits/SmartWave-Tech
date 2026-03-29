@@ -44,6 +44,13 @@ export interface Hotel {
     staff: number;
   };
   adminUIDs?: string[];
+  planHistory?: {
+    plan: PlanType;
+    previousPlan?: PlanType;
+    changedAt: string;
+    amount?: number;
+    reason?: string;
+  }[];
 }
 
 export interface TrackingCode {
@@ -55,6 +62,7 @@ export interface TrackingCode {
   maxHotels: number;
   issuedBy: string;
   createdAt: string;
+  price?: number;
   usedByHotel?: string;
   hotelId?: string; // For backward compatibility or tracking usage
 }
@@ -100,10 +108,20 @@ export interface AuditLog {
   details: string;
 }
 
+export interface RoomType {
+  id: string;
+  name: string;
+  description?: string;
+  basePrice: number;
+  capacity: number;
+  amenities: string[];
+}
+
 export interface Room {
   id: string;
   roomNumber: string;
   type: string;
+  roomTypeId?: string; // Link to RoomType
   price: number;
   status: 'clean' | 'dirty' | 'occupied' | 'maintenance' | 'vacant' | 'out_of_service';
   floor: string;
@@ -125,11 +143,12 @@ export interface Reservation {
   checkIn: string;
   checkOut: string;
   nights?: number;
-  status: 'pending' | 'checked_in' | 'checked_out' | 'cancelled';
+  status: 'pending' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
   totalAmount: number;
   paidAmount: number;
   paymentStatus: 'unpaid' | 'partial' | 'paid';
   notes?: string;
+  corporateReference?: string;
   createdAt: string;
   ledgerEntries?: LedgerEntry[]; // Changed from string[] to LedgerEntry[]
 }
@@ -191,6 +210,7 @@ export interface Guest {
   notes?: string;
   tags?: string[]; // VIP, Corporate, Frequent, etc.
   preferences?: string[];
+  corporateId?: string; // Link to CorporateAccount
   ledgerBalance: number;
   totalStays: number;
   totalSpent: number;
@@ -201,13 +221,14 @@ export interface Guest {
 export interface LedgerEntry {
   id: string;
   guestId: string;
+  corporateId?: string; // Link to CorporateAccount
   hotelId: string;
   type: 'debit' | 'credit';
   amount: number;
   description: string;
   timestamp: string;
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer';
   postedBy: string;
 }
 
@@ -230,6 +251,7 @@ export interface CorporateRate {
   id: string;
   corporateId: string;
   roomType: string;
+  roomTypeId?: string; // Link to RoomType
   rate: number;
   currency: 'NGN' | 'USD';
   startDate: string;

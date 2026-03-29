@@ -17,6 +17,7 @@ export const postToLedger = async (
     timestamp,
     hotelId,
     guestId,
+    corporateId,
     postedBy
   };
 
@@ -59,6 +60,35 @@ export const settleLedger = async (
     category: 'payment',
     description: `Payment via ${paymentMethod}`,
     referenceId: reservationId,
+    postedBy
+  }, postedBy);
+};
+
+export const transferLedgerBalance = async (
+  hotelId: string,
+  guestId: string,
+  fromReservationId: string,
+  toReservationId: string,
+  amount: number,
+  postedBy: string
+) => {
+  // 1. Post credit to source reservation
+  await postToLedger(hotelId, guestId, fromReservationId, {
+    amount,
+    type: 'credit',
+    category: 'transfer',
+    description: `Balance Transfer to Res #${toReservationId.slice(-6).toUpperCase()}`,
+    referenceId: toReservationId,
+    postedBy
+  }, postedBy);
+
+  // 2. Post debit to target reservation
+  await postToLedger(hotelId, guestId, toReservationId, {
+    amount,
+    type: 'debit',
+    category: 'transfer',
+    description: `Balance Transfer from Res #${fromReservationId.slice(-6).toUpperCase()}`,
+    referenceId: fromReservationId,
     postedBy
   }, postedBy);
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, addDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest } from '../types';
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
+import { toast } from 'sonner';
 
 export function Kitchen() {
   const { hotel, profile } = useAuth();
@@ -59,44 +60,44 @@ export function Kitchen() {
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
-    const q = query(
-      collection(db, 'hotels', hotel.id, 'kitchen_orders'),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, 
+    
+    const unsubOrders = onSnapshot(
+      query(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderBy('timestamp', 'desc')),
       (snap) => {
         setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder)));
       },
-      (error) => {
+      (error: any) => {
         handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/kitchen_orders`);
-        if (error.code === 'permission-denied') {
-          setHasPermissionError(true);
-        }
+        if (error.code === 'permission-denied') setHasPermissionError(true);
       }
     );
-    return () => unsubscribe();
-  }, [hotel?.id, profile?.uid, hasPermissionError]);
 
-  useEffect(() => {
-    if (!hotel?.id || !profile) return;
-    const q = query(
-      collection(db, 'hotels', hotel.id, 'reservations'),
-      where('status', '==', 'checked_in')
+    const unsubReservations = onSnapshot(
+      query(collection(db, 'hotels', hotel.id, 'reservations'), where('status', '==', 'checked_in')),
+      (snap) => {
+        setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      },
+      (error: any) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+      }
     );
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
-    });
-    return () => unsubscribe();
-  }, [hotel?.id, profile?.uid]);
 
-  useEffect(() => {
-    if (!hotel?.id || !profile) return;
-    const q = collection(db, 'hotels', hotel.id, 'guests');
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
-    });
-    return () => unsubscribe();
-  }, [hotel?.id, profile?.uid]);
+    const unsubGuests = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'guests'),
+      (snap) => {
+        setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+      },
+      (error: any) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
+      }
+    );
+
+    return () => {
+      unsubOrders();
+      unsubReservations();
+      unsubGuests();
+    };
+  }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,10 +165,12 @@ export function Kitchen() {
         module: 'Kitchen'
       });
 
+      toast.success('Kitchen order created');
       setShowAddModal(false);
       setNewOrder({ roomNumber: '', items: '', notes: '', category: 'food', price: 0, paymentMethod: 'cash' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/kitchen_orders`);
+      toast.error('Failed to create order');
     }
   };
 
@@ -192,8 +195,10 @@ export function Kitchen() {
         hotelId: hotel.id,
         module: 'Kitchen'
       });
+      toast.success(`Order status updated to ${status}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
+      toast.error('Failed to update order status');
     }
   };
 

@@ -23,6 +23,8 @@ import { Notifications } from './components/Notifications';
 import { TopBar } from './components/TopBar';
 import { motion, AnimatePresence } from 'motion/react';
 
+import { Toaster } from 'sonner';
+
 import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
 
 function AppContent() {
@@ -38,21 +40,37 @@ function AppContent() {
 
   // If no user is logged in, show AuthPage
   if (!user) {
-    return <AuthPage />;
+    return (
+      <>
+        <Toaster position="top-right" theme="dark" richColors />
+        <AuthPage />
+      </>
+    );
   }
 
   // If user is logged in but has no profile, they need to complete registration
   if (!profile) {
-    return <AuthPage />;
+    return (
+      <>
+        <Toaster position="top-right" theme="dark" richColors />
+        <AuthPage />
+      </>
+    );
   }
 
   // If subscription is expired and user is not superAdmin, show Expired page
   if (!isSubscriptionActive && profile.role !== 'superAdmin') {
-    return <SubscriptionExpiredPage />;
+    return (
+      <>
+        <Toaster position="top-right" theme="dark" richColors />
+        <SubscriptionExpiredPage />
+      </>
+    );
   }
 
   return (
     <div className="flex h-screen bg-zinc-950 overflow-hidden">
+      <Toaster position="top-right" theme="dark" richColors />
       <Sidebar />
       <main className="flex-1 flex flex-col overflow-hidden">
         <TopBar />

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room } from '../types';
+import { Reservation, Room, OperationType } from '../types';
 import { cn } from '../utils';
 import { 
   Users, 
@@ -30,6 +30,8 @@ export function OperationsDashboard() {
 
     const unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
       setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
     });
 
     const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {

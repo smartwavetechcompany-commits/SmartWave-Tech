@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Guest, OperationType, Reservation } from '../types';
+import { Guest, OperationType, Reservation, CorporateAccount } from '../types';
 import { 
   Users, 
   Plus, 
@@ -24,12 +24,15 @@ import {
   Clock,
   DollarSign,
   XCircle,
-  Receipt
+  Receipt,
+  Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
 import { ReceiptGenerator } from './ReceiptGenerator';
+import { GuestFolio } from './GuestFolio';
+import { toast } from 'sonner';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -39,7 +42,9 @@ export function GuestManagement() {
   const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
+  const [showFolio, setShowFolio] = useState<Reservation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [newGuest, setNewGuest] = useState({
     name: '',
     email: '',
@@ -50,40 +55,50 @@ export function GuestManagement() {
     notes: '',
     tags: [] as string[],
     preferences: [] as string[],
-    ledgerBalance: 0
+    ledgerBalance: 0,
+    corporateId: ''
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
+    
     const q = query(collection(db, 'hotels', hotel.id, 'guests'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, 
-      (snap) => {
-        setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
-        if (error.code === 'permission-denied') setHasPermissionError(true);
-      }
-    );
-    return () => unsubscribe();
+    const unsub = onSnapshot(q, (snap) => {
+      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
+      if (error.code === 'permission-denied') setHasPermissionError(true);
+    });
+
+    return () => unsub();
   }, [hotel?.id, profile?.uid]);
 
   useEffect(() => {
     if (!viewingHistory || !hotel?.id) return;
     
-    const fetchHistory = async () => {
-      const q = query(
-        collection(db, 'hotels', hotel.id, 'reservations'),
-        where('guestEmail', '==', viewingHistory.email)
-      );
-      const snap = await getDocs(q);
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('guestEmail', '==', viewingHistory.email)
+    );
+    const unsub = onSnapshot(q, (snap) => {
       setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
-    };
+    });
     
-    fetchHistory();
+    return () => unsub();
   }, [viewingHistory, hotel?.id]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    
+    const corpRef = collection(db, 'hotels', hotel.id, 'corporate_accounts');
+    const unsub = onSnapshot(corpRef, (snap) => {
+      setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    });
+
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
 
   const handleSaveGuest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,19 +143,27 @@ export function GuestManagement() {
         notes: '',
         tags: [],
         preferences: [],
-        ledgerBalance: 0
+        ledgerBalance: 0,
+        corporateId: ''
       });
+      toast.success(editingGuest ? 'Guest profile updated' : 'Guest profile created');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/guests`);
+      toast.error('Failed to save guest profile');
     }
   };
 
   const deleteGuest = async (guestId: string) => {
-    if (!hotel?.id || !window.confirm('Delete this guest profile?')) return;
+    if (!hotel?.id) return;
+    
+    if (!window.confirm('Are you sure you want to delete this guest profile? This action cannot be undone.')) return;
+
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'guests', guestId));
+      toast.success('Guest profile deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/guests/${guestId}`);
+      toast.error('Failed to delete guest profile');
     }
   };
 
@@ -207,7 +230,8 @@ export function GuestManagement() {
               notes: '',
               tags: [],
               preferences: [],
-              ledgerBalance: 0
+              ledgerBalance: 0,
+              corporateId: ''
             });
             setShowAddModal(true);
           }}
@@ -310,7 +334,8 @@ export function GuestManagement() {
                             notes: guest.notes || '',
                             tags: guest.tags || [],
                             preferences: guest.preferences || [],
-                            ledgerBalance: guest.ledgerBalance || 0
+                            ledgerBalance: guest.ledgerBalance || 0,
+                            corporateId: guest.corporateId || ''
                           });
                           setShowAddModal(true);
                         }}
@@ -336,6 +361,12 @@ export function GuestManagement() {
                       <Phone size={14} className="text-zinc-600" />
                       {guest.phone}
                     </div>
+                    {guest.corporateId && (
+                      <div className="flex items-center gap-2 text-sm text-emerald-500 font-medium">
+                        <Building2 size={14} />
+                        {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate Guest'}
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3 pt-4">
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Total Stays</div>
@@ -422,11 +453,11 @@ export function GuestManagement() {
                             {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
                           </div>
                           <button 
-                            onClick={() => setShowReceipt({ res, type: 'comprehensive' })}
+                            onClick={() => setShowFolio(res)}
                             className="mt-2 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
                           >
                             <Receipt size={10} />
-                            Print Receipt
+                            View Folio
                           </button>
                         </div>
                       </div>
@@ -478,6 +509,13 @@ export function GuestManagement() {
             </div>
           </div>
         </div>
+      )}
+
+      {showFolio && (
+        <GuestFolio 
+          reservation={showFolio} 
+          onClose={() => setShowFolio(null)} 
+        />
       )}
 
       {/* Add/Edit Modal */}
@@ -561,6 +599,19 @@ export function GuestManagement() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
                     placeholder="Home or Business address"
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Corporate Account (Optional)</label>
+                  <select
+                    value={newGuest.corporateId}
+                    onChange={(e) => setNewGuest({ ...newGuest, corporateId: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="">None / Individual</option>
+                    {corporateAccounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>{acc.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Tags (comma separated)</label>

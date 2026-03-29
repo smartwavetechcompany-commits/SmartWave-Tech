@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, addDoc, collection, query, where, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, addDoc, collection, query, where, getDocs, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, auth, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { SystemSettings, OperationType, TrackingCode, Hotel, GlobalAuditLog, PlanType } from '../types';
@@ -29,12 +29,17 @@ export function SubscriptionExpiredPage() {
   });
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'system', 'settings'), (snap) => {
-      if (snap.exists()) {
-        setSettings(snap.data() as SystemSettings);
+    const fetchSettings = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'system', 'settings'));
+        if (snap.exists()) {
+          setSettings(snap.data() as SystemSettings);
+        }
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.GET, 'system/settings');
       }
-    });
-    return () => unsub();
+    };
+    fetchSettings();
   }, []);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
