@@ -30,7 +30,6 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
-import { ErrorBoundary } from './ErrorBoundary';
 
 export function Dashboard() {
   const { hotel, profile, isSubscriptionActive, currency, exchangeRate } = useAuth();

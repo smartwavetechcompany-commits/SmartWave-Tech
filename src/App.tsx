@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Sidebar } from './components/Sidebar';
 import { AuthPage } from './components/AuthPage';
@@ -29,6 +29,7 @@ import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
 
 function AppContent() {
   const { user, loading, profile, isSubscriptionActive } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -76,7 +77,7 @@ function AppContent() {
         <TopBar />
         <div className="flex-1 overflow-y-auto relative">
           <AnimatePresence mode="wait">
-          <Routes>
+          <Routes location={location} key={location.pathname}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/rooms" element={<Rooms />} />
             <Route path="/front-desk" element={<FrontDesk />} />
