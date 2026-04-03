@@ -21,7 +21,25 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
-  const grandTotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
+  const subtotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
+  
+  // Calculate Taxes
+  const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active');
+  let taxTotal = 0;
+  const taxBreakdown = activeTaxes.map(tax => {
+    let amount = 0;
+    if (tax.isInclusive) {
+      // Amount = Subtotal - (Subtotal / (1 + percentage/100))
+      amount = subtotal - (subtotal / (1 + tax.percentage / 100));
+    } else {
+      // Amount = Subtotal * (percentage/100)
+      amount = subtotal * (tax.percentage / 100);
+      taxTotal += amount;
+    }
+    return { ...tax, amount };
+  });
+
+  const grandTotal = subtotal + taxTotal;
   const totalPaid = totalCredits + (hasRoomChargeInLedger ? 0 : (reservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
@@ -129,7 +147,21 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
       <div className="bg-zinc-50 p-6 rounded-2xl space-y-3">
         <div className="flex justify-between items-center">
           <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Subtotal</span>
-          <span className="font-bold">{formatCurrency(type === 'restaurant' ? totalDebits : grandTotal, currency, exchangeRate)}</span>
+          <span className="font-bold">{formatCurrency(subtotal, currency, exchangeRate)}</span>
+        </div>
+
+        {taxBreakdown.filter(t => t.showOnReceipt).map(tax => (
+          <div key={tax.id} className="flex justify-between items-center text-xs">
+            <span className="text-zinc-500 uppercase tracking-widest font-bold">
+              {tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}
+            </span>
+            <span className="font-bold">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+          </div>
+        ))}
+        
+        <div className="border-t border-zinc-200 pt-3 flex justify-between items-center">
+          <span className="text-sm font-black uppercase tracking-tighter">Grand Total</span>
+          <span className="text-xl font-black">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
         </div>
         
         {type === 'comprehensive' && (

@@ -26,6 +26,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Toaster } from 'sonner';
 
 import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
+import { OnboardingTour } from './components/OnboardingTour';
 
 function AppContent() {
   const { user, loading, profile, isSubscriptionActive } = useAuth();
@@ -72,6 +73,7 @@ function AppContent() {
   return (
     <div className="flex h-screen bg-zinc-950 overflow-hidden">
       <Toaster position="top-right" theme="dark" richColors />
+      <OnboardingTour />
       <Sidebar />
       <main className="flex-1 flex flex-col overflow-hidden">
         <TopBar />

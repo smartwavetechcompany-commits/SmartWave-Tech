@@ -19,6 +19,7 @@ import {
   XCircle,
   Settings,
   CreditCard,
+  Receipt,
   Link as LinkIcon,
   Users
 } from 'lucide-react';
@@ -28,6 +29,7 @@ import { cn } from '../utils';
 import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { StaffManagement } from './StaffManagement';
+import { SuperAdminReceipt } from './SuperAdminReceipt';
 
 import { toast } from 'sonner';
 
@@ -48,6 +50,8 @@ export function SuperAdmin() {
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [extendingHotel, setExtendingHotel] = useState<Hotel | null>(null);
   const [extendingCode, setExtendingCode] = useState<TrackingCode | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<TrackingCodeRequest | null>(null);
+  const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [changingPlanHotel, setChangingPlanHotel] = useState<Hotel | null>(null);
   const [managingStaffHotel, setManagingStaffHotel] = useState<Hotel | null>(null);
   const [showHistoryHotel, setShowHistoryHotel] = useState<Hotel | null>(null);
@@ -931,17 +935,37 @@ export function SuperAdmin() {
           
           {/* Tracking Code Requests */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="font-bold text-white flex items-center gap-2">
                 <Mail size={18} className="text-emerald-500" />
                 Tracking Code Requests
               </h3>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setFilterStatus('pending')}
+                  className={cn(
+                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                    filterStatus === 'pending' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 hover:text-white"
+                  )}
+                >
+                  Pending
+                </button>
+                <button 
+                  onClick={() => setFilterStatus('approved')}
+                  className={cn(
+                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                    filterStatus === 'approved' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 hover:text-white"
+                  )}
+                >
+                  Approved
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-zinc-800">
-              {requests.filter(r => r.status === 'pending').length === 0 ? (
-                <div className="p-8 text-center text-zinc-500 text-sm">No pending requests</div>
+              {requests.filter(r => r.status === filterStatus).length === 0 ? (
+                <div className="p-8 text-center text-zinc-500 text-sm">No {filterStatus} requests</div>
               ) : (
-                requests.filter(r => r.status === 'pending').map(request => (
+                requests.filter(r => r.status === filterStatus).map(request => (
                   <div key={request.id} className="p-6 hover:bg-zinc-800/50 transition-colors">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="space-y-1">
@@ -953,6 +977,11 @@ export function SuperAdmin() {
                           {request.type === 'extension' && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-500">
                               Extension
+                            </span>
+                          )}
+                          {request.status === 'approved' && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
+                              Approved
                             </span>
                           )}
                         </div>
@@ -971,20 +1000,32 @@ export function SuperAdmin() {
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <button 
-                          onClick={() => generateCodeForRequest(request)}
-                          className="flex-1 sm:flex-none bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-                        >
-                          <CheckCircle2 size={14} />
-                          Approve & Generate Code
-                        </button>
-                        <button 
-                          onClick={() => rejectRequest(request.id)}
-                          className="flex-1 sm:flex-none bg-zinc-800 text-zinc-400 px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-                        >
-                          <XCircle size={14} />
-                          Reject
-                        </button>
+                        {request.status === 'pending' ? (
+                          <>
+                            <button 
+                              onClick={() => generateCodeForRequest(request)}
+                              className="flex-1 sm:flex-none bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+                            >
+                              <CheckCircle2 size={14} />
+                              Approve & Generate Code
+                            </button>
+                            <button 
+                              onClick={() => rejectRequest(request.id)}
+                              className="flex-1 sm:flex-none bg-zinc-800 text-zinc-400 px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+                            >
+                              <XCircle size={14} />
+                              Reject
+                            </button>
+                          </>
+                        ) : (
+                          <button 
+                            onClick={() => setViewingReceipt(request)}
+                            className="flex-1 sm:flex-none bg-zinc-800 text-white px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+                          >
+                            <Receipt size={14} />
+                            View Receipt
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1224,6 +1265,20 @@ export function SuperAdmin() {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+      {/* Receipt Modal */}
+      {viewingReceipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
+            <button 
+              onClick={() => setViewingReceipt(null)}
+              className="absolute top-4 right-4 z-10 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all print:hidden"
+            >
+              <XCircle size={20} />
+            </button>
+            <SuperAdminReceipt request={viewingReceipt} settings={settings} />
           </div>
         </div>
       )}

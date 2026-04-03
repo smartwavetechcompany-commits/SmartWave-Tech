@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
+import { Tax } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 import { 
   User, 
@@ -18,7 +19,13 @@ import {
   CreditCard,
   Eye,
   EyeOff,
-  Info
+  Info,
+  Percent,
+  Receipt,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import { cn } from '../utils';
 import { toast } from 'sonner';
@@ -27,7 +34,7 @@ import { format, isValid } from 'date-fns';
 export function Settings() {
   const { profile, hotel, isSubscriptionActive, systemSettings } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   
@@ -119,6 +126,22 @@ export function Settings() {
     } catch (err) {
       console.error(err);
       toast.error('Failed to update profile.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveTaxes = async (updatedTaxes: Tax[]) => {
+    if (!hotel?.id) return;
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id), {
+        taxes: updatedTaxes
+      }, { merge: true });
+      toast.success('Taxes updated successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to update taxes');
     } finally {
       setIsSaving(false);
     }
@@ -239,6 +262,19 @@ export function Settings() {
             >
               <Smartphone size={18} />
               Branding
+            </button>
+          )}
+
+          {profile?.role === 'hotelAdmin' && (
+            <button 
+              onClick={() => setActiveTab('taxes')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
+                activeTab === 'taxes' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              )}
+            >
+              <Percent size={18} />
+              Taxes
             </button>
           )}
 
@@ -605,6 +641,129 @@ export function Settings() {
               </div>
             </div>
           )}
+          {activeTab === 'taxes' && (
+            <div className="space-y-8">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-lg font-bold text-white mb-1">Tax Management</h3>
+                  <p className="text-sm text-zinc-500">Configure taxes that apply to reservations and services.</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    const newTax: Tax = {
+                      id: Math.random().toString(36).substr(2, 9),
+                      name: '',
+                      percentage: 0,
+                      isInclusive: false,
+                      showOnReceipt: true,
+                      status: 'active'
+                    };
+                    const updatedTaxes = [...(hotel?.taxes || []), newTax];
+                    handleSaveTaxes(updatedTaxes);
+                  }}
+                  className="bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+                >
+                  <Plus size={18} />
+                  Add Tax
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {(!hotel?.taxes || hotel.taxes.length === 0) ? (
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-12 text-center">
+                    <Percent size={40} className="text-zinc-700 mx-auto mb-4" />
+                    <p className="text-zinc-500">No taxes configured yet.</p>
+                  </div>
+                ) : (
+                  hotel.taxes.map((tax, index) => (
+                    <div key={tax.id} className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Tax Name</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                            value={tax.name}
+                            placeholder="e.g. VAT, Service Charge"
+                            onChange={(e) => {
+                              const updatedTaxes = [...(hotel?.taxes || [])];
+                              updatedTaxes[index] = { ...tax, name: e.target.value };
+                              // We'll save on blur or with a separate button to avoid too many writes
+                            }}
+                            onBlur={(e) => {
+                              const updatedTaxes = [...(hotel?.taxes || [])];
+                              updatedTaxes[index] = { ...tax, name: e.target.value };
+                              handleSaveTaxes(updatedTaxes);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Percentage (%)</label>
+                          <input 
+                            type="number" 
+                            step="0.01"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                            value={tax.percentage}
+                            onChange={(e) => {
+                              const updatedTaxes = [...(hotel?.taxes || [])];
+                              updatedTaxes[index] = { ...tax, percentage: Number(e.target.value) };
+                            }}
+                            onBlur={(e) => {
+                              const updatedTaxes = [...(hotel?.taxes || [])];
+                              updatedTaxes[index] = { ...tax, percentage: Number(e.target.value) };
+                              handleSaveTaxes(updatedTaxes);
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center gap-3 pt-6">
+                          <button 
+                            onClick={() => {
+                              const updatedTaxes = [...(hotel?.taxes || [])];
+                              updatedTaxes[index] = { ...tax, isInclusive: !tax.isInclusive };
+                              handleSaveTaxes(updatedTaxes);
+                            }}
+                            className={cn(
+                              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                              tax.isInclusive ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                            )}
+                          >
+                            {tax.isInclusive ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                            Inclusive
+                          </button>
+                          <button 
+                            onClick={() => {
+                              const updatedTaxes = [...(hotel?.taxes || [])];
+                              updatedTaxes[index] = { ...tax, showOnReceipt: !tax.showOnReceipt };
+                              handleSaveTaxes(updatedTaxes);
+                            }}
+                            className={cn(
+                              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                              tax.showOnReceipt ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                            )}
+                          >
+                            {tax.showOnReceipt ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                            Show on Receipt
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-end pt-6">
+                          <button 
+                            onClick={() => {
+                              const updatedTaxes = hotel.taxes?.filter(t => t.id !== tax.id) || [];
+                              handleSaveTaxes(updatedTaxes);
+                            }}
+                            className="p-2 text-zinc-500 hover:text-red-500 transition-all"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'support' && (
             <div className="space-y-8">
               <div className="mb-8">

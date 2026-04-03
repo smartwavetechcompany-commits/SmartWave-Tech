@@ -3,6 +3,15 @@ export type StaffRole = 'receptionist' | 'housekeeper' | 'manager' | 'accountant
 export type SubscriptionStatus = 'active' | 'expired' | 'suspended';
 export type PlanType = 'standard' | 'premium' | 'enterprise';
 
+export interface Tax {
+  id: string;
+  name: string;
+  percentage: number;
+  isInclusive: boolean;
+  showOnReceipt: boolean;
+  status: 'active' | 'inactive';
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -15,6 +24,7 @@ export interface UserProfile {
   staffRole?: StaffRole;
   roles?: StaffRole[]; // Multi-role support
   subscriptionExpiry?: string;
+  hasCompletedOnboarding?: boolean;
 }
 
 export interface HotelBranding {
@@ -39,6 +49,7 @@ export interface Hotel {
   staffLimit: number;
   modulesEnabled: string[];
   branding?: HotelBranding;
+  taxes?: Tax[];
   limits?: {
     rooms: number;
     staff: number;
