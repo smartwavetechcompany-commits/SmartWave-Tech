@@ -136,7 +136,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
           <>
             <div className="flex justify-between items-center text-emerald-600">
               <span className="text-xs font-bold uppercase tracking-widest">Total Paid</span>
-              <span className="font-bold">-{formatCurrency(totalPaid, currency, exchangeRate)}</span>
+              <span className="font-bold">{formatCurrency(Math.abs(totalPaid), currency, exchangeRate)}</span>
             </div>
             <div className="border-t border-zinc-200 pt-3 flex justify-between items-center">
               <span className="text-sm font-black uppercase tracking-tighter">Balance Due</span>

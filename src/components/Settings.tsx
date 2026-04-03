@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth';
+import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { 
@@ -15,7 +15,9 @@ import {
   Lock,
   Mail,
   Calendar,
-  CreditCard
+  CreditCard,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { cn } from '../utils';
 import { toast } from 'sonner';
@@ -26,10 +28,14 @@ export function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(false);
   
   const [formData, setFormData] = useState({
     displayName: profile?.displayName || '',
     hotelName: hotel?.name || '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
     branding: {
       logoUrl: hotel?.branding?.logoUrl || '',
       primaryColor: hotel?.branding?.primaryColor || '#10b981',
@@ -40,6 +46,48 @@ export function Settings() {
       footerNotes: hotel?.branding?.footerNotes || '',
     }
   });
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser || !profile) return;
+    if (formData.newPassword !== formData.confirmPassword) {
+      toast.error('New passwords do not match');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Re-authenticate user first
+      const credential = EmailAuthProvider.credential(auth.currentUser.email!, formData.currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      
+      // Update password
+      await updatePassword(auth.currentUser, formData.newPassword);
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        action: 'CHANGE_PASSWORD',
+        resource: 'User Security',
+        hotelId: profile.hotelId,
+        module: 'Security'
+      });
+
+      toast.success('Password changed successfully!');
+      setFormData({ ...formData, currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/wrong-password') {
+        toast.error('Current password is incorrect');
+      } else {
+        toast.error('Failed to change password. ' + err.message);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -448,16 +496,71 @@ export function Settings() {
               <div>
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                   <Lock size={20} className="text-emerald-500" />
-                  Password & Security
+                  Change Password
+                </h3>
+                <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Current Password</label>
+                    <div className="relative">
+                      <input 
+                        required
+                        type={showPasswords ? "text" : "password"}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none pr-10"
+                        value={formData.currentPassword}
+                        onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowPasswords(!showPasswords)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                      >
+                        {showPasswords ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">New Password</label>
+                    <input 
+                      required
+                      type={showPasswords ? "text" : "password"}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      value={formData.newPassword}
+                      onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Confirm New Password</label>
+                    <input 
+                      required
+                      type={showPasswords ? "text" : "password"}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      value={formData.confirmPassword}
+                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    />
+                  </div>
+                  <button 
+                    disabled={isSaving}
+                    type="submit"
+                    className="bg-emerald-500 text-black px-6 py-2 rounded-lg font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isSaving ? 'Updating...' : 'Update Password'}
+                  </button>
+                </form>
+              </div>
+
+              <div className="pt-8 border-t border-zinc-800">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <Mail size={20} className="text-emerald-500" />
+                  Email Password Reset
                 </h3>
                 <p className="text-sm text-zinc-400 mb-6">
-                  To change your password, we will send a reset link to your registered email address.
+                  Alternatively, we can send a reset link to your registered email address.
                 </p>
                 <button 
                   className="px-6 py-2 rounded-lg border border-zinc-800 text-white hover:bg-zinc-800 transition-all active:scale-95 font-medium disabled:opacity-50"
                   onClick={() => setShowConfirmReset(true)}
                 >
-                  Request Password Reset
+                  Request Password Reset Link
                 </button>
               </div>
 

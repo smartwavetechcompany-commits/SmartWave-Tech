@@ -129,8 +129,47 @@ export function AuthPage() {
     try {
       if (isLogin) {
         console.log("Attempting login for:", formData.email);
-        await signInWithEmailAndPassword(auth, formData.email, formData.password);
-        console.log("Login successful in AuthPage");
+        try {
+          await signInWithEmailAndPassword(auth, formData.email, formData.password);
+          console.log("Login successful in AuthPage");
+        } catch (authErr: any) {
+          // If login fails, check if it's a staff member with an initial password
+          if (authErr.code === 'auth/invalid-credential' || authErr.code === 'auth/user-not-found' || authErr.code === 'auth/wrong-password') {
+            const staffQuery = query(
+              collection(db, 'users'), 
+              where('email', '==', formData.email.toLowerCase()), 
+              where('initialPassword', '==', formData.password)
+            );
+            const staffSnap = await getDocs(staffQuery);
+            
+            if (!staffSnap.empty) {
+              const staffDoc = staffSnap.docs[0];
+              const staffData = staffDoc.data();
+              
+              // Create the Auth user on the fly
+              const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+              const newUser = userCredential.user;
+              
+              // Update the user document: link to real UID and remove initialPassword
+              await setDoc(doc(db, 'users', newUser.uid), {
+                ...staffData,
+                uid: newUser.uid,
+                initialPassword: null, // Remove for security
+                status: 'active',
+                updatedAt: new Date().toISOString()
+              });
+              
+              // Delete the temporary staff document if it had a different ID
+              if (staffDoc.id !== newUser.uid) {
+                await deleteDoc(doc(db, 'users', staffDoc.id));
+              }
+              
+              showNotification('Welcome! Your account has been activated. Please change your password in settings for better security.', 'success');
+              return;
+            }
+          }
+          throw authErr;
+        }
       } else {
         // Registration Flow
         if (!user && formData.password !== formData.confirmPassword) {

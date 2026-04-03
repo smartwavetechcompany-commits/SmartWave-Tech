@@ -45,6 +45,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const [newStaff, setNewStaff] = useState({
     email: '',
     displayName: '',
+    password: '',
     role: 'staff' as const,
     roles: ['frontDesk'] as StaffRole[],
   });
@@ -76,9 +77,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId) return;
 
     const tempUid = `staff_${Math.random().toString(36).substr(2, 9)}`;
-    const staffProfile: UserProfile = {
+    const staffProfile: any = {
       uid: tempUid,
-      email: newStaff.email,
+      email: newStaff.email.toLowerCase(),
       hotelId: hotelId,
       role: 'staff',
       createdAt: new Date().toISOString(),
@@ -86,6 +87,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       permissions: newStaff.roles, // Keep for backward compatibility
       status: 'active',
       displayName: newStaff.displayName,
+      initialPassword: newStaff.password, // Store temporarily for first login
     };
 
     try {
@@ -96,12 +98,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         timestamp: new Date().toISOString(),
         user: profile?.email || profile?.uid || 'Unknown',
         action: 'CREATE_STAFF',
-        module: `Staff: ${newStaff.email} (${newStaff.roles.join(', ')})`
+        module: `Staff: ${newStaff.email} (${newStaff.roles.join(', ')})`,
+        details: `Initial password set by admin: ${newStaff.password}`
       });
 
       setIsAddingStaff(false);
-      setNewStaff({ email: '', displayName: '', role: 'staff', roles: ['frontDesk'] });
-      toast.success('Staff member added successfully');
+      setNewStaff({ email: '', displayName: '', password: '', role: 'staff', roles: ['frontDesk'] });
+      toast.success('Staff member added successfully. They can now login with the password you provided.');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
       toast.error('Failed to add staff member');
@@ -236,6 +239,18 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   value={newStaff.email}
                   onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Initial Password</label>
+                <input 
+                  required
+                  type="text" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  value={newStaff.password}
+                  onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
+                  placeholder="Set a password for them"
+                />
+                <p className="text-[10px] text-zinc-500 mt-1 italic">Tell the staff member this password so they can login.</p>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Primary Roles</label>

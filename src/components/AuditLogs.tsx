@@ -156,6 +156,11 @@ export function AuditLogs() {
                   </>
                 )}
               </div>
+              {(log as any).details && (
+                <div className="mt-2 p-2 bg-black/20 rounded border border-white/5 text-[10px] text-zinc-500 font-mono italic">
+                  {(log as any).details}
+                </div>
+              )}
             </div>
           ))
         )}
