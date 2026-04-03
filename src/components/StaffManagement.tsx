@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, setDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType } from '../types';
 import { 
@@ -70,8 +71,6 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     return () => unsub();
   }, [hotelId, profile?.uid, hasPermissionError]);
 
-  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
-
   const addStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotelId) return;
@@ -112,30 +111,24 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const removeStaff = async (staffUid: string, staffEmail: string) => {
     if (!hotelId) return;
 
-    setConfirmAction({
-      title: 'Remove Staff',
-      message: `Are you sure you want to remove ${staffEmail}?`,
-      onConfirm: async () => {
-        try {
-          await deleteDoc(doc(db, 'users', staffUid));
-          
-          // Log the action
-          await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
-            timestamp: new Date().toISOString(),
-            userId: profile?.uid,
-            userEmail: profile?.email,
-            action: 'DELETE_STAFF',
-            resource: `Staff: ${staffEmail}`,
-            hotelId: hotelId
-          });
-          toast.success('Staff member removed');
-          setConfirmAction(null);
-        } catch (err: any) {
-          handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
-          toast.error('Failed to remove staff member');
-        }
-      }
-    });
+    try {
+      await deleteDoc(doc(db, 'users', staffUid));
+      
+      // Log the action
+      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        action: 'DELETE_STAFF',
+        resource: `Staff: ${staffEmail}`,
+        hotelId: hotelId
+      });
+      toast.success('Staff member removed');
+      setShowConfirmRemove(null);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
+      toast.error('Failed to remove staff member');
+    }
   };
 
   const toggleRole = async (member: UserProfile, roleId: StaffRole) => {
@@ -175,6 +168,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   };
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
 
   const filteredStaff = staff.filter(member => {
     const search = searchTerm.toLowerCase();
@@ -184,29 +178,15 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   return (
     <div className="p-8 space-y-8 relative">
-      {/* Confirmation Modal */}
-      {confirmAction && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-2">{confirmAction.title}</h3>
-            <p className="text-zinc-400 text-sm mb-8 leading-relaxed">{confirmAction.message}</p>
-            <div className="flex gap-4">
-              <button 
-                onClick={() => setConfirmAction(null)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={confirmAction.onConfirm}
-                className="flex-1 bg-red-500 text-white font-bold py-2 rounded-lg hover:bg-red-400 transition-all active:scale-95"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={!!showConfirmRemove}
+        title="Remove Staff Member"
+        message={`Are you sure you want to remove ${showConfirmRemove?.email}? This action cannot be undone.`}
+        onConfirm={() => showConfirmRemove && removeStaff(showConfirmRemove.uid, showConfirmRemove.email)}
+        onCancel={() => setShowConfirmRemove(null)}
+        type="danger"
+        confirmText="Remove Staff"
+      />
 
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -387,7 +367,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                       )}
                       {member.role !== 'hotelAdmin' && member.uid !== profile?.uid && (
                         <button 
-                          onClick={() => removeStaff(member.uid, member.email)}
+                          onClick={() => setShowConfirmRemove({ uid: member.uid, email: member.email })}
                           className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                           title="Remove Staff"
                         >

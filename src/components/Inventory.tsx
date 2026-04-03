@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, orderBy, addDoc, updateDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { InventoryItem, OperationType } from '../types';
 import { Package, Plus, Search, Filter, AlertTriangle, History, ArrowUp, ArrowDown, Trash2, Edit2, MoreHorizontal, ChevronRight, Box, ShoppingCart } from 'lucide-react';
@@ -25,6 +26,7 @@ export function Inventory() {
     minThreshold: 5
   });
 
+  const [showConfirmDelete, setShowConfirmDelete] = useState<InventoryItem | null>(null);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   useEffect(() => {
@@ -115,6 +117,7 @@ export function Inventory() {
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'inventory', itemId));
       toast.success('Item deleted');
+      setShowConfirmDelete(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory/${itemId}`);
       toast.error('Failed to delete item');
@@ -131,6 +134,16 @@ export function Inventory() {
 
   return (
     <div className="p-8 space-y-8">
+      <ConfirmModal
+        isOpen={!!showConfirmDelete}
+        title="Delete Inventory Item"
+        message={`Are you sure you want to delete ${showConfirmDelete?.name}? This action cannot be undone.`}
+        onConfirm={() => showConfirmDelete && deleteItem(showConfirmDelete.id)}
+        onCancel={() => setShowConfirmDelete(null)}
+        type="danger"
+        confirmText="Delete Item"
+      />
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Inventory Management</h1>
@@ -286,7 +299,7 @@ export function Inventory() {
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => deleteItem(item.id)}
+                        onClick={() => setShowConfirmDelete(item)}
                         className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all"
                       >
                         <Trash2 size={16} />

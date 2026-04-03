@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { db, auth } from '../firebase';
+import { ConfirmModal } from './ConfirmModal';
 import { 
   User, 
   Building2, 
@@ -24,6 +25,7 @@ export function Settings() {
   const { profile, hotel, isSubscriptionActive } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security'>('profile');
+  const [showConfirmReset, setShowConfirmReset] = useState(false);
   
   const [formData, setFormData] = useState({
     displayName: profile?.displayName || '',
@@ -123,6 +125,19 @@ export function Settings() {
       toast.error('Failed to update hotel branding.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!profile?.email) return;
+    try {
+      await sendPasswordResetEmail(auth, profile.email);
+      toast.success('Password reset link sent to: ' + profile.email);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to send reset email. Please try again later.');
+    } finally {
+      setShowConfirmReset(false);
     }
   };
 
@@ -440,20 +455,21 @@ export function Settings() {
                 </p>
                 <button 
                   className="px-6 py-2 rounded-lg border border-zinc-800 text-white hover:bg-zinc-800 transition-all active:scale-95 font-medium disabled:opacity-50"
-                  onClick={async () => {
-                    if (!profile?.email) return;
-                    try {
-                      await sendPasswordResetEmail(auth, profile.email);
-                      toast.success('Password reset link sent to: ' + profile.email);
-                    } catch (err) {
-                      console.error(err);
-                      toast.error('Failed to send reset email. Please try again later.');
-                    }
-                  }}
+                  onClick={() => setShowConfirmReset(true)}
                 >
                   Request Password Reset
                 </button>
               </div>
+
+              <ConfirmModal
+                isOpen={showConfirmReset}
+                title="Reset Password"
+                message={`Are you sure you want to request a password reset link? It will be sent to ${profile?.email}.`}
+                onConfirm={handleResetPassword}
+                onCancel={() => setShowConfirmReset(false)}
+                type="warning"
+                confirmText="Send Reset Link"
+              />
 
               <div className="pt-8 border-t border-zinc-800">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">

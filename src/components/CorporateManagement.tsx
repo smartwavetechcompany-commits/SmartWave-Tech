@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 
 import { CorporateFolio } from './CorporateFolio';
+import { ConfirmModal } from './ConfirmModal';
 
 export function CorporateManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -63,6 +64,7 @@ export function CorporateManagement() {
     conditions: ''
   });
 
+  const [confirmDeleteRate, setConfirmDeleteRate] = useState<string | null>(null);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   const hasPermission = () => {
@@ -226,8 +228,6 @@ export function CorporateManagement() {
   const deleteRate = async (rateId: string) => {
     if (!hotel?.id || !showRatesModal) return;
     
-    if (!window.confirm('Are you sure you want to delete this negotiated rate?')) return;
-
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', rateId));
       toast.success('Rate deleted successfully');
@@ -661,7 +661,7 @@ export function CorporateManagement() {
                           </div>
                           {hasPermission() && (
                             <button 
-                              onClick={() => deleteRate(rate.id)}
+                              onClick={() => setConfirmDeleteRate(rate.id)}
                               className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                             >
                               <Trash2 size={16} />
@@ -685,6 +685,16 @@ export function CorporateManagement() {
           onClose={() => setShowFolioModal(null)} 
         />
       )}
+
+      <ConfirmModal
+        isOpen={!!confirmDeleteRate}
+        title="Delete Negotiated Rate"
+        message="Are you sure you want to delete this negotiated rate?"
+        onConfirm={() => confirmDeleteRate && deleteRate(confirmDeleteRate)}
+        onCancel={() => setConfirmDeleteRate(null)}
+        confirmText="Delete"
+        type="danger"
+      />
     </div>
   );
 }

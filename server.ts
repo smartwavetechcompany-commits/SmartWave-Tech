@@ -22,37 +22,12 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa",
     });
-    app.use(vite.middlewares);
     
-    // SPA fallback for development
-    app.use('*', async (req, res, next) => {
-      const url = req.originalUrl;
-      
-      // Skip if it's an API request or a file request that should have been handled
-      // We check for common file extensions to avoid intercepting assets
-      const isAsset = /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|json|map)$/.test(url);
-      const acceptsHtml = req.headers.accept?.includes('text/html');
-
-      if (url.startsWith('/api') || (isAsset && !acceptsHtml)) {
-        return next();
-      }
-
-      try {
-        // Read index.html from the root
-        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
-        
-        // Apply Vite HTML transforms
-        template = await vite.transformIndexHtml(url, template);
-        
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        next(e);
-      }
-    });
+    app.use(vite.middlewares);
   } else {
     // Serve static files from dist in production
     const distPath = path.join(process.cwd(), 'dist');
+    
     app.use(express.static(distPath));
     
     // SPA fallback: serve index.html for all unknown routes

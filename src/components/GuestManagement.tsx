@@ -33,6 +33,7 @@ import { format } from 'date-fns';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { toast } from 'sonner';
+import { ConfirmModal } from './ConfirmModal';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -59,6 +60,7 @@ export function GuestManagement() {
     corporateId: ''
   });
 
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   useEffect(() => {
@@ -156,8 +158,6 @@ export function GuestManagement() {
   const deleteGuest = async (guestId: string) => {
     if (!hotel?.id) return;
     
-    if (!window.confirm('Are you sure you want to delete this guest profile? This action cannot be undone.')) return;
-
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'guests', guestId));
       toast.success('Guest profile deleted');
@@ -344,7 +344,7 @@ export function GuestManagement() {
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => deleteGuest(guest.id)}
+                        onClick={() => setConfirmDelete(guest.id)}
                         className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all"
                       >
                         <Trash2 size={16} />
@@ -653,6 +653,16 @@ export function GuestManagement() {
           </motion.div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={!!confirmDelete}
+        title="Delete Guest Profile"
+        message="Are you sure you want to delete this guest profile? This action cannot be undone."
+        onConfirm={() => confirmDelete && deleteGuest(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+        confirmText="Delete"
+        type="danger"
+      />
     </div>
   );
 }

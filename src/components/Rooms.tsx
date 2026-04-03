@@ -33,7 +33,7 @@ export function Rooms() {
     name: '',
     description: '',
     basePrice: 0,
-    capacity: 2,
+    capacity: 0,
     amenities: [] as string[],
   });
   const [searchQuery, setSearchQuery] = useState('');
@@ -153,7 +153,7 @@ export function Rooms() {
         name: '',
         description: '',
         basePrice: 0,
-        capacity: 2,
+        capacity: 0,
         amenities: [],
       });
       setEditingRoomType(null);
@@ -163,6 +163,7 @@ export function Rooms() {
   };
 
   const [showConfirmDelete, setShowConfirmDelete] = useState<string | null>(null);
+  const [showConfirmDeleteRoom, setShowConfirmDeleteRoom] = useState<string | null>(null);
 
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
@@ -171,6 +172,16 @@ export function Rooms() {
       toast.success('Room type deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/room_types/${id}`);
+    }
+  };
+
+  const deleteRoom = async (id: string) => {
+    if (!hotel?.id) return;
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'rooms', id));
+      toast.success('Room deleted successfully');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rooms/${id}`);
     }
   };
 
@@ -258,13 +269,6 @@ export function Rooms() {
               {roomTypes.map(type => (
                 <option key={type.id} value={type.name}>{type.name}</option>
               ))}
-              {roomTypes.length === 0 && (
-                <>
-                  <option value="Standard">Standard</option>
-                  <option value="Deluxe">Deluxe</option>
-                  <option value="Suite">Suite</option>
-                </>
-              )}
             </select>
             <select 
               className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-emerald-500"
@@ -604,6 +608,16 @@ export function Rooms() {
         confirmText="Delete"
       />
 
+      <ConfirmModal
+        isOpen={!!showConfirmDeleteRoom}
+        title="Delete Room"
+        message="Are you sure you want to delete this room? This action cannot be undone."
+        onConfirm={() => showConfirmDeleteRoom && deleteRoom(showConfirmDeleteRoom)}
+        onCancel={() => setShowConfirmDeleteRoom(null)}
+        type="danger"
+        confirmText="Delete"
+      />
+
       {view === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
           {filteredRooms.length === 0 ? (
@@ -668,13 +682,7 @@ export function Rooms() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button 
-                      onClick={async () => {
-                        try {
-                          await deleteDoc(doc(db, 'hotels', hotel!.id, 'rooms', room.id));
-                        } catch (err) {
-                          handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel!.id}/rooms/${room.id}`);
-                        }
-                      }}
+                      onClick={() => setShowConfirmDeleteRoom(room.id)}
                       className="text-zinc-600 hover:text-red-500 transition-colors"
                     >
                       <XCircle size={18} />
