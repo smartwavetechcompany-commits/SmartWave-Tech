@@ -17,16 +17,17 @@ import {
   Calendar,
   CreditCard,
   Eye,
-  EyeOff
+  EyeOff,
+  Info
 } from 'lucide-react';
 import { cn } from '../utils';
 import { toast } from 'sonner';
 import { format, isValid } from 'date-fns';
 
 export function Settings() {
-  const { profile, hotel, isSubscriptionActive } = useAuth();
+  const { profile, hotel, isSubscriptionActive, systemSettings } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   
@@ -65,15 +66,17 @@ export function Settings() {
       await updatePassword(auth.currentUser, formData.newPassword);
       
       // Log action
-      await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        action: 'CHANGE_PASSWORD',
-        resource: 'User Security',
-        hotelId: profile.hotelId,
-        module: 'Security'
-      });
+      if (profile.hotelId) {
+        await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+          timestamp: new Date().toISOString(),
+          userId: profile.uid,
+          userEmail: profile.email,
+          action: 'CHANGE_PASSWORD',
+          resource: 'User Security',
+          hotelId: profile.hotelId,
+          module: 'Security'
+        });
+      }
 
       toast.success('Password changed successfully!');
       setFormData({ ...formData, currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -100,14 +103,17 @@ export function Settings() {
       }, { merge: true });
 
       // Log action
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        action: 'UPDATE_PROFILE',
-        resource: 'User Profile',
-        hotelId: profile.hotelId
-      });
+      if (profile.hotelId) {
+        await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+          timestamp: new Date().toISOString(),
+          userId: profile.uid,
+          userEmail: profile.email,
+          action: 'UPDATE_PROFILE',
+          resource: 'User Profile',
+          hotelId: profile.hotelId,
+          module: 'Security'
+        });
+      }
 
       toast.success('Profile updated successfully!');
     } catch (err) {
@@ -245,6 +251,17 @@ export function Settings() {
           >
             <Shield size={18} />
             Security
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('support')}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
+              activeTab === 'support' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+            )}
+          >
+            <Mail size={18} />
+            Help & Support
           </button>
         </aside>
 
@@ -585,6 +602,65 @@ export function Settings() {
                 <button className="px-6 py-2 rounded-lg bg-zinc-800 text-zinc-500 cursor-not-allowed font-medium">
                   Enable 2FA (Coming Soon)
                 </button>
+              </div>
+            </div>
+          )}
+          {activeTab === 'support' && (
+            <div className="space-y-8">
+              <div className="mb-8">
+                <h3 className="text-lg font-bold text-white mb-1">Help & Support</h3>
+                <p className="text-sm text-zinc-500">Need assistance? Our team is here to help you.</p>
+              </div>
+
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 space-y-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-emerald-500/10 text-emerald-500 rounded-xl flex items-center justify-center">
+                    <Mail size={24} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white">Email Support</h4>
+                    <p className="text-sm text-zinc-500">Send us an email and we'll get back to you within 24 hours.</p>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-zinc-800">
+                  <a 
+                    href={`mailto:${systemSettings?.supportEmail || 'support@smartwave.com'}`}
+                    className="flex items-center justify-center gap-2 w-full bg-emerald-500 text-black font-bold py-3 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                  >
+                    <Mail size={18} />
+                    {systemSettings?.supportEmail || 'support@smartwave.com'}
+                  </a>
+                </div>
+              </div>
+
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 space-y-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-500/10 text-blue-500 rounded-xl flex items-center justify-center">
+                    <Info size={24} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white">System Information</h4>
+                    <p className="text-sm text-zinc-500">Details about your current hotel and plan.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase">Hotel ID</span>
+                    <p className="text-sm text-white font-mono">{hotel?.id}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase">Current Plan</span>
+                    <p className="text-sm text-white capitalize">{hotel?.plan}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase">Subscription Expiry</span>
+                    <p className="text-sm text-white">
+                      {hotel?.subscriptionExpiry ? format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy') : 'N/A'}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}

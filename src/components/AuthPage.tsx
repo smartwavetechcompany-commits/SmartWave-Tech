@@ -5,7 +5,7 @@ import { auth, db, handleFirestoreError } from '../firebase';
 import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
+import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail } from 'lucide-react';
 import { cn } from '../utils';
 
 export function AuthPage() {
@@ -19,8 +19,11 @@ export function AuthPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [settings, setSettings] = useState({
-    paymentLink: '',
-    bankDetails: '',
+    paymentInstructions: '',
+    supportEmail: '',
+    bankName: '',
+    accountNumber: '',
+    accountName: '',
   });
 
   const { user, profile } = useAuth();
@@ -502,32 +505,40 @@ export function AuthPage() {
                 <h4 className="text-xs font-bold uppercase">Payment Instructions</h4>
               </div>
               
-              <p className="text-[10px] text-zinc-400 leading-relaxed">
-                After submitting, please complete your payment. Include your Hotel Name as reference. 
-                Once confirmed, your tracking code will be sent to your email.
-              </p>
-
-              {settings.paymentLink && (
-                <a 
-                  href={settings.paymentLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full bg-emerald-500/10 text-emerald-500 py-2 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all"
-                >
-                  <ExternalLink size={14} />
-                  Pay Online Now
-                </a>
+              {settings.paymentInstructions ? (
+                <p className="text-[10px] text-zinc-400 leading-relaxed whitespace-pre-wrap">
+                  {settings.paymentInstructions}
+                </p>
+              ) : (
+                <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  After submitting, please complete your payment. Include your Hotel Name as reference. 
+                  Once confirmed, your tracking code will be sent to your email.
+                </p>
               )}
 
-              {settings.bankDetails && (
+              {(settings.bankName || settings.accountNumber || settings.accountName) && (
                 <div className="pt-2 border-t border-emerald-500/10">
                   <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500 uppercase mb-1">
                     <CreditCard size={10} />
                     Bank Transfer Details
                   </div>
-                  <pre className="text-[10px] text-zinc-400 font-mono whitespace-pre-wrap bg-black/20 p-2 rounded border border-white/5">
-                    {settings.bankDetails}
-                  </pre>
+                  <div className="text-[10px] text-zinc-400 font-mono bg-black/20 p-2 rounded border border-white/5 space-y-1">
+                    {settings.bankName && <div>Bank: {settings.bankName}</div>}
+                    {settings.accountNumber && <div>Account: {settings.accountNumber}</div>}
+                    {settings.accountName && <div>Name: {settings.accountName}</div>}
+                  </div>
+                </div>
+              )}
+
+              {settings.supportEmail && (
+                <div className="pt-2 border-t border-emerald-500/10">
+                  <a 
+                    href={`mailto:${settings.supportEmail}`}
+                    className="flex items-center justify-center gap-2 w-full bg-zinc-800 text-zinc-400 py-2 rounded-lg text-[10px] font-bold hover:bg-zinc-700 hover:text-white transition-all"
+                  >
+                    <Mail size={12} />
+                    Contact Support: {settings.supportEmail}
+                  </a>
                 </div>
               )}
             </div>

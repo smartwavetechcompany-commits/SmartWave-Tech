@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, setDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { db, auth, handleFirestoreError } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType } from '../types';
@@ -14,7 +15,8 @@ import {
   CheckCircle2,
   XCircle,
   Lock,
-  ChevronRight
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '../utils';
 import { toast } from 'sonner';
@@ -51,6 +53,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [isResetting, setIsResetting] = useState<string | null>(null);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -131,6 +134,34 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
       toast.error('Failed to remove staff member');
+    }
+  };
+
+  const handleResetPassword = async (email: string, uid: string) => {
+    if (!email) return;
+    setIsResetting(uid);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      
+      // Log the action
+      if (hotelId) {
+        await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+          timestamp: new Date().toISOString(),
+          userId: profile?.uid,
+          userEmail: profile?.email,
+          action: 'STAFF_PASSWORD_RESET_SENT',
+          resource: `Staff: ${email}`,
+          hotelId: hotelId,
+          module: 'Staff'
+        });
+      }
+      
+      toast.success(`Password reset email sent to ${email}`);
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Failed to send reset email: ' + err.message);
+    } finally {
+      setIsResetting(null);
     }
   };
 
@@ -377,6 +408,19 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
+                      {member.role !== 'hotelAdmin' && (
+                        <button 
+                          onClick={() => handleResetPassword(member.email, member.uid)}
+                          disabled={isResetting === member.uid}
+                          className={cn(
+                            "p-2 transition-colors",
+                            isResetting === member.uid ? "text-zinc-700 animate-spin" : "text-zinc-500 hover:text-emerald-500"
+                          )}
+                          title="Send Password Reset Email"
+                        >
+                          <RefreshCw size={18} />
+                        </button>
+                      )}
                       {member.role !== 'hotelAdmin' && (
                         <button 
                           onClick={() => setEditingPermissions(member)}

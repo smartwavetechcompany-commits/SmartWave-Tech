@@ -15,6 +15,7 @@ interface AuthContextType {
   currency: 'NGN' | 'USD';
   setCurrency: (currency: 'NGN' | 'USD') => void;
   exchangeRate: number;
+  systemSettings: SystemSettings | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -175,7 +176,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isSubscriptionActive,
       currency,
       setCurrency,
-      exchangeRate
+      exchangeRate,
+      systemSettings
     }}>
       {children}
     </AuthContext.Provider>
