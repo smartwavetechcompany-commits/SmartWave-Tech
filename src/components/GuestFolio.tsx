@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance } from '../services/ledgerService';
+import { ReceiptGenerator } from './ReceiptGenerator';
 import { 
   Receipt, 
   User, 
@@ -39,6 +40,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showTransferBalanceModal, setShowTransferBalanceModal] = useState(false);
   const [otherReservations, setOtherReservations] = useState<Reservation[]>([]);
   const [transferTargetId, setTransferTargetId] = useState('');
+  const [showReceipt, setShowReceipt] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id || !reservation.id || !reservation.guestId) return;
@@ -94,7 +96,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      // If no entries in collection, fallback to reservation.ledgerEntries
+      if (entries.length === 0 && reservation.ledgerEntries && reservation.ledgerEntries.length > 0) {
+        setLedgerEntries(reservation.ledgerEntries);
+      } else {
+        setLedgerEntries(entries);
+      }
       setLoading(false);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
@@ -138,11 +146,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </div>
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => window.print()}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
-              title="Print Folio"
+              onClick={() => setShowReceipt(true)}
+              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-2"
+              title="Print Receipt"
             >
               <Printer size={20} />
+              <span className="text-xs font-bold">Print Receipt</span>
             </button>
             <button 
               onClick={onClose}
@@ -152,6 +161,25 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
           </div>
         </div>
+
+        {showReceipt && hotel && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-center justify-center p-4 overflow-y-auto">
+            <div className="relative w-full max-w-md">
+              <button 
+                onClick={() => setShowReceipt(false)}
+                className="absolute -top-12 right-0 p-2 text-white hover:bg-white/10 rounded-full transition-all"
+              >
+                <XCircle size={32} />
+              </button>
+              <ReceiptGenerator 
+                hotel={hotel} 
+                reservation={reservation} 
+                type="comprehensive" 
+                ledgerEntries={ledgerEntries} 
+              />
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
           {/* Guest & Stay Info */}

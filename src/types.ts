@@ -227,6 +227,7 @@ export interface LedgerEntry {
   amount: number;
   description: string;
   timestamp: string;
+  reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
   category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer';
   postedBy: string;

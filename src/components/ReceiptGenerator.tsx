@@ -17,7 +17,12 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const balance = totalDebits - totalCredits;
+  
+  // If room charges are already in ledger, don't add reservation.totalAmount again
+  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
+  const grandTotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
+  const totalPaid = totalCredits + (hasRoomChargeInLedger ? 0 : (reservation.paidAmount || 0));
+  const balance = grandTotal - totalPaid;
 
   return (
     <div className="bg-white text-black p-8 max-w-[400px] mx-auto font-mono text-sm shadow-lg">
@@ -85,17 +90,17 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
       <div className="space-y-1">
         <div className="flex justify-between font-bold text-lg">
           <span>TOTAL</span>
-          <span>{formatCurrency(type === 'restaurant' ? totalDebits : (reservation.totalAmount + totalDebits - reservation.totalAmount), currency, exchangeRate)}</span>
+          <span>{formatCurrency(type === 'restaurant' ? totalDebits : grandTotal, currency, exchangeRate)}</span>
         </div>
         {type === 'comprehensive' && (
           <>
             <div className="flex justify-between text-emerald-700">
               <span>Paid</span>
-              <span>{formatCurrency(totalCredits + (reservation.paidAmount || 0), currency, exchangeRate)}</span>
+              <span>{formatCurrency(totalPaid, currency, exchangeRate)}</span>
             </div>
             <div className="flex justify-between font-bold border-t border-black pt-1">
               <span>BALANCE DUE</span>
-              <span>{formatCurrency(Math.max(0, (reservation.totalAmount + totalDebits - (reservation.paidAmount || 0) - totalCredits)), currency, exchangeRate)}</span>
+              <span>{formatCurrency(Math.max(0, balance), currency, exchangeRate)}</span>
             </div>
           </>
         )}
