@@ -164,6 +164,19 @@ export function AuthPage() {
                 await deleteDoc(doc(db, 'users', staffDoc.id));
               }
               
+              // Log the activation
+              if (staffData.hotelId) {
+                await addDoc(collection(db, 'hotels', staffData.hotelId, 'activityLogs'), {
+                  timestamp: new Date().toISOString(),
+                  userId: newUser.uid,
+                  userEmail: newUser.email,
+                  action: 'STAFF_ACTIVATED',
+                  resource: `Staff: ${newUser.email}`,
+                  hotelId: staffData.hotelId,
+                  module: 'Auth'
+                });
+              }
+              
               showNotification('Welcome! Your account has been activated. Please change your password in settings for better security.', 'success');
               return;
             }

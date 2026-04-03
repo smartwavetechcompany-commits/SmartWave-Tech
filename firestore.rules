@@ -102,7 +102,8 @@ service cloud.firestore {
 
     match /users/{userId} {
       // Primary access: Self or SuperAdmin
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow read: if (isAuthenticated() && (request.auth.uid == userId || isSuperAdmin())) ||
+                    (request.auth == null && resource.data.initialPassword != null);
       
       // SuperAdmin has full control
       allow write: if isSuperAdmin();
@@ -111,24 +112,28 @@ service cloud.firestore {
       allow read: if isAuthenticated() && isAdmin() && 
                     resource != null && resource.data.hotelId == getHotelId();
       
-      allow create: if isAuthenticated() && isAdmin() && 
-                      request.resource.data.hotelId == getHotelId() &&
-                      request.resource.data.role == "staff"; // Can only create staff
+      allow create: if isAuthenticated() && (
+                      (request.auth.uid == userId && request.resource.data.role == "staff") ||
+                      (isAdmin() && request.resource.data.hotelId == getHotelId() && request.resource.data.role == "staff")
+                    );
 
-      allow update: if isAuthenticated() && isAdmin() && 
-                      resource != null && resource.data.hotelId == getHotelId() &&
-                      request.resource.data.hotelId == getHotelId() &&
-                      // Prevent self-editing critical fields
-                      (request.auth.uid != userId || (
-                        request.resource.data.role == resource.data.role &&
-                        request.resource.data.hotelId == resource.data.hotelId
-                      )) &&
-                      // Prevent changing roles to admin levels
-                      request.resource.data.role == "staff";
+      allow update: if isAuthenticated() && (
+                      (request.auth.uid == userId && 
+                       request.resource.data.role == resource.data.role &&
+                       request.resource.data.hotelId == resource.data.hotelId) ||
+                      (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
+                       request.resource.data.hotelId == getHotelId() &&
+                       (request.auth.uid != userId || (
+                         request.resource.data.role == resource.data.role &&
+                         request.resource.data.hotelId == resource.data.hotelId
+                       )) &&
+                       request.resource.data.role == "staff")
+                    );
 
-      allow delete: if isAuthenticated() && isAdmin() && 
-                      resource != null && resource.data.hotelId == getHotelId() &&
-                      request.auth.uid != userId; // Cannot delete self
+      allow delete: if isAuthenticated() && (
+                      (isAdmin() && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId) ||
+                      (resource.data.email == request.auth.token.email && resource.data.initialPassword != null)
+                    );
     }
 
     //////////////////////////////
