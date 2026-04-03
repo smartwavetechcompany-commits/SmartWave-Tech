@@ -11,6 +11,7 @@ interface ConfirmModalProps {
   confirmText?: string;
   cancelText?: string;
   type?: 'danger' | 'warning' | 'info';
+  isLoading?: boolean;
 }
 
 export function ConfirmModal({
@@ -21,7 +22,8 @@ export function ConfirmModal({
   onCancel,
   confirmText = 'Confirm',
   cancelText = 'Cancel',
-  type = 'info'
+  type = 'info',
+  isLoading = false
 }: ConfirmModalProps) {
   return (
     <AnimatePresence>
@@ -62,14 +64,16 @@ export function ConfirmModal({
                 <button
                   onClick={() => {
                     onConfirm();
-                    onCancel();
+                    if (!isLoading) onCancel();
                   }}
-                  className={`flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 ${
+                  disabled={isLoading}
+                  className={`flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 ${
                     type === 'danger' ? 'bg-red-500 text-white hover:bg-red-400' :
                     type === 'warning' ? 'bg-amber-500 text-black hover:bg-amber-400' :
                     'bg-emerald-500 text-black hover:bg-emerald-400'
-                  }`}
+                  } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
+                  {isLoading && <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />}
                   {confirmText}
                 </button>
               </div>

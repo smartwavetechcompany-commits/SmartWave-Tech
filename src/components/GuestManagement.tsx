@@ -30,6 +30,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { toast } from 'sonner';
@@ -156,11 +157,29 @@ export function GuestManagement() {
   };
 
   const deleteGuest = async (guestId: string) => {
-    if (!hotel?.id) return;
+    if (!hotel?.id || !profile) return;
+    
+    if (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+      toast.error('Only administrators can delete guest profiles');
+      return;
+    }
     
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'guests', guestId));
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        action: 'GUEST_DELETED',
+        resource: `Guest ID: ${guestId}`,
+        hotelId: hotel.id,
+        module: 'Guests'
+      });
+      
       toast.success('Guest profile deleted');
+      setConfirmDelete(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/guests/${guestId}`);
       toast.error('Failed to delete guest profile');
@@ -168,31 +187,24 @@ export function GuestManagement() {
   };
 
   const exportGuests = () => {
-    const headers = ['Name', 'Email', 'Phone', 'ID Type', 'ID Number', 'Address', 'Total Stays', 'Total Spent', 'Balance'];
-    const csvContent = [
-      headers.join(','),
-      ...guests.map(g => [
-        `"${g.name}"`,
-        `"${g.email}"`,
-        `"${g.phone}"`,
-        `"${g.idType}"`,
-        `"${g.idNumber}"`,
-        `"${g.address}"`,
-        g.totalStays || 0,
-        g.totalSpent || 0,
-        g.ledgerBalance || 0
-      ].join(','))
-    ].join('\n');
+    const data = guests.map(g => ({
+      Name: g.name,
+      Email: g.email,
+      Phone: g.phone,
+      'ID Type': g.idType,
+      'ID Number': g.idNumber,
+      Address: g.address,
+      'Total Stays': g.totalStays || 0,
+      'Total Spent': g.totalSpent || 0,
+      'Balance': g.ledgerBalance || 0,
+      'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
+    }));
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `guests_export_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Guests");
+    XLSX.writeFile(wb, `guests_export_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    toast.success("Guest data exported to Excel");
   };
 
   const filteredGuests = guests.filter(guest => {
@@ -344,8 +356,19 @@ export function GuestManagement() {
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => setConfirmDelete(guest.id)}
-                        className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all"
+                        onClick={() => {
+                          if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+                            toast.error('Only administrators can delete guest profiles');
+                            return;
+                          }
+                          setConfirmDelete(guest.id);
+                        }}
+                        className={cn(
+                          "p-2 rounded-lg transition-all",
+                          (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') 
+                            ? "text-zinc-500 hover:text-red-500" 
+                            : "text-zinc-700 cursor-not-allowed"
+                        )}
                       >
                         <Trash2 size={16} />
                       </button>

@@ -44,6 +44,7 @@ export interface Hotel {
     staff: number;
   };
   adminUIDs?: string[];
+  website?: string;
   planHistory?: {
     plan: PlanType;
     previousPlan?: PlanType;
@@ -216,6 +217,7 @@ export interface Guest {
   totalSpent: number;
   lastStay?: string;
   stayHistory?: string[]; // Reservation IDs
+  createdAt?: string;
 }
 
 export interface LedgerEntry {
@@ -229,7 +231,7 @@ export interface LedgerEntry {
   timestamp: string;
   reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate';
   postedBy: string;
 }
 

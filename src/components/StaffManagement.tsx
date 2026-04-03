@@ -170,6 +170,16 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const [searchTerm, setSearchTerm] = useState('');
   const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
 
+  if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+    return (
+      <div className="p-8 flex flex-col items-center justify-center h-[60vh] text-center">
+        <Lock size={48} className="text-zinc-700 mb-4" />
+        <h2 className="text-xl font-bold text-white mb-2">Access Restricted</h2>
+        <p className="text-zinc-400">Only administrators can manage staff members.</p>
+      </div>
+    );
+  }
+
   const filteredStaff = staff.filter(member => {
     const search = searchTerm.toLowerCase();
     return (member.displayName?.toLowerCase() || '').includes(search) || 

@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AuditLog, OperationType } from '../types';
 import { format, isValid } from 'date-fns';
-import { ClipboardList, User, Clock, Tag, RefreshCw, Building2 } from 'lucide-react';
+import { ClipboardList, User, Clock, Tag, RefreshCw, Building2, Lock } from 'lucide-react';
 
 export function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -96,6 +96,16 @@ export function AuditLogs() {
 
     return () => unsub();
   }, [hotel?.id, profile?.uid, profile?.role, hasPermissionError]);
+
+  if (profile?.role !== 'superAdmin' && profile?.role !== 'hotelAdmin') {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center">
+        <Lock size={48} className="mx-auto text-zinc-700 mb-4" />
+        <h3 className="text-lg font-bold text-white mb-2">Access Restricted</h3>
+        <p className="text-zinc-400 text-sm">You do not have permission to view system activity logs.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">

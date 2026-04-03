@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferLedgerBalance, deleteLedgerEntry } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
+import { ConfirmModal } from './ConfirmModal';
 import { 
   Receipt, 
   User, 
@@ -18,7 +19,8 @@ import {
   Building2,
   XCircle,
   Printer,
-  Download
+  Download,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -41,6 +43,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [otherReservations, setOtherReservations] = useState<Reservation[]>([]);
   const [transferTargetId, setTransferTargetId] = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<LedgerEntry | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id || !reservation.id || !reservation.guestId) return;
@@ -96,7 +100,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
       // If no entries in collection, fallback to reservation.ledgerEntries
       if (entries.length === 0 && reservation.ledgerEntries && reservation.ledgerEntries.length > 0) {
         setLedgerEntries(reservation.ledgerEntries);
@@ -124,7 +128,40 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const balance = totalDebits - totalCredits;
+  
+  // If room charges are already in ledger, don't add reservation.totalAmount again
+  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
+  const grandTotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
+  const totalPaid = totalCredits + (hasRoomChargeInLedger ? 0 : (reservation.paidAmount || 0));
+  const balance = grandTotal - totalPaid;
+
+  const handleDeleteEntry = async () => {
+    if (!hotel?.id || !confirmDelete || !profile) return;
+    
+    try {
+      setIsDeleting(true);
+      await deleteLedgerEntry(hotel.id, confirmDelete as any);
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        action: 'LEDGER_ENTRY_DELETED',
+        resource: `${confirmDelete.description} (${formatCurrency(confirmDelete.amount, currency, exchangeRate)})`,
+        hotelId: hotel.id,
+        module: 'Folio'
+      });
+      
+      toast.success('Transaction deleted');
+      setConfirmDelete(null);
+    } catch (err) {
+      console.error("Delete error:", err);
+      toast.error('Failed to delete transaction');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -247,11 +284,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Total Charges</span>
-                  <span className="text-white font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>
+                  <span className="text-white font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Total Payments</span>
-                  <span className="text-emerald-500 font-bold">{formatCurrency(totalCredits, currency, exchangeRate)}</span>
+                  <span className="text-emerald-500 font-bold">{formatCurrency(totalPaid, currency, exchangeRate)}</span>
                 </div>
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
                   <span className="text-sm font-bold text-white uppercase">Balance Due</span>
@@ -342,19 +379,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <th className="px-6 py-3">Category</th>
                     <th className="px-6 py-3 text-right">Debit</th>
                     <th className="px-6 py-3 text-right">Credit</th>
+                    {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                      <th className="px-6 py-3 text-right">Actions</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800">
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
                         <Clock size={24} className="mx-auto mb-2 animate-spin opacity-20" />
                         Loading transactions...
                       </td>
                     </tr>
                   ) : ledgerEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
                         No transactions recorded for this stay.
                       </td>
                     </tr>
@@ -379,6 +419,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
                           {entry.type === 'credit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
                         </td>
+                        {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              onClick={() => setConfirmDelete(entry)}
+                              className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                              title="Delete Transaction"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -392,6 +443,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
                       {formatCurrency(totalCredits, currency, exchangeRate)}
                     </td>
+                    {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                      <td className="px-6 py-4"></td>
+                    )}
                   </tr>
                 </tfoot>
               </table>
@@ -434,6 +488,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </button>
         </div>
       </motion.div>
+
+      <ConfirmModal
+        isOpen={!!confirmDelete}
+        title="Delete Transaction"
+        message={`Are you sure you want to delete the transaction "${confirmDelete?.description}"? This will also reverse the balance update for the guest.`}
+        onConfirm={handleDeleteEntry}
+        onCancel={() => setConfirmDelete(null)}
+        confirmText="Delete"
+        type="danger"
+        isLoading={isDeleting}
+      />
     </div>
   );
 }
