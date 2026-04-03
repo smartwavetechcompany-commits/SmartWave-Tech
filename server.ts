@@ -29,7 +29,11 @@ async function startServer() {
       const url = req.originalUrl;
       
       // Skip if it's an API request or a file request that should have been handled
-      if (url.startsWith('/api') || (url.includes('.') && !req.headers.accept?.includes('text/html'))) {
+      // We check for common file extensions to avoid intercepting assets
+      const isAsset = /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|json|map)$/.test(url);
+      const acceptsHtml = req.headers.accept?.includes('text/html');
+
+      if (url.startsWith('/api') || (isAsset && !acceptsHtml)) {
         return next();
       }
 

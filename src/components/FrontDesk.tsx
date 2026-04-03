@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
 import { postToLedger, settleLedger } from '../services/ledgerService';
+import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { motion, AnimatePresence } from 'motion/react';
@@ -46,6 +47,7 @@ export function FrontDesk() {
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
   const [showFolioModal, setShowFolioModal] = useState<Reservation | null>(null);
+  const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' } | null>(null);
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
     category: 'restaurant' as const,
@@ -1371,11 +1373,7 @@ export function FrontDesk() {
                       )}
                       {res.status === 'pending' && (
                         <button 
-                          onClick={() => {
-                            if (window.confirm(`Mark ${res.guestName} as No-Show?`)) {
-                              updateReservationStatus(res, 'no_show');
-                            }
-                          }}
+                          onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
                           className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
                           title="Mark No-Show"
                         >
@@ -1384,11 +1382,7 @@ export function FrontDesk() {
                       )}
                       {res.status === 'pending' && (
                         <button 
-                          onClick={() => {
-                            if (window.confirm(`Are you sure you want to cancel the reservation for ${res.guestName}?`)) {
-                              updateReservationStatus(res, 'cancelled');
-                            }
-                          }}
+                          onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
                           className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
                           title="Cancel"
                         >
@@ -1543,6 +1537,23 @@ export function FrontDesk() {
           }}
         />
       )}
+
+      <ConfirmModal
+        isOpen={!!showConfirmAction}
+        title={showConfirmAction?.action === 'no_show' ? 'Mark No-Show' : 'Cancel Reservation'}
+        message={showConfirmAction?.action === 'no_show' 
+          ? `Are you sure you want to mark ${showConfirmAction?.res.guestName} as No-Show?`
+          : `Are you sure you want to cancel the reservation for ${showConfirmAction?.res.guestName}?`
+        }
+        onConfirm={() => {
+          if (showConfirmAction) {
+            updateReservationStatus(showConfirmAction.res, showConfirmAction.action);
+          }
+        }}
+        onCancel={() => setShowConfirmAction(null)}
+        type={showConfirmAction?.action === 'no_show' ? 'warning' : 'danger'}
+        confirmText={showConfirmAction?.action === 'no_show' ? 'Confirm No-Show' : 'Cancel Reservation'}
+      />
     </div>
   );
 }

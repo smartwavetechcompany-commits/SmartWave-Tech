@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, addDoc, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType, RoomType } from '../types';
 import { 
@@ -43,13 +44,26 @@ export function Rooms() {
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
     roomNumber: '',
-    type: 'Standard',
-    price: 100,
+    type: '',
+    price: 0,
     floor: '1',
-    capacity: 2,
+    capacity: 0,
     amenities: [] as string[],
     description: '',
   });
+
+  useEffect(() => {
+    if (roomTypes.length > 0 && !newRoom.type) {
+      const firstType = roomTypes[0];
+      setNewRoom(prev => ({
+        ...prev,
+        type: firstType.name,
+        price: firstType.basePrice,
+        capacity: firstType.capacity,
+        amenities: firstType.amenities || []
+      }));
+    }
+  }, [roomTypes, newRoom.type]);
 
   const amenitiesOptions = [
     'WiFi', 'AC', 'TV', 'Mini Bar', 'Safe', 'Balcony', 'Sea View', 'Bathtub'
@@ -148,9 +162,10 @@ export function Rooms() {
     }
   };
 
+  const [showConfirmDelete, setShowConfirmDelete] = useState<string | null>(null);
+
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
-    if (!window.confirm('Are you sure you want to delete this room type?')) return;
     try {
       await deleteDoc(doc(db, 'hotels', hotel.id, 'room_types', id));
       toast.success('Room type deleted successfully');
@@ -315,6 +330,7 @@ export function Rooms() {
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type</label>
                   <select 
+                    required
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                     value={newRoom.type}
                     onChange={(e) => {
@@ -322,23 +338,20 @@ export function Rooms() {
                       setNewRoom({ 
                         ...newRoom, 
                         type: e.target.value,
-                        price: type?.basePrice || newRoom.price,
-                        capacity: type?.capacity || newRoom.capacity,
-                        amenities: type?.amenities || newRoom.amenities
+                        price: type?.basePrice || 0,
+                        capacity: type?.capacity || 0,
+                        amenities: type?.amenities || []
                       });
                     }}
                   >
+                    <option value="" disabled>Select Type</option>
                     {roomTypes.map(type => (
                       <option key={type.id} value={type.name}>{type.name}</option>
                     ))}
-                    {roomTypes.length === 0 && (
-                      <>
-                        <option>Standard</option>
-                        <option>Deluxe</option>
-                        <option>Suite</option>
-                      </>
-                    )}
                   </select>
+                  {roomTypes.length === 0 && (
+                    <p className="text-[10px] text-amber-500 mt-1">Please add a room type first using the "Types" button.</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Floor</label>
@@ -408,7 +421,8 @@ export function Rooms() {
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                  disabled={roomTypes.length === 0 || !newRoom.type}
+                  className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Create Room
                 </button>
@@ -560,7 +574,7 @@ export function Rooms() {
                           <Edit2 size={18} />
                         </button>
                         <button 
-                          onClick={() => deleteRoomType(type.id)}
+                          onClick={() => setShowConfirmDelete(type.id)}
                           className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
                         >
                           <Trash2 size={18} />
@@ -579,6 +593,16 @@ export function Rooms() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={!!showConfirmDelete}
+        title="Delete Room Type"
+        message="Are you sure you want to delete this room type? This action cannot be undone."
+        onConfirm={() => showConfirmDelete && deleteRoomType(showConfirmDelete)}
+        onCancel={() => setShowConfirmDelete(null)}
+        type="danger"
+        confirmText="Delete"
+      />
 
       {view === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">

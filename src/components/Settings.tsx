@@ -17,6 +17,7 @@ import {
   CreditCard
 } from 'lucide-react';
 import { cn } from '../utils';
+import { toast } from 'sonner';
 import { format, isValid } from 'date-fns';
 
 export function Settings() {
@@ -58,10 +59,10 @@ export function Settings() {
         hotelId: profile.hotelId
       });
 
-      alert('Profile updated successfully!');
+      toast.success('Profile updated successfully!');
     } catch (err) {
       console.error(err);
-      alert('Failed to update profile.');
+      toast.error('Failed to update profile.');
     } finally {
       setIsSaving(false);
     }
@@ -87,10 +88,10 @@ export function Settings() {
         hotelId: hotel.id
       });
 
-      alert('Hotel settings updated!');
+      toast.success('Hotel settings updated!');
     } catch (err) {
       console.error(err);
-      alert('Failed to update hotel settings.');
+      toast.error('Failed to update hotel settings.');
     } finally {
       setIsSaving(false);
     }
@@ -116,10 +117,10 @@ export function Settings() {
         hotelId: hotel.id
       });
 
-      alert('Hotel branding updated!');
+      toast.success('Hotel branding updated!');
     } catch (err) {
       console.error(err);
-      alert('Failed to update hotel branding.');
+      toast.error('Failed to update hotel branding.');
     } finally {
       setIsSaving(false);
     }
@@ -443,10 +444,10 @@ export function Settings() {
                     if (!profile?.email) return;
                     try {
                       await sendPasswordResetEmail(auth, profile.email);
-                      alert('Password reset link sent to: ' + profile.email);
+                      toast.success('Password reset link sent to: ' + profile.email);
                     } catch (err) {
                       console.error(err);
-                      alert('Failed to send reset email. Please try again later.');
+                      toast.error('Failed to send reset email. Please try again later.');
                     }
                   }}
                 >
