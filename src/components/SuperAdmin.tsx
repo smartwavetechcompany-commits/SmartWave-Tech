@@ -168,6 +168,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: profile?.email || auth.currentUser.email || auth.currentUser.uid,
+        userRole: 'superAdmin',
         action: 'APPROVE_CODE_REQUEST',
         target: `Hotel: ${request.hotelName}, Code: ${code}`
       };
@@ -221,6 +222,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
+        userRole: 'superAdmin',
         action: 'GENERATE_TRACKING_CODE',
         target: `Code: ${code} (${newCode.duration})`
       };
@@ -251,6 +253,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
+        userRole: 'superAdmin',
         action: 'EXTEND_TRACKING_CODE',
         target: `Code ${code.code}: +${months} months`
       };
@@ -280,6 +283,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: profile?.email || profile?.uid || 'system',
+        userRole: 'superAdmin',
         action: 'GIVE_LIVE_ACCESS',
         target: `Hotel: ${hotel.name}`
       };
@@ -302,6 +306,7 @@ export function SuperAdmin() {
           const log: Omit<GlobalAuditLog, 'id'> = {
             timestamp: new Date().toISOString(),
             actor: profile?.email || profile?.uid || 'system',
+            userRole: 'superAdmin',
             action: 'DELETE_HOTEL',
             target: `Hotel: ${hotel.name}`
           };
@@ -324,6 +329,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: profile?.email || profile?.uid || 'system',
+        userRole: 'superAdmin',
         action: 'TOGGLE_HOTEL_STATUS',
         target: `Hotel ${hotel.name}: ${newStatus}`
       };
@@ -348,6 +354,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: profile?.email || profile?.uid || 'system',
+        userRole: 'superAdmin',
         action: 'EXTEND_SUBSCRIPTION',
         target: `Hotel ${hotel.name}: +${months} months`
       };
@@ -420,6 +427,7 @@ export function SuperAdmin() {
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
+        userRole: 'superAdmin',
         action: 'CHANGE_HOTEL_PLAN',
         target: `Hotel ${hotel.name}: ${hotel.plan} -> ${newPlan} (Amount: ${planChangeAmount})`
       };

@@ -82,6 +82,7 @@ export function Inventory() {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
+        userRole: profile.role,
         action: editingItem ? 'INVENTORY_ITEM_UPDATED' : 'INVENTORY_ITEM_CREATED',
         resource: `${newItem.name} (${newItem.quantity} ${newItem.unit})`,
         hotelId: hotel.id,

@@ -111,6 +111,7 @@ export function Settings() {
           timestamp: new Date().toISOString(),
           userId: profile.uid,
           userEmail: profile.email,
+          userRole: profile.role,
           action: 'CHANGE_PASSWORD',
           resource: 'User Security',
           hotelId: profile.hotelId,
@@ -148,6 +149,7 @@ export function Settings() {
           timestamp: new Date().toISOString(),
           userId: profile.uid,
           userEmail: profile.email,
+          userRole: profile.role,
           action: 'UPDATE_PROFILE',
           resource: 'User Profile',
           hotelId: profile.hotelId,
@@ -179,6 +181,7 @@ export function Settings() {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
+        userRole: profile.role,
         action: 'UPDATE_HOTEL_SETTINGS',
         resource: `Hotel: ${formData.hotelName}`,
         hotelId: hotel.id
@@ -208,6 +211,7 @@ export function Settings() {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
+        userRole: profile.role,
         action: 'UPDATE_HOTEL_BRANDING',
         resource: `Hotel Branding: ${hotel.name}`,
         hotelId: hotel.id

@@ -129,6 +129,7 @@ export function GuestManagement() {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
+        userRole: profile.role,
         action: editingGuest ? 'GUEST_UPDATED' : 'GUEST_CREATED',
         resource: `${newGuest.name} (${newGuest.email})`,
         hotelId: hotel.id,

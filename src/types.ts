@@ -88,6 +88,7 @@ export interface GlobalAuditLog {
   id: string;
   timestamp: string;
   actor: string;
+  userRole?: UserRole;
   action: string;
   target: string;
 }
@@ -120,6 +121,7 @@ export interface AuditLog {
   action: string;
   userId: string;
   userEmail: string;
+  userRole?: UserRole;
   hotelId: string;
   timestamp: string;
   details: string;
@@ -295,6 +297,7 @@ export interface ActivityLog {
   timestamp: string;
   userId: string;
   userEmail: string;
+  userRole?: UserRole;
   action: string;
   resource: string;
   hotelId: string;

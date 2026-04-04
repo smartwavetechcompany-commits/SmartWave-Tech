@@ -52,9 +52,13 @@ export function Housekeeping() {
       // Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        user: profile?.email || profile?.uid || 'Unknown',
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
         action: 'HOUSEKEEPING_UPDATE',
-        module: `Room ${room?.roomNumber || roomId}: ${status}`
+        resource: `Room ${room?.roomNumber || roomId}: ${status}`,
+        hotelId: hotel.id,
+        module: 'Housekeeping'
       });
       toast.success(`Room ${room?.roomNumber} marked as ${status}`);
     } catch (err) {

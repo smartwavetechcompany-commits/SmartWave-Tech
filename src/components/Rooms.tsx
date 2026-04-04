@@ -196,9 +196,13 @@ export function Rooms() {
       // Log the action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        user: profile?.email || profile?.uid || 'Unknown',
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
         action: 'UPDATE_ROOM_STATUS',
-        module: `Room ${room?.roomNumber || roomId}: ${status}`
+        resource: `Room ${room?.roomNumber || roomId}: ${status}`,
+        hotelId: hotel.id,
+        module: 'Rooms'
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
@@ -236,9 +240,13 @@ export function Rooms() {
       // Log the action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        user: profile?.email || profile?.uid || 'Unknown',
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
         action: 'BULK_UPDATE_ROOM_STATUS',
-        module: `${selectedRooms.length} rooms set to ${status}`
+        resource: `${selectedRooms.length} rooms set to ${status}`,
+        hotelId: hotel.id,
+        module: 'Rooms'
       });
 
       toast.success(`Successfully updated ${selectedRooms.length} rooms`, { id: loadingToast });

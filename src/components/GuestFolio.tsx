@@ -166,6 +166,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
+        userRole: profile.role,
         action: 'LEDGER_ENTRY_DELETED',
         resource: `${confirmDelete.description} (${formatCurrency(confirmDelete.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,

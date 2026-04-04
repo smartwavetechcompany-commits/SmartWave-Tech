@@ -199,6 +199,7 @@ export function Finance() {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
+        userRole: profile?.role,
         action: 'FINANCE_RECORD_CREATED',
         resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,

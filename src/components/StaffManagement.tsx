@@ -100,9 +100,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       // Log the action
       await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
-        user: profile?.email || profile?.uid || 'Unknown',
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
         action: 'CREATE_STAFF',
-        module: `Staff: ${newStaff.email} (${newStaff.roles.join(', ')})`,
+        resource: `Staff: ${newStaff.email} (${newStaff.roles.join(', ')})`,
+        hotelId: hotelId,
+        module: 'Staff',
         details: `Initial password set by admin: ${newStaff.password}`
       });
 
@@ -126,9 +130,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
+        userRole: profile?.role,
         action: 'DELETE_STAFF',
         resource: `Staff: ${staffEmail}`,
-        hotelId: hotelId
+        hotelId: hotelId,
+        module: 'Staff'
       });
       toast.success('Staff member removed');
       setShowConfirmRemove(null);
@@ -150,6 +156,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           timestamp: new Date().toISOString(),
           userId: profile?.uid,
           userEmail: profile?.email,
+          userRole: profile?.role,
           action: 'STAFF_PASSWORD_RESET_SENT',
           resource: `Staff: ${email}`,
           hotelId: hotelId,
@@ -190,6 +197,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
+        userRole: profile?.role,
         action: 'UPDATE_STAFF_ROLES',
         resource: `Staff: ${member.email}, Roles: ${newRoles.join(', ')}`,
         hotelId: hotelId,

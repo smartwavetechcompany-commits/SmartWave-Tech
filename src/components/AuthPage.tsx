@@ -173,6 +173,7 @@ export function AuthPage() {
                   timestamp: new Date().toISOString(),
                   userId: newUser.uid,
                   userEmail: newUser.email,
+                  userRole: 'staff',
                   action: 'STAFF_ACTIVATED',
                   resource: `Staff: ${newUser.email}`,
                   hotelId: staffData.hotelId,
