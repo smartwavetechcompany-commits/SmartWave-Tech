@@ -36,17 +36,19 @@ export const postToLedger = async (
   // but we use the custom ID for arrayUnion/arrayRemove consistency
   
   // 3. Update Guest or Corporate Account balance
-  const amount = entry.type === 'debit' ? entry.amount : -entry.amount;
+  // User requested: "OVERSTAY SHOULD GIVE NEGATIVE TO SHOW THE GUEST IS OWNING"
+  // So: Debit (Charge) = Negative, Credit (Payment) = Positive
+  const balanceAdjustment = entry.type === 'debit' ? -entry.amount : entry.amount;
 
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
     await updateDoc(corpRef, {
-      currentBalance: increment(amount)
+      currentBalance: increment(balanceAdjustment)
     });
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
     await updateDoc(guestRef, {
-      ledgerBalance: increment(amount),
+      ledgerBalance: increment(balanceAdjustment),
       totalSpent: increment(entry.type === 'debit' ? entry.amount : 0)
     });
   }
@@ -72,7 +74,7 @@ export const deleteLedgerEntry = async (
   // For now, let's focus on the ledger collection which is what GuestFolio uses.
 
   // 3. Reverse the balance update
-  const reverseAmount = type === 'debit' ? -amount : amount;
+  const reverseAmount = type === 'debit' ? amount : -amount;
 
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
@@ -131,6 +133,42 @@ export const transferLedgerBalance = async (
     category: 'transfer',
     description: `Balance Transfer from Res #${fromReservationId.slice(-6).toUpperCase()}`,
     referenceId: fromReservationId,
+    postedBy
+  }, postedBy);
+};
+
+export const refundGuest = async (
+  hotelId: string,
+  guestId: string,
+  reservationId: string,
+  amount: number,
+  reason: string,
+  postedBy: string
+) => {
+  return postToLedger(hotelId, guestId, reservationId, {
+    amount,
+    type: 'debit',
+    category: 'service',
+    description: `Refund/Balance Adjustment: ${reason}`,
+    referenceId: reservationId,
+    postedBy
+  }, postedBy);
+};
+
+export const settleOverpayment = async (
+  hotelId: string,
+  guestId: string,
+  reservationId: string,
+  amount: number,
+  method: string,
+  postedBy: string
+) => {
+  return postToLedger(hotelId, guestId, reservationId, {
+    amount,
+    type: 'debit',
+    category: 'payment',
+    description: `Overpayment Settlement (${method})`,
+    referenceId: reservationId,
     postedBy
   }, postedBy);
 };

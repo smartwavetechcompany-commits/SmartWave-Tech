@@ -18,10 +18,12 @@ import {
   Calendar,
   DollarSign,
   X,
-  Lock
+  Lock,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, exportToCSV } from '../utils';
+import { fuzzySearch } from '../utils/searchUtils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -238,9 +240,24 @@ export function CorporateManagement() {
   };
 
   const filteredAccounts = accounts.filter(a => 
-    (a.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) || 
-    (a.contactPerson?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+    fuzzySearch(a.name || '', searchQuery) || 
+    fuzzySearch(a.contactPerson || '', searchQuery)
   );
+
+  const handleExport = () => {
+    const dataToExport = filteredAccounts.map(acc => ({
+      Name: acc.name,
+      Email: acc.email,
+      Phone: acc.phone,
+      Contact: acc.contactPerson,
+      TaxID: acc.taxId,
+      CreditLimit: acc.creditLimit,
+      Balance: acc.currentBalance,
+      BillingCycle: acc.billingCycle
+    }));
+    exportToCSV(dataToExport, `corporate_accounts_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    toast.success('Corporate accounts exported successfully');
+  };
 
   return (
     <div className="p-8 space-y-8">
@@ -249,22 +266,31 @@ export function CorporateManagement() {
           <h1 className="text-3xl font-bold text-white tracking-tight">Corporate Accounts</h1>
           <p className="text-zinc-400">Manage corporate partnerships and billing</p>
         </div>
-        {hasPermission() && (
+        <div className="flex items-center gap-3">
           <button 
-            onClick={() => {
-              setEditingAccount(null);
-              setNewAccount({
-                name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
-                creditLimit: 0, currentBalance: 0, billingCycle: 'monthly'
-              });
-              setShowAddModal(true);
-            }}
-            className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
-            <Plus size={18} />
-            Add Account
+            <Download size={18} />
+            Export CSV
           </button>
-        )}
+          {hasPermission() && (
+            <button 
+              onClick={() => {
+                setEditingAccount(null);
+                setNewAccount({
+                  name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
+                  creditLimit: 0, currentBalance: 0, billingCycle: 'monthly'
+                });
+                setShowAddModal(true);
+              }}
+              className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+            >
+              <Plus size={18} />
+              Add Account
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -328,7 +354,7 @@ export function CorporateManagement() {
                     <div className="text-sm text-white">Limit: {formatCurrency(account.creditLimit, currency, exchangeRate)}</div>
                     <div className={cn(
                       "text-xs font-bold",
-                      (account.currentBalance || 0) > account.creditLimit * 0.8 ? "text-red-500" : "text-emerald-500"
+                      Math.abs(account.currentBalance || 0) > account.creditLimit * 0.8 ? "text-red-500" : "text-emerald-500"
                     )}>
                       Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}
                     </div>

@@ -1,15 +1,35 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { collection, getDocs, query, orderBy, limit, where, onSnapshot, collectionGroup } from 'firebase/firestore';
+import React, { useEffect, useState, useMemo } from 'react';
+import { collection, onSnapshot, collectionGroup } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AuditLog, OperationType } from '../types';
 import { format, isValid } from 'date-fns';
-import { ClipboardList, User, Clock, Tag, RefreshCw, Building2, Lock } from 'lucide-react';
+import { 
+  ClipboardList, 
+  User, 
+  Clock, 
+  Tag, 
+  RefreshCw, 
+  Building2, 
+  Lock,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  Filter,
+  Download
+} from 'lucide-react';
+import { cn, exportToCSV } from '../utils';
+import { toast } from 'sonner';
 
 export function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId'; direction: 'asc' | 'desc' }>({
+    key: 'timestamp',
+    direction: 'desc'
+  });
 
   const { hotel, profile } = useAuth();
 
@@ -33,29 +53,19 @@ export function AuditLogs() {
 
     try {
       if (profile.role === 'superAdmin') {
-        // Fetch without orderBy to avoid index requirement
         const q = collectionGroup(db, 'activityLogs');
         unsub = onSnapshot(q, (snap) => {
-          const allLogs = snap.docs.map(doc => ({ 
-            id: doc.id, 
-            ...doc.data(),
-            hotelId: (doc.data() as any).hotelId || (doc.ref.parent.parent?.id)
-          } as any));
-
-          // Client-side sorting and limiting
-          const sortedLogs = allLogs
-            .sort((a, b) => {
-              const getTime = (ts: any) => {
-                if (!ts) return 0;
-                if (ts.toMillis) return ts.toMillis();
-                if (ts.seconds) return ts.seconds * 1000;
-                return new Date(ts).getTime() || 0;
-              };
-              return getTime(b.timestamp) - getTime(a.timestamp);
-            })
-            .slice(0, 100);
-
-          setLogs(sortedLogs);
+          const allLogs = snap.docs.map(doc => {
+            const data = doc.data();
+            return { 
+              id: doc.id, 
+              ...data,
+              actor: data.actor || data.user || data.userEmail || 'Unknown',
+              target: data.target || data.resource || data.module || 'System',
+              hotelId: data.hotelId || (doc.ref.parent.parent?.id)
+            } as any;
+          });
+          setLogs(allLogs);
           setLoading(false);
         }, (err: any) => {
           handleFirestoreError(err, OperationType.LIST, 'collectionGroup/activityLogs');
@@ -63,25 +73,18 @@ export function AuditLogs() {
           setLoading(false);
         });
       } else if (hotel?.id) {
-        // Fetch without orderBy to avoid index requirement
         const q = collection(db, 'hotels', hotel.id, 'activityLogs');
         unsub = onSnapshot(q, (snap) => {
-          const allLogs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-          
-          // Client-side sorting and limiting
-          const sortedLogs = allLogs
-            .sort((a, b) => {
-              const getTime = (ts: any) => {
-                if (!ts) return 0;
-                if (ts.toMillis) return ts.toMillis();
-                if (ts.seconds) return ts.seconds * 1000;
-                return new Date(ts).getTime() || 0;
-              };
-              return getTime(b.timestamp) - getTime(a.timestamp);
-            })
-            .slice(0, 50);
-
-          setLogs(sortedLogs);
+          const allLogs = snap.docs.map(doc => {
+            const data = doc.data();
+            return { 
+              id: doc.id, 
+              ...data,
+              actor: data.actor || data.user || data.userEmail || 'Unknown',
+              target: data.target || data.resource || data.module || 'System'
+            } as any;
+          });
+          setLogs(allLogs);
           setLoading(false);
         }, (err: any) => {
           handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/activityLogs`);
@@ -97,6 +100,54 @@ export function AuditLogs() {
     return () => unsub();
   }, [hotel?.id, profile?.uid, profile?.role, hasPermissionError]);
 
+  const handleSort = (key: typeof sortConfig.key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  const filteredAndSortedLogs = useMemo(() => {
+    let result = [...logs];
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(log => 
+        (log as any).actor?.toLowerCase().includes(query) ||
+        log.action?.toLowerCase().includes(query) ||
+        (log as any).target?.toLowerCase().includes(query) ||
+        log.details?.toLowerCase().includes(query)
+      );
+    }
+
+    result.sort((a, b) => {
+      const aValue = (a as any)[sortConfig.key];
+      const bValue = (b as any)[sortConfig.key];
+
+      if (sortConfig.key === 'timestamp') {
+        const getTime = (ts: any) => {
+          if (!ts) return 0;
+          if (ts.toMillis) return ts.toMillis();
+          if (ts.seconds) return ts.seconds * 1000;
+          return new Date(ts).getTime() || 0;
+        };
+        return sortConfig.direction === 'desc' 
+          ? getTime(bValue) - getTime(aValue)
+          : getTime(aValue) - getTime(bValue);
+      }
+
+      const strA = String(aValue || '').toLowerCase();
+      const strB = String(bValue || '').toLowerCase();
+
+      if (sortConfig.direction === 'desc') {
+        return strB.localeCompare(strA);
+      }
+      return strA.localeCompare(strB);
+    });
+
+    return result;
+  }, [logs, searchQuery, sortConfig]);
+
   if (profile?.role !== 'superAdmin' && profile?.role !== 'hotelAdmin') {
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center">
@@ -107,63 +158,159 @@ export function AuditLogs() {
     );
   }
 
+  const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
+    if (sortConfig.key !== column) return <Filter size={12} className="opacity-20" />;
+    return sortConfig.direction === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />;
+  };
+
+  const handleExport = () => {
+    const dataToExport = filteredAndSortedLogs.map(log => ({
+      Timestamp: safeFormat(log.timestamp, 'yyyy-MM-dd HH:mm:ss'),
+      Actor: (log as any).actor || log.userEmail || 'Unknown',
+      Action: log.action,
+      Target: (log as any).target || 'System',
+      HotelID: log.hotelId || 'N/A'
+    }));
+    exportToCSV(dataToExport, `audit_logs_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    toast.success('Audit logs exported successfully');
+  };
+
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-      <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-        <h3 className="font-bold text-white flex items-center gap-2">
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col h-full">
+      <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
           <ClipboardList size={18} className="text-emerald-500" />
-          System Activity Logs
-        </h3>
-        <button 
-          onClick={() => {}}
-          disabled={loading}
-          className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
-          title="Refresh Logs"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-        </button>
+          <h3 className="font-bold text-white">System Activity Logs</h3>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+            <input 
+              type="text"
+              placeholder="Search logs..."
+              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-sm text-white focus:border-emerald-500 outline-none transition-all w-full sm:w-64"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <button 
+            onClick={() => {}}
+            disabled={loading}
+            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            title="Refresh Logs"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
       </div>
-      <div className="divide-y divide-zinc-800 max-h-[400px] overflow-y-auto">
-        {loading && logs.length === 0 ? (
-          <div className="p-8 text-center text-zinc-500 text-sm">Loading logs...</div>
-        ) : logs.length === 0 ? (
-          <div className="p-8 text-center text-zinc-500 text-sm">No activity logs found</div>
-        ) : (
-          logs.map(log => (
-            <div key={log.id} className="p-4 hover:bg-zinc-800/50 transition-colors">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <User size={14} className="text-zinc-500" />
-                  {(log as any).actor || (log as any).user || (log as any).userEmail || 'Unknown'}
+
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-left border-collapse">
+          <thead className="sticky top-0 bg-zinc-900 z-10 shadow-sm">
+            <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
+              <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('timestamp')}>
+                <div className="flex items-center gap-2">
+                  Date & Time
+                  <SortIcon column="timestamp" />
                 </div>
-                <div className="flex items-center gap-1 text-[10px] text-zinc-500 uppercase font-bold">
-                  <Clock size={12} />
-                  {safeFormat(log.timestamp, 'MMM d, HH:mm:ss')}
+              </th>
+              <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('actor')}>
+                <div className="flex items-center gap-2">
+                  Actor
+                  <SortIcon column="actor" />
                 </div>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <Tag size={12} className="text-emerald-500" />
-                <span className="font-semibold text-emerald-500/80 uppercase tracking-wider">{log.action}</span>
-                <span>on</span>
-                <span className="text-zinc-300">{(log as any).target || (log as any).resource || (log as any).module || 'System'}</span>
-                {profile.role === 'superAdmin' && (log as any).hotelId && (
-                  <>
-                    <span className="text-zinc-600">•</span>
-                    <span className="flex items-center gap-1 text-blue-400">
-                      <Building2 size={10} />
-                      {(log as any).hotelId}
-                    </span>
-                  </>
-                )}
-              </div>
-              {(log as any).details && (
-                <div className="mt-2 p-2 bg-black/20 rounded border border-white/5 text-[10px] text-zinc-500 font-mono italic">
-                  {(log as any).details}
+              </th>
+              <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('action')}>
+                <div className="flex items-center gap-2">
+                  Action
+                  <SortIcon column="action" />
                 </div>
+              </th>
+              <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('target')}>
+                <div className="flex items-center gap-2">
+                  Target
+                  <SortIcon column="target" />
+                </div>
+              </th>
+              {profile.role === 'superAdmin' && (
+                <th className="px-6 py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('hotelId')}>
+                  <div className="flex items-center gap-2">
+                    Hotel
+                    <SortIcon column="hotelId" />
+                  </div>
+                </th>
               )}
-            </div>
-          ))
-        )}
+              <th className="px-6 py-4">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {loading && filteredAndSortedLogs.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="p-12 text-center text-zinc-500 text-sm italic">Loading activity logs...</td>
+              </tr>
+            ) : filteredAndSortedLogs.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="p-12 text-center text-zinc-500 text-sm italic">No activity logs found matching your search</td>
+              </tr>
+            ) : (
+              filteredAndSortedLogs.map(log => (
+                <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors group">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-white font-medium">{safeFormat(log.timestamp, 'MMM d, yyyy')}</span>
+                      <span className="text-[10px] text-zinc-500">{safeFormat(log.timestamp, 'HH:mm:ss')}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2 text-xs text-zinc-300">
+                      <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-500">
+                        {(log as any).actor?.charAt(0).toUpperCase()}
+                      </div>
+                      {(log as any).actor}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                      {log.action}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <Tag size={12} className="text-zinc-600" />
+                      {(log as any).target}
+                    </div>
+                  </td>
+                  {profile.role === 'superAdmin' && (
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-1 text-[10px] text-blue-400 font-bold uppercase tracking-tight">
+                        <Building2 size={12} />
+                        {(log as any).hotelId || 'N/A'}
+                      </div>
+                    </td>
+                  )}
+                  <td className="px-6 py-4 max-w-xs">
+                    <p className="text-[10px] text-zinc-500 font-mono line-clamp-2 italic group-hover:line-clamp-none transition-all">
+                      {log.details || 'No additional details'}
+                    </p>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      
+      <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
+        <span>Showing {filteredAndSortedLogs.length} logs</span>
+        {logs.length >= 100 && <span>Limited to latest 100 entries</span>}
       </div>
     </div>
   );

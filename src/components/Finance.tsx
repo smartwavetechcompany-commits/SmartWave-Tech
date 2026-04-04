@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord, OperationType, Guest } from '../types';
+import { FinanceRecord, OperationType, Guest, Reservation, Room } from '../types';
+import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
+import { syncDailyCharges } from '../services/financeService';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -20,12 +22,17 @@ import {
   ChevronRight,
   CreditCard,
   Banknote,
-  Send
+  Send,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
-import { cn, formatCurrency } from '../utils';
-import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths } from 'date-fns';
+import { cn, formatCurrency, exportToCSV } from '../utils';
+import { fuzzySearch } from '../utils/searchUtils';
+import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { toast } from 'sonner';
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -45,6 +52,16 @@ export function Finance() {
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [activeTab, setActiveTab] = useState<'transactions' | 'ledger'>('transactions');
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSettleModal, setShowSettleModal] = useState<Guest | null>(null);
+  const [settleData, setSettleData] = useState({
+    amount: 0,
+    method: 'cash' as 'cash' | 'card' | 'transfer',
+    notes: ''
+  });
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -76,9 +93,97 @@ export function Finance() {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
     });
 
-    return () => unsub();
+    // Fetch reservations and rooms for syncing
+    const unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
+      setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    });
+
+    const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
+      setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    });
+
+    return () => {
+      unsub();
+      unsubRes();
+      unsubRooms();
+    };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
+  const handleSyncCharges = async () => {
+    if (!hotel?.id || !profile) return;
+    setIsSyncing(true);
+    try {
+      const result = await syncDailyCharges(hotel.id, profile.uid, profile.email, reservations, rooms, guests);
+      if (result.chargedCount > 0) {
+        toast.success(`Successfully synced ${result.chargedCount} charges totaling ${formatCurrency(result.totalAmount, currency, exchangeRate)}`);
+      } else {
+        toast.info('All guest accounts are up to date.');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to sync charges');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSettleBalance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !showSettleModal) return;
+
+    try {
+      setIsSaving(true);
+      const guest = showSettleModal;
+      const amount = settleData.amount;
+      
+      // Find the most recent reservation for this guest to post the ledger entry
+      const lastRes = reservations
+        .filter(r => r.guestId === guest.id)
+        .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())[0];
+
+      if (!lastRes) {
+        toast.error('No reservation found for this guest to post the settlement.');
+        return;
+      }
+
+      if (guest.ledgerBalance < 0) {
+        // Guest owes money: Post a payment (credit)
+        await settleLedger(hotel.id, guest.id, lastRes.id, amount, settleData.method, profile.uid);
+        
+        // Record as income
+        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'income',
+          amount: amount,
+          category: 'Room Revenue',
+          description: `Balance Settlement: ${guest.name} (${settleData.notes || 'No notes'})`,
+          timestamp: new Date().toISOString(),
+          paymentMethod: settleData.method
+        });
+      } else {
+        // Guest has credit: Post a refund/settlement (debit)
+        await settleOverpayment(hotel.id, guest.id, lastRes.id, amount, settleData.method, profile.uid);
+        
+        // Record as expense
+        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'expense',
+          amount: amount,
+          category: 'Other',
+          description: `Overpayment Refund: ${guest.name} (${settleData.notes || 'No notes'})`,
+          timestamp: new Date().toISOString(),
+          paymentMethod: settleData.method
+        });
+      }
+
+      toast.success('Balance settled successfully');
+      setShowSettleModal(null);
+      setSettleData({ amount: 0, method: 'cash', notes: '' });
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to settle balance');
+    } finally {
+      setIsSaving(false);
+    }
+  };
   const handleAddRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
@@ -107,36 +212,9 @@ export function Finance() {
     }
   };
 
-  const exportToCSV = () => {
-    const headers = ['Date', 'Type', 'Description', 'Category', 'Method', 'Amount'];
-    const rows = filteredRecords.map(r => [
-      new Date(r.timestamp).toLocaleString(),
-      r.type,
-      r.description,
-      r.category,
-      r.paymentMethod,
-      r.amount
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `finance_report_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const filteredRecords = records.filter(r => {
-    const matchesSearch = (r.description?.toLowerCase() || '').includes(searchQuery.toLowerCase()) || 
-                         (r.category?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+    const matchesSearch = fuzzySearch(r.description || '', searchQuery) || 
+                         fuzzySearch(r.category || '', searchQuery);
     const matchesType = filterType === 'all' || r.type === filterType;
     
     let matchesTime = true;
@@ -171,6 +249,45 @@ export function Finance() {
     { name: 'Expense', value: totalExpense, color: '#ef4444' }
   ];
 
+  const filteredLedger = guests.filter(g => 
+    (g.ledgerBalance || 0) !== 0 && (
+      fuzzySearch(g.name || '', searchQuery) || 
+      fuzzySearch(g.email || '', searchQuery) || 
+      fuzzySearch(g.phone || '', searchQuery)
+    )
+  );
+
+  const handleExport = () => {
+    const dataToExport = activeTab === 'transactions' ? filteredRecords : filteredLedger;
+    const filename = activeTab === 'transactions' ? `transactions_${format(new Date(), 'yyyy-MM-dd')}.csv` : `ledger_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    
+    const formattedData = dataToExport.map(item => {
+      if (activeTab === 'transactions') {
+        const record = item as FinanceRecord;
+        return {
+          Date: format(new Date(record.timestamp), 'yyyy-MM-dd HH:mm'),
+          Description: record.description,
+          Type: record.type,
+          Category: record.category,
+          Amount: record.amount,
+          PaymentMethod: record.paymentMethod
+        };
+      } else {
+        const guest = item as Guest;
+        return {
+          Name: guest.name,
+          Email: guest.email,
+          Phone: guest.phone,
+          Balance: guest.ledgerBalance || 0,
+          Status: (guest.ledgerBalance || 0) < 0 ? 'Debt' : (guest.ledgerBalance || 0) > 0 ? 'Credit' : 'Balanced'
+        };
+      }
+    });
+
+    exportToCSV(formattedData, filename);
+    toast.success('Exported successfully');
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -180,7 +297,16 @@ export function Finance() {
         </div>
         <div className="flex items-center gap-3">
           <button 
-            onClick={exportToCSV}
+            onClick={handleSyncCharges}
+            disabled={isSyncing}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
+            title="Sync missing daily charges for all checked-in guests"
+          >
+            <RefreshCw size={18} className={cn(isSyncing && "animate-spin")} />
+            Sync Charges
+          </button>
+          <button 
+            onClick={handleExport}
             className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
@@ -365,6 +491,44 @@ export function Finance() {
             </div>
           </div>
         </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+            <BarChart3 size={18} className="text-amber-500" />
+            Revenue by Category
+          </h3>
+          <div className="space-y-4">
+            {categories.income.map(cat => {
+              const amount = filteredRecords
+                .filter(r => r.type === 'income' && r.category === cat)
+                .reduce((acc, r) => acc + r.amount, 0);
+              const percentage = totalIncome > 0 ? (amount / totalIncome) * 100 : 0;
+              
+              if (amount === 0) return null;
+
+              return (
+                <div key={cat} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-400">{cat}</span>
+                    <span className="text-white font-bold">{formatCurrency(amount, currency, exchangeRate)}</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${percentage}%` }}
+                      className="h-full bg-amber-500"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+            {totalIncome === 0 && (
+              <div className="h-[200px] flex items-center justify-center text-zinc-500 text-xs italic">
+                No revenue data for this period
+              </div>
+            )}
+          </div>
+        </div>
       </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -378,7 +542,7 @@ export function Finance() {
                 Total Credit: {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + Math.abs(g.ledgerBalance || 0), 0), currency, exchangeRate)}
               </div>
               <div className="px-3 py-1 bg-red-500/10 text-red-500 rounded-full text-[10px] font-bold uppercase">
-                Total Debt: {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) > 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
+                Total Debt: {formatCurrency(Math.abs(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0)), currency, exchangeRate)}
               </div>
             </div>
           </div>
@@ -390,17 +554,18 @@ export function Finance() {
                   <th className="px-6 py-4">Contact</th>
                   <th className="px-6 py-4">Last Stay</th>
                   <th className="px-6 py-4 text-right">Balance</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {guests.length === 0 ? (
+                {filteredLedger.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-zinc-500">
+                    <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
                       No outstanding balances found
                     </td>
                   </tr>
                 ) : (
-                  guests.map((guest) => (
+                  filteredLedger.map((guest) => (
                     <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="text-sm text-white font-medium">{guest.name}</div>
@@ -416,9 +581,20 @@ export function Finance() {
                       </td>
                       <td className={cn(
                         "px-6 py-4 text-right font-bold text-sm",
-                        (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                        (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
                       )}>
                         {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          onClick={() => {
+                            setShowSettleModal(guest);
+                            setSettleData({ ...settleData, amount: Math.abs(guest.ledgerBalance || 0) });
+                          }}
+                          className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
+                        >
+                          Settle
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -532,6 +708,103 @@ export function Finance() {
                   className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
                   Save Record
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+      {showSettleModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">
+                {showSettleModal.ledgerBalance < 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
+              </h2>
+              <p className="text-sm text-zinc-500 mt-1">Guest: {showSettleModal.name}</p>
+            </div>
+            <form onSubmit={handleSettleBalance}>
+              <div className="p-6 space-y-4">
+                <div className={cn(
+                  "p-4 rounded-2xl border flex items-center gap-4",
+                  showSettleModal.ledgerBalance < 0 ? "bg-red-500/5 border-red-500/20" : "bg-emerald-500/5 border-emerald-500/20"
+                )}>
+                  <div className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center",
+                    showSettleModal.ledgerBalance < 0 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                  )}>
+                    <AlertCircle size={20} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
+                    <p className={cn(
+                      "text-lg font-bold",
+                      showSettleModal.ledgerBalance < 0 ? "text-red-500" : "text-emerald-500"
+                    )}>
+                      {formatCurrency(showSettleModal.ledgerBalance, currency, exchangeRate)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Settlement Amount ({currency})</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{currency === 'NGN' ? '₦' : '$'}</span>
+                    <input
+                      required
+                      type="number"
+                      value={settleData.amount}
+                      onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
+                  <select
+                    value={settleData.method}
+                    onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                    <option value="transfer">Bank Transfer</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
+                  <textarea
+                    value={settleData.notes}
+                    onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                    placeholder="e.g. Guest paid cash at front desk"
+                  />
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSettleModal(null)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!settleData.amount || isSaving}
+                  className={cn(
+                    "flex-1 px-4 py-2 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
+                    showSettleModal.ledgerBalance < 0 ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
+                  )}
+                >
+                  {isSaving ? 'Processing...' : showSettleModal.ledgerBalance < 0 ? 'Post Payment' : 'Post Refund'}
                 </button>
               </div>
             </form>

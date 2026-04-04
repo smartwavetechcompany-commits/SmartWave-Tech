@@ -106,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchProfile();
   }, [user?.uid, hasProfileError]);
 
-  // 3. Hotel Fetcher
+  // 3. Hotel Fetcher (Real-time)
   useEffect(() => {
     const hotelId = profile?.hotelId;
     const role = profile?.role;
@@ -122,26 +122,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const fetchHotel = async () => {
-      const hotelRef = doc(db, 'hotels', hotelId);
-      try {
-        const snap = await getDoc(hotelRef);
-        if (snap.exists()) {
-          setHotel({ id: snap.id, ...snap.data() } as Hotel);
-        } else {
-          setHotel(null);
-        }
-      } catch (err: any) {
-        if (err.code === 'permission-denied') {
-          console.warn("Hotel access restricted.");
-          setHasHotelError(true);
-        } else {
-          console.error("Hotel fetch error:", err);
-        }
+    const hotelRef = doc(db, 'hotels', hotelId);
+    const unsub = onSnapshot(hotelRef, (snap) => {
+      if (snap.exists()) {
+        setHotel({ id: snap.id, ...snap.data() } as Hotel);
+      } else {
+        setHotel(null);
       }
-    };
+    }, (err: any) => {
+      if (err.code === 'permission-denied') {
+        console.warn("Hotel access restricted.");
+        setHasHotelError(true);
+      } else {
+        console.error("Hotel fetch error:", err);
+      }
+    });
 
-    fetchHotel();
+    return () => unsub();
   }, [profile?.hotelId, profile?.role, hasHotelError]);
 
   // 4. System Settings Fetcher

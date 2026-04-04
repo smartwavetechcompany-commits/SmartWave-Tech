@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
+import { fuzzySearch } from '../utils/searchUtils';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -208,10 +209,9 @@ export function GuestManagement() {
   };
 
   const filteredGuests = guests.filter(guest => {
-    const query = searchQuery.toLowerCase();
-    return (guest.name?.toLowerCase() || '').includes(query) || 
-           (guest.email?.toLowerCase() || '').includes(query) || 
-           (guest.phone || '').includes(query);
+    return fuzzySearch(guest.name || '', searchQuery) || 
+           fuzzySearch(guest.email || '', searchQuery) || 
+           fuzzySearch(guest.phone || '', searchQuery);
   });
 
   return (
@@ -270,7 +270,7 @@ export function GuestManagement() {
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Balance</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}</div>
+          <div className="text-2xl font-bold text-red-500">{formatCurrency(Math.abs(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0)), currency, exchangeRate)}</div>
         </div>
       </div>
 
@@ -399,7 +399,7 @@ export function GuestManagement() {
                         <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Ledger Balance</div>
                         <div className={cn(
                           "text-lg font-bold",
-                          (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                          (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
                         )}>
                           {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
                         </div>

@@ -24,9 +24,11 @@ import {
   Tag,
   AlertCircle,
   Trash2,
-  UserX
+  UserX,
+  Download
 } from 'lucide-react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, exportToCSV } from '../utils';
+import { fuzzySearch } from '../utils/searchUtils';
 import { format, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
@@ -103,8 +105,8 @@ export function FrontDesk() {
   }, [searchParams, setSearchParams]);
 
   const filteredReservations = reservations.filter(res => 
-    (res.guestName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-    (res.roomNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+    fuzzySearch(res.guestName || '', searchTerm) ||
+    fuzzySearch(res.roomNumber || '', searchTerm)
   );
 
   const roomStats = {
@@ -288,16 +290,6 @@ export function FrontDesk() {
           referenceId: res.id,
           postedBy: profile.uid
         }, profile.uid, res.corporateId);
-
-        // Update guest ledger balance
-        const guest = guests.find(g => g.email === res.guestEmail);
-        if (guest) {
-          const guestRef = doc(db, 'hotels', hotel.id, 'guests', guest.id);
-          await setDoc(guestRef, {
-            ...guest,
-            ledgerBalance: (guest.ledgerBalance || 0) + nightlyRate
-          });
-        }
       }
 
       // Log audit
@@ -492,8 +484,8 @@ export function FrontDesk() {
 
           // AUTO DEDUCTION: If guest has credit balance, apply it
           const guest = guests.find(g => g.id === res.guestId);
-          if (guest && guest.ledgerBalance < 0) {
-            const creditToApply = Math.min(Math.abs(guest.ledgerBalance), res.totalAmount - (res.paidAmount || 0));
+          if (guest && guest.ledgerBalance > 0) {
+            const creditToApply = Math.min(guest.ledgerBalance, res.totalAmount - (res.paidAmount || 0));
             if (creditToApply > 0) {
               await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'Credit Balance', profile.uid);
               // Update reservation paidAmount in batch
@@ -722,6 +714,85 @@ export function FrontDesk() {
     }
   };
 
+  const handleExport = (type: 'rooms' | 'arrivals' | 'checkins' | 'checkouts' | 'inhouse') => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    let dataToExport: any[] = [];
+    let filename = '';
+
+    switch (type) {
+      case 'rooms':
+        dataToExport = rooms.map(r => ({
+          Room: r.roomNumber,
+          Type: r.type,
+          Status: r.status,
+          Floor: r.floor,
+          Amenities: (r.amenities || []).join(', ')
+        }));
+        filename = `room_status_${todayStr}.csv`;
+        break;
+      case 'arrivals':
+        dataToExport = reservations
+          .filter(r => r.status === 'pending' && r.checkIn === todayStr)
+          .map(r => ({
+            Guest: r.guestName,
+            Room: r.roomNumber,
+            CheckIn: r.checkIn,
+            CheckOut: r.checkOut,
+            Amount: r.totalAmount,
+            Status: r.status
+          }));
+        filename = `arrivals_${todayStr}.csv`;
+        break;
+      case 'checkins':
+        dataToExport = reservations
+          .filter(r => r.status === 'checked_in' && r.checkIn === todayStr)
+          .map(r => ({
+            Guest: r.guestName,
+            Room: r.roomNumber,
+            CheckIn: r.checkIn,
+            CheckOut: r.checkOut,
+            Amount: r.totalAmount,
+            Status: r.status
+          }));
+        filename = `checkins_${todayStr}.csv`;
+        break;
+      case 'checkouts':
+        dataToExport = reservations
+          .filter(r => r.status === 'checked_out' && r.checkOut === todayStr)
+          .map(r => ({
+            Guest: r.guestName,
+            Room: r.roomNumber,
+            CheckIn: r.checkIn,
+            CheckOut: r.checkOut,
+            Amount: r.totalAmount,
+            Status: r.status
+          }));
+        filename = `checkouts_${todayStr}.csv`;
+        break;
+      case 'inhouse':
+        dataToExport = reservations
+          .filter(r => r.status === 'checked_in')
+          .map(r => ({
+            Guest: r.guestName,
+            Room: r.roomNumber,
+            CheckIn: r.checkIn,
+            CheckOut: r.checkOut,
+            Amount: r.totalAmount,
+            Status: r.status
+          }));
+        filename = `inhouse_${todayStr}.csv`;
+        break;
+    }
+
+    if (dataToExport.length === 0) {
+      toast.error('No data to export for this category');
+      return;
+    }
+
+    exportToCSV(dataToExport, filename);
+    toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} exported successfully`);
+  };
+
   return (
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -730,6 +801,19 @@ export function FrontDesk() {
           <p className="text-zinc-400">Manage bookings and guest check-ins</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="relative group">
+            <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
+              <Download size={18} />
+              Export
+            </button>
+            <div className="absolute right-0 mt-2 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+              <button onClick={() => handleExport('rooms')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Room Status</button>
+              <button onClick={() => handleExport('arrivals')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Today's Arrivals</button>
+              <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Today's Check-ins</button>
+              <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Today's Check-outs</button>
+              <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">In-House Guests</button>
+            </div>
+          </div>
           <button 
             onClick={() => setShowNightAuditModal(true)}
             disabled={isAuditing}
@@ -966,9 +1050,12 @@ export function FrontDesk() {
                   ))}
                 </select>
                 {newBooking.guestId && guests.find(g => g.id === newBooking.guestId)?.ledgerBalance !== 0 && (
-                  <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-[10px] text-amber-500 flex items-center gap-2">
+                  <div className={cn(
+                    "mt-2 p-2 rounded border flex items-center gap-2 text-[10px]",
+                    (guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0) < 0 ? "bg-red-500/10 border-red-500/20 text-red-500" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+                  )}>
                     <AlertCircle size={12} />
-                    Guest has an outstanding balance of {formatCurrency(guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0, currency, exchangeRate)}
+                    Guest has an {(guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0) < 0 ? 'outstanding balance' : 'overpayment credit'} of {formatCurrency(Math.abs(guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0), currency, exchangeRate)}
                   </div>
                 )}
               </div>
@@ -1302,15 +1389,22 @@ export function FrontDesk() {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                      res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                      res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
-                      res.status === 'no_show' ? "bg-amber-500/10 text-amber-500" :
-                      res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
-                    )}>
-                      {res.status.replace('_', ' ')}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={cn(
+                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider w-fit",
+                        res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
+                        res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
+                        res.status === 'no_show' ? "bg-amber-500/10 text-amber-500" :
+                        res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
+                      )}>
+                        {res.status.replace('_', ' ')}
+                      </span>
+                      {res.status === 'checked_in' && new Date() > new Date(res.checkOut) && (
+                        <span className="px-2 py-0.5 bg-red-500/10 text-red-500 text-[8px] font-bold uppercase rounded w-fit animate-pulse">
+                          Overstay
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
@@ -1348,10 +1442,11 @@ export function FrontDesk() {
                       )}
                       <button 
                         onClick={() => setShowFolioModal(res)}
-                        className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
                         title="View Guest Folio"
                       >
-                        <Receipt size={18} />
+                        <Receipt size={14} />
+                        View Folio
                       </button>
                       {res.status === 'pending' && (
                         <button 

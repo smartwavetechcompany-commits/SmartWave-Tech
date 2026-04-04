@@ -10,6 +10,7 @@ export interface Tax {
   isInclusive: boolean;
   showOnReceipt: boolean;
   status: 'active' | 'inactive';
+  category: 'all' | 'room' | 'restaurant' | 'service';
 }
 
 export interface UserProfile {
@@ -35,6 +36,10 @@ export interface HotelBranding {
   phone?: string;
   email?: string;
   footerNotes?: string;
+  organizationName?: string;
+  accountNumber?: string;
+  bankName?: string;
+  greeting?: string;
 }
 
 export interface Hotel {

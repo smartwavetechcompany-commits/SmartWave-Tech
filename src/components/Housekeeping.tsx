@@ -9,9 +9,11 @@ import {
   AlertCircle, 
   Clock,
   RefreshCw,
-  Search
+  Search,
+  Download
 } from 'lucide-react';
-import { cn } from '../utils';
+import { cn, exportToCSV } from '../utils';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
 
 export function Housekeeping() {
@@ -67,6 +69,17 @@ export function Housekeeping() {
     return true;
   });
 
+  const handleExport = () => {
+    const dataToExport = filteredRooms.map(r => ({
+      Room: r.roomNumber,
+      Type: r.type,
+      Status: r.status,
+      Floor: r.floor
+    }));
+    exportToCSV(dataToExport, `housekeeping_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    toast.success('Housekeeping status exported successfully');
+  };
+
   return (
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -75,6 +88,13 @@ export function Housekeeping() {
           <p className="text-zinc-400">Manage room cleaning and maintenance status</p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
           <button 
             onClick={() => setFilter('all')}
             className={cn(

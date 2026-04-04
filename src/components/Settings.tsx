@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
@@ -52,9 +52,42 @@ export function Settings() {
       phone: hotel?.branding?.phone || '',
       email: hotel?.branding?.email || '',
       footerNotes: hotel?.branding?.footerNotes || '',
+      organizationName: hotel?.branding?.organizationName || hotel?.name || '',
+      accountNumber: hotel?.branding?.accountNumber || '',
+      bankName: hotel?.branding?.bankName || '',
+      greeting: hotel?.branding?.greeting || 'Thank you for staying with us!',
     }
   });
 
+  const [localTaxes, setLocalTaxes] = useState<Tax[]>(hotel?.taxes || []);
+
+  useEffect(() => {
+    if (hotel?.taxes) {
+      setLocalTaxes(hotel?.taxes);
+    }
+  }, [hotel?.taxes]);
+
+  const handleUpdateLocalTax = (index: number, updates: Partial<Tax>) => {
+    const updated = [...localTaxes];
+    updated[index] = { ...updated[index], ...updates };
+    setLocalTaxes(updated);
+  };
+
+  const handleSaveTaxes = async () => {
+    if (!hotel?.id) return;
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id), {
+        taxes: localTaxes
+      }, { merge: true });
+      toast.success('Taxes updated successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to update taxes');
+    } finally {
+      setIsSaving(false);
+    }
+  };
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !profile) return;
@@ -126,22 +159,6 @@ export function Settings() {
     } catch (err) {
       console.error(err);
       toast.error('Failed to update profile.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSaveTaxes = async (updatedTaxes: Tax[]) => {
-    if (!hotel?.id) return;
-    setIsSaving(true);
-    try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
-        taxes: updatedTaxes
-      }, { merge: true });
-      toast.success('Taxes updated successfully');
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to update taxes');
     } finally {
       setIsSaving(false);
     }
@@ -507,6 +524,59 @@ export function Settings() {
                 </div>
 
                 <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Organization Name</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={formData.branding.organizationName}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, organizationName: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Bank Name</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={formData.branding.bankName}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, bankName: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Account Number</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={formData.branding.accountNumber}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, accountNumber: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Receipt Greeting</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    placeholder="e.g. Thank you for your business!"
+                    value={formData.branding.greeting}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, greeting: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Address</label>
                   <textarea 
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
@@ -648,34 +718,44 @@ export function Settings() {
                   <h3 className="text-lg font-bold text-white mb-1">Tax Management</h3>
                   <p className="text-sm text-zinc-500">Configure taxes that apply to reservations and services.</p>
                 </div>
-                <button 
-                  onClick={() => {
-                    const newTax: Tax = {
-                      id: Math.random().toString(36).substr(2, 9),
-                      name: '',
-                      percentage: 0,
-                      isInclusive: false,
-                      showOnReceipt: true,
-                      status: 'active'
-                    };
-                    const updatedTaxes = [...(hotel?.taxes || []), newTax];
-                    handleSaveTaxes(updatedTaxes);
-                  }}
-                  className="bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-                >
-                  <Plus size={18} />
-                  Add Tax
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => {
+                      const newTax: Tax = {
+                        id: Math.random().toString(36).substr(2, 9),
+                        name: '',
+                        percentage: 0,
+                        isInclusive: false,
+                        showOnReceipt: true,
+                        status: 'active',
+                        category: 'all'
+                      };
+                      setLocalTaxes([...localTaxes, newTax]);
+                    }}
+                    className="bg-zinc-800 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+                  >
+                    <Plus size={18} />
+                    Add Tax
+                  </button>
+                  <button 
+                    onClick={handleSaveTaxes}
+                    disabled={isSaving}
+                    className="bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    <Save size={18} />
+                    {isSaving ? 'Saving...' : 'Save All Taxes'}
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
-                {(!hotel?.taxes || hotel.taxes.length === 0) ? (
+                {localTaxes.length === 0 ? (
                   <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-12 text-center">
                     <Percent size={40} className="text-zinc-700 mx-auto mb-4" />
                     <p className="text-zinc-500">No taxes configured yet.</p>
                   </div>
                 ) : (
-                  hotel.taxes.map((tax, index) => (
+                  localTaxes.map((tax, index) => (
                     <div key={tax.id} className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         <div>
@@ -685,16 +765,7 @@ export function Settings() {
                             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                             value={tax.name}
                             placeholder="e.g. VAT, Service Charge"
-                            onChange={(e) => {
-                              const updatedTaxes = [...(hotel?.taxes || [])];
-                              updatedTaxes[index] = { ...tax, name: e.target.value };
-                              // We'll save on blur or with a separate button to avoid too many writes
-                            }}
-                            onBlur={(e) => {
-                              const updatedTaxes = [...(hotel?.taxes || [])];
-                              updatedTaxes[index] = { ...tax, name: e.target.value };
-                              handleSaveTaxes(updatedTaxes);
-                            }}
+                            onChange={(e) => handleUpdateLocalTax(index, { name: e.target.value })}
                           />
                         </div>
                         <div>
@@ -704,58 +775,65 @@ export function Settings() {
                             step="0.01"
                             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                             value={tax.percentage}
-                            onChange={(e) => {
-                              const updatedTaxes = [...(hotel?.taxes || [])];
-                              updatedTaxes[index] = { ...tax, percentage: Number(e.target.value) };
-                            }}
-                            onBlur={(e) => {
-                              const updatedTaxes = [...(hotel?.taxes || [])];
-                              updatedTaxes[index] = { ...tax, percentage: Number(e.target.value) };
-                              handleSaveTaxes(updatedTaxes);
-                            }}
+                            onChange={(e) => handleUpdateLocalTax(index, { percentage: Number(e.target.value) })}
                           />
                         </div>
-                        <div className="flex items-center gap-3 pt-6">
-                          <button 
-                            onClick={() => {
-                              const updatedTaxes = [...(hotel?.taxes || [])];
-                              updatedTaxes[index] = { ...tax, isInclusive: !tax.isInclusive };
-                              handleSaveTaxes(updatedTaxes);
-                            }}
-                            className={cn(
-                              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                              tax.isInclusive ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
-                            )}
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Category</label>
+                          <select 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                            value={tax.category}
+                            onChange={(e) => handleUpdateLocalTax(index, { category: e.target.value as any })}
                           >
-                            {tax.isInclusive ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                            Inclusive
-                          </button>
-                          <button 
-                            onClick={() => {
-                              const updatedTaxes = [...(hotel?.taxes || [])];
-                              updatedTaxes[index] = { ...tax, showOnReceipt: !tax.showOnReceipt };
-                              handleSaveTaxes(updatedTaxes);
-                            }}
-                            className={cn(
-                              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                              tax.showOnReceipt ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
-                            )}
-                          >
-                            {tax.showOnReceipt ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                            Show on Receipt
-                          </button>
+                            <option value="all">All Services</option>
+                            <option value="room">Rooms Only</option>
+                            <option value="restaurant">Restaurant Only</option>
+                            <option value="service">Services Only</option>
+                          </select>
                         </div>
                         <div className="flex items-center justify-end pt-6">
                           <button 
                             onClick={() => {
-                              const updatedTaxes = hotel.taxes?.filter(t => t.id !== tax.id) || [];
-                              handleSaveTaxes(updatedTaxes);
+                              const updated = localTaxes.filter(t => t.id !== tax.id);
+                              setLocalTaxes(updated);
                             }}
                             className="p-2 text-zinc-500 hover:text-red-500 transition-all"
                           >
                             <Trash2 size={18} />
                           </button>
                         </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-4 pt-2">
+                        <button 
+                          onClick={() => handleUpdateLocalTax(index, { isInclusive: !tax.isInclusive })}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                            tax.isInclusive ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                          )}
+                        >
+                          {tax.isInclusive ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                          Inclusive Tax
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateLocalTax(index, { showOnReceipt: !tax.showOnReceipt })}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                            tax.showOnReceipt ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                          )}
+                        >
+                          {tax.showOnReceipt ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                          Show on Receipt
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateLocalTax(index, { status: tax.status === 'active' ? 'inactive' : 'active' })}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ml-auto",
+                            tax.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                          )}
+                        >
+                          {tax.status === 'active' ? 'Active' : 'Inactive'}
+                        </button>
                       </div>
                     </div>
                   ))

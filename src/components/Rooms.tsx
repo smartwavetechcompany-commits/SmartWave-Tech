@@ -17,9 +17,10 @@ import {
   XCircle,
   Settings2,
   Trash2,
-  Edit2
+  Edit2,
+  Download
 } from 'lucide-react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, exportToCSV } from '../utils';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 
@@ -41,6 +42,7 @@ export function Rooms() {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [capacityFilter, setCapacityFilter] = useState<string>('all');
   const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
     roomNumber: '',
@@ -203,6 +205,50 @@ export function Rooms() {
     }
   };
 
+  const toggleRoomSelection = (roomId: string) => {
+    setSelectedRooms(prev => 
+      prev.includes(roomId) 
+        ? prev.filter(id => id !== roomId) 
+        : [...prev, roomId]
+    );
+  };
+
+  const selectAllRooms = () => {
+    if (selectedRooms.length === filteredRooms.length) {
+      setSelectedRooms([]);
+    } else {
+      setSelectedRooms(filteredRooms.map(r => r.id));
+    }
+  };
+
+  const bulkUpdateStatus = async (status: Room['status']) => {
+    if (!hotel?.id || selectedRooms.length === 0) return;
+    
+    const loadingToast = toast.loading(`Updating ${selectedRooms.length} rooms...`);
+    
+    try {
+      const promises = selectedRooms.map(roomId => 
+        setDoc(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { status }, { merge: true })
+      );
+      
+      await Promise.all(promises);
+
+      // Log the action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        user: profile?.email || profile?.uid || 'Unknown',
+        action: 'BULK_UPDATE_ROOM_STATUS',
+        module: `${selectedRooms.length} rooms set to ${status}`
+      });
+
+      toast.success(`Successfully updated ${selectedRooms.length} rooms`, { id: loadingToast });
+      setSelectedRooms([]);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/bulk`);
+      toast.error('Failed to update rooms', { id: loadingToast });
+    }
+  };
+
   const statusColors = {
     clean: 'border-emerald-500 text-emerald-500 bg-emerald-500/5',
     dirty: 'border-red-500 text-red-500 bg-red-500/5',
@@ -227,6 +273,20 @@ export function Rooms() {
     
     return matchesSearch && matchesStatus && matchesType && matchesCapacity;
   });
+
+  const handleExport = () => {
+    const dataToExport = filteredRooms.map(r => ({
+      Room: r.roomNumber,
+      Type: r.type,
+      Price: r.price,
+      Status: r.status,
+      Floor: r.floor,
+      Capacity: r.capacity,
+      Amenities: (r.amenities || []).join(', ')
+    }));
+    exportToCSV(dataToExport, `rooms_list_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Rooms list exported successfully');
+  };
 
   return (
     <div className="p-8 space-y-8">
@@ -298,6 +358,13 @@ export function Rooms() {
             </button>
           </div>
           <button 
+            onClick={handleExport}
+            className="w-full sm:w-auto bg-zinc-800 text-white px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+          <button 
             onClick={() => setIsAddingRoom(true)}
             className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
           >
@@ -313,6 +380,57 @@ export function Rooms() {
           </button>
         </div>
       </header>
+
+      {/* Bulk Actions Bar */}
+      {selectedRooms.length > 0 && (
+        <motion.div 
+          initial={{ y: 50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 border border-emerald-500/30 shadow-2xl shadow-emerald-500/10 px-6 py-4 rounded-2xl flex items-center gap-6 backdrop-blur-xl"
+        >
+          <div className="flex items-center gap-3 pr-6 border-r border-zinc-800">
+            <div className="w-8 h-8 rounded-full bg-emerald-500 text-black flex items-center justify-center font-bold text-sm">
+              {selectedRooms.length}
+            </div>
+            <span className="text-sm font-bold text-white whitespace-nowrap">Rooms Selected</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mr-2">Set Status:</span>
+            <button 
+              onClick={() => bulkUpdateStatus('clean')}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-xs font-bold hover:bg-emerald-500 hover:text-black transition-all"
+            >
+              Clean
+            </button>
+            <button 
+              onClick={() => bulkUpdateStatus('dirty')}
+              className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-500 border border-red-500/20 text-xs font-bold hover:bg-red-500 hover:text-white transition-all"
+            >
+              Dirty
+            </button>
+            <button 
+              onClick={() => bulkUpdateStatus('maintenance')}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20 text-xs font-bold hover:bg-amber-500 hover:text-white transition-all"
+            >
+              Maintenance
+            </button>
+            <button 
+              onClick={() => bulkUpdateStatus('out_of_service')}
+              className="px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 text-xs font-bold hover:bg-zinc-700 hover:text-white transition-all"
+            >
+              Out of Service
+            </button>
+          </div>
+
+          <button 
+            onClick={() => setSelectedRooms([])}
+            className="ml-4 p-2 text-zinc-500 hover:text-white transition-colors"
+          >
+            <XCircle size={20} />
+          </button>
+        </motion.div>
+      )}
 
       {isAddingRoom && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -630,11 +748,18 @@ export function Rooms() {
             <motion.div
               layout
               key={room.id}
+              onClick={() => toggleRoomSelection(room.id)}
               className={cn(
-                "aspect-square rounded-xl border-2 p-4 flex flex-col justify-between transition-all group relative overflow-hidden",
-                room.status ? statusColors[room.status] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5'
+                "aspect-square rounded-xl border-2 p-4 flex flex-col justify-between transition-all group relative overflow-hidden cursor-pointer",
+                room.status ? statusColors[room.status] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5',
+                selectedRooms.includes(room.id) && "ring-2 ring-emerald-500 ring-offset-4 ring-offset-zinc-950 scale-[0.98]"
               )}
             >
+              {selectedRooms.includes(room.id) && (
+                <div className="absolute top-2 right-2 bg-emerald-500 text-black rounded-full p-0.5 z-10">
+                  <CheckCircle2 size={12} />
+                </div>
+              )}
               <div className="flex justify-between items-start">
                 <span className="text-lg font-bold">{room.roomNumber}</span>
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
@@ -655,6 +780,14 @@ export function Rooms() {
           <table className="w-full text-left">
             <thead>
               <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
+                <th className="px-6 py-4">
+                  <input 
+                    type="checkbox" 
+                    className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                    checked={selectedRooms.length === filteredRooms.length && filteredRooms.length > 0}
+                    onChange={selectAllRooms}
+                  />
+                </th>
                 <th className="px-6 py-4">Room</th>
                 <th className="px-6 py-4">Type</th>
                 <th className="px-6 py-4">Capacity</th>
@@ -666,7 +799,22 @@ export function Rooms() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {filteredRooms.map(room => (
-                <tr key={room.id} className="hover:bg-zinc-800/50 transition-colors">
+                <tr 
+                  key={room.id} 
+                  className={cn(
+                    "hover:bg-zinc-800/50 transition-colors cursor-pointer",
+                    selectedRooms.includes(room.id) && "bg-emerald-500/5"
+                  )}
+                  onClick={() => toggleRoomSelection(room.id)}
+                >
+                  <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      checked={selectedRooms.includes(room.id)}
+                      onChange={() => toggleRoomSelection(room.id)}
+                    />
+                  </td>
                   <td className="px-6 py-4 font-bold text-white">{room.roomNumber}</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.type}</td>
                   <td className="px-6 py-4 text-sm text-zinc-400">{room.capacity} Pax</td>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Reservation, Hotel, LedgerEntry } from '../types';
-import { formatCurrency } from '../utils';
+import { formatCurrency, cn } from '../utils';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
@@ -24,7 +24,17 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   const subtotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
   
   // Calculate Taxes
-  const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active');
+  const activeTaxes = (hotel.taxes || []).filter(t => {
+    if (t.status !== 'active') return false;
+    if (type === 'restaurant') {
+      return t.category === 'restaurant' || t.category === 'all';
+    }
+    if (type === 'comprehensive') {
+      return true; // Show all taxes on comprehensive receipt
+    }
+    return t.category === 'all';
+  });
+
   let taxTotal = 0;
   const taxBreakdown = activeTaxes.map(tax => {
     let amount = 0;
@@ -54,7 +64,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
             {hotel.name.charAt(0)}
           </div>
         )}
-        <h1 className="text-2xl font-black uppercase tracking-tighter">{hotel.name}</h1>
+        <h1 className="text-2xl font-black uppercase tracking-tighter">{branding.organizationName || hotel.name}</h1>
         <div className="text-[11px] text-zinc-500 font-medium mt-1 space-y-0.5">
           <p className="flex items-center justify-center gap-1"><MapPin size={10} /> {branding.address || 'Hotel Address'}</p>
           <p className="flex items-center justify-center gap-1">
@@ -171,16 +181,38 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
               <span className="font-bold">{formatCurrency(Math.abs(totalPaid), currency, exchangeRate)}</span>
             </div>
             <div className="border-t border-zinc-200 pt-3 flex justify-between items-center">
-              <span className="text-sm font-black uppercase tracking-tighter">Balance Due</span>
-              <span className="text-xl font-black">{formatCurrency(Math.max(0, balance), currency, exchangeRate)}</span>
+              <span className="text-sm font-black uppercase tracking-tighter">
+                {balance < 0 ? 'Credit Balance' : 'Balance Due'}
+              </span>
+              <span className={cn(
+                "text-xl font-black",
+                balance < 0 ? "text-emerald-600" : ""
+              )}>
+                {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+              </span>
             </div>
           </>
         )}
       </div>
 
+      {/* Bank Details Section */}
+      {(branding.bankName || branding.accountNumber) && (
+        <div className="mt-6 p-4 border border-zinc-100 rounded-xl text-[10px]">
+          <p className="text-zinc-400 font-bold uppercase tracking-widest mb-2">Bank Details</p>
+          <div className="flex justify-between">
+            <span className="text-zinc-500">Bank Name:</span>
+            <span className="font-bold">{branding.bankName || 'N/A'}</span>
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="text-zinc-500">Account Number:</span>
+            <span className="font-bold">{branding.accountNumber || 'N/A'}</span>
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <div className="mt-10 text-center">
-        <p className="text-sm font-bold mb-1 italic">Thank you for choosing {hotel.name}!</p>
+        <p className="text-sm font-bold mb-1 italic">{branding.greeting || `Thank you for choosing ${hotel.name}!`}</p>
         <p className="text-[10px] text-zinc-400 max-w-[250px] mx-auto leading-relaxed">
           {branding.footerNotes || 'We hope you enjoyed your stay. Please keep this receipt for your records.'}
         </p>

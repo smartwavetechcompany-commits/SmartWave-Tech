@@ -98,11 +98,27 @@ export function Reports() {
         
         const indivRev = totalRevenue - corpRev;
 
+        // Fetch reservations for occupancy trends
+        const resSnap = await getDocs(collection(db, 'hotels', hotel.id, 'reservations'));
+        const allRes = resSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+
+        // Group revenue by category for chart
+        const categoryRevenue: { [key: string]: number } = {};
+        filteredEntries.forEach(entry => {
+          if (entry.type === 'debit') {
+            const cat = entry.category || 'Other';
+            categoryRevenue[cat] = (categoryRevenue[cat] || 0) + entry.amount;
+          }
+        });
+
+        const revenueByCategory = Object.entries(categoryRevenue).map(([name, value]) => ({ name, value }));
+        setCorporateData(revenueByCategory.length > 0 ? revenueByCategory : [{ name: 'No Data', value: 0 }]);
+
         // Group revenue by day for chart
         const dailyRevenue: { [key: string]: number } = {};
         filteredEntries.forEach(entry => {
           if (entry.type === 'debit') {
-            const day = format(new Date(entry.timestamp), 'EEE');
+            const day = format(new Date(entry.timestamp), 'MMM d');
             dailyRevenue[day] = (dailyRevenue[day] || 0) + entry.amount;
           }
         });
@@ -120,21 +136,25 @@ export function Reports() {
           totalRevenue
         });
 
-        setCorporateData([
-          { name: 'Corporate', value: corpRev },
-          { name: 'Individual', value: indivRev }
-        ]);
-
-        // Mock occupancy trend for now as we don't have historical occupancy snapshots
-        setOccupancyData([
-          { name: 'Mon', rate: 65 },
-          { name: 'Tue', rate: 70 },
-          { name: 'Wed', rate: 75 },
-          { name: 'Thu', rate: 80 },
-          { name: 'Fri', rate: 90 },
-          { name: 'Sat', rate: 95 },
-          { name: 'Sun', rate: 85 },
-        ]);
+        // Calculate occupancy trend
+        const trend: { name: string; rate: number }[] = [];
+        let curr = new Date(startDate);
+        while (curr <= endDate) {
+          const dayStr = format(curr, 'MMM d');
+          const activeOnDay = allRes.filter(res => {
+            const checkIn = new Date(res.checkIn);
+            const checkOut = new Date(res.checkOut);
+            return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut);
+          }).length;
+          
+          trend.push({
+            name: dayStr,
+            rate: totalRooms > 0 ? Math.round((activeOnDay / totalRooms) * 100) : 0
+          });
+          
+          curr.setDate(curr.getDate() + 1);
+        }
+        setOccupancyData(trend);
 
       } catch (error) {
         console.error("Error fetching report data:", error);
@@ -207,7 +227,7 @@ export function Reports() {
     toast.success("Excel exported successfully");
   };
 
-  const COLORS = ['#10b981', '#3b82f6'];
+  const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
   return (
     <div className="p-8 space-y-8">

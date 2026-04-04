@@ -4,9 +4,9 @@ import { db, handleFirestoreError } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { InventoryItem, OperationType } from '../types';
-import { Package, Plus, Search, Filter, AlertTriangle, History, ArrowUp, ArrowDown, Trash2, Edit2, MoreHorizontal, ChevronRight, Box, ShoppingCart } from 'lucide-react';
+import { Package, Plus, Search, Filter, AlertTriangle, History, ArrowUp, ArrowDown, Trash2, Edit2, MoreHorizontal, ChevronRight, Box, ShoppingCart, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../utils';
+import { cn, exportToCSV } from '../utils';
 import { format } from 'date-fns';
 import { createNotification } from './Notifications';
 import { toast } from 'sonner';
@@ -132,6 +132,19 @@ export function Inventory() {
 
   const lowStockItems = items.filter(i => i.quantity <= i.minThreshold);
 
+  const handleExport = () => {
+    const dataToExport = items.map(item => ({
+      Name: item.name,
+      Category: item.category,
+      Quantity: item.quantity,
+      Unit: item.unit,
+      MinThreshold: item.minThreshold,
+      LastUpdated: item.lastUpdated ? format(new Date(item.lastUpdated), 'yyyy-MM-dd HH:mm') : 'N/A'
+    }));
+    exportToCSV(dataToExport, `inventory_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    toast.success('Inventory exported successfully');
+  };
+
   return (
     <div className="p-8 space-y-8">
       <ConfirmModal
@@ -149,17 +162,26 @@ export function Inventory() {
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Inventory Management</h1>
           <p className="text-zinc-400">Manage supplies, food, and beverage stock</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingItem(null);
-            setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5 });
-            setShowAddModal(true);
-          }}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
-        >
-          <Plus size={18} />
-          Add Item
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+          <button
+            onClick={() => {
+              setEditingItem(null);
+              setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5 });
+              setShowAddModal(true);
+            }}
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Plus size={18} />
+            Add Item
+          </button>
+        </div>
       </div>
 
       {lowStockItems.length > 0 && (

@@ -16,9 +16,10 @@ import {
   XCircle,
   Lock,
   ChevronRight,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react';
-import { cn } from '../utils';
+import { cn, exportToCSV } from '../utils';
 import { toast } from 'sonner';
 
 const AVAILABLE_ROLES = [
@@ -220,6 +221,19 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
            (member.email?.toLowerCase() || '').includes(search);
   });
 
+  const handleExport = () => {
+    const dataToExport = filteredStaff.map(s => ({
+      Name: s.displayName || 'N/A',
+      Email: s.email,
+      Role: s.role,
+      Permissions: (s.roles || []).join(', '),
+      Status: s.status || 'active',
+      CreatedAt: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'
+    }));
+    exportToCSV(dataToExport, `staff_list_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Staff list exported successfully');
+  };
+
   return (
     <div className="p-8 space-y-8 relative">
       <ConfirmModal
@@ -237,13 +251,22 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           <h1 className="text-3xl font-bold text-white tracking-tight">Staff Management</h1>
           <p className="text-zinc-400">Manage your hotel's team and roles</p>
         </div>
-        <button 
-          onClick={() => setIsAddingStaff(true)}
-          className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-        >
-          <UserPlus size={18} />
-          Add Staff Member
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+          <button 
+            onClick={() => setIsAddingStaff(true)}
+            className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+          >
+            <UserPlus size={18} />
+            Add Staff Member
+          </button>
+        </div>
       </header>
 
       {isAddingStaff && (

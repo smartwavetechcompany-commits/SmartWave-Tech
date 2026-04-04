@@ -21,10 +21,11 @@ import {
   Pizza,
   MoreHorizontal,
   Bell,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../utils';
+import { cn, exportToCSV } from '../utils';
 import { toast } from 'sonner';
 
 export function Kitchen() {
@@ -225,6 +226,19 @@ export function Kitchen() {
     return `${Math.floor(diff / 60)}h ${diff % 60}m ago`;
   };
 
+  const handleExport = () => {
+    const dataToExport = filteredOrders.map(order => ({
+      Timestamp: new Date(order.timestamp).toLocaleString(),
+      Room: order.roomNumber,
+      Items: order.items,
+      Category: order.category,
+      Status: order.status,
+      Notes: order.notes || ''
+    }));
+    exportToCSV(dataToExport, `kitchen_orders_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Kitchen orders exported successfully');
+  };
+
   return (
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -233,6 +247,13 @@ export function Kitchen() {
           <p className="text-zinc-400">Manage room service orders and kitchen workflow</p>
         </div>
         <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
           <button
             onClick={() => setShowHistory(!showHistory)}
             className={cn(
