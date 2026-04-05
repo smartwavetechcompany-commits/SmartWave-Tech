@@ -48,7 +48,7 @@ export function Kitchen() {
     notes: '',
     category: 'food' as 'food' | 'drink' | 'other',
     price: 0,
-    paymentMethod: 'cash' as 'cash' | 'room'
+    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer' | 'room'
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -132,29 +132,20 @@ export function Kitchen() {
             amount: newOrder.price,
             type: 'debit',
             category: 'restaurant',
-            description: `Room Service: ${newOrder.items}`,
+            description: `Kitchen Order (Room Service): ${newOrder.items}`,
             referenceId: orderRef.id,
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
-
-          // Update guest ledger balance
-          const guest = guests.find(g => g.id === res.guestId);
-          if (guest) {
-            const guestRef = doc(db, 'hotels', hotel.id, 'guests', guest.id);
-            await updateDoc(guestRef, {
-              ledgerBalance: (guest.ledgerBalance || 0) + newOrder.price
-            });
-          }
         }
-      } else if (newOrder.paymentMethod === 'cash' && newOrder.price > 0) {
-        // Add to finance records
+      } else if (newOrder.price > 0) {
+        // Add to finance records for cash, card, transfer
         await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
           type: 'income',
           amount: newOrder.price,
           category: 'Restaurant Revenue',
-          description: `Cash payment for order ${orderRef.id} (Room ${newOrder.roomNumber})`,
+          description: `Kitchen Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${newOrder.paymentMethod.toUpperCase()}`,
           timestamp: new Date().toISOString(),
-          paymentMethod: 'cash'
+          paymentMethod: newOrder.paymentMethod
         });
       }
 
@@ -384,6 +375,16 @@ export function Kitchen() {
                     <div>
                       <p className="text-sm text-white leading-relaxed font-medium">{order.items}</p>
                     </div>
+                    {(order.price > 0) && (
+                      <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
+                        <div className="text-xs font-bold text-emerald-500">
+                          {order.price.toLocaleString()}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider bg-zinc-800 px-2 py-0.5 rounded">
+                          {order.paymentMethod === 'room' ? 'Post to Room' : order.paymentMethod}
+                        </div>
+                      </div>
+                    )}
                     {order.notes && (
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Notes</div>
@@ -521,14 +522,19 @@ export function Kitchen() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Room Number</label>
-                    <input
+                    <select
                       required
-                      type="text"
                       value={newOrder.roomNumber}
                       onChange={(e) => setNewOrder({ ...newOrder, roomNumber: e.target.value })}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      placeholder="e.g. 101"
-                    />
+                    >
+                      <option value="">Select Room</option>
+                      {reservations.map(res => (
+                        <option key={res.id} value={res.roomNumber}>
+                          Room {res.roomNumber} ({res.guestName})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
@@ -562,6 +568,8 @@ export function Kitchen() {
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="transfer">Bank Transfer</option>
                       <option value="room">Post to Room</option>
                     </select>
                   </div>

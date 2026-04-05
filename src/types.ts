@@ -82,6 +82,7 @@ export interface TrackingCode {
   price?: number;
   usedByHotel?: string;
   hotelId?: string; // For backward compatibility or tracking usage
+  targetEmail?: string; // New field: The only email allowed to use this code
 }
 
 export interface GlobalAuditLog {
@@ -180,6 +181,8 @@ export interface KitchenOrder {
   timestamp: string;
   category: 'food' | 'drink' | 'other';
   notes?: string;
+  price: number;
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'room';
   preparedAt?: string;
   readyAt?: string;
   deliveredAt?: string;

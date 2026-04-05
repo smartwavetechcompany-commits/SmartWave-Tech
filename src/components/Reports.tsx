@@ -436,7 +436,10 @@ export function Reports() {
                   <p className="text-xs text-zinc-500">Detailed report for the selected period</p>
                 </div>
                 <div className="flex gap-2">
-                  <button className="p-2 bg-zinc-800 text-zinc-400 rounded-lg hover:text-white transition-colors">
+                  <button 
+                    onClick={exportExcel}
+                    className="p-2 bg-zinc-800 text-zinc-400 rounded-lg hover:text-white transition-colors"
+                  >
                     <Download size={16} />
                   </button>
                 </div>

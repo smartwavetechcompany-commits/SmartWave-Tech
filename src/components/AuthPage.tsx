@@ -220,14 +220,23 @@ export function AuthPage() {
             }
             tcData = tcDoc.data() as TrackingCode;
             
-            if (tcData.status !== 'active' || new Date(tcData.expiryDate) < new Date()) {
-              throw new Error('Tracking code expired or inactive');
+            if (tcData.status === 'used' || tcData.hotelId) {
+              throw new Error('This tracking code has already been used to register a hotel.');
             }
-            if (tcData.hotelId) {
-              throw new Error('Tracking code already used');
+
+            if (new Date(tcData.expiryDate) < new Date() || tcData.status === 'expired') {
+              throw new Error('This tracking code has expired.');
+            }
+
+            if (tcData.status !== 'active') {
+              throw new Error('This tracking code is inactive.');
+            }
+
+            if (tcData.targetEmail && tcData.targetEmail.toLowerCase() !== formData.email.toLowerCase()) {
+              throw new Error(`This tracking code is uniquely assigned to ${tcData.targetEmail}. Please use the correct email address to register.`);
             }
           } catch (err: any) {
-            if (err.message.includes('Invalid tracking code') || err.message.includes('expired') || err.message.includes('used')) {
+            if (err.message.includes('Invalid tracking code') || err.message.includes('expired') || err.message.includes('used') || err.message.includes('assigned')) {
               throw err;
             }
             handleFirestoreError(err, OperationType.GET, `trackingCodes/${formData.trackingCode}`);
@@ -369,10 +378,12 @@ export function AuthPage() {
         if (parsed.error) errorMessage = parsed.error;
       } catch (e) {
         // Not a JSON error, use raw message
-        if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+        if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-email') {
+          errorMessage = 'The email or password you entered is incorrect. Please try again.';
         } else if (err.code === 'auth/too-many-requests') {
-          errorMessage = 'Too many failed login attempts. Please try again later or reset your password.';
+          errorMessage = 'Too many failed login attempts. Your account has been temporarily locked for security. Please try again later or reset your password.';
+        } else if (err.code === 'auth/network-request-failed') {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
         }
       }
       

@@ -61,6 +61,7 @@ export function SuperAdmin() {
     duration: '1 month',
     type: 'Standard',
     price: 0,
+    targetEmail: '',
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -152,7 +153,8 @@ export function SuperAdmin() {
         plan: (request.plan?.toLowerCase() as PlanType) || 'standard',
         maxHotels: 1,
         issuedBy: auth.currentUser.uid,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        targetEmail: request.email
       };
 
       // 1. Create the tracking code
@@ -201,6 +203,11 @@ export function SuperAdmin() {
 
     setLoading(true);
     try {
+      if (!newCode.targetEmail) {
+        toast.error('Target email is required');
+        return;
+      }
+
       const code = Math.random().toString(36).substring(2, 10).toUpperCase();
       let durationMs = 30 * 24 * 60 * 60 * 1000;
       if (newCode.duration === '6 months') durationMs = 6 * 30 * 24 * 60 * 60 * 1000;
@@ -214,7 +221,8 @@ export function SuperAdmin() {
         maxHotels: 1,
         issuedBy: auth.currentUser.uid,
         createdAt: new Date().toISOString(),
-        price: newCode.price
+        price: newCode.price,
+        targetEmail: newCode.targetEmail.toLowerCase()
       };
 
       await setDoc(doc(db, 'trackingCodes', code), tc);
@@ -229,6 +237,7 @@ export function SuperAdmin() {
       await addDoc(collection(db, 'activityLogs'), log);
 
       setGeneratedCode(code);
+      setNewCode({ duration: '1 month', type: 'Standard', price: 0, targetEmail: '' });
       toast.success('Tracking code generated successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
@@ -596,6 +605,18 @@ export function SuperAdmin() {
                       <option>6 months</option>
                       <option>1 year</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Target Email (Required)</label>
+                    <input 
+                      type="email" 
+                      placeholder="hotel@example.com"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                      value={newCode.targetEmail}
+                      onChange={(e) => setNewCode({ ...newCode, targetEmail: e.target.value })}
+                      required
+                    />
+                    <p className="text-[10px] text-zinc-500 mt-1">This code will only be valid for this email address.</p>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type</label>

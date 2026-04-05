@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem } from '../types';
@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
-import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay } from 'date-fns';
+import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
@@ -46,6 +46,10 @@ export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [records, setRecords] = useState<FinanceRecord[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
+  const [showPaySupplierModal, setShowPaySupplierModal] = useState<Supplier | null>(null);
+  const [showAddAccountModal, setShowAddAccountModal] = useState(false);
+  const [showAddPOModal, setShowAddPOModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [timeRange, setTimeRange] = useState<'today' | 'month' | 'all'>('month');
@@ -55,6 +59,34 @@ export function Finance() {
     type: 'income' as 'income' | 'expense',
     category: 'Room Revenue',
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer'
+  });
+
+  const [payData, setPayData] = useState({ amount: 0, method: 'cash' as const, notes: '' });
+
+  const [newSupplier, setNewSupplier] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    category: 'Supplies',
+    balance: 0
+  });
+
+  const [newAccount, setNewAccount] = useState({
+    code: '',
+    name: '',
+    type: 'asset' as Account['type'],
+    description: '',
+    balance: 0
+  });
+
+  const [newPO, setNewPO] = useState({
+    supplierId: '',
+    items: [] as PurchaseOrder['items'],
+    totalAmount: 0,
+    status: 'pending' as const,
+    paymentStatus: 'unpaid' as const,
+    dueDate: format(addDays(new Date(), 7), 'yyyy-MM-dd')
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -243,6 +275,193 @@ export function Finance() {
       setIsSaving(false);
     }
   };
+
+  const handleAddSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile) return;
+    setIsSaving(true);
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'suppliers'), {
+        ...newSupplier,
+        createdAt: new Date().toISOString()
+      });
+      toast.success('Supplier added successfully');
+      setShowAddSupplierModal(false);
+      setNewSupplier({ name: '', email: '', phone: '', address: '', category: 'Supplies', balance: 0 });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/suppliers`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePaySupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !showPaySupplierModal) return;
+    setIsSaving(true);
+    try {
+      const supplier = showPaySupplierModal;
+      const amount = payData.amount;
+
+      // Update supplier balance
+      await updateDoc(doc(db, 'hotels', hotel.id, 'suppliers', supplier.id), {
+        balance: (supplier.balance || 0) - amount
+      });
+
+      // Record as expense
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+        type: 'expense',
+        amount: amount,
+        category: 'Supplies',
+        description: `Supplier Payment: ${supplier.name} (${payData.notes || 'No notes'})`,
+        timestamp: new Date().toISOString(),
+        paymentMethod: payData.method
+      });
+
+      toast.success('Payment recorded successfully');
+      setShowPaySupplierModal(null);
+      setPayData({ amount: 0, method: 'cash', notes: '' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/suppliers/${showPaySupplierModal.id}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile) return;
+    setIsSaving(true);
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'accounts'), {
+        ...newAccount,
+        balance: Number(newAccount.balance)
+      });
+      toast.success('Account created successfully');
+      setShowAddAccountModal(false);
+      setNewAccount({ code: '', name: '', type: 'asset', description: '', balance: 0 });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/accounts`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCreatePO = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile) return;
+    if (newPO.items.length === 0) {
+      toast.error('Please add at least one item to the PO');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await addDoc(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
+        ...newPO,
+        timestamp: new Date().toISOString()
+      });
+      toast.success('Purchase Order created successfully');
+      setShowAddPOModal(false);
+      setNewPO({ supplierId: '', items: [], totalAmount: 0, status: 'pending', paymentStatus: 'unpaid', dueDate: format(addDays(new Date(), 7), 'yyyy-MM-dd') });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/purchaseOrders`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReceivePO = async (po: PurchaseOrder) => {
+    if (!hotel?.id || !profile) return;
+    if (po.status === 'received') return;
+
+    setIsSaving(true);
+    try {
+      // Update PO status
+      await updateDoc(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
+        status: 'received'
+      });
+
+      // Update inventory for each item
+      for (const item of po.items) {
+        const itemRef = doc(db, 'hotels', hotel.id, 'inventory', item.inventoryItemId);
+        const itemDoc = await getDoc(itemRef);
+        if (itemDoc.exists()) {
+          const currentQty = itemDoc.data().quantity || 0;
+          await updateDoc(itemRef, {
+            quantity: currentQty + item.quantity,
+            lastUpdated: new Date().toISOString()
+          });
+        }
+      }
+
+      toast.success('Purchase Order received and inventory updated');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/purchaseOrders/${po.id}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDownloadReport = (reportTitle: string) => {
+    let data: any[] = [];
+    let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+
+    switch (reportTitle) {
+      case 'Expense Type Report':
+        const expenseRecords = records.filter(r => r.type === 'expense');
+        const byCategory = categories.expense.map(cat => ({
+          Category: cat,
+          Total: expenseRecords.filter(r => r.category === cat).reduce((acc, r) => acc + r.amount, 0)
+        }));
+        data = byCategory;
+        break;
+      case 'Net Income Report':
+        data = [
+          { Item: 'Total Income', Amount: totalIncome },
+          { Item: 'Total Expense', Amount: totalExpense },
+          { Item: 'Net Income', Amount: balance }
+        ];
+        break;
+      case 'Transaction Report':
+        data = filteredRecords.map(r => ({
+          Date: format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
+          Description: r.description,
+          Category: r.category,
+          Type: r.type,
+          Amount: r.amount,
+          Method: r.paymentMethod
+        }));
+        break;
+      case 'Balance Sheet':
+        data = accounts.map(a => ({
+          Code: a.code,
+          Account: a.name,
+          Type: a.type,
+          Balance: a.balance
+        }));
+        break;
+      case 'Inventory Value':
+        data = inventoryItems.map(i => ({
+          Item: i.name,
+          Category: i.category,
+          Quantity: i.quantity,
+          Unit: i.unit,
+          EstimatedValue: i.quantity * 0
+        }));
+        break;
+      default:
+        toast.info('This report is currently being generated. Please check back soon.');
+        return;
+    }
+
+    if (data.length > 0) {
+      exportToCSV(data, filename);
+      toast.success(`${reportTitle} downloaded successfully`);
+    } else {
+      toast.info('No data available for this report');
+    }
+  };
+
   const handleAddRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
@@ -596,7 +815,12 @@ export function Finance() {
                   <h3 className="font-bold text-white">Supplier Accounts</h3>
                   <p className="text-xs text-zinc-500">Manage vendor balances and payments</p>
                 </div>
-                <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold">Add Supplier</button>
+                <button 
+                  onClick={() => setShowAddSupplierModal(true)}
+                  className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
+                >
+                  Add Supplier
+                </button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -618,7 +842,15 @@ export function Finance() {
                           <td className="px-6 py-4 text-xs text-zinc-400">{s.category}</td>
                           <td className="px-6 py-4 text-right font-bold text-red-500">{formatCurrency(s.balance, currency, exchangeRate)}</td>
                           <td className="px-6 py-4 text-right">
-                            <button className="text-xs font-bold text-emerald-500">Pay</button>
+                            <button 
+                              onClick={() => {
+                                setShowPaySupplierModal(s);
+                                setPayData({ ...payData, amount: s.balance });
+                              }}
+                              className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
+                            >
+                              Pay
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -636,7 +868,12 @@ export function Finance() {
                   <h3 className="font-bold text-white">Chart of Accounts</h3>
                   <p className="text-xs text-zinc-500">Financial structure and balances</p>
                 </div>
-                <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold">New Account</button>
+                <button 
+                  onClick={() => setShowAddAccountModal(true)}
+                  className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
+                >
+                  New Account
+                </button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -674,7 +911,12 @@ export function Finance() {
                   <h3 className="font-bold text-white">Purchase Orders</h3>
                   <p className="text-xs text-zinc-500">Manage inventory procurement</p>
                 </div>
-                <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold">Create PO</button>
+                <button 
+                  onClick={() => setShowAddPOModal(true)}
+                  className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
+                >
+                  Create PO
+                </button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -684,11 +926,12 @@ export function Finance() {
                       <th className="px-6 py-4">Supplier</th>
                       <th className="px-6 py-4">Status</th>
                       <th className="px-6 py-4 text-right">Total</th>
+                      <th className="px-6 py-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
                     {purchaseOrders.length === 0 ? (
-                      <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No purchase orders found</td></tr>
+                      <tr><td colSpan={5} className="px-6 py-12 text-center text-zinc-500 italic">No purchase orders found</td></tr>
                     ) : (
                       purchaseOrders.map((po) => (
                         <tr key={po.id} className="hover:bg-zinc-800/50 transition-colors">
@@ -701,6 +944,17 @@ export function Finance() {
                             )}>{po.status}</span>
                           </td>
                           <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(po.totalAmount, currency, exchangeRate)}</td>
+                          <td className="px-6 py-4 text-right">
+                            {po.status !== 'received' && (
+                              <button 
+                                onClick={() => handleReceivePO(po)}
+                                disabled={isSaving}
+                                className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors disabled:opacity-50"
+                              >
+                                Receive
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))
                     )}
@@ -760,11 +1014,18 @@ export function Finance() {
                 { title: 'Inventory Value', icon: LayoutDashboard, desc: 'Current value of stock on hand' },
                 { title: 'Store Balance', icon: Receipt, desc: 'Financial status of different store points' },
               ].map((report) => (
-                <button key={report.title} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl text-left hover:border-emerald-500/50 transition-all group">
+                <button 
+                  key={report.title} 
+                  onClick={() => handleDownloadReport(report.title)}
+                  className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl text-left hover:border-emerald-500/50 transition-all group"
+                >
                   <div className="p-3 rounded-xl bg-zinc-950 w-fit mb-4 group-hover:bg-emerald-500/10 transition-colors">
                     <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
                   </div>
-                  <h4 className="font-bold text-white mb-1">{report.title}</h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-white mb-1">{report.title}</h4>
+                    <Download size={14} className="text-zinc-600 group-hover:text-emerald-500" />
+                  </div>
                   <p className="text-xs text-zinc-500">{report.desc}</p>
                 </button>
               ))}
@@ -974,6 +1235,407 @@ export function Finance() {
                 >
                   {isSaving ? 'Processing...' : showSettleModal.ledgerBalance < 0 ? 'Post Payment' : 'Post Refund'}
                 </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {showPaySupplierModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">Pay Supplier</h2>
+              <p className="text-sm text-zinc-500 mt-1">Supplier: {showPaySupplierModal.name}</p>
+            </div>
+            <form onSubmit={handlePaySupplier}>
+              <div className="p-6 space-y-4">
+                <div className="p-4 rounded-2xl bg-red-500/5 border border-red-500/20 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-zinc-500 uppercase">Outstanding Balance</p>
+                    <p className="text-lg font-bold text-red-500">
+                      {formatCurrency(showPaySupplierModal.balance, currency, exchangeRate)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Payment Amount ({currency})</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{currency === 'NGN' ? '₦' : '$'}</span>
+                    <input
+                      required
+                      type="number"
+                      value={payData.amount}
+                      onChange={(e) => setPayData({ ...payData, amount: parseFloat(e.target.value) })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
+                  <select
+                    value={payData.method}
+                    onChange={(e) => setPayData({ ...payData, method: e.target.value as any })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                    <option value="transfer">Bank Transfer</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
+                  <textarea
+                    value={payData.notes}
+                    onChange={(e) => setPayData({ ...payData, notes: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                    placeholder="e.g. Payment for invoice #123"
+                  />
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPaySupplierModal(null)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!payData.amount || isSaving}
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isSaving ? 'Processing...' : 'Post Payment'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {showAddSupplierModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">Add New Supplier</h2>
+            </div>
+            <form onSubmit={handleAddSupplier}>
+              <div className="p-6 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Supplier Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={newSupplier.name}
+                    onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    placeholder="e.g. Fresh Foods Ltd"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
+                    <input
+                      required
+                      type="text"
+                      value={newSupplier.category}
+                      onChange={(e) => setNewSupplier({ ...newSupplier, category: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      placeholder="e.g. Food"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Phone</label>
+                    <input
+                      type="text"
+                      value={newSupplier.phone}
+                      onChange={(e) => setNewSupplier({ ...newSupplier, phone: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Email</label>
+                  <input
+                    type="email"
+                    value={newSupplier.email}
+                    onChange={(e) => setNewSupplier({ ...newSupplier, email: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddSupplierModal(false)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isSaving ? 'Saving...' : 'Add Supplier'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {showAddAccountModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">Create New Account</h2>
+            </div>
+            <form onSubmit={handleCreateAccount}>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Code</label>
+                    <input
+                      required
+                      type="text"
+                      value={newAccount.code}
+                      onChange={(e) => setNewAccount({ ...newAccount, code: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 font-mono"
+                      placeholder="1001"
+                    />
+                  </div>
+                  <div className="col-span-2 space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Account Name</label>
+                    <input
+                      required
+                      type="text"
+                      value={newAccount.name}
+                      onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      placeholder="e.g. Cash at Hand"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Account Type</label>
+                  <select
+                    value={newAccount.type}
+                    onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value as any })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="asset">Asset</option>
+                    <option value="liability">Liability</option>
+                    <option value="equity">Equity</option>
+                    <option value="revenue">Revenue</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Initial Balance</label>
+                  <input
+                    type="number"
+                    value={newAccount.balance}
+                    onChange={(e) => setNewAccount({ ...newAccount, balance: parseFloat(e.target.value) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddAccountModal(false)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isSaving ? 'Creating...' : 'Create Account'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {showAddPOModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">Create Purchase Order</h2>
+            </div>
+            <form onSubmit={handleCreatePO}>
+              <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Supplier</label>
+                    <select
+                      required
+                      value={newPO.supplierId}
+                      onChange={(e) => setNewPO({ ...newPO, supplierId: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="">Select Supplier</option>
+                      {suppliers.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Due Date</label>
+                    <input
+                      required
+                      type="date"
+                      value={newPO.dueDate}
+                      onChange={(e) => setNewPO({ ...newPO, dueDate: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Items</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewPO({
+                          ...newPO,
+                          items: [...newPO.items, { inventoryItemId: '', quantity: 1, unitPrice: 0, total: 0 }]
+                        });
+                      }}
+                      className="text-xs font-bold text-emerald-500 flex items-center gap-1"
+                    >
+                      <Plus size={14} /> Add Item
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {newPO.items.map((item, index) => (
+                      <div key={index} className="grid grid-cols-12 gap-3 items-end bg-zinc-950/50 p-3 rounded-xl border border-zinc-800">
+                        <div className="col-span-5 space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-600 uppercase">Inventory Item</label>
+                          <select
+                            required
+                            value={item.inventoryItemId}
+                            onChange={(e) => {
+                              const items = [...newPO.items];
+                              items[index].inventoryItemId = e.target.value;
+                              setNewPO({ ...newPO, items });
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          >
+                            <option value="">Select Item</option>
+                            {inventoryItems.map(i => (
+                              <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-2 space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-600 uppercase">Qty</label>
+                          <input
+                            required
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const items = [...newPO.items];
+                              items[index].quantity = parseFloat(e.target.value);
+                              items[index].total = items[index].quantity * items[index].unitPrice;
+                              const totalAmount = items.reduce((acc, curr) => acc + curr.total, 0);
+                              setNewPO({ ...newPO, items, totalAmount });
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          />
+                        </div>
+                        <div className="col-span-2 space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-600 uppercase">Price</label>
+                          <input
+                            required
+                            type="number"
+                            min="0"
+                            value={item.unitPrice}
+                            onChange={(e) => {
+                              const items = [...newPO.items];
+                              items[index].unitPrice = parseFloat(e.target.value);
+                              items[index].total = items[index].quantity * items[index].unitPrice;
+                              const totalAmount = items.reduce((acc, curr) => acc + curr.total, 0);
+                              setNewPO({ ...newPO, items, totalAmount });
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          />
+                        </div>
+                        <div className="col-span-2 text-right pb-2">
+                          <div className="text-[10px] font-bold text-zinc-600 uppercase mb-1">Total</div>
+                          <div className="text-sm font-bold text-white">{formatCurrency(item.total, currency, exchangeRate)}</div>
+                        </div>
+                        <div className="col-span-1 pb-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const items = newPO.items.filter((_, i) => i !== index);
+                              const totalAmount = items.reduce((acc, curr) => acc + curr.total, 0);
+                              setNewPO({ ...newPO, items, totalAmount });
+                            }}
+                            className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                          >
+                            <TrendingDown size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-zinc-500 uppercase font-bold">Total Amount</p>
+                  <p className="text-2xl font-bold text-emerald-500">{formatCurrency(newPO.totalAmount, currency, exchangeRate)}</p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddPOModal(false)}
+                    className="px-6 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSaving || !newPO.supplierId || newPO.items.length === 0}
+                    className="px-6 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isSaving ? 'Creating...' : 'Create PO'}
+                  </button>
+                </div>
               </div>
             </form>
           </motion.div>
