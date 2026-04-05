@@ -60,6 +60,10 @@ export function Sidebar() {
 
       // Check if module is enabled for the hotel
       if (item.permission && hotel?.modulesEnabled) {
+        // Special case: Corporate is always available for Premium and Enterprise plans
+        if (item.permission === 'corporate' && (hotel.plan === 'premium' || hotel.plan === 'enterprise')) {
+          return true;
+        }
         if (!hotel.modulesEnabled.includes(item.permission)) return false;
       }
 
