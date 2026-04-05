@@ -14,7 +14,11 @@ import {
   Building2,
   FileSpreadsheet,
   FileText,
-  Filter
+  Filter,
+  LayoutDashboard,
+  CreditCard,
+  Wallet,
+  Receipt
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { 
@@ -229,6 +233,29 @@ export function Reports() {
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
+  const [activeReport, setActiveReport] = useState('overview');
+  
+  const reportTypes = [
+    { id: 'overview', label: 'Overview', icon: PieChart },
+    { id: 'occupancy', label: 'Daily Occupancy', icon: Bed },
+    { id: 'inhouse', label: 'In House Guests', icon: Users },
+    { id: 'occupancy_ratio', label: 'Occupancy Ratio', icon: BarChart3 },
+    { id: 'reservations', label: 'Reservation Report', icon: Calendar },
+    { id: 'source', label: 'Source Report', icon: Building2 },
+    { id: 'rooms', label: 'Room Report', icon: Bed },
+    { id: 'services', label: 'Service Report', icon: LayoutDashboard },
+    { id: 'guests', label: 'Guest Report', icon: Users },
+    { id: 'countries', label: 'Country Report', icon: Building2 },
+    { id: 'daily_sales', label: 'Daily Sale Report', icon: TrendingUp },
+    { id: 'monthly_sales', label: 'Monthly Sale Report', icon: TrendingUp },
+    { id: 'payments', label: 'Payment Report', icon: CreditCard },
+    { id: 'balance', label: 'Balance', icon: Wallet },
+    { id: 'laundry', label: 'Daily Laundry Report', icon: Receipt },
+    { id: 'staff_sales', label: 'Staff Sale Report', icon: Users },
+    { id: 'staff_payments', label: 'Staff Payment Report', icon: CreditCard },
+    { id: 'taxation', label: 'Taxation Report', icon: Receipt },
+  ];
+
   return (
     <div className="p-8 space-y-8">
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
@@ -274,122 +301,157 @@ export function Reports() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-              <Bed size={20} />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{stats.occupancy}%</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Occupancy Rate</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
-              <TrendingUp size={20} />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
-              <TrendingUp size={20} />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
-              <Users size={20} />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">{stats.totalGuests}</div>
-          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Guests</div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <h3 className="font-bold text-white mb-6">Revenue Trend</h3>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueData}>
-                <defs>
-                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                  itemStyle={{ color: '#10b981' }}
-                  formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
-                />
-                <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Sidebar Navigation */}
+        <div className="w-full lg:w-64 flex-shrink-0 space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar">
+          {reportTypes.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveReport(item.id)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all",
+                activeReport === item.id 
+                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              )}
+            >
+              <item.icon size={18} />
+              {item.label}
+            </button>
+          ))}
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <h3 className="font-bold text-white mb-6">Revenue Mix</h3>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={corporateData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {corporateData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                  formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex justify-center gap-6 mt-4">
-            {corporateData.map((entry, index) => (
-              <div key={entry.name} className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
-                <span className="text-xs text-zinc-400">{entry.name}</span>
+        {/* Main Content Area */}
+        <div className="flex-1 min-w-0">
+          {activeReport === 'overview' && (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+                      <Bed size={20} />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-white mb-1">{stats.occupancy}%</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Occupancy Rate</div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+                      <TrendingUp size={20} />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
+                      <TrendingUp size={20} />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+                      <Users size={20} />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-bold text-white mb-1">{stats.totalGuests}</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Guests</div>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <h3 className="font-bold text-white mb-6">Occupancy Trend</h3>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={occupancyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}%`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                  itemStyle={{ color: '#3b82f6' }}
-                />
-                <Bar dataKey="rate" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <h3 className="font-bold text-white mb-6">Revenue Trend</h3>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={revenueData}>
+                        <defs>
+                          <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                        <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                          itemStyle={{ color: '#10b981' }}
+                          formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
+                        />
+                        <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <h3 className="font-bold text-white mb-6">Revenue Mix</h3>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={corporateData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {corporateData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                          formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex justify-center gap-6 mt-4">
+                    {corporateData.map((entry, index) => (
+                      <div key={entry.name} className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
+                        <span className="text-xs text-zinc-400">{entry.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeReport !== 'overview' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                <div>
+                  <h3 className="font-bold text-white">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
+                  <p className="text-xs text-zinc-500">Detailed report for the selected period</p>
+                </div>
+                <div className="flex gap-2">
+                  <button className="p-2 bg-zinc-800 text-zinc-400 rounded-lg hover:text-white transition-colors">
+                    <Download size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="p-12 text-center">
+                <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <FileText className="text-zinc-500" size={32} />
+                </div>
+                <h4 className="text-white font-bold mb-2">Report Ready for Generation</h4>
+                <p className="text-sm text-zinc-500 max-w-xs mx-auto mb-6">
+                  Click the export buttons above to download the full {reportTypes.find(r => r.id === activeReport)?.label} in your preferred format.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

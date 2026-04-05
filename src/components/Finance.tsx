@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord, OperationType, Guest, Reservation, Room } from '../types';
+import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
 import { syncDailyCharges } from '../services/financeService';
 import { 
@@ -25,7 +25,15 @@ import {
   Send,
   RefreshCw,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Building2,
+  FileText,
+  Users,
+  History,
+  LayoutDashboard,
+  Receipt,
+  ArrowLeftRight,
+  Percent
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -50,18 +58,69 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'transactions' | 'ledger'>('transactions');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports'>('overview');
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [commissions, setCommissions] = useState<Commission[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSettleModal, setShowSettleModal] = useState<Guest | null>(null);
-  const [settleData, setSettleData] = useState({
-    amount: 0,
-    method: 'cash' as 'cash' | 'card' | 'transfer',
-    notes: ''
-  });
+  const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as const, notes: '' });
+
+  useEffect(() => {
+    if (!hotel?.id || !profile || hasPermissionError) return;
+    
+    // Fetch Suppliers
+    const unsubSuppliers = onSnapshot(collection(db, 'hotels', hotel.id, 'suppliers'), (snap) => {
+      setSuppliers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supplier)));
+    });
+
+    // Fetch Accounts
+    const unsubAccounts = onSnapshot(collection(db, 'hotels', hotel.id, 'accounts'), (snap) => {
+      setAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account)));
+    });
+
+    // Fetch Purchase Orders
+    const unsubPOs = onSnapshot(collection(db, 'hotels', hotel.id, 'purchaseOrders'), (snap) => {
+      setPurchaseOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PurchaseOrder)));
+    });
+
+    // Fetch Commissions
+    const unsubCommissions = onSnapshot(collection(db, 'hotels', hotel.id, 'commissions'), (snap) => {
+      setCommissions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Commission)));
+    });
+
+    // Fetch Inventory for POs
+    const unsubInv = onSnapshot(collection(db, 'hotels', hotel.id, 'inventory'), (snap) => {
+      setInventoryItems(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+    });
+
+    return () => {
+      unsubSuppliers();
+      unsubAccounts();
+      unsubPOs();
+      unsubCommissions();
+      unsubInv();
+    };
+  }, [hotel?.id, profile?.uid, hasPermissionError]);
+
+  const navItems = [
+    { id: 'overview', label: 'Overview', icon: PieChart },
+    { id: 'transactions', label: 'Transactions', icon: RefreshCw },
+    { id: 'ledger', label: 'Guest Accounts', icon: Users },
+    { id: 'suppliers', label: 'Supplier Accounts', icon: Building2 },
+    { id: 'accounts', label: 'Chart of Accounts', icon: Wallet },
+    { id: 'expenses', label: 'Expense Records', icon: TrendingDown },
+    { id: 'pos', label: 'Purchase Orders', icon: FileText },
+    { id: 'commissions', label: 'Commissions', icon: DollarSign },
+    { id: 'payments', label: 'Payments', icon: CreditCard },
+    { id: 'reports', label: 'Finance Reports', icon: BarChart3 },
+  ];
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -323,288 +382,396 @@ export function Finance() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {stats.map((stat) => (
-          <div key={stat.label} className={cn("border border-zinc-800 p-6 rounded-2xl", stat.bg)}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
-              <stat.icon className={stat.color} size={20} />
-            </div>
-            <div className="text-2xl font-bold text-white">{stat.value}</div>
-          </div>
-        ))}
-      </div>
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Sidebar Navigation */}
+        <div className="w-full lg:w-64 flex-shrink-0 space-y-1">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id as any)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all",
+                activeTab === item.id 
+                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              )}
+            >
+              <item.icon size={18} />
+              {item.label}
+            </button>
+          ))}
+        </div>
 
-      <div className="flex items-center gap-4 border-b border-zinc-800 mb-8">
-        <button
-          onClick={() => setActiveTab('transactions')}
-          className={cn(
-            "px-4 py-2 font-bold text-sm transition-all relative",
-            activeTab === 'transactions' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          Transactions
-          {activeTab === 'transactions' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
-        </button>
-        <button
-          onClick={() => setActiveTab('ledger')}
-          className={cn(
-            "px-4 py-2 font-bold text-sm transition-all relative",
-            activeTab === 'ledger' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          City Ledger
-          {activeTab === 'ledger' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
-        </button>
-      </div>
-
-      {activeTab === 'transactions' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-          <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <h3 className="font-bold text-white">Transaction History</h3>
-              <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-                {(['all', 'income', 'expense'] as const).map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => setFilterType(type)}
-                    className={cn(
-                      "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
-                      filterType === type ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
-                    )}
-                  >
-                    {type}
-                  </button>
+        {/* Main Content Area */}
+        <div className="flex-1 min-w-0">
+          {activeTab === 'overview' && (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {stats.map((stat) => (
+                  <div key={stat.label} className={cn("border border-zinc-800 p-6 rounded-2xl", stat.bg)}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
+                      <stat.icon className={stat.color} size={20} />
+                    </div>
+                    <div className="text-2xl font-bold text-white">{stat.value}</div>
+                  </div>
                 ))}
               </div>
-              <select
-                value={timeRange}
-                onChange={(e) => setTimeRange(e.target.value as any)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1 text-xs text-zinc-400 outline-none focus:border-emerald-500/50"
-              >
-                <option value="today">Today</option>
-                <option value="month">This Month</option>
-                <option value="all">All Time</option>
-              </select>
-            </div>
-            <div className="relative w-full md:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-              <input
-                type="text"
-                placeholder="Search transactions..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
-              />
-            </div>
-          </div>
-          <div className="overflow-x-auto max-h-[400px]">
-            <table className="w-full text-left">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                  <th className="px-6 py-4">Date</th>
-                  <th className="px-6 py-4">Description</th>
-                  <th className="px-6 py-4">Category</th>
-                  <th className="px-6 py-4">Method</th>
-                  <th className="px-6 py-4 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {filteredRecords.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
-                      No transactions found
-                    </td>
-                  </tr>
-                ) : (
-                  filteredRecords.map((record) => (
-                    <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-white">{new Date(record.timestamp).toLocaleDateString()}</div>
-                        <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-white font-medium">{record.description}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">
-                          {record.category}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1 text-xs text-zinc-500 capitalize">
-                          {record.paymentMethod === 'card' ? <CreditCard size={12} /> : 
-                           record.paymentMethod === 'cash' ? <Banknote size={12} /> : 
-                           <Send size={12} />}
-                          {record.paymentMethod}
-                        </div>
-                      </td>
-                      <td className={cn(
-                        "px-6 py-4 text-right font-bold text-sm",
-                        record.type === 'income' ? "text-emerald-500" : "text-red-500"
-                      )}>
-                        {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-          <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-            <PieChart size={18} className="text-emerald-500" />
-            Income vs Expense
-          </h3>
-          <div className="h-[200px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="name" stroke="#71717a" fontSize={10} axisLine={false} tickLine={false} />
-                <YAxis hide />
-                <Tooltip 
-                  cursor={{ fill: 'transparent' }}
-                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-6 space-y-3">
-            <div className="flex items-center justify-between p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <span className="text-xs text-zinc-500">Income Share</span>
-              <span className="text-sm font-bold text-emerald-500">
-                {totalIncome + totalExpense > 0 ? Math.round((totalIncome / (totalIncome + totalExpense)) * 100) : 0}%
-              </span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-zinc-950 rounded-xl border border-zinc-800">
-              <span className="text-xs text-zinc-500">Expense Share</span>
-              <span className="text-sm font-bold text-red-500">
-                {totalIncome + totalExpense > 0 ? Math.round((totalExpense / (totalIncome + totalExpense)) * 100) : 0}%
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-          <h3 className="font-bold text-white mb-6 flex items-center gap-2">
-            <BarChart3 size={18} className="text-amber-500" />
-            Revenue by Category
-          </h3>
-          <div className="space-y-4">
-            {categories.income.map(cat => {
-              const amount = filteredRecords
-                .filter(r => r.type === 'income' && r.category === cat)
-                .reduce((acc, r) => acc + r.amount, 0);
-              const percentage = totalIncome > 0 ? (amount / totalIncome) * 100 : 0;
-              
-              if (amount === 0) return null;
-
-              return (
-                <div key={cat} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-zinc-400">{cat}</span>
-                    <span className="text-white font-bold">{formatCurrency(amount, currency, exchangeRate)}</span>
-                  </div>
-                  <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${percentage}%` }}
-                      className="h-full bg-amber-500"
-                    />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+                  <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+                    <PieChart size={18} className="text-emerald-500" />
+                    Income vs Expense
+                  </h3>
+                  <div className="h-[250px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                        <XAxis dataKey="name" stroke="#71717a" fontSize={10} axisLine={false} tickLine={false} />
+                        <YAxis hide />
+                        <Tooltip 
+                          cursor={{ fill: 'transparent' }}
+                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                        />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                          {chartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
-              );
-            })}
-            {totalIncome === 0 && (
-              <div className="h-[200px] flex items-center justify-center text-zinc-500 text-xs italic">
-                No revenue data for this period
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+                  <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+                    <BarChart3 size={18} className="text-amber-500" />
+                    Revenue by Category
+                  </h3>
+                  <div className="space-y-4">
+                    {categories.income.map(cat => {
+                      const amount = records
+                        .filter(r => r.type === 'income' && r.category === cat)
+                        .reduce((acc, r) => acc + r.amount, 0);
+                      const percentage = totalIncome > 0 ? (amount / totalIncome) * 100 : 0;
+                      if (amount === 0) return null;
+                      return (
+                        <div key={cat} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-zinc-400">{cat}</span>
+                            <span className="text-white font-bold">{formatCurrency(amount, currency, exchangeRate)}</span>
+                          </div>
+                          <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${percentage}%` }}
+                              className="h-full bg-amber-500"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {activeTab === 'transactions' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <h3 className="font-bold text-white">Transaction History</h3>
+                  <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                    {(['all', 'income', 'expense'] as const).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setFilterType(type)}
+                        className={cn(
+                          "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
+                          filterType === type ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="relative w-full md:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Search transactions..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <th className="px-6 py-4">Date</th>
+                      <th className="px-6 py-4">Description</th>
+                      <th className="px-6 py-4">Category</th>
+                      <th className="px-6 py-4">Method</th>
+                      <th className="px-6 py-4 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {filteredRecords.map((record) => (
+                      <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-white">{new Date(record.timestamp).toLocaleDateString()}</div>
+                          <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-white">{record.description}</td>
+                        <td className="px-6 py-4">
+                          <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">{record.category}</span>
+                        </td>
+                        <td className="px-6 py-4 text-xs text-zinc-500 capitalize">{record.paymentMethod}</td>
+                        <td className={cn("px-6 py-4 text-right font-bold text-sm", record.type === 'income' ? "text-emerald-500" : "text-red-500")}>
+                          {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ledger' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800">
+                <h3 className="font-bold text-white">Guest Accounts (City Ledger)</h3>
+                <p className="text-xs text-zinc-500">Manage outstanding balances and credits for individual guests</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <th className="px-6 py-4">Guest</th>
+                      <th className="px-6 py-4">Contact</th>
+                      <th className="px-6 py-4 text-right">Balance</th>
+                      <th className="px-6 py-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {filteredLedger.map((guest) => (
+                      <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
+                        <td className="px-6 py-4 text-sm text-white font-medium">{guest.name}</td>
+                        <td className="px-6 py-4">
+                          <div className="text-xs text-zinc-400">{guest.email}</div>
+                          <div className="text-[10px] text-zinc-500">{guest.phone}</div>
+                        </td>
+                        <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
+                          {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => {
+                              setShowSettleModal(guest);
+                              setSettleData({ ...settleData, amount: Math.abs(guest.ledgerBalance || 0) });
+                            }}
+                            className="text-xs font-bold text-emerald-500 hover:text-emerald-400"
+                          >
+                            Settle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'suppliers' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                <div>
+                  <h3 className="font-bold text-white">Supplier Accounts</h3>
+                  <p className="text-xs text-zinc-500">Manage vendor balances and payments</p>
+                </div>
+                <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold">Add Supplier</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <th className="px-6 py-4">Supplier</th>
+                      <th className="px-6 py-4">Category</th>
+                      <th className="px-6 py-4 text-right">Balance</th>
+                      <th className="px-6 py-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {suppliers.length === 0 ? (
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No suppliers found</td></tr>
+                    ) : (
+                      suppliers.map((s) => (
+                        <tr key={s.id} className="hover:bg-zinc-800/50 transition-colors">
+                          <td className="px-6 py-4 text-sm text-white font-medium">{s.name}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-400">{s.category}</td>
+                          <td className="px-6 py-4 text-right font-bold text-red-500">{formatCurrency(s.balance, currency, exchangeRate)}</td>
+                          <td className="px-6 py-4 text-right">
+                            <button className="text-xs font-bold text-emerald-500">Pay</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'accounts' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                <div>
+                  <h3 className="font-bold text-white">Chart of Accounts</h3>
+                  <p className="text-xs text-zinc-500">Financial structure and balances</p>
+                </div>
+                <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold">New Account</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <th className="px-6 py-4">Code</th>
+                      <th className="px-6 py-4">Account Name</th>
+                      <th className="px-6 py-4">Type</th>
+                      <th className="px-6 py-4 text-right">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {accounts.length === 0 ? (
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No accounts defined</td></tr>
+                    ) : (
+                      accounts.map((a) => (
+                        <tr key={a.id} className="hover:bg-zinc-800/50 transition-colors">
+                          <td className="px-6 py-4 text-xs text-zinc-500 font-mono">{a.code}</td>
+                          <td className="px-6 py-4 text-sm text-white font-medium">{a.name}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-400 capitalize">{a.type}</td>
+                          <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(a.balance, currency, exchangeRate)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'pos' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                <div>
+                  <h3 className="font-bold text-white">Purchase Orders</h3>
+                  <p className="text-xs text-zinc-500">Manage inventory procurement</p>
+                </div>
+                <button className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold">Create PO</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <th className="px-6 py-4">PO #</th>
+                      <th className="px-6 py-4">Supplier</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {purchaseOrders.length === 0 ? (
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No purchase orders found</td></tr>
+                    ) : (
+                      purchaseOrders.map((po) => (
+                        <tr key={po.id} className="hover:bg-zinc-800/50 transition-colors">
+                          <td className="px-6 py-4 text-xs text-white font-mono">{po.id.slice(0, 8)}</td>
+                          <td className="px-6 py-4 text-sm text-zinc-400">{suppliers.find(s => s.id === po.supplierId)?.name || 'Unknown'}</td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                              po.status === 'received' ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                            )}>{po.status}</span>
+                          </td>
+                          <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(po.totalAmount, currency, exchangeRate)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'commissions' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800">
+                <h3 className="font-bold text-white">Agent Commissions</h3>
+                <p className="text-xs text-zinc-500">Track and pay commissions to booking agents</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <th className="px-6 py-4">Agent</th>
+                      <th className="px-6 py-4">Reservation</th>
+                      <th className="px-6 py-4 text-right">Amount</th>
+                      <th className="px-6 py-4 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {commissions.length === 0 ? (
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No commissions found</td></tr>
+                    ) : (
+                      commissions.map((c) => (
+                        <tr key={c.id} className="hover:bg-zinc-800/50 transition-colors">
+                          <td className="px-6 py-4 text-sm text-white font-medium">{c.agentName}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-400">{c.reservationId}</td>
+                          <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(c.amount, currency, exchangeRate)}</td>
+                          <td className="px-6 py-4 text-right">
+                            <span className={cn(
+                              "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                              c.status === 'paid' ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                            )}>{c.status}</span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'reports' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[
+                { title: 'Expense Type Report', icon: TrendingDown, desc: 'Breakdown of expenses by category' },
+                { title: 'Net Income Report', icon: BarChart3, desc: 'Profit and loss statement' },
+                { title: 'Transaction Report', icon: History, desc: 'Detailed list of all financial movements' },
+                { title: 'Balance Sheet', icon: Wallet, desc: 'Assets, liabilities, and equity' },
+                { title: 'Inventory Value', icon: LayoutDashboard, desc: 'Current value of stock on hand' },
+                { title: 'Store Balance', icon: Receipt, desc: 'Financial status of different store points' },
+              ].map((report) => (
+                <button key={report.title} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl text-left hover:border-emerald-500/50 transition-all group">
+                  <div className="p-3 rounded-xl bg-zinc-950 w-fit mb-4 group-hover:bg-emerald-500/10 transition-colors">
+                    <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
+                  </div>
+                  <h4 className="font-bold text-white mb-1">{report.title}</h4>
+                  <p className="text-xs text-zinc-500">{report.desc}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-      ) : (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-          <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-white">City Ledger (Guest Balances)</h3>
-              <p className="text-xs text-zinc-500">Guests with outstanding balances or credits</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="px-3 py-1 bg-emerald-500/10 text-emerald-500 rounded-full text-[10px] font-bold uppercase">
-                Total Credit: {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + Math.abs(g.ledgerBalance || 0), 0), currency, exchangeRate)}
-              </div>
-              <div className="px-3 py-1 bg-red-500/10 text-red-500 rounded-full text-[10px] font-bold uppercase">
-                Total Debt: {formatCurrency(Math.abs(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0)), currency, exchangeRate)}
-              </div>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                  <th className="px-6 py-4">Guest Name</th>
-                  <th className="px-6 py-4">Contact</th>
-                  <th className="px-6 py-4">Last Stay</th>
-                  <th className="px-6 py-4 text-right">Balance</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {filteredLedger.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
-                      No outstanding balances found
-                    </td>
-                  </tr>
-                ) : (
-                  filteredLedger.map((guest) => (
-                    <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-white font-medium">{guest.name}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-xs text-zinc-400">{guest.email}</div>
-                        <div className="text-[10px] text-zinc-500">{guest.phone}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-xs text-zinc-400">
-                          {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yyyy') : 'N/A'}
-                        </div>
-                      </td>
-                      <td className={cn(
-                        "px-6 py-4 text-right font-bold text-sm",
-                        (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
-                      )}>
-                        {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => {
-                            setShowSettleModal(guest);
-                            setSettleData({ ...settleData, amount: Math.abs(guest.ledgerBalance || 0) });
-                          }}
-                          className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
-                        >
-                          Settle
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">

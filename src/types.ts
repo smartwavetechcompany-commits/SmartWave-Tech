@@ -193,6 +193,69 @@ export interface FinanceRecord {
   description: string;
   timestamp: string;
   paymentMethod: 'cash' | 'card' | 'transfer';
+  accountId?: string;
+  supplierId?: string;
+  guestId?: string;
+  referenceId?: string;
+  status?: 'pending' | 'completed' | 'cancelled';
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  category: string;
+  balance: number;
+  createdAt: string;
+}
+
+export interface Account {
+  id: string;
+  code: string;
+  name: string;
+  type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  balance: number;
+  description?: string;
+  parentAccountId?: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  supplierId: string;
+  items: {
+    inventoryItemId: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+  }[];
+  totalAmount: number;
+  status: 'pending' | 'approved' | 'received' | 'cancelled';
+  paymentStatus: 'unpaid' | 'partial' | 'paid';
+  timestamp: string;
+  dueDate?: string;
+}
+
+export interface Commission {
+  id: string;
+  agentName: string;
+  reservationId: string;
+  amount: number;
+  percentage: number;
+  status: 'pending' | 'paid';
+  timestamp: string;
+}
+
+export interface StockAdjustment {
+  id: string;
+  inventoryItemId: string;
+  previousQuantity: number;
+  newQuantity: number;
+  difference: number;
+  reason: string;
+  timestamp: string;
+  userId: string;
 }
 
 export interface InventoryItem {

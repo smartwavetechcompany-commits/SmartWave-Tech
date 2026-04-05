@@ -50,7 +50,11 @@ export function FrontDesk() {
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
   const [showFolioModal, setShowFolioModal] = useState<Reservation | null>(null);
-  const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' } | null>(null);
+  const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' | 'delete' } | null>(null);
+  const [showPostponeModal, setShowPostponeModal] = useState<Reservation | null>(null);
+  const [showDiscountModal, setShowDiscountModal] = useState<Reservation | null>(null);
+  const [discountData, setDiscountData] = useState({ amount: 0, reason: '' });
+  const [newCheckOutDate, setNewCheckOutDate] = useState('');
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
     category: 'restaurant' as const,
@@ -541,6 +545,112 @@ export function FrontDesk() {
     } catch (err) {
       console.error("Edit reservation error:", err);
       toast.error('Failed to update reservation');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!showConfirmAction || !hotel?.id) return;
+    const { res, action } = showConfirmAction;
+    
+    try {
+      setLoading(true);
+      if (action === 'delete') {
+        await deleteReservation(res);
+      } else {
+        await updateReservationStatus(res, action);
+      }
+      setShowConfirmAction(null);
+    } catch (err) {
+      console.error("Confirm action error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePostponeStay = async () => {
+    if (!showPostponeModal || !hotel?.id || !newCheckOutDate) return;
+    
+    try {
+      setLoading(true);
+      const res = showPostponeModal;
+      
+      const oldCheckOut = new Date(res.checkOut);
+      const newCheckOut = new Date(newCheckOutDate);
+      const extraNights = Math.ceil((newCheckOut.getTime() - oldCheckOut.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (extraNights <= 0) {
+        toast.error('New check-out date must be after current check-out date');
+        return;
+      }
+
+      const room = rooms.find(r => r.id === res.roomId);
+      const nightlyRate = room?.price || 0;
+      const extraAmount = extraNights * nightlyRate;
+      const newTotalAmount = res.totalAmount + extraAmount;
+
+      await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
+        checkOut: newCheckOutDate,
+        totalAmount: newTotalAmount
+      });
+
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        userRole: profile?.role,
+        action: 'RESERVATION_POSTPONED',
+        resource: `Res #${res.id.slice(-6)} - Extended to ${newCheckOutDate}`,
+        hotelId: hotel.id,
+        module: 'Front Desk',
+        details: `Extended by ${extraNights} nights. Added ${formatCurrency(extraAmount, currency, exchangeRate)} to total.`
+      });
+
+      toast.success('Stay postponed successfully');
+      setShowPostponeModal(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/reservations`);
+      toast.error('Failed to postpone stay');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApplyDiscount = async () => {
+    if (!showDiscountModal || !hotel?.id || !discountData.amount || !profile) return;
+    
+    try {
+      setLoading(true);
+      const res = showDiscountModal;
+      
+      await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
+        amount: discountData.amount,
+        type: 'credit',
+        category: 'service',
+        description: `Discount: ${discountData.reason || 'Management Discount'}`,
+        referenceId: res.id,
+        postedBy: profile.uid
+      }, profile.uid);
+
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'DISCOUNT_APPLIED',
+        resource: `Res #${res.id.slice(-6)} - ${formatCurrency(discountData.amount, currency, exchangeRate)}`,
+        hotelId: hotel.id,
+        module: 'Front Desk',
+        details: discountData.reason
+      });
+
+      toast.success('Discount applied successfully');
+      setShowDiscountModal(null);
+      setDiscountData({ amount: 0, reason: '' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/ledger`);
+      toast.error('Failed to apply discount');
     } finally {
       setLoading(false);
     }
@@ -1507,81 +1617,74 @@ export function FrontDesk() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
                       {res.status === 'checked_in' && (
-                        <button 
-                          onClick={() => setShowTransferModal(res)}
-                          className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                          title="Transfer Room"
-                        >
-                          <RefreshCw size={18} />
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => setShowTransferModal(res)}
+                            className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                            title="Transfer Room"
+                          >
+                            <RefreshCw size={18} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setNewCheckOutDate(res.checkOut);
+                              setShowPostponeModal(res);
+                            }}
+                            className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                            title="Postpone Stay / Extend"
+                          >
+                            <Calendar size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setShowDiscountModal(res)}
+                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                            title="Apply Discount"
+                          >
+                            <Tag size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setShowChargeModal(res)}
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                            title="Post Charge to Room"
+                          >
+                            <Plus size={18} />
+                          </button>
+                          <button 
+                            onClick={() => updateReservationStatus(res, 'checked_out')}
+                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                            title="Check Out"
+                          >
+                            <LogOut size={18} />
+                          </button>
+                        </>
                       )}
-                      {res.status === 'checked_in' && (
-                        <button 
-                          onClick={() => setShowChargeModal(res)}
-                          className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
-                          title="Post Charge to Room"
-                        >
-                          <Plus size={18} />
-                        </button>
-                      )}
-                      {res.paymentStatus !== 'paid' && (
-                        <button 
-                          onClick={() => {
-                            const amount = prompt(`Enter payment amount for ${res.guestName} (Total: ${formatCurrency(res.totalAmount, currency, exchangeRate)}):`, (res.totalAmount - (res.paidAmount || 0)).toString());
-                            if (amount && !isNaN(Number(amount))) {
-                              updatePayment(res, Number(amount));
-                            }
-                          }}
-                          className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                          title="Record Payment"
-                        >
-                          <CreditCard size={18} />
-                        </button>
-                      )}
-                      <button 
-                        onClick={() => setShowFolioModal(res)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
-                        title="View Guest Folio"
-                      >
-                        <Receipt size={14} />
-                        View Folio
-                      </button>
+                      
                       {res.status === 'pending' && (
-                        <button 
-                          onClick={() => updateReservationStatus(res, 'checked_in')}
-                          className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
-                          title="Check In"
-                        >
-                          <CheckCircle2 size={18} />
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => updateReservationStatus(res, 'checked_in')}
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                            title="Check In"
+                          >
+                            <CheckCircle2 size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
+                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                            title="Mark No-Show"
+                          >
+                            <UserX size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
+                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
+                            title="Cancel"
+                          >
+                            <XCircle size={18} />
+                          </button>
+                        </>
                       )}
-                      {res.status === 'checked_in' && (
-                        <button 
-                          onClick={() => updateReservationStatus(res, 'checked_out')}
-                          className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
-                          title="Check Out"
-                        >
-                          <LogOut size={18} />
-                        </button>
-                      )}
-                      {res.status === 'pending' && (
-                        <button 
-                          onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
-                          className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                          title="Mark No-Show"
-                        >
-                          <UserX size={18} />
-                        </button>
-                      )}
-                      {res.status === 'pending' && (
-                        <button 
-                          onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
-                          className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
-                          title="Cancel"
-                        >
-                          <XCircle size={18} />
-                        </button>
-                      )}
+
                       <button 
                         onClick={() => {
                           setEditingReservation(res);
@@ -1597,14 +1700,20 @@ export function FrontDesk() {
                       >
                         <Edit2 size={18} />
                       </button>
+
+                      <button 
+                        onClick={() => setShowFolioModal(res)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                        title="View Guest Folio"
+                      >
+                        <Receipt size={14} />
+                        View Folio
+                      </button>
+
                       {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                         <button 
-                          onClick={() => {
-                            if (confirm('Are you sure you want to delete this reservation? This action cannot be undone.')) {
-                              deleteReservation(res);
-                            }
-                          }}
-                          className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
+                          onClick={() => setShowConfirmAction({ res, action: 'delete' })}
+                          className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
                           title="Delete Reservation"
                         >
                           <Trash2 size={18} />
@@ -1827,21 +1936,132 @@ export function FrontDesk() {
         />
       )}
 
+      {showPostponeModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+          >
+            <h3 className="text-xl font-bold text-white mb-2">Postpone Stay</h3>
+            <p className="text-zinc-400 text-sm mb-6">Extend the stay for {showPostponeModal.guestName} in Room {showPostponeModal.roomNumber}.</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Current Check-out</label>
+                <div className="bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-400">
+                  {showPostponeModal.checkOut}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">New Check-out Date</label>
+                <input 
+                  type="date"
+                  min={addDays(new Date(showPostponeModal.checkOut), 1).toISOString().split('T')[0]}
+                  value={newCheckOutDate}
+                  onChange={(e) => setNewCheckOutDate(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                />
+              </div>
+              
+              {newCheckOutDate && (
+                <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+                  <div className="flex justify-between text-xs font-bold text-blue-500 uppercase mb-1">
+                    <span>Extra Nights</span>
+                    <span>{Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24))}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold text-white">
+                    <span>Estimated Extra Charge</span>
+                    <span>{formatCurrency(Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24)) * (rooms.find(r => r.id === showPostponeModal.roomId)?.price || 0), currency, exchangeRate)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={() => setShowPostponeModal(null)}
+                className="flex-1 py-3 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePostponeStay}
+                disabled={loading || !newCheckOutDate}
+                className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {loading ? 'Processing...' : 'Confirm Extension'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showDiscountModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+          >
+            <h3 className="text-xl font-bold text-white mb-2">Apply Discount</h3>
+            <p className="text-zinc-400 text-sm mb-6">Give a discount to {showDiscountModal.guestName}. This will be posted as a credit to their folio.</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Discount Amount ({currency})</label>
+                <input 
+                  type="number"
+                  value={discountData.amount}
+                  onChange={(e) => setDiscountData({ ...discountData, amount: parseFloat(e.target.value) })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Reason / Notes</label>
+                <textarea 
+                  value={discountData.reason}
+                  onChange={(e) => setDiscountData({ ...discountData, reason: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none h-24 resize-none"
+                  placeholder="e.g. Compensation for noise, Management approval..."
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={() => setShowDiscountModal(null)}
+                className="flex-1 py-3 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApplyDiscount}
+                disabled={loading || !discountData.amount}
+                className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {loading ? 'Applying...' : 'Apply Discount'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       <ConfirmModal
         isOpen={!!showConfirmAction}
-        title={showConfirmAction?.action === 'no_show' ? 'Mark No-Show' : 'Cancel Reservation'}
-        message={showConfirmAction?.action === 'no_show' 
-          ? `Are you sure you want to mark ${showConfirmAction?.res.guestName} as No-Show?`
-          : `Are you sure you want to cancel the reservation for ${showConfirmAction?.res.guestName}?`
+        title={showConfirmAction?.action === 'delete' ? 'Delete Reservation' : showConfirmAction?.action === 'no_show' ? 'Mark No-Show' : 'Cancel Reservation'}
+        message={showConfirmAction?.action === 'delete'
+          ? `Are you sure you want to permanently delete the reservation for ${showConfirmAction?.res.guestName}? This action cannot be undone.`
+          : showConfirmAction?.action === 'no_show' 
+            ? `Are you sure you want to mark ${showConfirmAction?.res.guestName} as No-Show?`
+            : `Are you sure you want to cancel the reservation for ${showConfirmAction?.res.guestName}?`
         }
-        onConfirm={() => {
-          if (showConfirmAction) {
-            updateReservationStatus(showConfirmAction.res, showConfirmAction.action);
-          }
-        }}
+        onConfirm={handleConfirmAction}
         onCancel={() => setShowConfirmAction(null)}
-        type={showConfirmAction?.action === 'no_show' ? 'warning' : 'danger'}
-        confirmText={showConfirmAction?.action === 'no_show' ? 'Confirm No-Show' : 'Cancel Reservation'}
+        type={showConfirmAction?.action === 'delete' ? 'danger' : showConfirmAction?.action === 'no_show' ? 'warning' : 'danger'}
+        confirmText={showConfirmAction?.action === 'delete' ? 'Delete' : showConfirmAction?.action === 'no_show' ? 'Confirm No-Show' : 'Cancel Reservation'}
+        isLoading={loading}
       />
     </div>
   );
