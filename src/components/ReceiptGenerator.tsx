@@ -54,7 +54,10 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   const balance = grandTotal - totalPaid;
 
   return (
-    <div className="bg-white text-zinc-900 p-10 max-w-[500px] mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0">
+    <div className={cn(
+      "bg-white text-zinc-900 p-10 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0",
+      type === 'comprehensive' ? "w-[210mm] min-h-[297mm]" : "max-w-[500px]"
+    )}>
       {/* Hotel Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         {branding.logoUrl ? (
@@ -139,13 +142,20 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
                   <span className="font-bold text-sm text-right">{formatCurrency(reservation.totalAmount, currency, exchangeRate)}</span>
                 </div>
               )}
-              {ledgerEntries.filter(e => e.type === 'debit').map(e => (
+              {ledgerEntries.map(e => (
                 <div key={e.id} className="flex justify-between items-start">
                   <div className="flex-1">
-                    <p className="text-sm font-bold">{e.description}</p>
+                    <p className={cn("text-sm font-bold", e.type === 'credit' ? "text-emerald-600" : "")}>
+                      {e.description} {e.type === 'credit' ? '(Payment)' : ''}
+                    </p>
                     <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
                   </div>
-                  <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                  <span className={cn(
+                    "font-bold text-sm text-right",
+                    e.type === 'credit' ? "text-emerald-600" : ""
+                  )}>
+                    {e.type === 'credit' ? '-' : ''}{formatCurrency(e.amount, currency, exchangeRate)}
+                  </span>
                 </div>
               ))}
             </>

@@ -26,6 +26,7 @@ export function AuditLogs() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [moduleFilter, setModuleFilter] = useState<string>('all');
   const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId'; direction: 'asc' | 'desc' }>({
     key: 'timestamp',
     direction: 'desc'
@@ -125,6 +126,10 @@ export function AuditLogs() {
       );
     }
 
+    if (moduleFilter !== 'all') {
+      result = result.filter(log => (log as any).module === moduleFilter);
+    }
+
     result.sort((a, b) => {
       const aValue = (a as any)[sortConfig.key];
       const bValue = (b as any)[sortConfig.key];
@@ -189,6 +194,20 @@ export function AuditLogs() {
         </div>
         
         <div className="flex items-center gap-2 sm:gap-3">
+          <select
+            value={moduleFilter}
+            onChange={(e) => setModuleFilter(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-[10px] sm:text-sm text-white focus:border-emerald-500 outline-none"
+          >
+            <option value="all">All Modules</option>
+            <option value="Front Desk">Front Desk</option>
+            <option value="Guests">Guests</option>
+            <option value="Corporate">Corporate</option>
+            <option value="Kitchen">Kitchen</option>
+            <option value="Rooms">Rooms</option>
+            <option value="Finance">Finance</option>
+            <option value="Settings">Settings</option>
+          </select>
           <button 
             onClick={handleExport}
             className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95"

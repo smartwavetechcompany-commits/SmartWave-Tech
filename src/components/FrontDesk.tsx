@@ -25,7 +25,8 @@ import {
   AlertCircle,
   Trash2,
   UserX,
-  Download
+  Download,
+  Edit2
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -86,6 +87,13 @@ export function FrontDesk() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
+  const [editForm, setEditForm] = useState({
+    checkIn: '',
+    checkOut: '',
+    totalAmount: 0,
+    notes: ''
+  });
   const [isNegotiatedRate, setIsNegotiatedRate] = useState(false);
 
   useEffect(() => {
@@ -421,7 +429,8 @@ export function FrontDesk() {
 
       await batch.commit();
 
-      // 2. Post initial charges to ledger for all bookings
+      // REMOVED: Initial room charges are now handled by check-in or manual posting
+      /*
       for (const stay of createdStays) {
         await postToLedger(hotel.id, stay.guestId, stay.resId, {
           amount: stay.totalAmount,
@@ -432,6 +441,7 @@ export function FrontDesk() {
           postedBy: profile?.uid || 'system'
         }, profile?.uid || 'system', stay.corporateId);
       }
+      */
       setIsBooking(false);
       setNewBooking({
         guestType: 'individual',
@@ -458,6 +468,84 @@ export function FrontDesk() {
     }
   };
 
+  const deleteReservation = async (res: Reservation) => {
+    if (!hotel?.id || !profile) return;
+    if (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+      toast.error('Only administrators can delete reservations');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const batch = writeBatch(db);
+      
+      // 1. Delete reservation
+      batch.delete(doc(db, 'hotels', hotel.id, 'reservations', res.id));
+      
+      // 2. If checked in, mark room as clean
+      if (res.status === 'checked_in') {
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
+      }
+      
+      // 3. Log action
+      batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'DELETE_RESERVATION',
+        resource: `Reservation for ${res.guestName} (Room ${res.roomNumber})`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
+      
+      await batch.commit();
+      toast.success('Reservation deleted successfully');
+    } catch (err) {
+      console.error("Delete reservation error:", err);
+      toast.error('Failed to delete reservation');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditReservation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !editingReservation || !profile) return;
+
+    try {
+      setLoading(true);
+      const resRef = doc(db, 'hotels', hotel.id, 'reservations', editingReservation.id);
+      
+      await updateDoc(resRef, {
+        checkIn: editForm.checkIn,
+        checkOut: editForm.checkOut,
+        totalAmount: editForm.totalAmount,
+        notes: editForm.notes
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'EDIT_RESERVATION',
+        resource: `Reservation ${editingReservation.id} updated (Dates: ${editForm.checkIn} to ${editForm.checkOut}, Total: ${editForm.totalAmount})`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
+
+      toast.success('Reservation updated successfully');
+      setEditingReservation(null);
+    } catch (err) {
+      console.error("Edit reservation error:", err);
+      toast.error('Failed to update reservation');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
     if (!hotel?.id || !profile) return;
     try {
@@ -474,7 +562,8 @@ export function FrontDesk() {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
-          // Post room charge
+          // REMOVED: Redundant with manual posting or nightly audit
+          /*
           await postToLedger(hotel.id, res.guestId, res.id, {
             amount: res.totalAmount,
             type: 'debit',
@@ -483,6 +572,7 @@ export function FrontDesk() {
             referenceId: res.id,
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
+          */
 
           // AUTO DEDUCTION: If guest has credit balance, apply it
           const guest = guests.find(g => g.id === res.guestId);
@@ -1137,6 +1227,7 @@ export function FrontDesk() {
                     type="date" 
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
                     value={newBooking.checkIn}
+                    min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                     onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
                   />
                 </div>
@@ -1491,6 +1582,34 @@ export function FrontDesk() {
                           <XCircle size={18} />
                         </button>
                       )}
+                      <button 
+                        onClick={() => {
+                          setEditingReservation(res);
+                          setEditForm({
+                            checkIn: res.checkIn,
+                            checkOut: res.checkOut,
+                            totalAmount: res.totalAmount,
+                            notes: res.notes || ''
+                          });
+                        }}
+                        className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                        title="Edit Reservation"
+                      >
+                        <Edit2 size={18} />
+                      </button>
+                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                        <button 
+                          onClick={() => {
+                            if (confirm('Are you sure you want to delete this reservation? This action cannot be undone.')) {
+                              deleteReservation(res);
+                            }
+                          }}
+                          className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
+                          title="Delete Reservation"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1499,6 +1618,74 @@ export function FrontDesk() {
           </table>
         </div>
       </div>
+
+      {/* Edit Reservation Modal */}
+      {editingReservation && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+          >
+            <h3 className="text-xl font-bold text-white mb-6">Edit Reservation</h3>
+            <form onSubmit={handleEditReservation} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
+                  <input 
+                    type="date" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={editForm.checkIn}
+                    min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
+                    onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
+                  <input 
+                    type="date" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    value={editForm.checkOut}
+                    onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Total Amount (Discounted/Adjusted)</label>
+                <input 
+                  type="number" 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  value={editForm.totalAmount}
+                  onChange={(e) => setEditForm({ ...editForm, totalAmount: Number(e.target.value) })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
+                <textarea 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingReservation(null)}
+                  className="flex-1 py-2 bg-zinc-800 text-zinc-400 rounded-lg font-bold hover:bg-zinc-700 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-emerald-500 text-black rounded-lg font-bold hover:bg-emerald-400 transition-all active:scale-95"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
 
       {showTransferModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
