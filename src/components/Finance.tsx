@@ -278,17 +278,20 @@ export function Finance() {
 
   const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id || !profile) return;
+    if (!hotel?.id || !profile || isSaving) return;
     setIsSaving(true);
+    console.log('Starting handleAddSupplier with data:', newSupplier);
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'suppliers'), {
+      const supplierRef = await addDoc(collection(db, 'hotels', hotel.id, 'suppliers'), {
         ...newSupplier,
         createdAt: new Date().toISOString()
       });
+      console.log('Supplier added with ID:', supplierRef.id);
       toast.success('Supplier added successfully');
       setShowAddSupplierModal(false);
       setNewSupplier({ name: '', email: '', phone: '', address: '', category: 'Supplies', balance: 0 });
     } catch (err) {
+      console.error('Error in handleAddSupplier:', err);
       handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/suppliers`);
     } finally {
       setIsSaving(false);
@@ -330,17 +333,20 @@ export function Finance() {
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id || !profile) return;
+    if (!hotel?.id || !profile || isSaving) return;
     setIsSaving(true);
+    console.log('Starting handleCreateAccount with data:', newAccount);
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'accounts'), {
+      const accountRef = await addDoc(collection(db, 'hotels', hotel.id, 'accounts'), {
         ...newAccount,
         balance: Number(newAccount.balance)
       });
+      console.log('Account created with ID:', accountRef.id);
       toast.success('Account created successfully');
       setShowAddAccountModal(false);
       setNewAccount({ code: '', name: '', type: 'asset', description: '', balance: 0 });
     } catch (err) {
+      console.error('Error in handleCreateAccount:', err);
       handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/accounts`);
     } finally {
       setIsSaving(false);
@@ -349,21 +355,24 @@ export function Finance() {
 
   const handleCreatePO = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id || !profile) return;
+    if (!hotel?.id || !profile || isSaving) return;
     if (newPO.items.length === 0) {
       toast.error('Please add at least one item to the PO');
       return;
     }
     setIsSaving(true);
+    console.log('Starting handleCreatePO with data:', newPO);
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
+      const poRef = await addDoc(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
         ...newPO,
         timestamp: new Date().toISOString()
       });
+      console.log('Purchase Order created with ID:', poRef.id);
       toast.success('Purchase Order created successfully');
       setShowAddPOModal(false);
       setNewPO({ supplierId: '', items: [], totalAmount: 0, status: 'pending', paymentStatus: 'unpaid', dueDate: format(addDays(new Date(), 7), 'yyyy-MM-dd') });
     } catch (err) {
+      console.error('Error in handleCreatePO:', err);
       handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/purchaseOrders`);
     } finally {
       setIsSaving(false);
@@ -446,7 +455,19 @@ export function Finance() {
           Category: i.category,
           Quantity: i.quantity,
           Unit: i.unit,
-          EstimatedValue: i.quantity * 0
+          UnitPrice: i.price || 0,
+          EstimatedValue: i.quantity * (i.price || 0)
+        }));
+        break;
+      case 'Store Balance':
+        // Summary based on finance records by payment method
+        const methods = ['cash', 'card', 'transfer'];
+        data = methods.map(method => ({
+          'Store Point': method.toUpperCase(),
+          Income: records.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0),
+          Expense: records.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0),
+          Balance: records.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0) - 
+                   records.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0)
         }));
         break;
       default:

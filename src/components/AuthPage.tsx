@@ -384,6 +384,10 @@ export function AuthPage() {
           errorMessage = 'Too many failed login attempts. Your account has been temporarily locked for security. Please try again later or reset your password.';
         } else if (err.code === 'auth/network-request-failed') {
           errorMessage = 'Network error. Please check your internet connection and try again.';
+        } else if (err.code === 'auth/email-already-in-use') {
+          errorMessage = 'This email address is already registered. Please sign in instead.';
+        } else if (err.code === 'auth/weak-password') {
+          errorMessage = 'Password is too weak. Please use at least 6 characters.';
         }
       }
       

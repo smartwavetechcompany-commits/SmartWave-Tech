@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation, Guest } from '../types';
+import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { 
@@ -24,7 +24,10 @@ import {
   RefreshCw,
   Download,
   Printer,
-  XCircle
+  XCircle,
+  ShoppingCart,
+  Trash2,
+  Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
@@ -35,15 +38,20 @@ export function Kitchen() {
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [printingOrder, setPrintingOrder] = useState<KitchenOrder | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'food' | 'drink' | 'other'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [now, setNow] = useState(new Date());
+  
+  const [cart, setCart] = useState<{ id: string; name: string; price: number; quantity: number }[]>([]);
   const [newOrder, setNewOrder] = useState({
     roomNumber: '',
+    guestId: '',
     items: '',
     notes: '',
     category: 'food' as 'food' | 'drink' | 'other',
@@ -96,25 +104,89 @@ export function Kitchen() {
       }
     );
 
+    const unsubInventory = onSnapshot(
+      query(collection(db, 'hotels', hotel.id, 'inventory'), where('category', 'in', ['food', 'drink', 'other'])),
+      (snap) => {
+        setInventory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+      },
+      (error: any) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
+      }
+    );
+
     return () => {
       unsubOrders();
       unsubReservations();
       unsubGuests();
+      unsubInventory();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
+  const [customItem, setCustomItem] = useState({ name: '', price: 0 });
+
+  const addToCart = (item: InventoryItem | { name: string; price: number; id?: string }) => {
+    setCart(prev => {
+      const id = item.id || `custom-${Date.now()}`;
+      const existing = prev.find(i => i.id === id || (i.name === item.name && i.id.startsWith('custom-')));
+      if (existing) {
+        return prev.map(i => (i.id === id || (i.name === item.name && i.id.startsWith('custom-'))) ? { ...i, quantity: i.quantity + 1 } : i);
+      }
+      return [...prev, { id: id, name: item.name, price: item.price, quantity: 1 }];
+    });
+  };
+
+  const addCustomToCart = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customItem.name || customItem.price <= 0) return;
+    addToCart({ name: customItem.name, price: customItem.price });
+    setCustomItem({ name: '', price: 0 });
+    toast.success('Custom item added to cart');
+  };
+
+  const removeFromCart = (id: string) => {
+    setCart(prev => prev.filter(i => i.id !== id));
+  };
+
+  const updateCartQuantity = (id: string, delta: number) => {
+    setCart(prev => prev.map(i => {
+      if (i.id === id) {
+        const newQty = Math.max(1, i.quantity + delta);
+        return { ...i, quantity: newQty };
+      }
+      return i;
+    }));
+  };
+
+  useEffect(() => {
+    const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const itemsString = cart.map(i => `${i.quantity}x ${i.name}`).join(', ');
+    setNewOrder(prev => ({ ...prev, price: total, items: itemsString }));
+  }, [cart]);
+
   const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id) return;
+    if (!hotel?.id || !profile || isSaving) return;
+
+    setIsSaving(true);
+    console.log('Starting handleAddOrder with data:', newOrder);
 
     try {
+      console.log("Creating kitchen order for hotel:", hotel.id);
+      console.log("Order data:", newOrder);
+      
+      const res = reservations.find(r => r.roomNumber === newOrder.roomNumber);
       const orderData = {
         ...newOrder,
+        itemsList: cart,
+        guestName: res?.guestName || 'Walk-in',
+        hotelId: hotel.id, // Ensure hotelId is explicitly set
         status: 'pending',
         timestamp: new Date().toISOString()
       };
 
+      console.log('Attempting to add kitchen order to Firestore...');
       const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
+      console.log('Kitchen order added with ID:', orderRef.id);
 
       // Create notification for kitchen staff
       await createNotification(hotel.id, {
@@ -126,9 +198,11 @@ export function Kitchen() {
 
       // If posting to room, find reservation and post to ledger
       if (newOrder.paymentMethod === 'room' && newOrder.price > 0) {
-        const res = reservations.find(r => r.roomNumber === newOrder.roomNumber);
-        if (res && res.guestId) {
-          await postToLedger(hotel.id, res.guestId, res.id, {
+        const guestId = newOrder.guestId || (res?.guestId);
+        
+        if (res && guestId) {
+          console.log('Posting to room ledger for reservation:', res.id);
+          await postToLedger(hotel.id, guestId, res.id, {
             amount: newOrder.price,
             type: 'debit',
             category: 'restaurant',
@@ -136,16 +210,21 @@ export function Kitchen() {
             referenceId: orderRef.id,
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
+        } else {
+          throw new Error('No active reservation or guest found for this room');
         }
       } else if (newOrder.price > 0) {
         // Add to finance records for cash, card, transfer
+        console.log('Recording as income in finance...');
         await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
           type: 'income',
           amount: newOrder.price,
           category: 'Restaurant Revenue',
           description: `Kitchen Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${newOrder.paymentMethod.toUpperCase()}`,
           timestamp: new Date().toISOString(),
-          paymentMethod: newOrder.paymentMethod
+          paymentMethod: newOrder.paymentMethod,
+          referenceId: orderRef.id,
+          postedBy: profile.uid
         });
       }
 
@@ -163,10 +242,18 @@ export function Kitchen() {
 
       toast.success('Kitchen order created');
       setShowAddModal(false);
-      setNewOrder({ roomNumber: '', items: '', notes: '', category: 'food', price: 0, paymentMethod: 'cash' });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/kitchen_orders`);
-      toast.error('Failed to create order');
+      setCart([]);
+      setNewOrder({ roomNumber: '', guestId: '', items: '', notes: '', category: 'food', price: 0, paymentMethod: 'cash' });
+    } catch (err: any) {
+      console.error('Error in handleAddOrder:', err);
+      if (err.message === 'No active reservation or guest found for this room') {
+        toast.error(err.message);
+      } else {
+        handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/kitchen_orders`);
+        toast.error('Failed to create order');
+      }
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -343,11 +430,16 @@ export function Kitchen() {
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-white font-bold">
-                        {order.roomNumber}
+                        {order.roomNumber === 'Walk-in' ? 'W' : order.roomNumber}
                       </div>
                       <div>
-                        <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Room</div>
-                        <div className="text-xs text-zinc-400 flex items-center gap-1">
+                        <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
+                          {order.roomNumber === 'Walk-in' ? 'Walk-in' : `Room ${order.roomNumber}`}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 font-bold">
+                          {order.guestName}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 flex items-center gap-1">
                           <Clock size={10} />
                           {getWaitTime(order.timestamp)}
                         </div>
@@ -470,9 +562,24 @@ export function Kitchen() {
               
               <div className="mb-6">
                 <p className="text-[10px] font-bold uppercase border-b border-black mb-2">Order Items</p>
-                <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed">
-                  {printingOrder.items}
-                </p>
+                {printingOrder.itemsList ? (
+                  <div className="space-y-1">
+                    {printingOrder.itemsList.map((item, idx) => (
+                      <div key={idx} className="flex justify-between text-sm font-bold">
+                        <span>{item.quantity}x {item.name}</span>
+                        <span>{(item.price * item.quantity).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-black pt-1 mt-2 flex justify-between text-sm font-black">
+                      <span>TOTAL</span>
+                      <span>{printingOrder.price.toLocaleString()}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed">
+                    {printingOrder.items}
+                  </p>
+                )}
               </div>
               
               {printingOrder.notes && (
@@ -506,29 +613,168 @@ export function Kitchen() {
         </div>
       )}
 
-      {/* Add Order Modal */}
+      {/* Add Order Modal (POS) */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden"
           >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">New Kitchen Order</h2>
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Kitchen POS</h2>
+                <p className="text-xs text-zinc-500">Create new room service or walk-in order</p>
+              </div>
+              <button 
+                onClick={() => setShowAddModal(false)}
+                className="p-2 hover:bg-zinc-800 rounded-full text-zinc-500 transition-colors"
+              >
+                <XCircle size={24} />
+              </button>
             </div>
-            <form onSubmit={handleAddOrder}>
-              <div className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left Column: Menu */}
+              <div className="flex-1 border-r border-zinc-800 flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex gap-2">
+                  {(['all', 'food', 'drink', 'other'] as const).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setNewOrder(prev => ({ ...prev, category: cat === 'all' ? 'food' : cat }))}
+                      className={cn(
+                        "px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                        (cat === 'all' ? true : newOrder.category === cat) 
+                          ? "bg-emerald-500 text-black" 
+                          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                      )}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {inventory
+                      .filter(item => newOrder.category === 'food' || newOrder.category === 'drink' || newOrder.category === 'other' ? item.category === newOrder.category : true)
+                      .map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => addToCart(item)}
+                          className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl text-left hover:border-emerald-500/50 transition-all group active:scale-95"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            {item.category === 'food' ? <Pizza size={16} className="text-amber-500" /> : 
+                             item.category === 'drink' ? <Coffee size={16} className="text-blue-500" /> :
+                             <MoreHorizontal size={16} className="text-zinc-500" />}
+                            <Plus size={14} className="text-zinc-500 group-hover:text-emerald-500" />
+                          </div>
+                          <div className="text-sm font-bold text-white mb-1 line-clamp-1">{item.name}</div>
+                          <div className="text-xs font-bold text-emerald-500">{item.price.toLocaleString()}</div>
+                        </button>
+                      ))}
+                  </div>
+
+                  {/* Custom Item Form */}
+                  <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-2xl mt-auto">
+                    <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                      <Plus size={16} className="text-emerald-500" />
+                      Add Custom Item
+                    </h3>
+                    <form onSubmit={addCustomToCart} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="sm:col-span-1">
+                        <input
+                          type="text"
+                          placeholder="Item Name"
+                          value={customItem.name}
+                          onChange={(e) => setCustomItem({ ...customItem, name: e.target.value })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                      <div className="sm:col-span-1">
+                        <input
+                          type="number"
+                          placeholder="Price"
+                          value={customItem.price || ''}
+                          onChange={(e) => setCustomItem({ ...customItem, price: Number(e.target.value) })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!customItem.name || customItem.price <= 0}
+                        className="bg-emerald-500 text-black rounded-xl text-xs font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                      >
+                        Add to Cart
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Cart & Details */}
+              <div className="w-80 bg-zinc-950 flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-zinc-800">
+                  <div className="flex items-center gap-2 text-zinc-400 mb-4">
+                    <ShoppingCart size={18} />
+                    <span className="text-sm font-bold uppercase tracking-wider">Current Order</span>
+                  </div>
+                  
+                  <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-2">
+                    {cart.length === 0 ? (
+                      <div className="text-center py-8 text-zinc-600">
+                        <Utensils size={32} className="mx-auto mb-2 opacity-20" />
+                        <p className="text-xs">Cart is empty</p>
+                      </div>
+                    ) : (
+                      cart.map(item => (
+                        <div key={item.id} className="flex items-center justify-between gap-3 bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/50">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-white truncate">{item.name}</div>
+                            <div className="text-[10px] text-emerald-500 font-bold">{item.price.toLocaleString()}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => updateCartQuantity(item.id, -1)}
+                              className="w-6 h-6 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white"
+                            >
+                              <Minus size={12} />
+                            </button>
+                            <span className="text-xs font-bold text-white w-4 text-center">{item.quantity}</span>
+                            <button 
+                              onClick={() => updateCartQuantity(item.id, 1)}
+                              className="w-6 h-6 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white"
+                            >
+                              <Plus size={12} />
+                            </button>
+                            <button 
+                              onClick={() => removeFromCart(item.id)}
+                              className="text-zinc-600 hover:text-red-500 ml-1"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Room Number</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room & Guest</label>
                     <select
                       required
                       value={newOrder.roomNumber}
-                      onChange={(e) => setNewOrder({ ...newOrder, roomNumber: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      onChange={(e) => {
+                        const roomNum = e.target.value;
+                        const res = reservations.find(r => r.roomNumber === roomNum);
+                        setNewOrder({ ...newOrder, roomNumber: roomNum, guestId: res?.guestId || '' });
+                      }}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">Select Room</option>
+                      <option value="Walk-in">Walk-in Guest</option>
                       {reservations.map(res => (
                         <option key={res.id} value={res.roomNumber}>
                           Room {res.roomNumber} ({res.guestName})
@@ -536,82 +782,65 @@ export function Kitchen() {
                       ))}
                     </select>
                   </div>
+
+                  {newOrder.roomNumber && (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payment Method</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['cash', 'card', 'transfer', 'room'] as const).map(method => (
+                          <button
+                            key={method}
+                            type="button"
+                            disabled={method === 'room' && newOrder.roomNumber === 'Walk-in'}
+                            onClick={() => setNewOrder({ ...newOrder, paymentMethod: method })}
+                            className={cn(
+                              "py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all",
+                              newOrder.paymentMethod === method 
+                                ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" 
+                                : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700",
+                              method === 'room' && newOrder.roomNumber === 'Walk-in' && "opacity-50 cursor-not-allowed"
+                            )}
+                          >
+                            {method === 'room' ? 'Post to Room' : method}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
-                    <select
-                      value={newOrder.category}
-                      onChange={(e) => setNewOrder({ ...newOrder, category: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    >
-                      <option value="food">Food</option>
-                      <option value="drink">Drink</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Price</label>
-                    <input
-                      type="number"
-                      value={newOrder.price}
-                      onChange={(e) => setNewOrder({ ...newOrder, price: Number(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      placeholder="0.00"
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Special Notes</label>
+                    <textarea
+                      value={newOrder.notes}
+                      onChange={(e) => setNewOrder({ ...newOrder, notes: e.target.value })}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                      placeholder="e.g. No onions, extra ice..."
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Payment</label>
-                    <select
-                      value={newOrder.paymentMethod}
-                      onChange={(e) => setNewOrder({ ...newOrder, paymentMethod: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    >
-                      <option value="cash">Cash</option>
-                      <option value="card">Card</option>
-                      <option value="transfer">Bank Transfer</option>
-                      <option value="room">Post to Room</option>
-                    </select>
+                </div>
+
+                <div className="p-4 bg-zinc-900 border-t border-zinc-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-zinc-400">Total Amount</span>
+                    <span className="text-xl font-black text-emerald-500">{newOrder.price.toLocaleString()}</span>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Items</label>
-                  <textarea
-                    required
-                    value={newOrder.items}
-                    onChange={(e) => setNewOrder({ ...newOrder, items: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
-                    placeholder="e.g. 2x Club Sandwich, 1x Orange Juice"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Special Notes</label>
-                  <input
-                    type="text"
-                    value={newOrder.notes}
-                    onChange={(e) => setNewOrder({ ...newOrder, notes: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    placeholder="e.g. No onions, extra ice"
-                  />
+                  <button
+                    onClick={handleAddOrder}
+                    disabled={!newOrder.roomNumber || cart.length === 0 || isSaving}
+                    className="w-full py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isSaving ? (
+                      <RefreshCw size={18} className="animate-spin" />
+                    ) : (
+                      <>
+                        <CheckCircle2 size={18} />
+                        Complete Order
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newOrder.roomNumber || !newOrder.items}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
-                >
-                  Create Order
-                </button>
-              </div>
-            </form>
+            </div>
           </motion.div>
         </div>
       )}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc, query, where, orderBy } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings, PlanType } from '../types';
@@ -136,6 +136,20 @@ export function SuperAdmin() {
 
     setLoading(true);
     try {
+      const email = request.email.toLowerCase();
+      
+      // Check if there's already an active code for this email
+      const q = query(
+        collection(db, 'trackingCodes'),
+        where('targetEmail', '==', email),
+        where('status', '==', 'active')
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        toast.error('An active tracking code already exists for this email');
+        return;
+      }
+
       // Use the code if it was already generated but not approved, or generate new
       const code = request.generatedCode || Math.random().toString(36).substring(2, 10).toUpperCase();
       
@@ -205,6 +219,20 @@ export function SuperAdmin() {
     try {
       if (!newCode.targetEmail) {
         toast.error('Target email is required');
+        return;
+      }
+
+      const email = newCode.targetEmail.toLowerCase();
+      
+      // Check if there's already an active code for this email
+      const q = query(
+        collection(db, 'trackingCodes'),
+        where('targetEmail', '==', email),
+        where('status', '==', 'active')
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        toast.error('An active tracking code already exists for this email');
         return;
       }
 

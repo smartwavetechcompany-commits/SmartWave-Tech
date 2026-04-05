@@ -23,7 +23,8 @@ export function Inventory() {
     category: 'food' as InventoryItem['category'],
     quantity: 0,
     unit: 'pcs',
-    minThreshold: 5
+    minThreshold: 5,
+    price: 0
   });
 
   const [showConfirmDelete, setShowConfirmDelete] = useState<InventoryItem | null>(null);
@@ -91,7 +92,7 @@ export function Inventory() {
 
       setShowAddModal(false);
       setEditingItem(null);
-      setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5 });
+      setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5, price: 0 });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/inventory`);
       toast.error('Failed to save item');
@@ -139,6 +140,8 @@ export function Inventory() {
       Category: item.category,
       Quantity: item.quantity,
       Unit: item.unit,
+      Price: item.price || 0,
+      TotalValue: (item.quantity || 0) * (item.price || 0),
       MinThreshold: item.minThreshold,
       LastUpdated: item.lastUpdated ? format(new Date(item.lastUpdated), 'yyyy-MM-dd HH:mm') : 'N/A'
     }));
@@ -174,7 +177,7 @@ export function Inventory() {
           <button
             onClick={() => {
               setEditingItem(null);
-              setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5 });
+              setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5, price: 0 });
               setShowAddModal(true);
             }}
             className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
@@ -182,6 +185,29 @@ export function Inventory() {
             <Plus size={18} />
             Add Item
           </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Items</div>
+          <div className="text-2xl font-bold text-white">{items.length}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1">Low Stock</div>
+          <div className="text-2xl font-bold text-red-500">{lowStockItems.length}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Value</div>
+          <div className="text-2xl font-bold text-emerald-500">
+            {new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(
+              items.reduce((acc, item) => acc + (item.quantity * (item.price || 0)), 0)
+            )}
+          </div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1">Categories</div>
+          <div className="text-2xl font-bold text-blue-500">{new Set(items.map(i => i.category)).size}</div>
         </div>
       </div>
 
@@ -314,7 +340,14 @@ export function Inventory() {
                       <button 
                         onClick={() => {
                           setEditingItem(item);
-                          setNewItem({ ...item });
+                          setNewItem({ 
+                            name: item.name, 
+                            category: item.category, 
+                            quantity: item.quantity, 
+                            unit: item.unit, 
+                            minThreshold: item.minThreshold, 
+                            price: item.price || 0 
+                          });
                           setShowAddModal(true);
                         }}
                         className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all"
@@ -398,15 +431,27 @@ export function Inventory() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Min Threshold</label>
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Unit Price (NGN)</label>
                     <input
                       required
                       type="number"
-                      value={newItem.minThreshold}
-                      onChange={(e) => setNewItem({ ...newItem, minThreshold: parseInt(e.target.value) })}
+                      min="0"
+                      step="0.01"
+                      value={newItem.price}
+                      onChange={(e) => setNewItem({ ...newItem, price: parseFloat(e.target.value) })}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Min Threshold</label>
+                  <input
+                    required
+                    type="number"
+                    value={newItem.minThreshold}
+                    onChange={(e) => setNewItem({ ...newItem, minThreshold: parseInt(e.target.value) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  />
                 </div>
               </div>
               <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">

@@ -169,6 +169,9 @@ export interface Reservation {
   paymentStatus: 'unpaid' | 'partial' | 'paid';
   notes?: string;
   corporateReference?: string;
+  discountAmount?: number;
+  discountType?: 'fixed' | 'percentage';
+  discountReason?: string;
   createdAt: string;
   ledgerEntries?: LedgerEntry[]; // Changed from string[] to LedgerEntry[]
 }
@@ -176,7 +179,10 @@ export interface Reservation {
 export interface KitchenOrder {
   id: string;
   roomNumber: string;
+  guestId?: string;
+  guestName?: string;
   items: string;
+  itemsList?: { id: string; name: string; price: number; quantity: number }[];
   status: 'pending' | 'preparing' | 'ready' | 'delivered';
   timestamp: string;
   category: 'food' | 'drink' | 'other';
@@ -269,6 +275,7 @@ export interface InventoryItem {
   unit: string;
   minThreshold: number;
   lastUpdated: string;
+  price?: number; // Added price for valuation
 }
 
 export interface MaintenanceRequest {

@@ -53,7 +53,11 @@ export function FrontDesk() {
   const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' | 'delete' } | null>(null);
   const [showPostponeModal, setShowPostponeModal] = useState<Reservation | null>(null);
   const [showDiscountModal, setShowDiscountModal] = useState<Reservation | null>(null);
-  const [discountData, setDiscountData] = useState({ amount: 0, reason: '' });
+  const [discountData, setDiscountData] = useState({ 
+    amount: 0, 
+    type: 'fixed' as 'fixed' | 'percentage',
+    reason: '' 
+  });
   const [newCheckOutDate, setNewCheckOutDate] = useState('');
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
@@ -75,6 +79,9 @@ export function FrontDesk() {
     paymentStatus: 'unpaid' as const,
     notes: '',
     corporateReference: '',
+    discountAmount: 0,
+    discountType: 'fixed' as 'fixed' | 'percentage',
+    discountReason: '',
     additionalStays: [] as {
       id: string;
       guestName: string;
@@ -351,7 +358,16 @@ export function FrontDesk() {
     setLoading(true);
     try {
       const batch = writeBatch(db);
-      const createdStays: { resId: string; guestId: string; totalAmount: number; roomNumber: string; corporateId?: string }[] = [];
+      const createdStays: { 
+        resId: string; 
+        guestId: string; 
+        totalAmount: number; 
+        roomNumber: string; 
+        corporateId?: string;
+        discountAmount?: number;
+        discountType?: 'fixed' | 'percentage';
+        discountReason?: string;
+      }[] = [];
       
       for (const stay of allStays) {
         const selectedRoom = rooms.find(r => r.id === stay.roomId);
@@ -388,7 +404,7 @@ export function FrontDesk() {
         }
 
         const resRef = doc(collection(db, 'hotels', hotel.id, 'reservations'));
-        const resData = {
+        const resData: any = {
           guestName: stay.guestName,
           guestEmail: stay.guestEmail,
           guestPhone: stay.guestPhone,
@@ -408,13 +424,23 @@ export function FrontDesk() {
           createdAt: new Date().toISOString(),
         };
 
+        // Apply discount to the first reservation in the batch
+        if (createdStays.length === 0 && newBooking.discountAmount > 0) {
+          resData.discountAmount = newBooking.discountAmount;
+          resData.discountType = newBooking.discountType;
+          resData.discountReason = newBooking.discountReason;
+        }
+
         batch.set(resRef, resData);
         createdStays.push({ 
           resId: resRef.id, 
           guestId, 
           totalAmount, 
           roomNumber: selectedRoom.roomNumber,
-          corporateId: newBooking.corporateId 
+          corporateId: newBooking.corporateId,
+          discountAmount: createdStays.length === 0 ? newBooking.discountAmount : 0,
+          discountType: createdStays.length === 0 ? newBooking.discountType : undefined,
+          discountReason: createdStays.length === 0 ? newBooking.discountReason : undefined
         });
 
         // Activity log for each booking
@@ -432,20 +458,26 @@ export function FrontDesk() {
       }
 
       await batch.commit();
-
-      // REMOVED: Initial room charges are now handled by check-in or manual posting
-      /*
+      
+      // Post discounts to ledger if any
       for (const stay of createdStays) {
-        await postToLedger(hotel.id, stay.guestId, stay.resId, {
-          amount: stay.totalAmount,
-          type: 'debit',
-          category: 'room',
-          description: `Initial Room Charge: ${stay.roomNumber}`,
-          referenceId: stay.resId,
-          postedBy: profile?.uid || 'system'
-        }, profile?.uid || 'system', stay.corporateId);
+        if (stay.discountAmount && stay.discountAmount > 0) {
+          let finalDiscount = stay.discountAmount;
+          if (stay.discountType === 'percentage') {
+            finalDiscount = (stay.totalAmount * stay.discountAmount) / 100;
+          }
+
+          await postToLedger(hotel.id, stay.guestId, stay.resId, {
+            amount: finalDiscount,
+            type: 'credit',
+            category: 'service',
+            description: `Booking Discount (${stay.discountType === 'percentage' ? stay.discountAmount + '%' : formatCurrency(stay.discountAmount, currency, exchangeRate)}): ${stay.discountReason || 'New Booking Discount'}`,
+            referenceId: stay.resId,
+            postedBy: profile.uid
+          }, profile.uid, stay.corporateId);
+        }
       }
-      */
+
       setIsBooking(false);
       setNewBooking({
         guestType: 'individual',
@@ -462,6 +494,9 @@ export function FrontDesk() {
         paymentStatus: 'unpaid',
         notes: '',
         corporateReference: '',
+        discountAmount: 0,
+        discountType: 'fixed',
+        discountReason: '',
         additionalStays: []
       });
     } catch (err) {
@@ -624,11 +659,16 @@ export function FrontDesk() {
       setLoading(true);
       const res = showDiscountModal;
       
+      let finalAmount = discountData.amount;
+      if (discountData.type === 'percentage') {
+        finalAmount = (res.totalAmount * discountData.amount) / 100;
+      }
+      
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
-        amount: discountData.amount,
+        amount: finalAmount,
         type: 'credit',
         category: 'service',
-        description: `Discount: ${discountData.reason || 'Management Discount'}`,
+        description: `Discount (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Management Discount'}`,
         referenceId: res.id,
         postedBy: profile.uid
       }, profile.uid);
@@ -639,15 +679,15 @@ export function FrontDesk() {
         userEmail: profile.email,
         userRole: profile.role,
         action: 'DISCOUNT_APPLIED',
-        resource: `Res #${res.id.slice(-6)} - ${formatCurrency(discountData.amount, currency, exchangeRate)}`,
+        resource: `Res #${res.id.slice(-6)} - ${formatCurrency(finalAmount, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Front Desk',
-        details: discountData.reason
+        details: `${discountData.type === 'percentage' ? discountData.amount + '%' : 'Fixed'} - ${discountData.reason}`
       });
 
       toast.success('Discount applied successfully');
       setShowDiscountModal(null);
-      setDiscountData({ amount: 0, reason: '' });
+      setDiscountData({ amount: 0, type: 'fixed', reason: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/ledger`);
       toast.error('Failed to apply discount');
@@ -1046,6 +1086,9 @@ export function FrontDesk() {
                 paymentStatus: 'unpaid' as const,
                 notes: '',
                 corporateReference: '',
+                discountAmount: 0,
+                discountType: 'fixed',
+                discountReason: '',
                 additionalStays: [],
               });
               setIsBooking(true);
@@ -1072,6 +1115,9 @@ export function FrontDesk() {
                 paymentStatus: 'unpaid' as const,
                 notes: '',
                 corporateReference: '',
+                discountAmount: 0,
+                discountType: 'fixed',
+                discountReason: '',
                 additionalStays: [],
               });
               setIsBooking(true);
@@ -1359,6 +1405,46 @@ export function FrontDesk() {
                   onChange={(e) => setNewBooking({ ...newBooking, notes: e.target.value })}
                 />
               </div>
+
+              <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-4">
+                <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs uppercase tracking-wider">
+                  <Tag size={14} />
+                  Discount (Optional)
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
+                    <input 
+                      type="number" 
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:border-emerald-500 outline-none"
+                      value={newBooking.discountAmount || ''}
+                      onChange={(e) => setNewBooking({ ...newBooking, discountAmount: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Type</label>
+                    <select 
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:border-emerald-500 outline-none"
+                      value={newBooking.discountType}
+                      onChange={(e) => setNewBooking({ ...newBooking, discountType: e.target.value as 'fixed' | 'percentage' })}
+                    >
+                      <option value="fixed">Fixed ({currency})</option>
+                      <option value="percentage">Percentage (%)</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Reason</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Management Approval"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:border-emerald-500 outline-none"
+                    value={newBooking.discountReason}
+                    onChange={(e) => setNewBooking({ ...newBooking, discountReason: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
                 <div className="flex justify-between text-xs text-zinc-500 uppercase font-bold">
                   <span>Summary</span>
@@ -1375,9 +1461,25 @@ export function FrontDesk() {
                     <span className="flex items-center gap-1"><Tag size={10} /> Negotiated</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm text-white">
-                  <span>Total Amount</span>
-                  <span className="font-bold text-emerald-500">{formatCurrency(newBooking.totalAmount, currency, exchangeRate)}</span>
+                <div className="flex justify-between text-[10px] text-zinc-400">
+                  <span>Subtotal</span>
+                  <span>{formatCurrency(newBooking.totalAmount, currency, exchangeRate)}</span>
+                </div>
+                {newBooking.discountAmount > 0 && (
+                  <div className="flex justify-between text-[10px] text-red-500">
+                    <span>Discount ({newBooking.discountType === 'percentage' ? newBooking.discountAmount + '%' : 'Fixed'})</span>
+                    <span>-{formatCurrency(newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount, currency, exchangeRate)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm text-white border-t border-zinc-800 pt-2 mt-2">
+                  <span>Net Total</span>
+                  <span className="font-bold text-emerald-500">
+                    {formatCurrency(
+                      newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount), 
+                      currency, 
+                      exchangeRate
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -2009,7 +2111,33 @@ export function FrontDesk() {
             
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Discount Amount ({currency})</label>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Discount Type</label>
+                <div className="flex gap-2 p-1 bg-zinc-950 border border-zinc-800 rounded-xl">
+                  <button
+                    onClick={() => setDiscountData({ ...discountData, type: 'fixed' })}
+                    className={cn(
+                      "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
+                      discountData.type === 'fixed' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-400"
+                    )}
+                  >
+                    Fixed Amount
+                  </button>
+                  <button
+                    onClick={() => setDiscountData({ ...discountData, type: 'percentage' })}
+                    className={cn(
+                      "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
+                      discountData.type === 'percentage' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-400"
+                    )}
+                  >
+                    Percentage (%)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
+                  {discountData.type === 'fixed' ? `Discount Amount (${currency})` : 'Discount Percentage (%)'}
+                </label>
                 <input 
                   type="number"
                   value={discountData.amount}
@@ -2017,6 +2145,11 @@ export function FrontDesk() {
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none"
                   placeholder="0.00"
                 />
+                {discountData.type === 'percentage' && discountData.amount > 0 && (
+                  <p className="text-[10px] text-emerald-500 mt-1 font-bold">
+                    Calculated Discount: {formatCurrency((showDiscountModal.totalAmount * discountData.amount) / 100, currency, exchangeRate)}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">Reason / Notes</label>
@@ -2038,7 +2171,7 @@ export function FrontDesk() {
               </button>
               <button
                 onClick={handleApplyDiscount}
-                disabled={loading || !discountData.amount}
+                disabled={loading || !discountData.amount || !discountData.reason}
                 className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
               >
                 {loading ? 'Applying...' : 'Apply Discount'}
