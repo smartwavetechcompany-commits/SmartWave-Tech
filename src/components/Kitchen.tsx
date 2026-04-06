@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem } from '../types';
@@ -41,7 +41,6 @@ export function Kitchen() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [printingOrder, setPrintingOrder] = useState<KitchenOrder | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'food' | 'drink' | 'other'>('all');
@@ -54,7 +53,7 @@ export function Kitchen() {
     guestId: '',
     items: '',
     notes: '',
-    category: 'food' as 'food' | 'drink' | 'other',
+    category: 'all' as 'all' | 'food' | 'drink' | 'other',
     price: 0,
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer' | 'room'
   });
@@ -243,7 +242,7 @@ export function Kitchen() {
       toast.success('Kitchen order created');
       setShowAddModal(false);
       setCart([]);
-      setNewOrder({ roomNumber: '', guestId: '', items: '', notes: '', category: 'food', price: 0, paymentMethod: 'cash' });
+      setNewOrder({ roomNumber: '', guestId: '', items: '', notes: '', category: 'all', price: 0, paymentMethod: 'cash' });
     } catch (err: any) {
       console.error('Error in handleAddOrder:', err);
       if (err.message === 'No active reservation or guest found for this room') {
@@ -254,6 +253,35 @@ export function Kitchen() {
       }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string, roomNumber: string) => {
+    if (!hotel?.id || !profile || (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin')) return;
+
+    if (!window.confirm(`Are you sure you want to delete order for Room ${roomNumber}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId));
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'KITCHEN_ORDER_DELETED',
+        resource: `Order ${orderId} (Room ${roomNumber})`,
+        hotelId: hotel.id,
+        module: 'Kitchen'
+      });
+      
+      toast.success('Order deleted successfully');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
+      toast.error('Failed to delete order');
     }
   };
 
@@ -286,18 +314,17 @@ export function Kitchen() {
     }
   };
 
-  const activeOrders = orders.filter(o => o.status !== 'delivered');
-  const historyOrders = orders.filter(o => o.status === 'delivered');
-
-  const filteredOrders = (showHistory ? historyOrders : activeOrders).filter(o => {
+  const filteredOrders = orders.filter(o => {
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
     const matchesSearch = (o.roomNumber || '').includes(searchQuery) || (o.items?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     return matchesFilter && matchesCategory && matchesSearch;
   });
 
+  const activeOrdersCount = orders.filter(o => o.status !== 'delivered').length;
+
   const stats = [
-    { label: 'Active Orders', count: activeOrders.length, icon: Utensils, color: 'text-blue-500' },
+    { label: 'Active Orders', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
     { label: 'Preparing', count: orders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
     { label: 'Ready for Pickup', count: orders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
   ];
@@ -336,16 +363,6 @@ export function Kitchen() {
           >
             <Download size={18} />
             Export CSV
-          </button>
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all active:scale-95",
-              showHistory ? "bg-emerald-500 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-            )}
-          >
-            <History size={18} />
-            {showHistory ? 'View Active' : 'Order History'}
           </button>
           <button
             onClick={() => setShowAddModal(true)}
@@ -445,15 +462,26 @@ export function Kitchen() {
                         </div>
                       </div>
                     </div>
-                    <div className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1",
-                      order.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
-                      order.status === 'preparing' ? "bg-amber-500/10 text-amber-500" :
-                      order.status === 'ready' ? "bg-emerald-500/10 text-emerald-500" :
-                      "bg-zinc-800 text-zinc-500"
-                    )}>
-                      {order.status === 'preparing' && <RefreshCw size={10} className="animate-spin" />}
-                      {order.status}
+                    <div className="flex items-center gap-2">
+                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                        <button
+                          onClick={() => handleDeleteOrder(order.id, order.roomNumber)}
+                          className="p-1.5 hover:bg-red-500/10 text-zinc-600 hover:text-red-500 rounded-lg transition-colors"
+                          title="Delete Order"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                      <div className={cn(
+                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1",
+                        order.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
+                        order.status === 'preparing' ? "bg-amber-500/10 text-amber-500" :
+                        order.status === 'ready' ? "bg-emerald-500/10 text-emerald-500" :
+                        "bg-zinc-800 text-zinc-500"
+                      )}>
+                        {order.status === 'preparing' && <RefreshCw size={10} className="animate-spin" />}
+                        {order.status}
+                      </div>
                     </div>
                   </div>
 
@@ -486,7 +514,7 @@ export function Kitchen() {
                   </div>
                 </div>
 
-                {!showHistory && (
+                {order.status !== 'delivered' && (
                   <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
                     {order.status === 'pending' && (
                       <button
@@ -641,10 +669,11 @@ export function Kitchen() {
                   {(['all', 'food', 'drink', 'other'] as const).map(cat => (
                     <button
                       key={cat}
-                      onClick={() => setNewOrder(prev => ({ ...prev, category: cat === 'all' ? 'food' : cat }))}
+                      type="button"
+                      onClick={() => setNewOrder(prev => ({ ...prev, category: cat }))}
                       className={cn(
                         "px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
-                        (cat === 'all' ? true : newOrder.category === cat) 
+                        newOrder.category === cat 
                           ? "bg-emerald-500 text-black" 
                           : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
                       )}
@@ -656,7 +685,7 @@ export function Kitchen() {
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     {inventory
-                      .filter(item => newOrder.category === 'food' || newOrder.category === 'drink' || newOrder.category === 'other' ? item.category === newOrder.category : true)
+                      .filter(item => newOrder.category === 'all' ? true : item.category === newOrder.category)
                       .map(item => (
                         <button
                           key={item.id}

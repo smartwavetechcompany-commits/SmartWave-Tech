@@ -421,6 +421,7 @@ export function FrontDesk() {
           notes: newBooking.notes,
           corporateReference: newBooking.corporateReference,
           ledgerEntries: [],
+          nightlyRate: pricePerNight,
           createdAt: new Date().toISOString(),
         };
 
@@ -729,7 +730,7 @@ export function FrontDesk() {
           if (guest && guest.ledgerBalance > 0) {
             const creditToApply = Math.min(guest.ledgerBalance, res.totalAmount - (res.paidAmount || 0));
             if (creditToApply > 0) {
-              await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'Credit Balance', profile.uid);
+              await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'Credit Balance', profile.uid, res.corporateId);
               // Update reservation paidAmount in batch
               batch.update(resRef, { 
                 paidAmount: increment(creditToApply),
@@ -804,7 +805,8 @@ export function FrontDesk() {
           res.id, 
           amount, 
           'Cash', // Default to cash
-          profile.uid
+          profile.uid,
+          res.corporateId
         );
       }
 

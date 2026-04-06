@@ -96,7 +96,8 @@ export const settleLedger = async (
   reservationId: string,
   amount: number,
   paymentMethod: string,
-  postedBy: string
+  postedBy: string,
+  corporateId?: string
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
@@ -105,7 +106,7 @@ export const settleLedger = async (
     description: `Payment via ${paymentMethod}`,
     referenceId: reservationId,
     postedBy
-  }, postedBy);
+  }, postedBy, corporateId);
 };
 
 export const transferLedgerBalance = async (
@@ -114,7 +115,8 @@ export const transferLedgerBalance = async (
   fromReservationId: string,
   toReservationId: string,
   amount: number,
-  postedBy: string
+  postedBy: string,
+  corporateId?: string
 ) => {
   // 1. Post credit to source reservation
   await postToLedger(hotelId, guestId, fromReservationId, {
@@ -124,7 +126,7 @@ export const transferLedgerBalance = async (
     description: `Balance Transfer to Res #${toReservationId.slice(-6).toUpperCase()}`,
     referenceId: toReservationId,
     postedBy
-  }, postedBy);
+  }, postedBy, corporateId);
 
   // 2. Post debit to target reservation
   await postToLedger(hotelId, guestId, toReservationId, {
@@ -134,7 +136,7 @@ export const transferLedgerBalance = async (
     description: `Balance Transfer from Res #${fromReservationId.slice(-6).toUpperCase()}`,
     referenceId: fromReservationId,
     postedBy
-  }, postedBy);
+  }, postedBy, corporateId);
 };
 
 export const refundGuest = async (
@@ -143,16 +145,17 @@ export const refundGuest = async (
   reservationId: string,
   amount: number,
   reason: string,
-  postedBy: string
+  postedBy: string,
+  corporateId?: string
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
     type: 'debit',
-    category: 'service',
-    description: `Refund/Balance Adjustment: ${reason}`,
+    category: 'refund',
+    description: `Refund: ${reason}`,
     referenceId: reservationId,
     postedBy
-  }, postedBy);
+  }, postedBy, corporateId);
 };
 
 export const settleOverpayment = async (
@@ -161,7 +164,8 @@ export const settleOverpayment = async (
   reservationId: string,
   amount: number,
   method: string,
-  postedBy: string
+  postedBy: string,
+  corporateId?: string
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
@@ -170,5 +174,5 @@ export const settleOverpayment = async (
     description: `Overpayment Settlement (${method})`,
     referenceId: reservationId,
     postedBy
-  }, postedBy);
+  }, postedBy, corporateId);
 };

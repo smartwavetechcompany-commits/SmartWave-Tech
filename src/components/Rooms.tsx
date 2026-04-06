@@ -18,30 +18,38 @@ import {
   Settings2,
   Trash2,
   Edit2,
-  Download
+  Download,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Info
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
+import { Reservation } from '../types';
 
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
   const [isManagingTypes, setIsManagingTypes] = useState(false);
   const [editingRoomType, setEditingRoomType] = useState<RoomType | null>(null);
   const [newRoomType, setNewRoomType] = useState({
     name: '',
     description: '',
     basePrice: 0,
-    capacity: 0,
+    capacity: 2,
     amenities: [] as string[],
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [capacityFilter, setCapacityFilter] = useState<string>('all');
-  const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [view, setView] = useState<'grid' | 'list' | 'calendar'>('grid');
+  const [calendarStartDate, setCalendarStartDate] = useState(startOfDay(new Date()));
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
@@ -110,6 +118,19 @@ export function Rooms() {
       setRoomTypes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomType)));
     }, (err: any) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/room_types`);
+    });
+
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const reservationsRef = collection(db, 'hotels', hotel.id, 'reservations');
+    
+    const unsub = onSnapshot(reservationsRef, (snap) => {
+      setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
     });
 
     return () => unsub();
@@ -272,7 +293,9 @@ export function Rooms() {
       (room.roomNumber?.toLowerCase() || '').includes(query) ||
       (room.type?.toLowerCase() || '').includes(query) ||
       (room.status?.toLowerCase() || '').includes(query) ||
-      (room.status?.replace('_', ' ').toLowerCase() || '').includes(query)
+      (room.status?.replace('_', ' ').toLowerCase() || '').includes(query) ||
+      (room.notes?.toLowerCase() || '').includes(query) ||
+      (room.description?.toLowerCase() || '').includes(query)
     );
     
     const matchesStatus = statusFilter === 'all' || room.status === statusFilter;
@@ -355,14 +378,23 @@ export function Rooms() {
             <button 
               onClick={() => setView('grid')}
               className={cn("flex-1 sm:flex-none p-1.5 rounded-md transition-all active:scale-90", view === 'grid' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white")}
+              title="Grid View"
             >
               <LayoutGrid size={18} className="mx-auto" />
             </button>
             <button 
               onClick={() => setView('list')}
               className={cn("flex-1 sm:flex-none p-1.5 rounded-md transition-all active:scale-90", view === 'list' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white")}
+              title="List View"
             >
               <List size={18} className="mx-auto" />
+            </button>
+            <button 
+              onClick={() => setView('calendar')}
+              className={cn("flex-1 sm:flex-none p-1.5 rounded-md transition-all active:scale-90", view === 'calendar' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white")}
+              title="Availability Calendar"
+            >
+              <Calendar size={18} className="mx-auto" />
             </button>
           </div>
           <button 
@@ -677,7 +709,19 @@ export function Rooms() {
                   {roomTypes.map(type => (
                     <div key={type.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between group">
                       <div>
-                        <div className="font-bold text-white">{type.name}</div>
+                        <div className="font-bold text-white flex items-center gap-2">
+                          {type.name}
+                          {type.description && (
+                            <div className="group/info relative">
+                              <Info size={12} className="text-zinc-500 cursor-help" />
+                              <div className="absolute left-0 bottom-full mb-2 w-64 p-3 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl opacity-0 group-hover/info:opacity-100 pointer-events-none transition-opacity z-50">
+                                <p className="text-[10px] text-zinc-400 normal-case font-normal leading-relaxed">
+                                  {type.description}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                         <div className="text-xs text-zinc-500">{type.capacity} Pax • {formatCurrency(type.basePrice, currency, exchangeRate)}</div>
                         {type.amenities && type.amenities.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
@@ -771,19 +815,24 @@ export function Rooms() {
               <div className="flex justify-between items-start">
                 <span className="text-lg font-bold">{room.roomNumber}</span>
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
-                  <button onClick={() => updateStatus(room.id, 'clean')} className="p-1 hover:bg-white/10 rounded"><CheckCircle2 size={14} /></button>
-                  <button onClick={() => updateStatus(room.id, 'dirty')} className="p-1 hover:bg-white/10 rounded"><AlertCircle size={14} /></button>
-                  <button onClick={() => updateStatus(room.id, 'maintenance')} className="p-1 hover:bg-white/10 rounded"><Wrench size={14} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'clean'); }} className="p-1 hover:bg-white/10 rounded"><CheckCircle2 size={14} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'dirty'); }} className="p-1 hover:bg-white/10 rounded"><AlertCircle size={14} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'maintenance'); }} className="p-1 hover:bg-white/10 rounded"><Wrench size={14} /></button>
                 </div>
               </div>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider opacity-60">{room.type} • {room.capacity} Pax</div>
                 <div className="text-xs font-medium">{(room.status || 'unknown').replace('_', ' ')}</div>
+                {room.notes && (
+                  <div className="mt-1 text-[8px] text-zinc-500 truncate" title={room.notes}>
+                    {room.notes}
+                  </div>
+                )}
               </div>
             </motion.div>
           )))}
         </div>
-      ) : (
+      ) : view === 'list' ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <table className="w-full text-left">
             <thead>
@@ -798,24 +847,19 @@ export function Rooms() {
                 </th>
                 <th className="px-6 py-4">Room</th>
                 <th className="px-6 py-4">Type</th>
-                <th className="px-6 py-4">Capacity</th>
-                <th className="px-6 py-4">Floor</th>
-                <th className="px-6 py-4">Price</th>
+                <th className="px-6 py-4 text-right">Price</th>
                 <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4">Floor</th>
+                <th className="px-6 py-4">Capacity</th>
+                <th className="px-6 py-4">Amenities</th>
+                <th className="px-6 py-4">Notes</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredRooms.map(room => (
-                <tr 
-                  key={room.id} 
-                  className={cn(
-                    "hover:bg-zinc-800/50 transition-colors cursor-pointer",
-                    selectedRooms.includes(room.id) && "bg-emerald-500/5"
-                  )}
-                  onClick={() => toggleRoomSelection(room.id)}
-                >
-                  <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+              {filteredRooms.map((room) => (
+                <tr key={room.id} className="hover:bg-zinc-800/50 transition-colors group">
+                  <td className="px-6 py-4">
                     <input 
                       type="checkbox" 
                       className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
@@ -824,30 +868,160 @@ export function Rooms() {
                     />
                   </td>
                   <td className="px-6 py-4 font-bold text-white">{room.roomNumber}</td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">{room.type}</td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">{room.capacity} Pax</td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">{room.floor}</td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">{formatCurrency(room.price, currency, exchangeRate)}</td>
+                  <td className="px-6 py-4 text-zinc-400 text-sm">{room.type}</td>
+                  <td className="px-6 py-4 text-right text-white font-medium">{formatCurrency(room.price, currency, exchangeRate)}</td>
                   <td className="px-6 py-4">
                     <span className={cn(
                       "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border",
-                      room.status ? statusColors[room.status] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5'
+                      statusColors[room.status]
                     )}>
-                      {(room.status || 'unknown').replace('_', ' ')}
+                      {room.status.replace('_', ' ')}
                     </span>
                   </td>
+                  <td className="px-6 py-4 text-zinc-400 text-sm">{room.floor}</td>
+                  <td className="px-6 py-4 text-zinc-400 text-sm">{room.capacity} Pax</td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-wrap gap-1">
+                      {(room.amenities || []).map(a => (
+                        <span key={a} className="text-[8px] px-1 bg-zinc-800 text-zinc-500 rounded border border-zinc-700">{a}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="text-xs text-zinc-500 max-w-[150px] truncate" title={room.notes}>
+                      {room.notes || '-'}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 text-right">
-                    <button 
-                      onClick={() => setShowConfirmDeleteRoom(room.id)}
-                      className="text-zinc-600 hover:text-red-500 transition-colors"
-                    >
-                      <XCircle size={18} />
-                    </button>
+                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => updateStatus(room.id, 'clean')} className="p-1 text-emerald-500 hover:bg-emerald-500/10 rounded" title="Mark Clean"><CheckCircle2 size={16} /></button>
+                      <button onClick={() => updateStatus(room.id, 'dirty')} className="p-1 text-red-500 hover:bg-red-500/10 rounded" title="Mark Dirty"><AlertCircle size={16} /></button>
+                      <button onClick={() => updateStatus(room.id, 'maintenance')} className="p-1 text-amber-500 hover:bg-amber-500/10 rounded" title="Maintenance"><Wrench size={16} /></button>
+                      <button onClick={() => setShowConfirmDeleteRoom(room.id)} className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded" title="Delete Room"><Trash2 size={16} /></button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col">
+          <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setCalendarStartDate(subDays(calendarStartDate, 7))}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <h3 className="text-sm font-bold text-white uppercase tracking-widest">
+                {format(calendarStartDate, 'MMMM yyyy')}
+              </h3>
+              <button 
+                onClick={() => setCalendarStartDate(addDays(calendarStartDate, 7))}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+            <button 
+              onClick={() => setCalendarStartDate(startOfDay(new Date()))}
+              className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
+            >
+              Today
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr>
+                  <th className="sticky left-0 z-20 bg-zinc-900 border-r border-b border-zinc-800 p-4 text-left min-w-[150px]">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room</span>
+                  </th>
+                  {eachDayOfInterval({
+                    start: calendarStartDate,
+                    end: addDays(calendarStartDate, 13)
+                  }).map(day => (
+                    <th key={day.toISOString()} className={cn(
+                      "border-b border-r border-zinc-800 p-2 min-w-[80px] text-center",
+                      isSameDay(day, new Date()) ? "bg-emerald-500/5" : "bg-zinc-900/30"
+                    )}>
+                      <div className="text-[10px] font-bold text-zinc-500 uppercase">{format(day, 'EEE')}</div>
+                      <div className={cn(
+                        "text-sm font-bold",
+                        isSameDay(day, new Date()) ? "text-emerald-500" : "text-white"
+                      )}>{format(day, 'dd')}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRooms.map(room => (
+                  <tr key={room.id} className="group">
+                    <td className="sticky left-0 z-10 bg-zinc-900 border-r border-b border-zinc-800 p-4 font-bold text-white group-hover:bg-zinc-800 transition-colors">
+                      <div className="flex flex-col">
+                        <span>{room.roomNumber}</span>
+                        <span className="text-[8px] text-zinc-500 font-normal uppercase tracking-tighter">{room.type}</span>
+                      </div>
+                    </td>
+                    {eachDayOfInterval({
+                      start: calendarStartDate,
+                      end: addDays(calendarStartDate, 13)
+                    }).map(day => {
+                      const reservation = reservations.find(res => 
+                        res.roomId === room.id && 
+                        res.status !== 'cancelled' &&
+                        isWithinInterval(day, {
+                          start: parseISO(res.checkIn),
+                          end: subDays(parseISO(res.checkOut), 1) // checkOut day is usually available for next guest
+                        })
+                      );
+
+                      return (
+                        <td key={day.toISOString()} className={cn(
+                          "border-r border-b border-zinc-800 p-1 min-w-[80px] h-16 relative group/cell",
+                          isSameDay(day, new Date()) ? "bg-emerald-500/5" : "bg-zinc-950/20"
+                        )}>
+                          {reservation ? (
+                            <div 
+                              className={cn(
+                                "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border",
+                                reservation.status === 'checked_in' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
+                              )}
+                              title={`${reservation.guestName} (${format(parseISO(reservation.checkIn), 'MMM dd')} - ${format(parseISO(reservation.checkOut), 'MMM dd')})`}
+                            >
+                              <div className="truncate">{reservation.guestName}</div>
+                              <div className="opacity-60">{reservation.status.replace('_', ' ')}</div>
+                            </div>
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity">
+                              <Plus size={14} className="text-zinc-700" />
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="p-4 bg-zinc-900/50 border-t border-zinc-800 flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">Confirmed</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-blue-500/20 border border-blue-500/30"></div>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">In-House</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-zinc-950/20 border border-zinc-800"></div>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">Available</span>
+            </div>
+          </div>
         </div>
       )}
     </div>

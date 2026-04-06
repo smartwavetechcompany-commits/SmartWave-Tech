@@ -3,6 +3,26 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-brand-primary: var(--primary-color, #10b981);
+  --color-brand-secondary: var(--secondary-color, #18181b);
+
+  /* Map emerald to brand primary for system-wide updates */
+  --color-emerald-50: color-mix(in srgb, var(--primary-color, #10b981) 5%, white);
+  --color-emerald-100: color-mix(in srgb, var(--primary-color, #10b981) 10%, white);
+  --color-emerald-200: color-mix(in srgb, var(--primary-color, #10b981) 30%, white);
+  --color-emerald-300: color-mix(in srgb, var(--primary-color, #10b981) 50%, white);
+  --color-emerald-400: color-mix(in srgb, var(--primary-color, #10b981) 70%, white);
+  --color-emerald-500: var(--primary-color, #10b981);
+  --color-emerald-600: color-mix(in srgb, var(--primary-color, #10b981) 80%, black);
+  --color-emerald-700: color-mix(in srgb, var(--primary-color, #10b981) 60%, black);
+  --color-emerald-800: color-mix(in srgb, var(--primary-color, #10b981) 40%, black);
+  --color-emerald-900: color-mix(in srgb, var(--primary-color, #10b981) 20%, black);
+  --color-emerald-950: color-mix(in srgb, var(--primary-color, #10b981) 10%, black);
+
+  /* Map zinc-950 to brand secondary */
+  --color-zinc-950: var(--secondary-color, #09090b);
+  --color-zinc-900: color-mix(in srgb, var(--secondary-color, #09090b) 90%, white);
 }
 
 @layer base {

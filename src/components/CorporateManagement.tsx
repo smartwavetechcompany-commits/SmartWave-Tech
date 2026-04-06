@@ -43,6 +43,9 @@ export function CorporateManagement() {
   const [rates, setRates] = useState<CorporateRate[]>([]);
   const [editingAccount, setEditingAccount] = useState<CorporateAccount | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'contactPerson' | 'creditLimit' | 'currentBalance'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [editingRate, setEditingRate] = useState<CorporateRate | null>(null);
   const [newAccount, setNewAccount] = useState({
     name: '',
     email: '',
@@ -192,13 +195,22 @@ export function CorporateManagement() {
 
     try {
       const selectedType = roomTypes.find(t => t.name === newRate.roomType);
-      await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'), {
+      const rateData = {
         ...newRate,
         roomTypeId: selectedType?.id,
         corporateId: showRatesModal.id,
         status: 'active',
-        createdAt: new Date().toISOString()
-      });
+        updatedAt: new Date().toISOString()
+      };
+
+      if (editingRate) {
+        await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', editingRate.id), rateData);
+      } else {
+        await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'), {
+          ...rateData,
+          createdAt: new Date().toISOString()
+        });
+      }
 
       // Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
@@ -206,7 +218,7 @@ export function CorporateManagement() {
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
-        action: 'CORPORATE_RATE_CREATED',
+        action: editingRate ? 'CORPORATE_RATE_UPDATED' : 'CORPORATE_RATE_CREATED',
         resource: `Rate for ${showRatesModal.name} - ${newRate.roomType}`,
         hotelId: hotel.id,
         module: 'Corporate'
@@ -222,10 +234,11 @@ export function CorporateManagement() {
         discountValue: 0,
         conditions: ''
       });
-      toast.success('Negotiated rate added successfully');
+      setEditingRate(null);
+      toast.success(editingRate ? 'Negotiated rate updated successfully' : 'Negotiated rate added successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates`);
-      toast.error('Failed to add rate');
+      toast.error('Failed to save rate');
     }
   };
 
@@ -241,10 +254,19 @@ export function CorporateManagement() {
     }
   };
 
-  const filteredAccounts = accounts.filter(a => 
-    fuzzySearch(a.name || '', searchQuery) || 
-    fuzzySearch(a.contactPerson || '', searchQuery)
-  );
+  const filteredAccounts = accounts
+    .filter(a => 
+      fuzzySearch(a.name || '', searchQuery) || 
+      fuzzySearch(a.contactPerson || '', searchQuery)
+    )
+    .sort((a, b) => {
+      const factor = sortOrder === 'asc' ? 1 : -1;
+      if (sortBy === 'name') return factor * (a.name || '').localeCompare(b.name || '');
+      if (sortBy === 'contactPerson') return factor * (a.contactPerson || '').localeCompare(b.contactPerson || '');
+      if (sortBy === 'creditLimit') return factor * ((a.creditLimit || 0) - (b.creditLimit || 0));
+      if (sortBy === 'currentBalance') return factor * ((a.currentBalance || 0) - (b.currentBalance || 0));
+      return 0;
+    });
 
   const handleExport = () => {
     const dataToExport = filteredAccounts.map(acc => ({
@@ -311,7 +333,7 @@ export function CorporateManagement() {
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+        <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="relative w-full max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
             <input 
@@ -321,6 +343,25 @@ export function CorporateManagement() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500"
             />
+          </div>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-xs font-bold text-zinc-500 uppercase whitespace-nowrap">Sort By:</span>
+            <select 
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+            >
+              <option value="name">Company Name</option>
+              <option value="contactPerson">Contact Person</option>
+              <option value="creditLimit">Credit Limit</option>
+              <option value="currentBalance">Balance</option>
+            </select>
+            <button 
+              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="p-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-all"
+            >
+              <TrendingUp size={16} className={cn(sortOrder === 'desc' && "rotate-180")} />
+            </button>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -494,17 +535,18 @@ export function CorporateManagement() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Billing Cycle</label>
-                  <select
-                    value={newAccount.billingCycle}
-                    onChange={(e) => setNewAccount({ ...newAccount, billingCycle: e.target.value as any })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                  </select>
-                </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Billing Cycle</label>
+                    <select
+                      value={newAccount.billingCycle}
+                      onChange={(e) => setNewAccount({ ...newAccount, billingCycle: e.target.value as any })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                    </select>
+                  </div>
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Address</label>
                   <textarea
@@ -556,9 +598,32 @@ export function CorporateManagement() {
               {/* Add Rate Form */}
               {hasPermission() ? (
                 <div className="p-6 border-r border-zinc-800 bg-zinc-950/50">
-                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                    <Plus size={16} className="text-emerald-500" />
-                    Add New Rate
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Plus size={16} className="text-emerald-500" />
+                      {editingRate ? 'Edit Rate' : 'Add New Rate'}
+                    </div>
+                    {editingRate && (
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setEditingRate(null);
+                          setNewRate({
+                            roomType: '',
+                            rate: 0,
+                            currency: 'NGN',
+                            startDate: format(new Date(), 'yyyy-MM-dd'),
+                            endDate: format(new Date(Date.now() + 31536000000), 'yyyy-MM-dd'),
+                            discountType: 'fixed',
+                            discountValue: 0,
+                            conditions: ''
+                          });
+                        }}
+                        className="text-[10px] text-zinc-500 hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                    )}
                   </h3>
                   <form onSubmit={handleSaveRate} className="space-y-4">
                     <div className="space-y-1">
@@ -566,7 +631,15 @@ export function CorporateManagement() {
                       <select
                         required
                         value={newRate.roomType}
-                        onChange={(e) => setNewRate({ ...newRate, roomType: e.target.value })}
+                        onChange={(e) => {
+                          const typeName = e.target.value;
+                          const selectedType = roomTypes.find(t => t.name === typeName);
+                          setNewRate({ 
+                            ...newRate, 
+                            roomType: typeName,
+                            rate: selectedType ? selectedType.basePrice : newRate.rate
+                          });
+                        }}
                         className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="">Select Type</option>
@@ -574,10 +647,57 @@ export function CorporateManagement() {
                           <option key={type} value={type}>{type}</option>
                         ))}
                       </select>
+                      {newRate.roomType && (
+                        <div className="text-[10px] text-zinc-500 mt-1">
+                          Base Price: {formatCurrency(roomTypes.find(t => t.name === newRate.roomType)?.basePrice || 0, currency, exchangeRate)}
+                        </div>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Rate</label>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Discount Type</label>
+                        <select
+                          value={newRate.discountType}
+                          onChange={(e) => setNewRate({ ...newRate, discountType: e.target.value as any })}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                        >
+                          <option value="fixed">Fixed Amount</option>
+                          <option value="percentage">Percentage (%)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Discount Value</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            value={newRate.discountValue}
+                            onChange={(e) => setNewRate({ ...newRate, discountValue: Number(e.target.value) })}
+                            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const selectedType = roomTypes.find(t => t.name === newRate.roomType);
+                              if (!selectedType) return;
+                              let calculatedRate = selectedType.basePrice;
+                              if (newRate.discountType === 'percentage') {
+                                calculatedRate = selectedType.basePrice * (1 - newRate.discountValue / 100);
+                              } else {
+                                calculatedRate = Math.max(0, selectedType.basePrice - newRate.discountValue);
+                              }
+                              setNewRate({ ...newRate, rate: calculatedRate });
+                            }}
+                            className="px-2 bg-zinc-800 text-zinc-400 hover:text-white rounded-lg text-[10px] font-bold transition-all"
+                            title="Apply Discount to Base Price"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Negotiated Rate</label>
                         <input
                           required
                           type="number"
@@ -632,7 +752,7 @@ export function CorporateManagement() {
                       type="submit"
                       className="w-full py-2 bg-emerald-500 text-black font-bold rounded-lg hover:bg-emerald-400 transition-all active:scale-95 text-sm"
                     >
-                      Add Rate
+                      {editingRate ? 'Update Rate' : 'Add Rate'}
                     </button>
                   </form>
                 </div>
@@ -675,6 +795,11 @@ export function CorporateManagement() {
                               </div>
                               <div className="text-lg font-bold text-white">
                                 {rate.currency === 'NGN' ? '₦' : '$'}{rate.rate.toLocaleString()}
+                                {rate.discountValue > 0 && (
+                                  <span className="text-[10px] text-emerald-500 ml-2">
+                                    (-{rate.discountType === 'percentage' ? `${rate.discountValue}%` : formatCurrency(rate.discountValue, rate.currency, exchangeRate)})
+                                  </span>
+                                )}
                                 {rate.currency !== currency && (
                                   <span className="text-[10px] text-zinc-500 ml-2">
                                     ≈ {formatCurrency(rate.currency === 'NGN' ? rate.rate / exchangeRate : rate.rate * exchangeRate, currency, exchangeRate)}
@@ -687,14 +812,36 @@ export function CorporateManagement() {
                               </div>
                             </div>
                           </div>
-                          {hasPermission() && (
-                            <button 
-                              onClick={() => setConfirmDeleteRate(rate.id)}
-                              className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          )}
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {hasPermission() && (
+                              <>
+                                <button 
+                                  onClick={() => {
+                                    setEditingRate(rate);
+                                    setNewRate({
+                                      roomType: rate.roomType,
+                                      rate: rate.rate,
+                                      currency: rate.currency,
+                                      startDate: rate.startDate,
+                                      endDate: rate.endDate,
+                                      discountType: rate.discountType || 'fixed',
+                                      discountValue: rate.discountValue || 0,
+                                      conditions: rate.conditions || ''
+                                    });
+                                  }}
+                                  className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                >
+                                  <Edit2 size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => setConfirmDeleteRate(rate.id)}
+                                  className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       );
                     })

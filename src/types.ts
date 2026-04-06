@@ -40,6 +40,14 @@ export interface HotelBranding {
   accountNumber?: string;
   bankName?: string;
   greeting?: string;
+  statusColors?: {
+    clean?: string;
+    dirty?: string;
+    occupied?: string;
+    maintenance?: string;
+    vacant?: string;
+    out_of_service?: string;
+  };
 }
 
 export interface Hotel {
@@ -149,6 +157,9 @@ export interface Room {
   amenities?: string[];
   description?: string;
   images?: string[];
+  notes?: string;
+  lastCleanedAt?: string;
+  lastFlaggedAt?: string;
 }
 
 export interface Reservation {
@@ -172,6 +183,7 @@ export interface Reservation {
   discountAmount?: number;
   discountType?: 'fixed' | 'percentage';
   discountReason?: string;
+  nightlyRate?: number; // Added for nightly audit synchronization
   createdAt: string;
   ledgerEntries?: LedgerEntry[]; // Changed from string[] to LedgerEntry[]
 }
@@ -322,7 +334,7 @@ export interface LedgerEntry {
   timestamp: string;
   reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund';
   postedBy: string;
 }
 

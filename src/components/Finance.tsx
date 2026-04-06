@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, getDoc, deleteDoc, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem } from '../types';
+import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
 import { syncDailyCharges } from '../services/financeService';
 import { 
@@ -33,7 +33,8 @@ import {
   LayoutDashboard,
   Receipt,
   ArrowLeftRight,
-  Percent
+  Percent,
+  Trash2
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -97,11 +98,12 @@ export function Finance() {
   const [commissions, setCommissions] = useState<Commission[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [showSettleModal, setShowSettleModal] = useState<Guest | null>(null);
+  const [showSettleModal, setShowSettleModal] = useState<Guest | CorporateAccount | null>(null);
   const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as const, notes: '' });
 
   useEffect(() => {
@@ -193,12 +195,46 @@ export function Finance() {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
     });
 
+    const unsubCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), (snap) => {
+      setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    });
+
     return () => {
       unsub();
       unsubRes();
       unsubRooms();
+      unsubCorp();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
+
+  const handleDeleteTransaction = async (id: string, description: string, amount: number) => {
+    if (!hotel?.id || !profile || profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') return;
+    
+    if (!window.confirm(`Are you sure you want to delete this transaction: "${description}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'finance', id));
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'FINANCE_RECORD_DELETED',
+        resource: `${description} (${formatCurrency(amount, currency, exchangeRate)})`,
+        hotelId: hotel.id,
+        module: 'Finance'
+      });
+      
+      toast.success('Transaction deleted successfully');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/finance/${id}`);
+      toast.error('Failed to delete transaction');
+    }
+  };
 
   const handleSyncCharges = async () => {
     if (!hotel?.id || !profile) return;
@@ -224,42 +260,47 @@ export function Finance() {
 
     try {
       setIsSaving(true);
-      const guest = showSettleModal;
+      const entity = showSettleModal;
       const amount = settleData.amount;
       
-      // Find the most recent reservation for this guest to post the ledger entry
+      const isCorporate = 'contactPerson' in entity;
+      const currentBalance = isCorporate ? (entity as CorporateAccount).currentBalance : (entity as Guest).ledgerBalance;
+      const entityName = entity.name;
+      const entityId = entity.id;
+
+      // Find the most recent reservation for this entity to post the ledger entry
       const lastRes = reservations
-        .filter(r => r.guestId === guest.id)
+        .filter(r => isCorporate ? r.corporateId === entityId : r.guestId === entityId)
         .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())[0];
 
       if (!lastRes) {
-        toast.error('No reservation found for this guest to post the settlement.');
+        toast.error('No reservation found for this account to post the settlement.');
         return;
       }
 
-      if (guest.ledgerBalance < 0) {
-        // Guest owes money: Post a payment (credit)
-        await settleLedger(hotel.id, guest.id, lastRes.id, amount, settleData.method, profile.uid);
+      if (currentBalance < 0) {
+        // Entity owes money: Post a payment (credit)
+        await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, amount, settleData.method, profile.uid, isCorporate ? entityId : undefined);
         
         // Record as income
         await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
           type: 'income',
           amount: amount,
           category: 'Room Revenue',
-          description: `Balance Settlement: ${guest.name} (${settleData.notes || 'No notes'})`,
+          description: `Balance Settlement: ${entityName} (${settleData.notes || 'No notes'})`,
           timestamp: new Date().toISOString(),
           paymentMethod: settleData.method
         });
       } else {
-        // Guest has credit: Post a refund/settlement (debit)
-        await settleOverpayment(hotel.id, guest.id, lastRes.id, amount, settleData.method, profile.uid);
+        // Entity has credit: Post a refund/settlement (debit)
+        await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, amount, settleData.method, profile.uid, isCorporate ? entityId : undefined);
         
         // Record as expense
         await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
           type: 'expense',
           amount: amount,
           category: 'Other',
-          description: `Overpayment Refund: ${guest.name} (${settleData.notes || 'No notes'})`,
+          description: `Overpayment Refund: ${entityName} (${settleData.notes || 'No notes'})`,
           timestamp: new Date().toISOString(),
           paymentMethod: settleData.method
         });
@@ -367,6 +408,13 @@ export function Finance() {
         ...newPO,
         timestamp: new Date().toISOString()
       });
+
+      // Update supplier balance (liability)
+      const supplierRef = doc(db, 'hotels', hotel.id, 'suppliers', newPO.supplierId);
+      await updateDoc(supplierRef, {
+        balance: increment(newPO.totalAmount)
+      });
+
       console.log('Purchase Order created with ID:', poRef.id);
       toast.success('Purchase Order created successfully');
       setShowAddPOModal(false);
@@ -403,7 +451,69 @@ export function Finance() {
         }
       }
 
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        userRole: profile?.role,
+        action: 'INVENTORY_PO_RECEIVED',
+        resource: `PO #${po.id.slice(0, 8)} received, inventory updated`,
+        hotelId: hotel.id,
+        module: 'Inventory'
+      });
+
       toast.success('Purchase Order received and inventory updated');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/purchaseOrders/${po.id}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePayPO = async (po: PurchaseOrder) => {
+    if (!hotel?.id || !profile) return;
+    if (po.paymentStatus === 'paid') return;
+
+    setIsSaving(true);
+    try {
+      // Update PO payment status
+      await updateDoc(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
+        paymentStatus: 'paid'
+      });
+
+      // Update supplier balance
+      const supplierRef = doc(db, 'hotels', hotel.id, 'suppliers', po.supplierId);
+      await updateDoc(supplierRef, {
+        balance: increment(-po.totalAmount)
+      });
+
+      // Record as expense in finance
+      const supplier = suppliers.find(s => s.id === po.supplierId);
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+        type: 'expense',
+        amount: po.totalAmount,
+        category: 'Supplies',
+        description: `PO Payment: #${po.id.slice(0, 8)} to ${supplier?.name || 'Supplier'}`,
+        timestamp: new Date().toISOString(),
+        paymentMethod: 'transfer', // Default for POs
+        referenceId: po.id,
+        postedBy: profile.uid
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        userRole: profile?.role,
+        action: 'FINANCE_PO_PAID',
+        resource: `PO #${po.id.slice(0, 8)} paid (${formatCurrency(po.totalAmount, currency, exchangeRate)})`,
+        hotelId: hotel.id,
+        module: 'Finance'
+      });
+
+      toast.success('Purchase Order marked as paid and finance record created');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/purchaseOrders/${po.id}`);
     } finally {
@@ -758,6 +868,9 @@ export function Finance() {
                       <th className="px-6 py-4">Category</th>
                       <th className="px-6 py-4">Method</th>
                       <th className="px-6 py-4 text-right">Amount</th>
+                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
@@ -775,6 +888,17 @@ export function Finance() {
                         <td className={cn("px-6 py-4 text-right font-bold text-sm", record.type === 'income' ? "text-emerald-500" : "text-red-500")}>
                           {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
                         </td>
+                        {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              onClick={() => handleDeleteTransaction(record.id, record.description, record.amount)}
+                              className="p-2 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 rounded-lg transition-colors"
+                              title="Delete Transaction"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -784,47 +908,101 @@ export function Finance() {
           )}
 
           {activeTab === 'ledger' && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-              <div className="p-6 border-b border-zinc-800">
-                <h3 className="font-bold text-white">Guest Accounts (City Ledger)</h3>
-                <p className="text-xs text-zinc-500">Manage outstanding balances and credits for individual guests</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                      <th className="px-6 py-4">Guest</th>
-                      <th className="px-6 py-4">Contact</th>
-                      <th className="px-6 py-4 text-right">Balance</th>
-                      <th className="px-6 py-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {filteredLedger.map((guest) => (
-                      <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
-                        <td className="px-6 py-4 text-sm text-white font-medium">{guest.name}</td>
-                        <td className="px-6 py-4">
-                          <div className="text-xs text-zinc-400">{guest.email}</div>
-                          <div className="text-[10px] text-zinc-500">{guest.phone}</div>
-                        </td>
-                        <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
-                          {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => {
-                              setShowSettleModal(guest);
-                              setSettleData({ ...settleData, amount: Math.abs(guest.ledgerBalance || 0) });
-                            }}
-                            className="text-xs font-bold text-emerald-500 hover:text-emerald-400"
-                          >
-                            Settle
-                          </button>
-                        </td>
+            <div className="space-y-6">
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-zinc-800">
+                  <h3 className="font-bold text-white">Guest Accounts (City Ledger)</h3>
+                  <p className="text-xs text-zinc-500">Manage outstanding balances and credits for individual guests</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                        <th className="px-6 py-4">Guest</th>
+                        <th className="px-6 py-4">Contact</th>
+                        <th className="px-6 py-4 text-right">Balance</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800">
+                      {filteredLedger.length === 0 ? (
+                        <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No guests with outstanding balances</td></tr>
+                      ) : (
+                        filteredLedger.map((guest) => (
+                          <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
+                            <td className="px-6 py-4 text-sm text-white font-medium">{guest.name}</td>
+                            <td className="px-6 py-4">
+                              <div className="text-xs text-zinc-400">{guest.email}</div>
+                              <div className="text-[10px] text-zinc-500">{guest.phone}</div>
+                            </td>
+                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
+                              {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <button
+                                onClick={() => {
+                                  setShowSettleModal(guest);
+                                  setSettleData({ ...settleData, amount: Math.abs(guest.ledgerBalance || 0) });
+                                }}
+                                className="text-xs font-bold text-emerald-500 hover:text-emerald-400"
+                              >
+                                Settle
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-zinc-800">
+                  <h3 className="font-bold text-white">Corporate Accounts</h3>
+                  <p className="text-xs text-zinc-500">Manage outstanding balances and credits for corporate partners</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                        <th className="px-6 py-4">Company</th>
+                        <th className="px-6 py-4">Contact</th>
+                        <th className="px-6 py-4 text-right">Balance</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800">
+                      {corporateAccounts.filter(c => c.currentBalance !== 0).length === 0 ? (
+                        <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No corporate accounts with outstanding balances</td></tr>
+                      ) : (
+                        corporateAccounts.filter(c => c.currentBalance !== 0).map((corp) => (
+                          <tr key={corp.id} className="hover:bg-zinc-800/50 transition-colors">
+                            <td className="px-6 py-4 text-sm text-white font-medium">{corp.name}</td>
+                            <td className="px-6 py-4">
+                              <div className="text-xs text-zinc-400">{corp.contactPerson}</div>
+                              <div className="text-[10px] text-zinc-500">{corp.email}</div>
+                            </td>
+                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (corp.currentBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
+                              {formatCurrency(corp.currentBalance || 0, currency, exchangeRate)}
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <button
+                                onClick={() => {
+                                  setShowSettleModal(corp);
+                                  setSettleData({ ...settleData, amount: Math.abs(corp.currentBalance || 0) });
+                                }}
+                                className="text-xs font-bold text-emerald-500 hover:text-emerald-400"
+                              >
+                                Settle
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -959,22 +1137,39 @@ export function Finance() {
                           <td className="px-6 py-4 text-xs text-white font-mono">{po.id.slice(0, 8)}</td>
                           <td className="px-6 py-4 text-sm text-zinc-400">{suppliers.find(s => s.id === po.supplierId)?.name || 'Unknown'}</td>
                           <td className="px-6 py-4">
-                            <span className={cn(
-                              "px-2 py-1 rounded text-[10px] font-bold uppercase",
-                              po.status === 'received' ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
-                            )}>{po.status}</span>
+                            <div className="flex flex-col gap-1">
+                              <span className={cn(
+                                "px-2 py-1 rounded text-[10px] font-bold uppercase w-fit",
+                                po.status === 'received' ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                              )}>{po.status}</span>
+                              <span className={cn(
+                                "px-2 py-1 rounded text-[10px] font-bold uppercase w-fit",
+                                po.paymentStatus === 'paid' ? "bg-blue-500/10 text-blue-500" : "bg-red-500/10 text-red-500"
+                              )}>{po.paymentStatus}</span>
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(po.totalAmount, currency, exchangeRate)}</td>
                           <td className="px-6 py-4 text-right">
-                            {po.status !== 'received' && (
-                              <button 
-                                onClick={() => handleReceivePO(po)}
-                                disabled={isSaving}
-                                className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors disabled:opacity-50"
-                              >
-                                Receive
-                              </button>
-                            )}
+                            <div className="flex justify-end gap-2">
+                              {po.status !== 'received' && (
+                                <button 
+                                  onClick={() => handleReceivePO(po)}
+                                  disabled={isSaving}
+                                  className="text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors disabled:opacity-50"
+                                >
+                                  Receive
+                                </button>
+                              )}
+                              {po.paymentStatus !== 'paid' && (
+                                <button 
+                                  onClick={() => handlePayPO(po)}
+                                  disabled={isSaving}
+                                  className="text-xs font-bold text-blue-500 hover:text-blue-400 transition-colors disabled:opacity-50"
+                                >
+                                  Pay
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1171,93 +1366,102 @@ export function Finance() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">
-                {showSettleModal.ledgerBalance < 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">Guest: {showSettleModal.name}</p>
-            </div>
-            <form onSubmit={handleSettleBalance}>
-              <div className="p-6 space-y-4">
-                <div className={cn(
-                  "p-4 rounded-2xl border flex items-center gap-4",
-                  showSettleModal.ledgerBalance < 0 ? "bg-red-500/5 border-red-500/20" : "bg-emerald-500/5 border-emerald-500/20"
-                )}>
-                  <div className={cn(
-                    "w-10 h-10 rounded-full flex items-center justify-center",
-                    showSettleModal.ledgerBalance < 0 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
-                  )}>
-                    <AlertCircle size={20} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
-                    <p className={cn(
-                      "text-lg font-bold",
-                      showSettleModal.ledgerBalance < 0 ? "text-red-500" : "text-emerald-500"
-                    )}>
-                      {formatCurrency(showSettleModal.ledgerBalance, currency, exchangeRate)}
+            {(() => {
+              const balance = 'ledgerBalance' in showSettleModal ? showSettleModal.ledgerBalance : showSettleModal.currentBalance;
+              return (
+                <>
+                  <div className="p-6 border-b border-zinc-800">
+                    <h2 className="text-xl font-bold text-white">
+                      {balance < 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
+                    </h2>
+                    <p className="text-sm text-zinc-500 mt-1">
+                      {'ledgerBalance' in showSettleModal ? 'Guest' : 'Corporate'}: {showSettleModal.name}
                     </p>
                   </div>
-                </div>
+                  <form onSubmit={handleSettleBalance}>
+                    <div className="p-6 space-y-4">
+                      <div className={cn(
+                        "p-4 rounded-2xl border flex items-center gap-4",
+                        balance < 0 ? "bg-red-500/5 border-red-500/20" : "bg-emerald-500/5 border-emerald-500/20"
+                      )}>
+                        <div className={cn(
+                          "w-10 h-10 rounded-full flex items-center justify-center",
+                          balance < 0 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                        )}>
+                          <AlertCircle size={20} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
+                          <p className={cn(
+                            "text-lg font-bold",
+                            balance < 0 ? "text-red-500" : "text-emerald-500"
+                          )}>
+                            {formatCurrency(balance, currency, exchangeRate)}
+                          </p>
+                        </div>
+                      </div>
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Settlement Amount ({currency})</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{currency === 'NGN' ? '₦' : '$'}</span>
-                    <input
-                      required
-                      type="number"
-                      value={settleData.amount}
-                      onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Settlement Amount ({currency})</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">{currency === 'NGN' ? '₦' : '$'}</span>
+                          <input
+                            required
+                            type="number"
+                            value={settleData.amount}
+                            onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </div>
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
-                  <select
-                    value={settleData.method}
-                    onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="card">Card</option>
-                    <option value="transfer">Bank Transfer</option>
-                  </select>
-                </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
+                        <select
+                          value={settleData.method}
+                          onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        >
+                          <option value="cash">Cash</option>
+                          <option value="card">Card</option>
+                          <option value="transfer">Bank Transfer</option>
+                        </select>
+                      </div>
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
-                  <textarea
-                    value={settleData.notes}
-                    onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
-                    placeholder="e.g. Guest paid cash at front desk"
-                  />
-                </div>
-              </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowSettleModal(null)}
-                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!settleData.amount || isSaving}
-                  className={cn(
-                    "flex-1 px-4 py-2 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
-                    showSettleModal.ledgerBalance < 0 ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
-                  )}
-                >
-                  {isSaving ? 'Processing...' : showSettleModal.ledgerBalance < 0 ? 'Post Payment' : 'Post Refund'}
-                </button>
-              </div>
-            </form>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
+                        <textarea
+                          value={settleData.notes}
+                          onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                          placeholder="e.g. Guest paid cash at front desk"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowSettleModal(null)}
+                        className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={!settleData.amount || isSaving}
+                        className={cn(
+                          "flex-1 px-4 py-2 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
+                          balance < 0 ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
+                        )}
+                      >
+                        {isSaving ? 'Processing...' : balance < 0 ? 'Post Payment' : 'Post Refund'}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              );
+            })()}
           </motion.div>
         </div>
       )}

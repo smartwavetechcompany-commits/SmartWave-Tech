@@ -54,7 +54,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile) return;
     try {
       setIsSaving(true);
-      await settleOverpayment(hotel.id, reservation.guestId || 'unknown', reservation.id, settleData.amount, settleData.method, profile.uid);
+      await settleOverpayment(hotel.id, reservation.guestId || 'unknown', reservation.id, settleData.amount, settleData.method, profile.uid, reservation.corporateId);
       toast.success('Overpayment settled successfully');
       setShowSettleOverpayment(false);
     } catch (err) {
@@ -96,7 +96,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         reservation.id,
         transferTargetId,
         balance,
-        profile.uid
+        profile.uid,
+        reservation.corporateId
       );
       toast.success('Balance transferred successfully');
       setShowTransferBalanceModal(false);

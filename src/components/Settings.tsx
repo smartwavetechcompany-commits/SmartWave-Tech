@@ -56,6 +56,14 @@ export function Settings() {
       accountNumber: hotel?.branding?.accountNumber || '',
       bankName: hotel?.branding?.bankName || '',
       greeting: hotel?.branding?.greeting || 'Thank you for staying with us!',
+      statusColors: hotel?.branding?.statusColors || {
+        clean: '#10b981',
+        dirty: '#ef4444',
+        occupied: '#3b82f6',
+        maintenance: '#f59e0b',
+        vacant: '#71717a',
+        out_of_service: '#18181b'
+      }
     }
   });
 
@@ -603,6 +611,51 @@ export function Settings() {
                       branding: { ...formData.branding, footerNotes: e.target.value } 
                     })}
                   />
+                </div>
+
+                <div className="md:col-span-2 pt-6 border-t border-zinc-800">
+                  <h4 className="text-sm font-bold text-white mb-4">Room Status Colors</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {(['clean', 'dirty', 'occupied', 'maintenance', 'vacant', 'out_of_service'] as const).map((status) => (
+                      <div key={status}>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">
+                          {status.replace(/_/g, ' ')}
+                        </label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
+                            value={formData.branding.statusColors?.[status] || '#71717a'}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { 
+                                ...formData.branding, 
+                                statusColors: { 
+                                  ...formData.branding.statusColors, 
+                                  [status]: e.target.value 
+                                } 
+                              } 
+                            })}
+                          />
+                          <input 
+                            type="text" 
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none font-mono text-sm"
+                            value={formData.branding.statusColors?.[status] || '#71717a'}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { 
+                                ...formData.branding, 
+                                statusColors: { 
+                                  ...formData.branding.statusColors, 
+                                  [status]: e.target.value 
+                                } 
+                              } 
+                            })}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 

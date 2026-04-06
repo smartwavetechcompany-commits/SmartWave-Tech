@@ -97,7 +97,7 @@ export function Reports() {
           .reduce((acc, curr) => acc + curr.amount, 0);
 
         const corpRev = filteredEntries
-          .filter(e => e.type === 'debit' && e.category === 'corporate')
+          .filter(e => e.type === 'debit' && e.corporateId)
           .reduce((acc, curr) => acc + curr.amount, 0);
         
         const indivRev = totalRevenue - corpRev;

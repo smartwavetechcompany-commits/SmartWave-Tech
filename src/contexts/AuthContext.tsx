@@ -158,6 +158,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchSettings();
   }, []);
 
+  // 5. Branding Color Application
+  useEffect(() => {
+    if (hotel?.branding) {
+      const { primaryColor, secondaryColor, statusColors } = hotel.branding;
+      const root = document.documentElement;
+      
+      if (primaryColor) root.style.setProperty('--primary-color', primaryColor);
+      if (secondaryColor) root.style.setProperty('--secondary-color', secondaryColor);
+      
+      if (statusColors) {
+        Object.entries(statusColors).forEach(([status, color]) => {
+          if (color) root.style.setProperty(`--status-${status}-color`, color);
+        });
+      }
+    }
+  }, [hotel?.branding]);
+
   const isSubscriptionActive = profile?.role === 'superAdmin' 
     ? true 
     : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry).getTime() > Date.now()) : false);

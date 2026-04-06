@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, orderBy, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { MaintenanceRequest, OperationType } from '../types';
+import { MaintenanceRequest, OperationType, Room } from '../types';
 import { 
   Wrench, 
   AlertTriangle, 
@@ -26,6 +26,7 @@ import { toast } from 'sonner';
 export function Maintenance() {
   const { hotel, profile } = useAuth();
   const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high' | 'urgent'>('all');
@@ -50,7 +51,16 @@ export function Maintenance() {
       if (error.code === 'permission-denied') setHasPermissionError(true);
     });
 
-    return () => unsub();
+    const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
+      setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+    });
+
+    return () => {
+      unsub();
+      unsubRooms();
+    };
   }, [hotel?.id, profile?.uid]);
 
   const handleAddRequest = async (e: React.FormEvent) => {
@@ -305,14 +315,19 @@ export function Maintenance() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Room Number</label>
-                    <input
+                    <select
                       required
-                      type="text"
                       value={newRequest.roomNumber}
                       onChange={(e) => setNewRequest({ ...newRequest, roomNumber: e.target.value })}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      placeholder="e.g. 101"
-                    />
+                    >
+                      <option value="">Select Room</option>
+                      {rooms.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber)).map(room => (
+                        <option key={room.id} value={room.roomNumber}>
+                          Room {room.roomNumber} ({room.type})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Priority</label>

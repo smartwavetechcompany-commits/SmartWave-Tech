@@ -52,9 +52,7 @@ export const syncDailyCharges = async (
         const chargeDateStr = format(chargeDate, 'MMM dd, yyyy');
         
         // Calculate nightly rate
-        let nightlyRate = room.price;
-        // (Simplified: not checking corporate rates here for brevity, 
-        // but in a real app we would. FrontDesk.tsx has that logic.)
+        let nightlyRate = res.nightlyRate || room.price;
         
         await postToLedger(hotelId, res.guestId || 'unknown', res.id, {
           amount: nightlyRate,
