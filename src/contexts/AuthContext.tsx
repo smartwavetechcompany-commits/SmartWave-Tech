@@ -16,6 +16,8 @@ interface AuthContextType {
   setCurrency: (currency: 'NGN' | 'USD') => void;
   exchangeRate: number;
   systemSettings: SystemSettings | null;
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,12 +32,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currency, setCurrencyState] = useState<'NGN' | 'USD'>(() => {
     return (localStorage.getItem('pms_currency') as 'NGN' | 'USD') || 'NGN';
   });
+  const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('pms_theme') as 'light' | 'dark') || 'dark';
+  });
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
 
   const setCurrency = (newCurrency: 'NGN' | 'USD') => {
     setCurrencyState(newCurrency);
     localStorage.setItem('pms_currency', newCurrency);
   };
+
+  const setTheme = (newTheme: 'light' | 'dark') => {
+    setThemeState(newTheme);
+    localStorage.setItem('pms_theme', newTheme);
+  };
+
+  // Apply theme class
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [theme]);
 
   // 1. Auth State Listener
   useEffect(() => {
@@ -179,7 +199,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ? true 
     : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry).getTime() > Date.now()) : false);
 
-  const exchangeRate = systemSettings?.exchangeRate || 1500;
+  const exchangeRate = hotel?.exchangeRate || systemSettings?.exchangeRate || 1500;
+  const baseCurrency = hotel?.defaultCurrency || 'NGN';
 
   return (
     <AuthContext.Provider value={{ 
@@ -191,7 +212,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       currency,
       setCurrency,
       exchangeRate,
-      systemSettings
+      systemSettings,
+      theme,
+      setTheme
     }}>
       {children}
     </AuthContext.Provider>

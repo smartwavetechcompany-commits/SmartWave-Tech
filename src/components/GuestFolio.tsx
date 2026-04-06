@@ -198,14 +198,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <Receipt size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Guest Folio</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Guest Folio</h2>
               <p className="text-sm text-zinc-500">Reservation #{reservation.id.slice(-6).toUpperCase()}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setShowReceipt(true)}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-2"
+              className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-2"
               title="Print Receipt"
             >
               <Printer size={20} />
@@ -213,7 +213,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
             <button 
               onClick={onClose}
-              className="p-2 text-zinc-500 hover:text-white transition-colors"
+              className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
             >
               <XCircle size={24} />
             </button>
@@ -225,7 +225,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <div className="relative w-full max-w-md">
               <button 
                 onClick={() => setShowReceipt(false)}
-                className="absolute -top-12 right-0 p-2 text-white hover:bg-white/10 rounded-full transition-all"
+                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"
               >
                 <XCircle size={32} />
               </button>
@@ -245,10 +245,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
                 <User size={18} className="text-emerald-500" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Guest Details</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Guest Details</h3>
               </div>
               <div className="space-y-2">
-                <p className="text-lg font-bold text-white">{reservation.guestName}</p>
+                <p className="text-lg font-bold text-zinc-50">{reservation.guestName}</p>
                 <p className="text-sm text-zinc-400">{reservation.guestEmail}</p>
                 <p className="text-sm text-zinc-400">{reservation.guestPhone}</p>
                 {reservation.corporateId && (
@@ -266,13 +266,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
                 <Calendar size={18} className="text-blue-500" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Stay Info</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Stay Info</h3>
               </div>
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Room</p>
-                    <p className="text-lg font-bold text-white">{reservation.roomNumber}</p>
+                    <p className="text-lg font-bold text-zinc-50">{reservation.roomNumber}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Status</p>
@@ -287,11 +287,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check In</p>
-                    <p className="text-sm text-white font-medium">{format(new Date(reservation.checkIn), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(reservation.checkIn), 'MMM d, yyyy')}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
-                    <p className="text-sm text-white font-medium">{format(new Date(reservation.checkOut), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(reservation.checkOut), 'MMM d, yyyy')}</p>
                   </div>
                 </div>
               </div>
@@ -300,19 +300,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
                 <DollarSign size={18} className="text-amber-500" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Financial Summary</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Total Charges</span>
-                  <span className="text-white font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
+                  <span className="text-zinc-50 font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Total Payments</span>
                   <span className="text-emerald-500 font-bold">{formatCurrency(totalPaid, currency, exchangeRate)}</span>
                 </div>
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
-                  <span className="text-sm font-bold text-white uppercase">Balance Due</span>
+                  <span className="text-sm font-bold text-zinc-50 uppercase">Balance Due</span>
                   <div className="flex flex-col items-end">
                     <span className={cn(
                       "text-xl font-bold",
@@ -352,7 +352,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           {showTransferBalanceModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-md">
-                <h3 className="text-lg font-bold text-white mb-4">Transfer Balance</h3>
+                <h3 className="text-lg font-bold text-zinc-50 mb-4">Transfer Balance</h3>
                 <p className="text-sm text-zinc-400 mb-6">
                   Select another active reservation for {reservation.guestName} to transfer the current balance of {formatCurrency(balance, currency, exchangeRate)}.
                 </p>
@@ -360,7 +360,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Target Reservation</label>
                     <select 
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       value={transferTargetId}
                       onChange={(e) => setTransferTargetId(e.target.value)}
                     >
@@ -375,7 +375,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="flex gap-3 pt-4">
                     <button 
                       onClick={() => setShowTransferBalanceModal(false)}
-                      className="flex-1 py-2 bg-zinc-800 text-white rounded-lg font-bold hover:bg-zinc-700 transition-all"
+                      className="flex-1 py-2 bg-zinc-800 text-zinc-50 rounded-lg font-bold hover:bg-zinc-700 transition-all"
                     >
                       Cancel
                     </button>
@@ -400,7 +400,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
               >
                 <div className="p-6 border-b border-zinc-800">
-                  <h2 className="text-xl font-bold text-white">Settle Overpayment</h2>
+                  <h2 className="text-xl font-bold text-zinc-50">Settle Overpayment</h2>
                   <p className="text-sm text-zinc-500 mt-1">Refund or balance adjustment for {reservation.guestName}</p>
                 </div>
                 <form onSubmit={handleSettleOverpayment}>
@@ -422,7 +422,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         type="number"
                         value={settleData.amount}
                         onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         max={Math.abs(balance)}
                       />
                     </div>
@@ -432,7 +432,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <select
                         value={settleData.method}
                         onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="cash">Cash</option>
                         <option value="card">Card</option>
@@ -464,7 +464,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           {/* Ledger Entries Table */}
           <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">Transaction History</h3>
+              <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Transaction History</h3>
               {onPostCharge && reservation.status === 'checked_in' && (
                 <button 
                   onClick={onPostCharge}
@@ -510,7 +510,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
-                          <div className="text-sm text-white font-medium">{entry.description}</div>
+                          <div className="text-sm text-zinc-50 font-medium">{entry.description}</div>
                           <div className="text-[10px] text-zinc-500">Ref: {entry.id.slice(-8).toUpperCase()}</div>
                         </td>
                         <td className="px-6 py-4">
@@ -580,7 +580,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               link.download = `folio_${reservation.id.slice(-6)}.csv`;
               link.click();
             }}
-            className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
+            className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV

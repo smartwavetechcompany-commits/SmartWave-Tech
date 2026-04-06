@@ -163,13 +163,13 @@ export function Inventory() {
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Inventory Management</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Inventory Management</h1>
           <p className="text-zinc-400">Manage supplies, food, and beverage stock</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
@@ -180,7 +180,7 @@ export function Inventory() {
               setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5, price: 0 });
               setShowAddModal(true);
             }}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Plus size={18} />
             Add Item
@@ -251,7 +251,7 @@ export function Inventory() {
             placeholder="Search inventory..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
         <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
@@ -261,7 +261,7 @@ export function Inventory() {
               onClick={() => setCategoryFilter(c)}
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
-                categoryFilter === c ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                categoryFilter === c ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
               )}
             >
               {c}
@@ -294,7 +294,7 @@ export function Inventory() {
               filteredItems.map((item) => (
                 <tr key={item.id} className="hover:bg-zinc-800/50 transition-colors group">
                   <td className="px-6 py-4">
-                    <div className="text-sm font-bold text-white">{item.name}</div>
+                    <div className="text-sm font-bold text-zinc-50">{item.name}</div>
                   </td>
                   <td className="px-6 py-4">
                     <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
@@ -309,7 +309,7 @@ export function Inventory() {
                       >
                         <ArrowDown size={14} />
                       </button>
-                      <div className="text-sm font-bold text-white w-12 text-center">
+                      <div className="text-sm font-bold text-zinc-50 w-12 text-center">
                         {item.quantity} <span className="text-[10px] text-zinc-500 font-normal">{item.unit}</span>
                       </div>
                       <button 
@@ -350,7 +350,7 @@ export function Inventory() {
                           });
                           setShowAddModal(true);
                         }}
-                        className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all"
+                        className="p-2 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
                       >
                         <Edit2 size={16} />
                       </button>
@@ -378,7 +378,7 @@ export function Inventory() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">{editingItem ? 'Edit Item' : 'Add Inventory Item'}</h2>
+              <h2 className="text-xl font-bold text-zinc-50">{editingItem ? 'Edit Item' : 'Add Inventory Item'}</h2>
             </div>
             <form onSubmit={handleSaveItem}>
               <div className="p-6 space-y-4">
@@ -464,7 +464,7 @@ export function Inventory() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
                 >
                   {editingItem ? 'Update Item' : 'Add Item'}
                 </button>

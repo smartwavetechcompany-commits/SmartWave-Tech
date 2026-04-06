@@ -260,7 +260,7 @@ export function Reports() {
     <div className="p-8 space-y-8">
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Reports & Analytics</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Reports & Analytics</h1>
           <p className="text-zinc-400">Monitor hotel performance and trends</p>
         </div>
         
@@ -271,28 +271,28 @@ export function Reports() {
               type="date" 
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="bg-transparent text-white text-sm outline-none border-none p-1"
+              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1"
             />
             <span className="text-zinc-600">to</span>
             <input 
               type="date" 
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="bg-transparent text-white text-sm outline-none border-none p-1"
+              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1"
             />
           </div>
 
           <div className="flex gap-2">
             <button 
               onClick={exportPDF}
-              className="bg-zinc-900 border border-zinc-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
             >
               <FileText size={18} className="text-red-500" />
               PDF
             </button>
             <button 
               onClick={exportExcel}
-              className="bg-zinc-900 border border-zinc-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
             >
               <FileSpreadsheet size={18} className="text-emerald-500" />
               Excel
@@ -311,7 +311,7 @@ export function Reports() {
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all",
                 activeReport === item.id 
-                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
+                  ? "bg-emerald-500 text-zinc-50 shadow-lg shadow-emerald-500/20" 
                   : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               )}
             >
@@ -332,7 +332,7 @@ export function Reports() {
                       <Bed size={20} />
                     </div>
                   </div>
-                  <div className="text-2xl font-bold text-white mb-1">{stats.occupancy}%</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{stats.occupancy}%</div>
                   <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Occupancy Rate</div>
                 </div>
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
@@ -341,7 +341,7 @@ export function Reports() {
                       <TrendingUp size={20} />
                     </div>
                   </div>
-                  <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
                   <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
                 </div>
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
@@ -350,7 +350,7 @@ export function Reports() {
                       <TrendingUp size={20} />
                     </div>
                   </div>
-                  <div className="text-2xl font-bold text-white mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
                   <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
                 </div>
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
@@ -359,14 +359,14 @@ export function Reports() {
                       <Users size={20} />
                     </div>
                   </div>
-                  <div className="text-2xl font-bold text-white mb-1">{stats.totalGuests}</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{stats.totalGuests}</div>
                   <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Guests</div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <h3 className="font-bold text-white mb-6">Revenue Trend</h3>
+                  <h3 className="font-bold text-zinc-50 mb-6">Revenue Trend</h3>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={revenueData}>
@@ -391,7 +391,7 @@ export function Reports() {
                 </div>
 
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <h3 className="font-bold text-white mb-6">Revenue Mix</h3>
+                  <h3 className="font-bold text-zinc-50 mb-6">Revenue Mix</h3>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -432,13 +432,13 @@ export function Reports() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
                 <div>
-                  <h3 className="font-bold text-white">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
+                  <h3 className="font-bold text-zinc-50">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
                   <p className="text-xs text-zinc-500">Detailed report for the selected period</p>
                 </div>
                 <div className="flex gap-2">
                   <button 
                     onClick={exportExcel}
-                    className="p-2 bg-zinc-800 text-zinc-400 rounded-lg hover:text-white transition-colors"
+                    className="p-2 bg-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors"
                   >
                     <Download size={16} />
                   </button>
@@ -448,7 +448,7 @@ export function Reports() {
                 <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
                   <FileText className="text-zinc-500" size={32} />
                 </div>
-                <h4 className="text-white font-bold mb-2">Report Ready for Generation</h4>
+                <h4 className="text-zinc-50 font-bold mb-2">Report Ready for Generation</h4>
                 <p className="text-sm text-zinc-500 max-w-xs mx-auto mb-6">
                   Click the export buttons above to download the full {reportTypes.find(r => r.id === activeReport)?.label} in your preferred format.
                 </p>

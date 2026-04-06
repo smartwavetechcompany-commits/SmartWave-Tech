@@ -37,7 +37,7 @@ export function ConfirmModal({
           >
             <button 
               onClick={onCancel}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-50 transition-colors"
             >
               <X size={20} />
             </button>
@@ -51,7 +51,7 @@ export function ConfirmModal({
                 <AlertCircle size={32} />
               </div>
               
-              <h3 className="text-xl font-bold text-white mb-2">{title}</h3>
+              <h3 className="text-xl font-bold text-zinc-50 mb-2">{title}</h3>
               <p className="text-zinc-400 text-sm mb-8">{message}</p>
 
               <div className="flex gap-3 w-full">
@@ -68,7 +68,7 @@ export function ConfirmModal({
                   }}
                   disabled={isLoading}
                   className={`flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 ${
-                    type === 'danger' ? 'bg-red-500 text-white hover:bg-red-400' :
+                    type === 'danger' ? 'bg-red-500 text-zinc-50 hover:bg-red-400' :
                     type === 'warning' ? 'bg-amber-500 text-black hover:bg-amber-400' :
                     'bg-emerald-500 text-black hover:bg-emerald-400'
                   } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}

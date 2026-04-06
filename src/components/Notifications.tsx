@@ -81,11 +81,11 @@ export function Notifications() {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all active:scale-95"
+        className="relative p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all active:scale-95"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
-          <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-zinc-950">
+          <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-zinc-50 text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-zinc-950">
             {unreadCount}
           </span>
         )}
@@ -105,7 +105,7 @@ export function Notifications() {
               className="absolute right-0 mt-2 w-80 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 overflow-hidden"
             >
               <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/50">
-                <h3 className="text-sm font-bold text-white">Notifications</h3>
+                <h3 className="text-sm font-bold text-zinc-50">Notifications</h3>
                 {unreadCount > 0 && (
                   <button 
                     onClick={markAllAsRead}
@@ -147,7 +147,7 @@ export function Notifications() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <h4 className="text-xs font-bold text-white truncate">{notification.title}</h4>
+                            <h4 className="text-xs font-bold text-zinc-50 truncate">{notification.title}</h4>
                             <span className="text-[10px] text-zinc-500 whitespace-nowrap">
                               {format(new Date(notification.timestamp), 'HH:mm')}
                             </span>
@@ -166,7 +166,7 @@ export function Notifications() {
               </div>
 
               <div className="p-3 bg-zinc-950/50 border-t border-zinc-800 text-center">
-                <button className="text-[10px] font-bold text-zinc-500 hover:text-white uppercase tracking-wider">
+                <button className="text-[10px] font-bold text-zinc-500 hover:text-zinc-50 uppercase tracking-wider">
                   View all activity
                 </button>
               </div>

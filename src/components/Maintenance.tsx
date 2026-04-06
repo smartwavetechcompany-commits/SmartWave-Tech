@@ -154,20 +154,20 @@ export function Maintenance() {
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Maintenance</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Maintenance</h1>
           <p className="text-zinc-400">Track and manage room repairs and facility maintenance</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Plus size={18} />
             New Request
@@ -192,7 +192,7 @@ export function Maintenance() {
             placeholder="Search by room or issue..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
         <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl overflow-x-auto w-full md:w-auto">
@@ -202,7 +202,7 @@ export function Maintenance() {
               onClick={() => setFilter(f)}
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
-                filter === f ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                filter === f ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
               )}
             >
               {f.replace('_', ' ')}
@@ -231,7 +231,7 @@ export function Maintenance() {
                 <div className="p-5 flex-1">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-white font-bold">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-50 font-bold">
                         {request.roomNumber}
                       </div>
                       <div>
@@ -244,7 +244,7 @@ export function Maintenance() {
                     </div>
                     <div className={cn(
                       "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                      request.priority === 'urgent' ? "bg-red-500 text-white" :
+                      request.priority === 'urgent' ? "bg-red-500 text-zinc-50" :
                       request.priority === 'high' ? "bg-orange-500/10 text-orange-500" :
                       request.priority === 'medium' ? "bg-blue-500/10 text-blue-500" :
                       "bg-zinc-800 text-zinc-500"
@@ -254,7 +254,7 @@ export function Maintenance() {
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className="text-sm font-bold text-white leading-tight">{request.issue}</h3>
+                    <h3 className="text-sm font-bold text-zinc-50 leading-tight">{request.issue}</h3>
                     {request.notes && (
                       <p className="text-xs text-zinc-400 italic bg-zinc-950 p-2 rounded-lg border border-zinc-800">
                         {request.notes}
@@ -308,7 +308,7 @@ export function Maintenance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">New Maintenance Request</h2>
+              <h2 className="text-xl font-bold text-zinc-50">New Maintenance Request</h2>
             </div>
             <form onSubmit={handleAddRequest}>
               <div className="p-6 space-y-4">
@@ -319,7 +319,7 @@ export function Maintenance() {
                       required
                       value={newRequest.roomNumber}
                       onChange={(e) => setNewRequest({ ...newRequest, roomNumber: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">Select Room</option>
                       {rooms.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber)).map(room => (
@@ -334,7 +334,7 @@ export function Maintenance() {
                     <select
                       value={newRequest.priority}
                       onChange={(e) => setNewRequest({ ...newRequest, priority: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="low">Low</option>
                       <option value="medium">Medium</option>
@@ -349,7 +349,7 @@ export function Maintenance() {
                     required
                     value={newRequest.issue}
                     onChange={(e) => setNewRequest({ ...newRequest, issue: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
                     placeholder="Describe the problem..."
                   />
                 </div>
@@ -359,7 +359,7 @@ export function Maintenance() {
                     type="text"
                     value={newRequest.notes}
                     onChange={(e) => setNewRequest({ ...newRequest, notes: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="Any extra details..."
                   />
                 </div>
@@ -374,7 +374,7 @@ export function Maintenance() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
                 >
                   Create Request
                 </button>

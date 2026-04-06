@@ -217,7 +217,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     return (
       <div className="p-8 flex flex-col items-center justify-center h-[60vh] text-center">
         <Lock size={48} className="text-zinc-700 mb-4" />
-        <h2 className="text-xl font-bold text-white mb-2">Access Restricted</h2>
+        <h2 className="text-xl font-bold text-zinc-50 mb-2">Access Restricted</h2>
         <p className="text-zinc-400">Only administrators can manage staff members.</p>
       </div>
     );
@@ -256,13 +256,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Staff Management</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Staff Management</h1>
           <p className="text-zinc-400">Manage your hotel's team and roles</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
@@ -280,14 +280,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       {isAddingStaff && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">Add Staff Member</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-6">Add Staff Member</h3>
             <form onSubmit={addStaff} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Full Name</label>
                 <input 
                   required
                   type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newStaff.displayName}
                   onChange={(e) => setNewStaff({ ...newStaff, displayName: e.target.value })}
                 />
@@ -297,7 +297,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 <input 
                   required
                   type="email" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newStaff.email}
                   onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
                 />
@@ -307,7 +307,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 <input 
                   required
                   type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newStaff.password}
                   onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
                   placeholder="Set a password for them"
@@ -331,7 +331,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                         "px-2 py-1.5 rounded text-[10px] font-bold uppercase transition-all",
                         newStaff.roles.includes(role.id as StaffRole)
                           ? "bg-emerald-500 text-black"
-                          : "bg-zinc-800 text-zinc-500 hover:text-white"
+                          : "bg-zinc-800 text-zinc-500 hover:text-zinc-50"
                       )}
                     >
                       {role.label}
@@ -343,7 +343,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 <button 
                   type="button"
                   onClick={() => setIsAddingStaff(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95"
                 >
                   Cancel
                 </button>
@@ -361,7 +361,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="font-bold text-white">Team Members</h3>
+          <h3 className="font-bold text-zinc-50">Team Members</h3>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
             <input 
@@ -369,7 +369,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               placeholder="Search staff..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
             />
           </div>
         </div>
@@ -393,7 +393,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                         <UserIcon size={20} />
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-white">{member.displayName || 'Unnamed Staff'}</div>
+                        <div className="text-sm font-medium text-zinc-50">{member.displayName || 'Unnamed Staff'}</div>
                         <div className="text-xs text-zinc-500 flex items-center gap-1">
                           <Mail size={12} />
                           {member.email}
@@ -486,7 +486,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       {editingPermissions && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-2">Manage Permissions</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Manage Permissions</h3>
             <p className="text-zinc-400 text-sm mb-6">Setting permissions for {editingPermissions.displayName || editingPermissions.email}</p>
             
             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">

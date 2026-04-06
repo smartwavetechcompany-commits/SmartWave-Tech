@@ -162,7 +162,7 @@ export function AuditLogs() {
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center">
         <Lock size={48} className="mx-auto text-zinc-700 mb-4" />
-        <h3 className="text-lg font-bold text-white mb-2">Access Restricted</h3>
+        <h3 className="text-lg font-bold text-zinc-50 mb-2">Access Restricted</h3>
         <p className="text-zinc-400 text-sm">You do not have permission to view system activity logs.</p>
       </div>
     );
@@ -190,14 +190,14 @@ export function AuditLogs() {
       <div className="p-3 sm:p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-2">
           <ClipboardList size={16} className="text-emerald-500 sm:size-[18px]" />
-          <h3 className="font-bold text-white text-xs sm:text-base">System Activity Logs</h3>
+          <h3 className="font-bold text-zinc-50 text-xs sm:text-base">System Activity Logs</h3>
         </div>
         
         <div className="flex items-center gap-2 sm:gap-3">
           <select
             value={moduleFilter}
             onChange={(e) => setModuleFilter(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-[10px] sm:text-sm text-white focus:border-emerald-500 outline-none"
+            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-[10px] sm:text-sm text-zinc-50 focus:border-emerald-500 outline-none"
           >
             <option value="all">All Modules</option>
             <option value="Front Desk">Front Desk</option>
@@ -210,7 +210,7 @@ export function AuditLogs() {
           </select>
           <button 
             onClick={handleExport}
-            className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95"
+            className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95"
           >
             <Download size={12} className="sm:size-[18px]" />
             <span className="hidden xs:inline">Export CSV</span>
@@ -221,7 +221,7 @@ export function AuditLogs() {
             <input 
               type="text"
               placeholder="Search..."
-              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] sm:text-sm text-white focus:border-emerald-500 outline-none transition-all w-full sm:w-48 md:w-64"
+              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] sm:text-sm text-zinc-50 focus:border-emerald-500 outline-none transition-all w-full sm:w-48 md:w-64"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -229,7 +229,7 @@ export function AuditLogs() {
           <button 
             onClick={() => {}}
             disabled={loading}
-            className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            className="p-1.5 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
             title="Refresh Logs"
           >
             <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
@@ -242,32 +242,32 @@ export function AuditLogs() {
           <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 bg-zinc-900 z-10 shadow-sm">
               <tr className="text-[9px] sm:text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
-                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('timestamp')}>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('timestamp')}>
                   <div className="flex items-center gap-2">
                     Date & Time
                     <SortIcon column="timestamp" />
                   </div>
                 </th>
-                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('actor')}>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('actor')}>
                   <div className="flex items-center gap-2">
                     Actor
                     <SortIcon column="actor" />
                   </div>
                 </th>
-                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('action')}>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('action')}>
                   <div className="flex items-center gap-2">
                     Action
                     <SortIcon column="action" />
                   </div>
                 </th>
-                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-white transition-colors hidden md:table-cell" onClick={() => handleSort('target')}>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden md:table-cell" onClick={() => handleSort('target')}>
                   <div className="flex items-center gap-2">
                     Target
                     <SortIcon column="target" />
                   </div>
                 </th>
                 {profile.role === 'superAdmin' && (
-                  <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-white transition-colors hidden lg:table-cell" onClick={() => handleSort('hotelId')}>
+                  <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden lg:table-cell" onClick={() => handleSort('hotelId')}>
                     <div className="flex items-center gap-2">
                       Hotel
                       <SortIcon column="hotelId" />
@@ -291,7 +291,7 @@ export function AuditLogs() {
                   <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors group">
                     <td className="px-4 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                       <div className="flex flex-col">
-                        <span className="text-[10px] sm:text-xs text-white font-medium">{safeFormat(log.timestamp, 'MMM d, yyyy')}</span>
+                        <span className="text-[10px] sm:text-xs text-zinc-50 font-medium">{safeFormat(log.timestamp, 'MMM d, yyyy')}</span>
                         <span className="text-[9px] sm:text-[10px] text-zinc-500">{safeFormat(log.timestamp, 'HH:mm:ss')}</span>
                       </div>
                     </td>

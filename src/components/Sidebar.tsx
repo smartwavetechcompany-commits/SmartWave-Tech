@@ -82,7 +82,7 @@ export function Sidebar() {
   return (
     <div className="w-64 bg-zinc-950 text-zinc-400 flex flex-col h-screen border-r border-zinc-800">
       <div className="p-6">
-        <h1 className="text-xl font-bold text-white tracking-tighter flex items-center gap-2">
+        <h1 className="text-xl font-bold text-zinc-50 tracking-tighter flex items-center gap-2">
           <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black">
             SW
           </div>
@@ -101,7 +101,7 @@ export function Sidebar() {
               to={isDisabled ? '#' : item.path}
               className={cn(
                 "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 active:scale-[0.98]",
-                isActive ? "bg-emerald-500/10 text-emerald-500" : "hover:bg-zinc-900 hover:text-white",
+                isActive ? "bg-emerald-500/10 text-emerald-500" : "hover:bg-zinc-900 hover:text-zinc-50",
                 isDisabled && "opacity-50 cursor-not-allowed active:scale-100"
               )}
             >

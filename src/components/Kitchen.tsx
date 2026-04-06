@@ -353,20 +353,20 @@ export function Kitchen() {
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Kitchen Management</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Kitchen Management</h1>
           <p className="text-zinc-400">Manage room service orders and kitchen workflow</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Plus size={18} />
             New Order
@@ -381,7 +381,7 @@ export function Kitchen() {
               <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
               <stat.icon className={stat.color} size={20} />
             </div>
-            <div className="text-2xl font-bold text-white">{stat.count}</div>
+            <div className="text-2xl font-bold text-zinc-50">{stat.count}</div>
           </div>
         ))}
       </div>
@@ -394,7 +394,7 @@ export function Kitchen() {
             placeholder="Search by room or items..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
@@ -404,7 +404,7 @@ export function Kitchen() {
               onClick={() => setFilter(f)}
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
-                filter === f ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                filter === f ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
               )}
             >
               {f}
@@ -446,7 +446,7 @@ export function Kitchen() {
                 <div className="p-5 flex-1">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-white font-bold">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-50 font-bold">
                         {order.roomNumber === 'Walk-in' ? 'W' : order.roomNumber}
                       </div>
                       <div>
@@ -493,7 +493,7 @@ export function Kitchen() {
                       <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{order.category}</span>
                     </div>
                     <div>
-                      <p className="text-sm text-white leading-relaxed font-medium">{order.items}</p>
+                      <p className="text-sm text-zinc-50 leading-relaxed font-medium">{order.items}</p>
                     </div>
                     {(order.price > 0) && (
                       <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
@@ -537,7 +537,7 @@ export function Kitchen() {
                     {order.status === 'ready' && (
                       <button
                         onClick={() => updateOrderStatus(order.id, 'delivered')}
-                        className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                        className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
                       >
                         <CheckCircle2 size={14} />
                         Confirm Delivery
@@ -545,7 +545,7 @@ export function Kitchen() {
                     )}
                     <button
                       onClick={() => setPrintingOrder(order)}
-                      className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                      className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
                     >
                       <Printer size={14} />
                       Print Docket
@@ -564,7 +564,7 @@ export function Kitchen() {
           <div className="relative w-full max-w-md">
             <button 
               onClick={() => setPrintingOrder(null)}
-              className="absolute -top-12 right-0 p-2 text-white hover:bg-white/10 rounded-full transition-all print:hidden"
+              className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all print:hidden"
             >
               <XCircle size={32} />
             </button>
@@ -630,7 +630,7 @@ export function Kitchen() {
               <div className="mt-8 flex justify-center print:hidden">
                 <button 
                   onClick={() => window.print()}
-                  className="bg-black text-white px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 flex items-center gap-2"
+                  className="bg-black text-zinc-50 px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 flex items-center gap-2"
                 >
                   <Printer size={18} />
                   Print Docket
@@ -651,7 +651,7 @@ export function Kitchen() {
           >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-white">Kitchen POS</h2>
+                <h2 className="text-xl font-bold text-zinc-50">Kitchen POS</h2>
                 <p className="text-xs text-zinc-500">Create new room service or walk-in order</p>
               </div>
               <button 
@@ -698,7 +698,7 @@ export function Kitchen() {
                              <MoreHorizontal size={16} className="text-zinc-500" />}
                             <Plus size={14} className="text-zinc-500 group-hover:text-emerald-500" />
                           </div>
-                          <div className="text-sm font-bold text-white mb-1 line-clamp-1">{item.name}</div>
+                          <div className="text-sm font-bold text-zinc-50 mb-1 line-clamp-1">{item.name}</div>
                           <div className="text-xs font-bold text-emerald-500">{item.price.toLocaleString()}</div>
                         </button>
                       ))}
@@ -706,7 +706,7 @@ export function Kitchen() {
 
                   {/* Custom Item Form */}
                   <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-2xl mt-auto">
-                    <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-zinc-50 mb-4 flex items-center gap-2">
                       <Plus size={16} className="text-emerald-500" />
                       Add Custom Item
                     </h3>
@@ -717,7 +717,7 @@ export function Kitchen() {
                           placeholder="Item Name"
                           value={customItem.name}
                           onChange={(e) => setCustomItem({ ...customItem, name: e.target.value })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                       <div className="sm:col-span-1">
@@ -726,7 +726,7 @@ export function Kitchen() {
                           placeholder="Price"
                           value={customItem.price || ''}
                           onChange={(e) => setCustomItem({ ...customItem, price: Number(e.target.value) })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                       <button
@@ -759,20 +759,20 @@ export function Kitchen() {
                       cart.map(item => (
                         <div key={item.id} className="flex items-center justify-between gap-3 bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/50">
                           <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold text-white truncate">{item.name}</div>
+                            <div className="text-xs font-bold text-zinc-50 truncate">{item.name}</div>
                             <div className="text-[10px] text-emerald-500 font-bold">{item.price.toLocaleString()}</div>
                           </div>
                           <div className="flex items-center gap-2">
                             <button 
                               onClick={() => updateCartQuantity(item.id, -1)}
-                              className="w-6 h-6 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white"
+                              className="w-6 h-6 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-50"
                             >
                               <Minus size={12} />
                             </button>
-                            <span className="text-xs font-bold text-white w-4 text-center">{item.quantity}</span>
+                            <span className="text-xs font-bold text-zinc-50 w-4 text-center">{item.quantity}</span>
                             <button 
                               onClick={() => updateCartQuantity(item.id, 1)}
-                              className="w-6 h-6 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-400 hover:text-white"
+                              className="w-6 h-6 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-50"
                             >
                               <Plus size={12} />
                             </button>

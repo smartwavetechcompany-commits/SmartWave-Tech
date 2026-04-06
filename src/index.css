@@ -20,14 +20,57 @@
   --color-emerald-900: color-mix(in srgb, var(--primary-color, #10b981) 20%, black);
   --color-emerald-950: color-mix(in srgb, var(--primary-color, #10b981) 10%, black);
 
-  /* Map zinc-950 to brand secondary */
-  --color-zinc-950: var(--secondary-color, #09090b);
-  --color-zinc-900: color-mix(in srgb, var(--secondary-color, #09090b) 90%, white);
+  /* Map zinc colors to variables for dynamic theme support */
+  --color-zinc-50: var(--zinc-50);
+  --color-zinc-100: var(--zinc-100);
+  --color-zinc-200: var(--zinc-200);
+  --color-zinc-300: var(--zinc-300);
+  --color-zinc-400: var(--zinc-400);
+  --color-zinc-500: var(--zinc-500);
+  --color-zinc-600: var(--zinc-600);
+  --color-zinc-700: var(--zinc-700);
+  --color-zinc-800: var(--zinc-800);
+  --color-zinc-900: var(--zinc-900);
+  --color-zinc-950: var(--zinc-950);
 }
 
 @layer base {
+  :root {
+    --bg-color: #ffffff;
+    --text-color: #09090b;
+    --zinc-950: #ffffff;
+    --zinc-900: #f4f4f5;
+    --zinc-800: #e4e4e7;
+    --zinc-700: #d4d4d8;
+    --zinc-600: #a1a1aa;
+    --zinc-500: #71717a;
+    --zinc-400: #52525b;
+    --zinc-300: #3f3f46;
+    --zinc-200: #27272a;
+    --zinc-100: #18181b;
+    --zinc-50: #09090b;
+  }
+
+  .dark {
+    --bg-color: #09090b;
+    --text-color: #f4f4f5;
+    --zinc-950: #09090b;
+    --zinc-900: #18181b;
+    --zinc-800: #27272a;
+    --zinc-700: #3f3f46;
+    --zinc-600: #52525b;
+    --zinc-500: #71717a;
+    --zinc-400: #a1a1aa;
+    --zinc-300: #d4d4d8;
+    --zinc-200: #e4e4e7;
+    --zinc-100: #f4f4f5;
+    --zinc-50: #fafafa;
+  }
+
   body {
-    @apply bg-zinc-950 text-zinc-100 antialiased;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    @apply antialiased transition-colors duration-300;
   }
 
   /* Custom Scrollbar */

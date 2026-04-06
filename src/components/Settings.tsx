@@ -25,22 +25,29 @@ import {
   Plus,
   Trash2,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Moon,
+  Sun,
+  Coins,
+  Globe,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '../utils';
 import { toast } from 'sonner';
 import { format, isValid } from 'date-fns';
 
 export function Settings() {
-  const { profile, hotel, isSubscriptionActive, systemSettings } = useAuth();
+  const { profile, hotel, isSubscriptionActive, systemSettings, theme, setTheme } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   
   const [formData, setFormData] = useState({
     displayName: profile?.displayName || '',
     hotelName: hotel?.name || '',
+    defaultCurrency: hotel?.defaultCurrency || 'NGN',
+    exchangeRate: hotel?.exchangeRate || 1500,
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -66,6 +73,32 @@ export function Settings() {
       }
     }
   });
+
+  useEffect(() => {
+    if (hotel) {
+      setFormData(prev => ({
+        ...prev,
+        hotelName: hotel.name || prev.hotelName,
+        defaultCurrency: hotel.defaultCurrency || prev.defaultCurrency,
+        exchangeRate: hotel.exchangeRate || prev.exchangeRate,
+        branding: {
+          ...prev.branding,
+          logoUrl: hotel.branding?.logoUrl || prev.branding.logoUrl,
+          primaryColor: hotel.branding?.primaryColor || prev.branding.primaryColor,
+          secondaryColor: hotel.branding?.secondaryColor || prev.branding.secondaryColor,
+          address: hotel.branding?.address || prev.branding.address,
+          phone: hotel.branding?.phone || prev.branding.phone,
+          email: hotel.branding?.email || prev.branding.email,
+          footerNotes: hotel.branding?.footerNotes || prev.branding.footerNotes,
+          organizationName: hotel.branding?.organizationName || hotel.name || prev.branding.organizationName,
+          accountNumber: hotel.branding?.accountNumber || prev.branding.accountNumber,
+          bankName: hotel.branding?.bankName || prev.branding.bankName,
+          greeting: hotel.branding?.greeting || prev.branding.greeting,
+          statusColors: hotel.branding?.statusColors || prev.branding.statusColors
+        }
+      }));
+    }
+  }, [hotel]);
 
   const [localTaxes, setLocalTaxes] = useState<Tax[]>(hotel?.taxes || []);
 
@@ -174,6 +207,13 @@ export function Settings() {
     }
   };
 
+  const fetchExchangeRate = () => {
+    // Mock fetching real-time exchange rate
+    const mockRate = 1500 + Math.floor(Math.random() * 200);
+    setFormData(prev => ({ ...prev, exchangeRate: mockRate }));
+    toast.success(`Exchange rate updated to ${mockRate} NGN/USD`);
+  };
+
   const handleSaveHotel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
@@ -182,6 +222,8 @@ export function Settings() {
     try {
       await setDoc(doc(db, 'hotels', hotel.id), {
         name: formData.hotelName,
+        defaultCurrency: formData.defaultCurrency,
+        exchangeRate: formData.exchangeRate,
       }, { merge: true });
 
       // Log action
@@ -191,7 +233,7 @@ export function Settings() {
         userEmail: profile.email,
         userRole: profile.role,
         action: 'UPDATE_HOTEL_SETTINGS',
-        resource: `Hotel: ${formData.hotelName}`,
+        resource: `Hotel: ${formData.hotelName} (Currency: ${formData.defaultCurrency}, Rate: ${formData.exchangeRate})`,
         hotelId: hotel.id
       });
 
@@ -250,7 +292,7 @@ export function Settings() {
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-8">
       <header>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Settings</h1>
+        <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Settings</h1>
         <p className="text-zinc-400">Manage your account and system preferences</p>
       </header>
 
@@ -261,7 +303,7 @@ export function Settings() {
             onClick={() => setActiveTab('profile')}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
-              activeTab === 'profile' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              activeTab === 'profile' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
             <User size={18} />
@@ -273,7 +315,7 @@ export function Settings() {
               onClick={() => setActiveTab('hotel')}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
-                activeTab === 'hotel' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                activeTab === 'hotel' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
               <Building2 size={18} />
@@ -286,7 +328,7 @@ export function Settings() {
               onClick={() => setActiveTab('branding')}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
-                activeTab === 'branding' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                activeTab === 'branding' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
               <Smartphone size={18} />
@@ -299,7 +341,7 @@ export function Settings() {
               onClick={() => setActiveTab('taxes')}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
-                activeTab === 'taxes' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                activeTab === 'taxes' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
               <Percent size={18} />
@@ -308,10 +350,21 @@ export function Settings() {
           )}
 
           <button 
+            onClick={() => setActiveTab('preferences')}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
+              activeTab === 'preferences' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
+            )}
+          >
+            <Moon size={18} />
+            Preferences
+          </button>
+
+          <button 
             onClick={() => setActiveTab('security')}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
-              activeTab === 'security' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              activeTab === 'security' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
             <Shield size={18} />
@@ -322,7 +375,7 @@ export function Settings() {
             onClick={() => setActiveTab('support')}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
-              activeTab === 'support' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              activeTab === 'support' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
             <Mail size={18} />
@@ -339,7 +392,7 @@ export function Settings() {
                   <User size={40} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-white">{profile?.displayName || 'User'}</h3>
+                  <h3 className="text-lg font-bold text-zinc-50">{profile?.displayName || 'User'}</h3>
                   <p className="text-sm text-zinc-500 capitalize">{profile?.role.replace('hotelAdmin', 'Hotel Administrator')}</p>
                 </div>
               </div>
@@ -349,7 +402,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Display Name</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.displayName}
                     onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                   />
@@ -379,27 +432,104 @@ export function Settings() {
           {activeTab === 'hotel' && profile?.role === 'hotelAdmin' && (
             <form onSubmit={handleSaveHotel} className="space-y-6">
               <div className="mb-8">
-                <h3 className="text-lg font-bold text-white mb-1">Hotel Configuration</h3>
-                <p className="text-sm text-zinc-500">Manage your property details and subscription</p>
+                <h3 className="text-lg font-bold text-zinc-50 mb-1">Hotel Configuration</h3>
+                <p className="text-sm text-zinc-500">Manage your property details, general information, and currency settings</p>
               </div>
 
-              <div className="grid grid-cols-1 gap-6">
-                <div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Hotel Name</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.hotelName}
                     onChange={(e) => setFormData({ ...formData, hotelName: e.target.value })}
                   />
                 </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Phone Number</label>
+                  <input 
+                    type="tel" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={formData.branding.phone}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, phone: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Email Address</label>
+                  <input 
+                    type="email" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={formData.branding.email}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, email: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Address</label>
+                  <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
+                    value={formData.branding.address}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, address: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="pt-6 border-t border-zinc-800 md:col-span-2">
+                  <h4 className="text-sm font-bold text-zinc-50 mb-4 flex items-center gap-2">
+                    <Coins size={18} className="text-emerald-500" />
+                    Currency & Exchange Rate
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Default Currency (Base)</label>
+                      <select
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                        value={formData.defaultCurrency}
+                        onChange={(e) => setFormData({ ...formData, defaultCurrency: e.target.value as 'NGN' | 'USD' })}
+                      >
+                        <option value="NGN">NGN (Nigerian Naira)</option>
+                        <option value="USD">USD (US Dollar)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Exchange Rate (1 USD = ? NGN)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="number" 
+                          className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={formData.exchangeRate}
+                          onChange={(e) => setFormData({ ...formData, exchangeRate: parseFloat(e.target.value) })}
+                        />
+                        <button 
+                          type="button"
+                          onClick={fetchExchangeRate}
+                          className="px-3 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-xs font-bold hover:bg-zinc-700 transition-all flex items-center gap-2 whitespace-nowrap"
+                        >
+                          <RefreshCw size={14} />
+                          Fetch Rate
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 
-                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4">
+                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4 md:col-span-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <CreditCard size={18} className="text-emerald-500" />
                       <div>
-                        <p className="text-sm font-medium text-white">Subscription Status</p>
+                        <p className="text-sm font-medium text-zinc-50">Subscription Status</p>
                         <p className="text-xs text-zinc-500">{hotel?.plan} Plan</p>
                       </div>
                     </div>
@@ -442,7 +572,7 @@ export function Settings() {
           {activeTab === 'branding' && profile?.role === 'hotelAdmin' && (
             <form onSubmit={handleSaveBranding} className="space-y-6">
               <div className="mb-8">
-                <h3 className="text-lg font-bold text-white mb-1">Hotel Branding</h3>
+                <h3 className="text-lg font-bold text-zinc-50 mb-1">Hotel Branding</h3>
                 <p className="text-sm text-zinc-500">Customize your hotel's visual identity and receipt details</p>
               </div>
 
@@ -452,7 +582,7 @@ export function Settings() {
                   <input 
                     type="url" 
                     placeholder="https://example.com/logo.png"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.branding.logoUrl}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -475,7 +605,7 @@ export function Settings() {
                     />
                     <input 
                       type="text" 
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none font-mono text-sm"
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-sm"
                       value={formData.branding.primaryColor}
                       onChange={(e) => setFormData({ 
                         ...formData, 
@@ -499,7 +629,7 @@ export function Settings() {
                     />
                     <input 
                       type="text" 
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none font-mono text-sm"
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-sm"
                       value={formData.branding.secondaryColor}
                       onChange={(e) => setFormData({ 
                         ...formData, 
@@ -513,7 +643,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Contact Phone</label>
                   <input 
                     type="tel" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.branding.phone}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -526,7 +656,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Contact Email</label>
                   <input 
                     type="email" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.branding.email}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -539,7 +669,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Organization Name</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.branding.organizationName}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -552,7 +682,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Bank Name</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.branding.bankName}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -565,7 +695,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Account Number</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.branding.accountNumber}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -578,7 +708,7 @@ export function Settings() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Receipt Greeting</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     placeholder="e.g. Thank you for your business!"
                     value={formData.branding.greeting}
                     onChange={(e) => setFormData({ 
@@ -591,7 +721,7 @@ export function Settings() {
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Address</label>
                   <textarea 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
                     value={formData.branding.address}
                     onChange={(e) => setFormData({ 
                       ...formData, 
@@ -603,7 +733,7 @@ export function Settings() {
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Receipt Footer Notes</label>
                   <textarea 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
                     placeholder="Thank you for staying with us!"
                     value={formData.branding.footerNotes}
                     onChange={(e) => setFormData({ 
@@ -614,7 +744,7 @@ export function Settings() {
                 </div>
 
                 <div className="md:col-span-2 pt-6 border-t border-zinc-800">
-                  <h4 className="text-sm font-bold text-white mb-4">Room Status Colors</h4>
+                  <h4 className="text-sm font-bold text-zinc-50 mb-4">Room Status Colors</h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {(['clean', 'dirty', 'occupied', 'maintenance', 'vacant', 'out_of_service'] as const).map((status) => (
                       <div key={status}>
@@ -639,7 +769,7 @@ export function Settings() {
                           />
                           <input 
                             type="text" 
-                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none font-mono text-sm"
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-sm"
                             value={formData.branding.statusColors?.[status] || '#71717a'}
                             onChange={(e) => setFormData({ 
                               ...formData, 
@@ -671,10 +801,65 @@ export function Settings() {
             </form>
           )}
 
+          {activeTab === 'preferences' && (
+            <div className="space-y-8">
+              <div className="mb-8">
+                <h3 className="text-lg font-bold text-zinc-50 mb-1">System Preferences</h3>
+                <p className="text-sm text-zinc-500">Customize your personal experience and interface settings</p>
+              </div>
+
+              <div className="space-y-6">
+                <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-2xl">
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
+                      theme === 'dark' ? "bg-zinc-800 text-zinc-50" : "bg-zinc-200 text-zinc-900"
+                    )}>
+                      {theme === 'dark' ? <Moon size={24} /> : <Sun size={24} />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-zinc-50">Dark Mode</p>
+                      <p className="text-xs text-zinc-500">Switch between light and dark visual themes</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                    className={cn(
+                      "w-14 h-8 rounded-full p-1 transition-all duration-300",
+                      theme === 'dark' ? "bg-emerald-500" : "bg-zinc-700"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-6 h-6 rounded-full bg-zinc-50 shadow-lg transition-all duration-300 transform",
+                      theme === 'dark' ? "translate-x-6" : "translate-x-0"
+                    )} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-2xl">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-zinc-800 text-zinc-50 flex items-center justify-center">
+                      <Globe size={24} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-zinc-50">Language</p>
+                      <p className="text-xs text-zinc-500">Select your preferred display language</p>
+                    </div>
+                  </div>
+                  <select className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-50 focus:border-emerald-500 outline-none">
+                    <option value="en">English</option>
+                    <option value="fr">French (Coming Soon)</option>
+                    <option value="es">Spanish (Coming Soon)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'security' && (
             <div className="space-y-8">
               <div>
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-bold text-zinc-50 mb-4 flex items-center gap-2">
                   <Lock size={20} className="text-emerald-500" />
                   Change Password
                 </h3>
@@ -685,14 +870,14 @@ export function Settings() {
                       <input 
                         required
                         type={showPasswords ? "text" : "password"}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none pr-10"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none pr-10"
                         value={formData.currentPassword}
                         onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
                       />
                       <button 
                         type="button"
                         onClick={() => setShowPasswords(!showPasswords)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-50"
                       >
                         {showPasswords ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
@@ -703,7 +888,7 @@ export function Settings() {
                     <input 
                       required
                       type={showPasswords ? "text" : "password"}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       value={formData.newPassword}
                       onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
                     />
@@ -713,7 +898,7 @@ export function Settings() {
                     <input 
                       required
                       type={showPasswords ? "text" : "password"}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       value={formData.confirmPassword}
                       onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                     />
@@ -729,7 +914,7 @@ export function Settings() {
               </div>
 
               <div className="pt-8 border-t border-zinc-800">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-bold text-zinc-50 mb-4 flex items-center gap-2">
                   <Mail size={20} className="text-emerald-500" />
                   Email Password Reset
                 </h3>
@@ -737,7 +922,7 @@ export function Settings() {
                   Alternatively, we can send a reset link to your registered email address.
                 </p>
                 <button 
-                  className="px-6 py-2 rounded-lg border border-zinc-800 text-white hover:bg-zinc-800 transition-all active:scale-95 font-medium disabled:opacity-50"
+                  className="px-6 py-2 rounded-lg border border-zinc-800 text-zinc-50 hover:bg-zinc-800 transition-all active:scale-95 font-medium disabled:opacity-50"
                   onClick={() => setShowConfirmReset(true)}
                 >
                   Request Password Reset Link
@@ -755,7 +940,7 @@ export function Settings() {
               />
 
               <div className="pt-8 border-t border-zinc-800">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-bold text-zinc-50 mb-4 flex items-center gap-2">
                   <Smartphone size={20} className="text-emerald-500" />
                   Two-Factor Authentication
                 </h3>
@@ -772,7 +957,7 @@ export function Settings() {
             <div className="space-y-8">
               <div className="flex items-center justify-between mb-8">
                 <div>
-                  <h3 className="text-lg font-bold text-white mb-1">Tax Management</h3>
+                  <h3 className="text-lg font-bold text-zinc-50 mb-1">Tax Management</h3>
                   <p className="text-sm text-zinc-500">Configure taxes that apply to reservations and services.</p>
                 </div>
                 <div className="flex gap-2">
@@ -789,7 +974,7 @@ export function Settings() {
                       };
                       setLocalTaxes([...localTaxes, newTax]);
                     }}
-                    className="bg-zinc-800 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+                    className="bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
                   >
                     <Plus size={18} />
                     Add Tax
@@ -819,7 +1004,7 @@ export function Settings() {
                           <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Tax Name</label>
                           <input 
                             type="text" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={tax.name}
                             placeholder="e.g. VAT, Service Charge"
                             onChange={(e) => handleUpdateLocalTax(index, { name: e.target.value })}
@@ -830,7 +1015,7 @@ export function Settings() {
                           <input 
                             type="number" 
                             step="0.01"
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={tax.percentage}
                             onChange={(e) => handleUpdateLocalTax(index, { percentage: Number(e.target.value) })}
                           />
@@ -838,7 +1023,7 @@ export function Settings() {
                         <div>
                           <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Category</label>
                           <select 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={tax.category}
                             onChange={(e) => handleUpdateLocalTax(index, { category: e.target.value as any })}
                           >
@@ -902,7 +1087,7 @@ export function Settings() {
           {activeTab === 'support' && (
             <div className="space-y-8">
               <div className="mb-8">
-                <h3 className="text-lg font-bold text-white mb-1">Help & Support</h3>
+                <h3 className="text-lg font-bold text-zinc-50 mb-1">Help & Support</h3>
                 <p className="text-sm text-zinc-500">Need assistance? Our team is here to help you.</p>
               </div>
 
@@ -912,7 +1097,7 @@ export function Settings() {
                     <Mail size={24} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-white">Email Support</h4>
+                    <h4 className="font-bold text-zinc-50">Email Support</h4>
                     <p className="text-sm text-zinc-500">Send us an email and we'll get back to you within 24 hours.</p>
                   </div>
                 </div>
@@ -934,7 +1119,7 @@ export function Settings() {
                     <Info size={24} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-white">System Information</h4>
+                    <h4 className="font-bold text-zinc-50">System Information</h4>
                     <p className="text-sm text-zinc-500">Details about your current hotel and plan.</p>
                   </div>
                 </div>
@@ -942,15 +1127,15 @@ export function Settings() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase">Hotel ID</span>
-                    <p className="text-sm text-white font-mono">{hotel?.id}</p>
+                    <p className="text-sm text-zinc-50 font-mono">{hotel?.id}</p>
                   </div>
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase">Current Plan</span>
-                    <p className="text-sm text-white capitalize">{hotel?.plan}</p>
+                    <p className="text-sm text-zinc-50 capitalize">{hotel?.plan}</p>
                   </div>
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase">Subscription Expiry</span>
-                    <p className="text-sm text-white">
+                    <p className="text-sm text-zinc-50">
                       {hotel?.subscriptionExpiry ? format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy') : 'N/A'}
                     </p>
                   </div>

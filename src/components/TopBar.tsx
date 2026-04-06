@@ -24,7 +24,7 @@ export function TopBar() {
         
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
-            <div className="text-sm font-bold text-white leading-none mb-1">
+            <div className="text-sm font-bold text-zinc-50 leading-none mb-1">
               {profile?.displayName || profile?.email?.split('@')[0]}
             </div>
             <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider leading-none">

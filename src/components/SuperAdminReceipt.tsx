@@ -115,7 +115,7 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
       <div className="mt-8 flex justify-center print:hidden">
         <button 
           onClick={() => window.print()}
-          className="bg-zinc-900 text-white px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-zinc-200 flex items-center gap-2"
+          className="bg-zinc-900 text-zinc-50 px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-zinc-200 flex items-center gap-2"
         >
           <Printer size={18} />
           Print Receipt

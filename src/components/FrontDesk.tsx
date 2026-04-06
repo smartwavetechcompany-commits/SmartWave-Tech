@@ -1046,27 +1046,27 @@ export function FrontDesk() {
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Front Desk</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Front Desk</h1>
           <p className="text-zinc-400">Manage bookings and guest check-ins</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative group">
-            <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
+            <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
               <Download size={18} />
               Export
             </button>
             <div className="absolute right-0 mt-2 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
-              <button onClick={() => handleExport('rooms')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Room Status</button>
-              <button onClick={() => handleExport('arrivals')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Today's Arrivals</button>
-              <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Today's Check-ins</button>
-              <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">Today's Check-outs</button>
-              <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors">In-House Guests</button>
+              <button onClick={() => handleExport('rooms')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Room Status</button>
+              <button onClick={() => handleExport('arrivals')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Arrivals</button>
+              <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-ins</button>
+              <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-outs</button>
+              <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">In-House Guests</button>
             </div>
           </div>
           <button 
             onClick={() => setShowNightAuditModal(true)}
             disabled={isAuditing}
-            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
             title="Run Nightly Audit"
           >
             <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
@@ -1095,37 +1095,37 @@ export function FrontDesk() {
               });
               setIsBooking(true);
             }}
-            className="hidden sm:flex bg-zinc-900 border border-zinc-800 text-white px-4 py-2 rounded-lg font-bold items-center justify-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+            className="hidden sm:flex bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold items-center justify-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
           >
             <Building2 size={18} className="text-emerald-500" />
             Corporate Booking
           </button>
-          <button 
-            onClick={() => {
-              setNewBooking({
-                guestName: '',
-                guestEmail: '',
-                guestPhone: '',
-                roomId: '',
-                checkIn: format(new Date(), 'yyyy-MM-dd'),
-                checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                guestType: 'individual',
-                corporateId: '',
-                guestId: '',
-                totalAmount: 0,
-                paidAmount: 0,
-                paymentStatus: 'unpaid' as const,
-                notes: '',
-                corporateReference: '',
-                discountAmount: 0,
-                discountType: 'fixed',
-                discountReason: '',
-                additionalStays: [],
-              });
-              setIsBooking(true);
-            }}
-            className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-          >
+                <button 
+                  onClick={() => {
+                    setNewBooking({
+                      guestName: '',
+                      guestEmail: '',
+                      guestPhone: '',
+                      roomId: '',
+                      checkIn: format(new Date(), 'yyyy-MM-dd'),
+                      checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+                      guestType: 'individual',
+                      corporateId: '',
+                      guestId: '',
+                      totalAmount: 0,
+                      paidAmount: 0,
+                      paymentStatus: 'unpaid' as const,
+                      notes: '',
+                      corporateReference: '',
+                      discountAmount: 0,
+                      discountType: 'fixed',
+                      discountReason: '',
+                      additionalStays: [],
+                    });
+                    setIsBooking(true);
+                  }}
+                  className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+                >
             <Plus size={18} />
             New Booking
           </button>
@@ -1136,23 +1136,23 @@ export function FrontDesk() {
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Rooms</div>
-          <div className="text-xl font-bold text-white">{roomStats.total}</div>
+          <div className="text-xl font-bold text-zinc-50">{roomStats.total}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Available</div>
-          <div className="text-xl font-bold text-white">{roomStats.available}</div>
+          <div className="text-xl font-bold text-zinc-50">{roomStats.available}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Occupied</div>
-          <div className="text-xl font-bold text-white">{roomStats.occupied}</div>
+          <div className="text-xl font-bold text-zinc-50">{roomStats.occupied}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1">Dirty</div>
-          <div className="text-xl font-bold text-white">{roomStats.dirty}</div>
+          <div className="text-xl font-bold text-zinc-50">{roomStats.dirty}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-1">Maintenance</div>
-          <div className="text-xl font-bold text-white">{roomStats.maintenance}</div>
+          <div className="text-xl font-bold text-zinc-50">{roomStats.maintenance}</div>
         </div>
       </div>
 
@@ -1167,7 +1167,7 @@ export function FrontDesk() {
             <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
               <RefreshCw size={32} className={cn("text-emerald-500", isAuditing && "animate-spin")} />
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Run Nightly Audit</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Run Nightly Audit</h3>
             <p className="text-zinc-400 text-sm mb-8">
               This will post nightly room charges for all {reservations.filter(r => r.status === 'checked_in').length} checked-in guests for the current date.
             </p>
@@ -1201,7 +1201,7 @@ export function FrontDesk() {
       {isBooking && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">New Reservation</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-6">New Reservation</h3>
             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1234,7 +1234,7 @@ export function FrontDesk() {
                   {corporateAccounts.length > 0 ? (
                     <select 
                       className={cn(
-                        "w-full bg-zinc-950 border rounded-lg px-4 py-2 text-white outline-none transition-all",
+                        "w-full bg-zinc-950 border rounded-lg px-4 py-2 text-zinc-50 outline-none transition-all",
                         newBooking.guestType === 'corporate' && !newBooking.corporateId ? "border-amber-500/50" : "border-zinc-800 focus:border-emerald-500"
                       )}
                       value={newBooking.corporateId}
@@ -1269,7 +1269,7 @@ export function FrontDesk() {
                     <input 
                       type="text" 
                       placeholder="e.g. PO-12345 or Project Name"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       value={newBooking.corporateReference}
                       onChange={(e) => setNewBooking({ ...newBooking, corporateReference: e.target.value })}
                     />
@@ -1280,7 +1280,7 @@ export function FrontDesk() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Select Existing Guest</label>
                 <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newBooking.guestId}
                   onChange={(e) => {
                     const guest = guests.find(g => g.id === e.target.value);
@@ -1318,8 +1318,10 @@ export function FrontDesk() {
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Guest Name</label>
                   <input 
+                    required
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    placeholder="e.g. 101, 204A"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={newBooking.guestName}
                     onChange={(e) => setNewBooking({ ...newBooking, guestName: e.target.value })}
                   />
@@ -1328,7 +1330,7 @@ export function FrontDesk() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Phone Number</label>
                   <input 
                     type="tel" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={newBooking.guestPhone}
                     onChange={(e) => setNewBooking({ ...newBooking, guestPhone: e.target.value })}
                   />
@@ -1338,7 +1340,7 @@ export function FrontDesk() {
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Email Address</label>
                 <input 
                   type="email" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newBooking.guestEmail}
                   onChange={(e) => setNewBooking({ ...newBooking, guestEmail: e.target.value })}
                 />
@@ -1346,7 +1348,7 @@ export function FrontDesk() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
                 <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newBooking.roomId}
                   onChange={(e) => {
                     setNewBooking({ ...newBooking, roomId: e.target.value });
@@ -1383,7 +1385,7 @@ export function FrontDesk() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
                   <input 
                     type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={newBooking.checkIn}
                     min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                     onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
@@ -1393,7 +1395,7 @@ export function FrontDesk() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
                   <input 
                     type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={newBooking.checkOut}
                     onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
                   />
@@ -1402,7 +1404,7 @@ export function FrontDesk() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
                 <textarea 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
                   value={newBooking.notes}
                   onChange={(e) => setNewBooking({ ...newBooking, notes: e.target.value })}
                 />
@@ -1418,7 +1420,7 @@ export function FrontDesk() {
                     <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
                     <input 
                       type="number" 
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
                       value={newBooking.discountAmount || ''}
                       onChange={(e) => setNewBooking({ ...newBooking, discountAmount: Number(e.target.value) })}
                     />
@@ -1426,7 +1428,7 @@ export function FrontDesk() {
                   <div>
                     <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Type</label>
                     <select 
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
                       value={newBooking.discountType}
                       onChange={(e) => setNewBooking({ ...newBooking, discountType: e.target.value as 'fixed' | 'percentage' })}
                     >
@@ -1440,7 +1442,7 @@ export function FrontDesk() {
                   <input 
                     type="text" 
                     placeholder="e.g. Management Approval"
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
                     value={newBooking.discountReason}
                     onChange={(e) => setNewBooking({ ...newBooking, discountReason: e.target.value })}
                   />
@@ -1473,7 +1475,7 @@ export function FrontDesk() {
                     <span>-{formatCurrency(newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount, currency, exchangeRate)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm text-white border-t border-zinc-800 pt-2 mt-2">
+                <div className="flex justify-between text-sm text-zinc-50 border-t border-zinc-800 pt-2 mt-2">
                   <span>Net Total</span>
                   <span className="font-bold text-emerald-500">
                     {formatCurrency(
@@ -1488,7 +1490,7 @@ export function FrontDesk() {
               {newBooking.guestType === 'corporate' && (
                 <div className="space-y-4 pt-4 border-t border-zinc-800">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold text-white">Additional Guests</h4>
+                    <h4 className="text-sm font-bold text-zinc-50">Additional Guests</h4>
                     <button 
                       onClick={() => {
                         const id = Math.random().toString(36).substr(2, 9);
@@ -1533,7 +1535,7 @@ export function FrontDesk() {
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Guest Name</label>
                           <input 
                             type="text" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.guestName}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1545,7 +1547,7 @@ export function FrontDesk() {
                         <div>
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Room</label>
                           <select 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.roomId}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1584,7 +1586,7 @@ export function FrontDesk() {
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Check In</label>
                           <input 
                             type="date" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.checkIn}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1597,7 +1599,7 @@ export function FrontDesk() {
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Check Out</label>
                           <input 
                             type="date" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.checkOut}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1615,7 +1617,7 @@ export function FrontDesk() {
             <div className="flex gap-4 mt-8">
               <button 
                 onClick={() => setIsBooking(false)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95"
               >
                 Cancel
               </button>
@@ -1632,13 +1634,13 @@ export function FrontDesk() {
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="font-bold text-white">Active Reservations</h3>
+          <h3 className="font-bold text-zinc-50">Active Reservations</h3>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
             <input 
               type="text" 
               placeholder="Search guests or rooms..."
-              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -1665,7 +1667,7 @@ export function FrontDesk() {
                         {res.corporateId ? <Building2 size={14} /> : <User size={14} />}
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-white">{res.guestName}</div>
+                        <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
                         {res.corporateId && (
                           <div className="text-[10px] text-emerald-500 font-bold flex flex-col gap-0.5">
                             <div className="flex items-center gap-1">
@@ -1799,7 +1801,7 @@ export function FrontDesk() {
                             notes: res.notes || ''
                           });
                         }}
-                        className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                        className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
                         title="Edit Reservation"
                       >
                         <Edit2 size={18} />
@@ -1840,14 +1842,14 @@ export function FrontDesk() {
             animate={{ opacity: 1, scale: 1 }}
             className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
           >
-            <h3 className="text-xl font-bold text-white mb-6">Edit Reservation</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-6">Edit Reservation</h3>
             <form onSubmit={handleEditReservation} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
                   <input 
                     type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={editForm.checkIn}
                     min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                     onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })}
@@ -1857,7 +1859,7 @@ export function FrontDesk() {
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
                   <input 
                     type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={editForm.checkOut}
                     onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })}
                   />
@@ -1867,7 +1869,7 @@ export function FrontDesk() {
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Total Amount (Discounted/Adjusted)</label>
                 <input 
                   type="number" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={editForm.totalAmount}
                   onChange={(e) => setEditForm({ ...editForm, totalAmount: Number(e.target.value) })}
                 />
@@ -1875,7 +1877,7 @@ export function FrontDesk() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
                 <textarea 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none resize-none h-20"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
                   value={editForm.notes}
                   onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                 />
@@ -1903,7 +1905,7 @@ export function FrontDesk() {
       {showTransferModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">Transfer Room</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-6">Transfer Room</h3>
             <p className="text-zinc-400 text-sm mb-4">
               Transferring <strong>{showTransferModal.guestName}</strong> from Room <strong>{showTransferModal.roomNumber}</strong>
             </p>
@@ -1911,7 +1913,7 @@ export function FrontDesk() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Select New Room</label>
                 <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   onChange={(e) => {
                     if (e.target.value) {
                       transferRoom(showTransferModal, e.target.value);
@@ -1930,7 +1932,7 @@ export function FrontDesk() {
             <div className="flex gap-4 mt-8">
               <button 
                 onClick={() => setShowTransferModal(null)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all"
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all"
               >
                 Cancel
               </button>
@@ -1942,7 +1944,7 @@ export function FrontDesk() {
       {showChargeModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">Post Charge to Room</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-6">Post Charge to Room</h3>
             <p className="text-zinc-400 text-sm mb-4">
               Posting charge for <strong>{showChargeModal.guestName}</strong> (Room {showChargeModal.roomNumber})
             </p>
@@ -1950,7 +1952,7 @@ export function FrontDesk() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Category</label>
                 <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={chargeDetails.category}
                   onChange={(e) => setChargeDetails({ ...chargeDetails, category: e.target.value as any })}
                 >
@@ -1963,7 +1965,7 @@ export function FrontDesk() {
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Amount ({currency})</label>
                 <input 
                   type="number" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={chargeDetails.amount}
                   onChange={(e) => setChargeDetails({ ...chargeDetails, amount: Number(e.target.value) })}
                 />
@@ -1973,7 +1975,7 @@ export function FrontDesk() {
                 <input 
                   type="text" 
                   placeholder="e.g. Dinner, Laundry, etc."
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={chargeDetails.description}
                   onChange={(e) => setChargeDetails({ ...chargeDetails, description: e.target.value })}
                 />
@@ -1982,7 +1984,7 @@ export function FrontDesk() {
             <div className="flex gap-4 mt-8">
               <button 
                 onClick={() => setShowChargeModal(null)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all"
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all"
               >
                 Cancel
               </button>
@@ -2004,14 +2006,14 @@ export function FrontDesk() {
             <div className="absolute -top-12 right-0 flex gap-4 print:hidden">
               <button 
                 onClick={() => window.print()}
-                className="text-white hover:text-emerald-400 font-bold flex items-center gap-2"
+                className="text-zinc-50 hover:text-emerald-400 font-bold flex items-center gap-2"
               >
                 <Receipt size={20} />
                 Print
               </button>
               <button 
                 onClick={() => setShowReceipt(null)}
-                className="text-white hover:text-zinc-400 font-bold flex items-center gap-2"
+                className="text-zinc-50 hover:text-zinc-400 font-bold flex items-center gap-2"
               >
                 <XCircle size={20} />
                 Close
@@ -2047,7 +2049,7 @@ export function FrontDesk() {
             animate={{ opacity: 1, scale: 1 }}
             className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
           >
-            <h3 className="text-xl font-bold text-white mb-2">Postpone Stay</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Postpone Stay</h3>
             <p className="text-zinc-400 text-sm mb-6">Extend the stay for {showPostponeModal.guestName} in Room {showPostponeModal.roomNumber}.</p>
             
             <div className="space-y-4">
@@ -2064,7 +2066,7 @@ export function FrontDesk() {
                   min={addDays(new Date(showPostponeModal.checkOut), 1).toISOString().split('T')[0]}
                   value={newCheckOutDate}
                   onChange={(e) => setNewCheckOutDate(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                 />
               </div>
               
@@ -2074,7 +2076,7 @@ export function FrontDesk() {
                     <span>Extra Nights</span>
                     <span>{Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24))}</span>
                   </div>
-                  <div className="flex justify-between text-sm font-bold text-white">
+                  <div className="flex justify-between text-sm font-bold text-zinc-50">
                     <span>Estimated Extra Charge</span>
                     <span>{formatCurrency(Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24)) * (rooms.find(r => r.id === showPostponeModal.roomId)?.price || 0), currency, exchangeRate)}</span>
                   </div>
@@ -2108,7 +2110,7 @@ export function FrontDesk() {
             animate={{ opacity: 1, scale: 1 }}
             className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
           >
-            <h3 className="text-xl font-bold text-white mb-2">Apply Discount</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Apply Discount</h3>
             <p className="text-zinc-400 text-sm mb-6">Give a discount to {showDiscountModal.guestName}. This will be posted as a credit to their folio.</p>
             
             <div className="space-y-4">
@@ -2119,7 +2121,7 @@ export function FrontDesk() {
                     onClick={() => setDiscountData({ ...discountData, type: 'fixed' })}
                     className={cn(
                       "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
-                      discountData.type === 'fixed' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-400"
+                      discountData.type === 'fixed' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
                     )}
                   >
                     Fixed Amount
@@ -2128,7 +2130,7 @@ export function FrontDesk() {
                     onClick={() => setDiscountData({ ...discountData, type: 'percentage' })}
                     className={cn(
                       "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
-                      discountData.type === 'percentage' ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-400"
+                      discountData.type === 'percentage' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
                     )}
                   >
                     Percentage (%)
@@ -2144,7 +2146,7 @@ export function FrontDesk() {
                   type="number"
                   value={discountData.amount}
                   onChange={(e) => setDiscountData({ ...discountData, amount: parseFloat(e.target.value) })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   placeholder="0.00"
                 />
                 {discountData.type === 'percentage' && discountData.amount > 0 && (
@@ -2158,7 +2160,7 @@ export function FrontDesk() {
                 <textarea 
                   value={discountData.reason}
                   onChange={(e) => setDiscountData({ ...discountData, reason: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:border-emerald-500 outline-none h-24 resize-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none h-24 resize-none"
                   placeholder="e.g. Compensation for noise, Management approval..."
                 />
               </div>

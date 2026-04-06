@@ -75,7 +75,7 @@ export function OperationsDashboard() {
   return (
     <div className="p-8 space-y-8">
       <header>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Daily Operations</h1>
+        <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
         <p className="text-zinc-400">Manage today's guest movements and room status</p>
       </header>
 
@@ -97,7 +97,7 @@ export function OperationsDashboard() {
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               )}
             </div>
-            <div className="text-2xl font-bold text-white mb-1">{stat.count}</div>
+            <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.count}</div>
             <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
           </button>
         ))}
@@ -106,7 +106,7 @@ export function OperationsDashboard() {
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <h2 className="text-xl font-bold text-white capitalize">{activeTab.replace('-', ' ')}</h2>
+            <h2 className="text-xl font-bold text-zinc-50 capitalize">{activeTab.replace('-', ' ')}</h2>
             <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs font-bold rounded-full">
               {filteredData().length}
             </span>
@@ -118,7 +118,7 @@ export function OperationsDashboard() {
               placeholder="Search guest or room..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors w-full sm:w-64"
+              className="bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500 transition-colors w-full sm:w-64"
             />
           </div>
         </div>
@@ -155,7 +155,7 @@ export function OperationsDashboard() {
                           <Users size={14} />
                         </div>
                         <div>
-                          <div className="text-sm font-medium text-white">{res.guestName}</div>
+                          <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
                           <div className="text-xs text-zinc-500">{res.guestEmail}</div>
                         </div>
                       </div>
@@ -163,7 +163,7 @@ export function OperationsDashboard() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <BedDouble size={14} className="text-emerald-500" />
-                        <span className="text-sm text-white font-medium">Room {res.roomNumber}</span>
+                        <span className="text-sm text-zinc-50 font-medium">Room {res.roomNumber}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">

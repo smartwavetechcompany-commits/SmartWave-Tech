@@ -643,7 +643,7 @@ export function Finance() {
   const balance = totalIncome - totalExpense;
 
   const stats = [
-    { label: 'Net Balance', value: formatCurrency(balance, currency, exchangeRate), icon: Wallet, color: 'text-white', bg: 'bg-zinc-900' },
+    { label: 'Net Balance', value: formatCurrency(balance, currency, exchangeRate), icon: Wallet, color: 'text-zinc-50', bg: 'bg-zinc-900' },
     { label: 'Total Income', value: formatCurrency(totalIncome, currency, exchangeRate), icon: TrendingUp, color: 'text-emerald-500', bg: 'bg-emerald-500/5' },
     { label: 'Total Expenses', value: formatCurrency(totalExpense, currency, exchangeRate), icon: TrendingDown, color: 'text-red-500', bg: 'bg-red-500/5' },
     { label: "Transactions", value: filteredRecords.length, icon: BarChart3, color: 'text-amber-500', bg: 'bg-amber-500/5' },
@@ -702,14 +702,14 @@ export function Finance() {
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Financial Management</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Financial Management</h1>
           <p className="text-zinc-400">Track income, expenses and overall hotel performance</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleSyncCharges}
             disabled={isSyncing}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
             title="Sync missing daily charges for all checked-in guests"
           >
             <RefreshCw size={18} className={cn(isSyncing && "animate-spin")} />
@@ -717,14 +717,14 @@ export function Finance() {
           </button>
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Plus size={18} />
             Add Record
@@ -742,7 +742,7 @@ export function Finance() {
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all",
                 activeTab === item.id 
-                  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
+                  ? "bg-emerald-500 text-zinc-50 shadow-lg shadow-emerald-500/20" 
                   : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               )}
             >
@@ -763,14 +763,14 @@ export function Finance() {
                       <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
                       <stat.icon className={stat.color} size={20} />
                     </div>
-                    <div className="text-2xl font-bold text-white">{stat.value}</div>
+                    <div className="text-2xl font-bold text-zinc-50">{stat.value}</div>
                   </div>
                 ))}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-                  <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+                  <h3 className="font-bold text-zinc-50 mb-6 flex items-center gap-2">
                     <PieChart size={18} className="text-emerald-500" />
                     Income vs Expense
                   </h3>
@@ -795,7 +795,7 @@ export function Finance() {
                 </div>
 
                 <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-                  <h3 className="font-bold text-white mb-6 flex items-center gap-2">
+                  <h3 className="font-bold text-zinc-50 mb-6 flex items-center gap-2">
                     <BarChart3 size={18} className="text-amber-500" />
                     Revenue by Category
                   </h3>
@@ -810,7 +810,7 @@ export function Finance() {
                         <div key={cat} className="space-y-1">
                           <div className="flex justify-between text-xs">
                             <span className="text-zinc-400">{cat}</span>
-                            <span className="text-white font-bold">{formatCurrency(amount, currency, exchangeRate)}</span>
+                            <span className="text-zinc-50 font-bold">{formatCurrency(amount, currency, exchangeRate)}</span>
                           </div>
                           <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                             <motion.div 
@@ -832,7 +832,7 @@ export function Finance() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
-                  <h3 className="font-bold text-white">Transaction History</h3>
+                  <h3 className="font-bold text-zinc-50">Transaction History</h3>
                   <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
                     {(['all', 'income', 'expense'] as const).map((type) => (
                       <button
@@ -840,7 +840,7 @@ export function Finance() {
                         onClick={() => setFilterType(type)}
                         className={cn(
                           "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
-                          filterType === type ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                          filterType === type ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
                         )}
                       >
                         {type}
@@ -855,7 +855,7 @@ export function Finance() {
                     placeholder="Search transactions..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
               </div>
@@ -877,10 +877,10 @@ export function Finance() {
                     {filteredRecords.map((record) => (
                       <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
                         <td className="px-6 py-4">
-                          <div className="text-sm text-white">{new Date(record.timestamp).toLocaleDateString()}</div>
+                          <div className="text-sm text-zinc-50">{new Date(record.timestamp).toLocaleDateString()}</div>
                           <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-white">{record.description}</td>
+                        <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
                         <td className="px-6 py-4">
                           <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">{record.category}</span>
                         </td>
@@ -911,7 +911,7 @@ export function Finance() {
             <div className="space-y-6">
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
                 <div className="p-6 border-b border-zinc-800">
-                  <h3 className="font-bold text-white">Guest Accounts (City Ledger)</h3>
+                  <h3 className="font-bold text-zinc-50">Guest Accounts (City Ledger)</h3>
                   <p className="text-xs text-zinc-500">Manage outstanding balances and credits for individual guests</p>
                 </div>
                 <div className="overflow-x-auto">
@@ -930,7 +930,7 @@ export function Finance() {
                       ) : (
                         filteredLedger.map((guest) => (
                           <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-6 py-4 text-sm text-white font-medium">{guest.name}</td>
+                            <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{guest.name}</td>
                             <td className="px-6 py-4">
                               <div className="text-xs text-zinc-400">{guest.email}</div>
                               <div className="text-[10px] text-zinc-500">{guest.phone}</div>
@@ -959,7 +959,7 @@ export function Finance() {
 
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
                 <div className="p-6 border-b border-zinc-800">
-                  <h3 className="font-bold text-white">Corporate Accounts</h3>
+                  <h3 className="font-bold text-zinc-50">Corporate Accounts</h3>
                   <p className="text-xs text-zinc-500">Manage outstanding balances and credits for corporate partners</p>
                 </div>
                 <div className="overflow-x-auto">
@@ -978,7 +978,7 @@ export function Finance() {
                       ) : (
                         corporateAccounts.filter(c => c.currentBalance !== 0).map((corp) => (
                           <tr key={corp.id} className="hover:bg-zinc-800/50 transition-colors">
-                            <td className="px-6 py-4 text-sm text-white font-medium">{corp.name}</td>
+                            <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{corp.name}</td>
                             <td className="px-6 py-4">
                               <div className="text-xs text-zinc-400">{corp.contactPerson}</div>
                               <div className="text-[10px] text-zinc-500">{corp.email}</div>
@@ -1011,12 +1011,12 @@ export function Finance() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
                 <div>
-                  <h3 className="font-bold text-white">Supplier Accounts</h3>
+                  <h3 className="font-bold text-zinc-50">Supplier Accounts</h3>
                   <p className="text-xs text-zinc-500">Manage vendor balances and payments</p>
                 </div>
                 <button 
                   onClick={() => setShowAddSupplierModal(true)}
-                  className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
+                  className="bg-emerald-500 text-zinc-50 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
                 >
                   Add Supplier
                 </button>
@@ -1037,7 +1037,7 @@ export function Finance() {
                     ) : (
                       suppliers.map((s) => (
                         <tr key={s.id} className="hover:bg-zinc-800/50 transition-colors">
-                          <td className="px-6 py-4 text-sm text-white font-medium">{s.name}</td>
+                          <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{s.name}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400">{s.category}</td>
                           <td className="px-6 py-4 text-right font-bold text-red-500">{formatCurrency(s.balance, currency, exchangeRate)}</td>
                           <td className="px-6 py-4 text-right">
@@ -1064,12 +1064,12 @@ export function Finance() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
                 <div>
-                  <h3 className="font-bold text-white">Chart of Accounts</h3>
+                  <h3 className="font-bold text-zinc-50">Chart of Accounts</h3>
                   <p className="text-xs text-zinc-500">Financial structure and balances</p>
                 </div>
                 <button 
                   onClick={() => setShowAddAccountModal(true)}
-                  className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
+                  className="bg-emerald-500 text-zinc-50 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
                 >
                   New Account
                 </button>
@@ -1091,9 +1091,9 @@ export function Finance() {
                       accounts.map((a) => (
                         <tr key={a.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4 text-xs text-zinc-500 font-mono">{a.code}</td>
-                          <td className="px-6 py-4 text-sm text-white font-medium">{a.name}</td>
+                          <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{a.name}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400 capitalize">{a.type}</td>
-                          <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(a.balance, currency, exchangeRate)}</td>
+                          <td className="px-6 py-4 text-right font-bold text-zinc-50">{formatCurrency(a.balance, currency, exchangeRate)}</td>
                         </tr>
                       ))
                     )}
@@ -1107,12 +1107,12 @@ export function Finance() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
                 <div>
-                  <h3 className="font-bold text-white">Purchase Orders</h3>
+                  <h3 className="font-bold text-zinc-50">Purchase Orders</h3>
                   <p className="text-xs text-zinc-500">Manage inventory procurement</p>
                 </div>
                 <button 
                   onClick={() => setShowAddPOModal(true)}
-                  className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
+                  className="bg-emerald-500 text-zinc-50 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95"
                 >
                   Create PO
                 </button>
@@ -1134,7 +1134,7 @@ export function Finance() {
                     ) : (
                       purchaseOrders.map((po) => (
                         <tr key={po.id} className="hover:bg-zinc-800/50 transition-colors">
-                          <td className="px-6 py-4 text-xs text-white font-mono">{po.id.slice(0, 8)}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-50 font-mono">{po.id.slice(0, 8)}</td>
                           <td className="px-6 py-4 text-sm text-zinc-400">{suppliers.find(s => s.id === po.supplierId)?.name || 'Unknown'}</td>
                           <td className="px-6 py-4">
                             <div className="flex flex-col gap-1">
@@ -1148,7 +1148,7 @@ export function Finance() {
                               )}>{po.paymentStatus}</span>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(po.totalAmount, currency, exchangeRate)}</td>
+                          <td className="px-6 py-4 text-right font-bold text-zinc-50">{formatCurrency(po.totalAmount, currency, exchangeRate)}</td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
                               {po.status !== 'received' && (
@@ -1183,7 +1183,7 @@ export function Finance() {
           {activeTab === 'commissions' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800">
-                <h3 className="font-bold text-white">Agent Commissions</h3>
+                <h3 className="font-bold text-zinc-50">Agent Commissions</h3>
                 <p className="text-xs text-zinc-500">Track and pay commissions to booking agents</p>
               </div>
               <div className="overflow-x-auto">
@@ -1202,9 +1202,9 @@ export function Finance() {
                     ) : (
                       commissions.map((c) => (
                         <tr key={c.id} className="hover:bg-zinc-800/50 transition-colors">
-                          <td className="px-6 py-4 text-sm text-white font-medium">{c.agentName}</td>
+                          <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{c.agentName}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400">{c.reservationId}</td>
-                          <td className="px-6 py-4 text-right font-bold text-white">{formatCurrency(c.amount, currency, exchangeRate)}</td>
+                          <td className="px-6 py-4 text-right font-bold text-zinc-50">{formatCurrency(c.amount, currency, exchangeRate)}</td>
                           <td className="px-6 py-4 text-right">
                             <span className={cn(
                               "px-2 py-1 rounded text-[10px] font-bold uppercase",
@@ -1239,7 +1239,7 @@ export function Finance() {
                     <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-white mb-1">{report.title}</h4>
+                    <h4 className="font-bold text-zinc-50 mb-1">{report.title}</h4>
                     <Download size={14} className="text-zinc-600 group-hover:text-emerald-500" />
                   </div>
                   <p className="text-xs text-zinc-500">{report.desc}</p>
@@ -1258,7 +1258,7 @@ export function Finance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">Add Financial Record</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Add Financial Record</h2>
             </div>
             <form onSubmit={handleAddRecord}>
               <div className="p-6 space-y-4">
@@ -1268,7 +1268,7 @@ export function Finance() {
                     onClick={() => setNewRecord({ ...newRecord, type: 'income', category: categories.income[0] })}
                     className={cn(
                       "flex-1 py-2 rounded-lg text-sm font-bold transition-all",
-                      newRecord.type === 'income' ? "bg-emerald-500 text-white" : "text-zinc-500"
+                      newRecord.type === 'income' ? "bg-emerald-500 text-zinc-50" : "text-zinc-500"
                     )}
                   >
                     Income
@@ -1278,7 +1278,7 @@ export function Finance() {
                     onClick={() => setNewRecord({ ...newRecord, type: 'expense', category: categories.expense[0] })}
                     className={cn(
                       "flex-1 py-2 rounded-lg text-sm font-bold transition-all",
-                      newRecord.type === 'expense' ? "bg-red-500 text-white" : "text-zinc-500"
+                      newRecord.type === 'expense' ? "bg-red-500 text-zinc-50" : "text-zinc-500"
                     )}
                   >
                     Expense
@@ -1295,7 +1295,7 @@ export function Finance() {
                         type="number"
                         value={newRecord.amount}
                         onChange={(e) => setNewRecord({ ...newRecord, amount: parseFloat(e.target.value) })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         placeholder="0.00"
                       />
                     </div>
@@ -1305,7 +1305,7 @@ export function Finance() {
                     <select
                       value={newRecord.category}
                       onChange={(e) => setNewRecord({ ...newRecord, category: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       {categories[newRecord.type].map(cat => (
                         <option key={cat} value={cat}>{cat}</option>
@@ -1319,7 +1319,7 @@ export function Finance() {
                   <select
                     value={newRecord.paymentMethod}
                     onChange={(e) => setNewRecord({ ...newRecord, paymentMethod: e.target.value as any })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   >
                     <option value="cash">Cash</option>
                     <option value="card">Card</option>
@@ -1334,7 +1334,7 @@ export function Finance() {
                     type="text"
                     value={newRecord.description}
                     onChange={(e) => setNewRecord({ ...newRecord, description: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="e.g. Room 102 stay payment"
                   />
                 </div>
@@ -1350,7 +1350,7 @@ export function Finance() {
                 <button
                   type="submit"
                   disabled={!newRecord.amount || !newRecord.description}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
                   Save Record
                 </button>
@@ -1371,7 +1371,7 @@ export function Finance() {
               return (
                 <>
                   <div className="p-6 border-b border-zinc-800">
-                    <h2 className="text-xl font-bold text-white">
+                    <h2 className="text-xl font-bold text-zinc-50">
                       {balance < 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
                     </h2>
                     <p className="text-sm text-zinc-500 mt-1">
@@ -1410,7 +1410,7 @@ export function Finance() {
                             type="number"
                             value={settleData.amount}
                             onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             placeholder="0.00"
                           />
                         </div>
@@ -1421,7 +1421,7 @@ export function Finance() {
                         <select
                           value={settleData.method}
                           onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="cash">Cash</option>
                           <option value="card">Card</option>
@@ -1434,7 +1434,7 @@ export function Finance() {
                         <textarea
                           value={settleData.notes}
                           onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
                           placeholder="e.g. Guest paid cash at front desk"
                         />
                       </div>
@@ -1451,7 +1451,7 @@ export function Finance() {
                         type="submit"
                         disabled={!settleData.amount || isSaving}
                         className={cn(
-                          "flex-1 px-4 py-2 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
+                          "flex-1 px-4 py-2 text-zinc-50 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
                           balance < 0 ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
                         )}
                       >
@@ -1474,7 +1474,7 @@ export function Finance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">Pay Supplier</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Pay Supplier</h2>
               <p className="text-sm text-zinc-500 mt-1">Supplier: {showPaySupplierModal.name}</p>
             </div>
             <form onSubmit={handlePaySupplier}>
@@ -1500,7 +1500,7 @@ export function Finance() {
                       type="number"
                       value={payData.amount}
                       onChange={(e) => setPayData({ ...payData, amount: parseFloat(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="0.00"
                     />
                   </div>
@@ -1511,7 +1511,7 @@ export function Finance() {
                   <select
                     value={payData.method}
                     onChange={(e) => setPayData({ ...payData, method: e.target.value as any })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   >
                     <option value="cash">Cash</option>
                     <option value="card">Card</option>
@@ -1524,7 +1524,7 @@ export function Finance() {
                   <textarea
                     value={payData.notes}
                     onChange={(e) => setPayData({ ...payData, notes: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
                     placeholder="e.g. Payment for invoice #123"
                   />
                 </div>
@@ -1540,7 +1540,7 @@ export function Finance() {
                 <button
                   type="submit"
                   disabled={!payData.amount || isSaving}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isSaving ? 'Processing...' : 'Post Payment'}
                 </button>
@@ -1558,7 +1558,7 @@ export function Finance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">Add New Supplier</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Add New Supplier</h2>
             </div>
             <form onSubmit={handleAddSupplier}>
               <div className="p-6 space-y-4">
@@ -1569,7 +1569,7 @@ export function Finance() {
                     type="text"
                     value={newSupplier.name}
                     onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="e.g. Fresh Foods Ltd"
                   />
                 </div>
@@ -1581,7 +1581,7 @@ export function Finance() {
                       type="text"
                       value={newSupplier.category}
                       onChange={(e) => setNewSupplier({ ...newSupplier, category: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="e.g. Food"
                     />
                   </div>
@@ -1591,7 +1591,7 @@ export function Finance() {
                       type="text"
                       value={newSupplier.phone}
                       onChange={(e) => setNewSupplier({ ...newSupplier, phone: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                 </div>
@@ -1601,7 +1601,7 @@ export function Finance() {
                     type="email"
                     value={newSupplier.email}
                     onChange={(e) => setNewSupplier({ ...newSupplier, email: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
               </div>
@@ -1616,7 +1616,7 @@ export function Finance() {
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isSaving ? 'Saving...' : 'Add Supplier'}
                 </button>
@@ -1634,7 +1634,7 @@ export function Finance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">Create New Account</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Create New Account</h2>
             </div>
             <form onSubmit={handleCreateAccount}>
               <div className="p-6 space-y-4">
@@ -1646,7 +1646,7 @@ export function Finance() {
                       type="text"
                       value={newAccount.code}
                       onChange={(e) => setNewAccount({ ...newAccount, code: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 font-mono"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 font-mono"
                       placeholder="1001"
                     />
                   </div>
@@ -1657,7 +1657,7 @@ export function Finance() {
                       type="text"
                       value={newAccount.name}
                       onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="e.g. Cash at Hand"
                     />
                   </div>
@@ -1667,7 +1667,7 @@ export function Finance() {
                   <select
                     value={newAccount.type}
                     onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value as any })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   >
                     <option value="asset">Asset</option>
                     <option value="liability">Liability</option>
@@ -1682,7 +1682,7 @@ export function Finance() {
                     type="number"
                     value={newAccount.balance}
                     onChange={(e) => setNewAccount({ ...newAccount, balance: parseFloat(e.target.value) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
               </div>
@@ -1697,7 +1697,7 @@ export function Finance() {
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isSaving ? 'Creating...' : 'Create Account'}
                 </button>
@@ -1715,7 +1715,7 @@ export function Finance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">Create Purchase Order</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Create Purchase Order</h2>
             </div>
             <form onSubmit={handleCreatePO}>
               <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
@@ -1726,7 +1726,7 @@ export function Finance() {
                       required
                       value={newPO.supplierId}
                       onChange={(e) => setNewPO({ ...newPO, supplierId: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">Select Supplier</option>
                       {suppliers.map(s => (
@@ -1741,7 +1741,7 @@ export function Finance() {
                       type="date"
                       value={newPO.dueDate}
                       onChange={(e) => setNewPO({ ...newPO, dueDate: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                 </div>
@@ -1776,7 +1776,7 @@ export function Finance() {
                               items[index].inventoryItemId = e.target.value;
                               setNewPO({ ...newPO, items });
                             }}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           >
                             <option value="">Select Item</option>
                             {inventoryItems.map(i => (
@@ -1798,7 +1798,7 @@ export function Finance() {
                               const totalAmount = items.reduce((acc, curr) => acc + curr.total, 0);
                               setNewPO({ ...newPO, items, totalAmount });
                             }}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           />
                         </div>
                         <div className="col-span-2 space-y-1">
@@ -1815,12 +1815,12 @@ export function Finance() {
                               const totalAmount = items.reduce((acc, curr) => acc + curr.total, 0);
                               setNewPO({ ...newPO, items, totalAmount });
                             }}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           />
                         </div>
                         <div className="col-span-2 text-right pb-2">
                           <div className="text-[10px] font-bold text-zinc-600 uppercase mb-1">Total</div>
-                          <div className="text-sm font-bold text-white">{formatCurrency(item.total, currency, exchangeRate)}</div>
+                          <div className="text-sm font-bold text-zinc-50">{formatCurrency(item.total, currency, exchangeRate)}</div>
                         </div>
                         <div className="col-span-1 pb-1">
                           <button
@@ -1856,7 +1856,7 @@ export function Finance() {
                   <button
                     type="submit"
                     disabled={isSaving || !newPO.supplierId || newPO.items.length === 0}
-                    className="px-6 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
+                    className="px-6 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
                   >
                     {isSaving ? 'Creating...' : 'Create PO'}
                   </button>

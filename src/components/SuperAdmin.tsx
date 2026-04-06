@@ -525,7 +525,7 @@ export function SuperAdmin() {
           <ShieldAlert size={32} />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-white">Access Denied</h2>
+          <h2 className="text-xl font-bold text-zinc-50">Access Denied</h2>
           <p className="text-zinc-400 max-w-md mx-auto mt-2">
             You do not have the required permissions to access the SuperAdmin panel. 
             If you believe this is an error, please contact the system administrator.
@@ -547,7 +547,7 @@ export function SuperAdmin() {
       {confirmAction && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-2">{confirmAction.title}</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">{confirmAction.title}</h3>
             <p className="text-zinc-400 text-sm mb-8 leading-relaxed">{confirmAction.message}</p>
             <div className="flex gap-4">
               <button 
@@ -558,7 +558,7 @@ export function SuperAdmin() {
               </button>
               <button 
                 onClick={confirmAction.onConfirm}
-                className="flex-1 bg-red-500 text-white font-bold py-2 rounded-lg hover:bg-red-400 transition-all active:scale-95"
+                className="flex-1 bg-red-500 text-zinc-50 font-bold py-2 rounded-lg hover:bg-red-400 transition-all active:scale-95"
               >
                 Confirm
               </button>
@@ -569,14 +569,14 @@ export function SuperAdmin() {
 
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">System Control</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">System Control</h1>
           <p className="text-zinc-400">Manage tracking codes and hotel subscriptions</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={() => window.location.reload()}
             disabled={loading}
-            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
             title="Refresh Page"
           >
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
@@ -595,23 +595,23 @@ export function SuperAdmin() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Hotels</div>
-          <div className="text-3xl font-bold text-white">{stats.totalHotels}</div>
+          <div className="text-3xl font-bold text-zinc-50">{stats.totalHotels}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active</div>
-          <div className="text-3xl font-bold text-white">{stats.activeHotels}</div>
+          <div className="text-3xl font-bold text-zinc-50">{stats.activeHotels}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired</div>
-          <div className="text-3xl font-bold text-white">{stats.expiredHotels}</div>
+          <div className="text-3xl font-bold text-zinc-50">{stats.expiredHotels}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">Pending Requests</div>
-          <div className="text-3xl font-bold text-white">{stats.pendingRequests}</div>
+          <div className="text-3xl font-bold text-zinc-50">{stats.pendingRequests}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Active Codes</div>
-          <div className="text-3xl font-bold text-white">{stats.activeCodes}</div>
+          <div className="text-3xl font-bold text-zinc-50">{stats.activeCodes}</div>
         </div>
       </div>
 
@@ -620,12 +620,12 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             {!generatedCode ? (
               <>
-                <h3 className="text-xl font-bold text-white mb-6">Generate Tracking Code</h3>
+                <h3 className="text-xl font-bold text-zinc-50 mb-6">Generate Tracking Code</h3>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Duration</label>
                     <select 
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50"
                       value={newCode.duration}
                       onChange={(e) => setNewCode({ ...newCode, duration: e.target.value })}
                     >
@@ -639,7 +639,7 @@ export function SuperAdmin() {
                     <input 
                       type="email" 
                       placeholder="hotel@example.com"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
                       value={newCode.targetEmail}
                       onChange={(e) => setNewCode({ ...newCode, targetEmail: e.target.value })}
                       required
@@ -649,7 +649,7 @@ export function SuperAdmin() {
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type</label>
                     <select 
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50"
                       value={newCode.type}
                       onChange={(e) => setNewCode({ ...newCode, type: e.target.value })}
                     >
@@ -662,7 +662,7 @@ export function SuperAdmin() {
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Price (Optional)</label>
                     <input 
                       type="number" 
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50"
                       value={newCode.price}
                       onChange={(e) => setNewCode({ ...newCode, price: Number(e.target.value) })}
                       placeholder="Enter amount paid"
@@ -672,7 +672,7 @@ export function SuperAdmin() {
                 <div className="flex gap-4 mt-8">
                   <button 
                     onClick={() => setIsAddingCode(false)}
-                    className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                    className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95"
                   >
                     Cancel
                   </button>
@@ -689,7 +689,7 @@ export function SuperAdmin() {
                 <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Key size={32} />
                 </div>
-                <h3 className="text-xl font-bold text-white mb-2">Code Generated!</h3>
+                <h3 className="text-xl font-bold text-zinc-50 mb-2">Code Generated!</h3>
                 <p className="text-zinc-400 text-sm mb-6">Share this code with the hotel admin</p>
                 
                 <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 mb-8 relative group">
@@ -723,14 +723,14 @@ export function SuperAdmin() {
       {extendingCode && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-2">Extend Access Code</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Extend Access Code</h3>
             <p className="text-zinc-400 text-sm mb-6">Extending code: {extendingCode.code}</p>
             <div className="grid grid-cols-1 gap-3">
               {[1, 3, 6, 12].map(months => (
                 <button 
                   key={months}
                   onClick={() => extendTrackingCode(extendingCode, months)}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-lg font-medium transition-all active:scale-95"
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-50 py-3 rounded-lg font-medium transition-all active:scale-95"
                 >
                   Add {months} Month{months > 1 ? 's' : ''}
                 </button>
@@ -749,14 +749,14 @@ export function SuperAdmin() {
       {extendingHotel && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-2">Extend Subscription</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Extend Subscription</h3>
             <p className="text-zinc-400 text-sm mb-6">Extending subscription for {extendingHotel.name}</p>
             <div className="grid grid-cols-1 gap-3">
               {[1, 3, 6, 12].map(months => (
                 <button 
                   key={months}
                   onClick={() => extendSubscription(extendingHotel, months)}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-lg font-medium transition-all active:scale-95"
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-50 py-3 rounded-lg font-medium transition-all active:scale-95"
                 >
                   Add {months} Month{months > 1 ? 's' : ''}
                 </button>
@@ -775,7 +775,7 @@ export function SuperAdmin() {
       {changingPlanHotel && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-2">Change Subscription Plan</h3>
+            <h3 className="text-xl font-bold text-zinc-50 mb-2">Change Subscription Plan</h3>
             <p className="text-zinc-400 text-sm mb-6">Updating plan for {changingPlanHotel.name}</p>
             
             <div className="space-y-4 mb-6">
@@ -783,7 +783,7 @@ export function SuperAdmin() {
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Upgrade Amount</label>
                 <input 
                   type="number" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50"
                   value={planChangeAmount}
                   onChange={(e) => setPlanChangeAmount(Number(e.target.value))}
                   placeholder="Enter amount paid for upgrade"
@@ -793,7 +793,7 @@ export function SuperAdmin() {
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Reason / Reference</label>
                 <input 
                   type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50"
                   value={planChangeReason}
                   onChange={(e) => setPlanChangeReason(e.target.value)}
                   placeholder="e.g. Upgrade to Premium"
@@ -811,7 +811,7 @@ export function SuperAdmin() {
                     "w-full py-3 rounded-lg font-medium transition-all active:scale-95 flex items-center justify-between px-6",
                     changingPlanHotel.plan === plan 
                       ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 cursor-default"
-                      : "bg-zinc-800 hover:bg-zinc-700 text-white"
+                      : "bg-zinc-800 hover:bg-zinc-700 text-zinc-50"
                   )}
                 >
                   <span className="capitalize">{plan}</span>
@@ -835,7 +835,7 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <div>
-                <h3 className="text-xl font-bold text-white">Staff Management</h3>
+                <h3 className="text-xl font-bold text-zinc-50">Staff Management</h3>
                 <p className="text-sm text-zinc-400">{managingStaffHotel.name}</p>
               </div>
               <button 
@@ -857,20 +857,20 @@ export function SuperAdmin() {
           {/* Hotels List */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <h3 className="font-bold text-white">Registered Hotels</h3>
+              <h3 className="font-bold text-zinc-50">Registered Hotels</h3>
               <div className="flex flex-col sm:flex-row items-center gap-3">
                 <div className="relative w-full sm:w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
                   <input 
                     type="text" 
                     placeholder="Search name or code..."
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
                 </div>
                 <select 
-                  className="w-full sm:w-auto bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full sm:w-auto bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                 >
@@ -905,7 +905,7 @@ export function SuperAdmin() {
                       return (
                         <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4">
-                            <div className="text-sm font-medium text-white">{hotel.name}</div>
+                            <div className="text-sm font-medium text-zinc-50">{hotel.name}</div>
                             <div className="text-xs text-zinc-500">{hotel.plan}</div>
                           </td>
                           <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
@@ -993,7 +993,7 @@ export function SuperAdmin() {
           {/* Tracking Code Requests */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="font-bold text-white flex items-center gap-2">
+              <h3 className="font-bold text-zinc-50 flex items-center gap-2">
                 <Mail size={18} className="text-emerald-500" />
                 Tracking Code Requests
               </h3>
@@ -1027,7 +1027,7 @@ export function SuperAdmin() {
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold text-white">{request.hotelName}</span>
+                          <span className="text-lg font-bold text-zinc-50">{request.hotelName}</span>
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-500">
                             {request.plan}
                           </span>
@@ -1077,7 +1077,7 @@ export function SuperAdmin() {
                         ) : (
                           <button 
                             onClick={() => setViewingReceipt(request)}
-                            className="flex-1 sm:flex-none bg-zinc-800 text-white px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+                            className="flex-1 sm:flex-none bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
                           >
                             <Receipt size={14} />
                             View Receipt
@@ -1100,7 +1100,7 @@ export function SuperAdmin() {
           {/* System Settings */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800">
-              <h3 className="font-bold text-white flex items-center gap-2">
+              <h3 className="font-bold text-zinc-50 flex items-center gap-2">
                 <Settings size={18} className="text-emerald-500" />
                 System Settings
               </h3>
@@ -1113,7 +1113,7 @@ export function SuperAdmin() {
                 </label>
                 <input 
                   type="number" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
                   value={settings.exchangeRate}
                   onChange={(e) => setSettings({ ...settings, exchangeRate: Number(e.target.value) })}
                 />
@@ -1126,7 +1126,7 @@ export function SuperAdmin() {
                 <input 
                   type="email" 
                   placeholder="support@example.com"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
                   value={settings.supportEmail}
                   onChange={(e) => setSettings({ ...settings, supportEmail: e.target.value })}
                 />
@@ -1137,7 +1137,7 @@ export function SuperAdmin() {
                 </label>
                 <input 
                   type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
                   value={settings.bankName}
                   onChange={(e) => setSettings({ ...settings, bankName: e.target.value })}
                 />
@@ -1148,7 +1148,7 @@ export function SuperAdmin() {
                 </label>
                 <input 
                   type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
                   value={settings.accountNumber}
                   onChange={(e) => setSettings({ ...settings, accountNumber: e.target.value })}
                 />
@@ -1159,7 +1159,7 @@ export function SuperAdmin() {
                 </label>
                 <input 
                   type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
                   value={settings.accountName}
                   onChange={(e) => setSettings({ ...settings, accountName: e.target.value })}
                 />
@@ -1172,7 +1172,7 @@ export function SuperAdmin() {
                 <textarea 
                   placeholder="Bank: Example Bank&#10;Account: 1234567890&#10;Name: SmartWave PMS"
                   rows={4}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white text-sm focus:border-emerald-500 outline-none resize-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none resize-none"
                   value={settings.paymentInstructions}
                   onChange={(e) => setSettings({ ...settings, paymentInstructions: e.target.value })}
                 />
@@ -1189,7 +1189,7 @@ export function SuperAdmin() {
           {/* Tracking Codes List */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 space-y-4">
-              <h3 className="font-bold text-white flex items-center gap-2">
+              <h3 className="font-bold text-zinc-50 flex items-center gap-2">
                 <Key size={18} className="text-emerald-500" />
                 Active Tracking Codes
               </h3>
@@ -1198,7 +1198,7 @@ export function SuperAdmin() {
                 <input 
                   type="text" 
                   placeholder="Search codes..."
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
                   value={codeSearchTerm}
                   onChange={(e) => setCodeSearchTerm(e.target.value)}
                 />
@@ -1276,12 +1276,12 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h3 className="text-xl font-bold text-white">Plan History</h3>
+                <h3 className="text-xl font-bold text-zinc-50">Plan History</h3>
                 <p className="text-zinc-400 text-sm">Subscription changes for {showHistoryHotel.name}</p>
               </div>
               <button 
                 onClick={() => setShowHistoryHotel(null)}
-                className="p-2 text-zinc-500 hover:text-white rounded-lg"
+                className="p-2 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <XCircle size={24} />
               </button>
@@ -1318,7 +1318,7 @@ export function SuperAdmin() {
 
             <button 
               onClick={() => setShowHistoryHotel(null)}
-              className="w-full mt-8 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl transition-all"
+              className="w-full mt-8 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 font-bold py-3 rounded-xl transition-all"
             >
               Close
             </button>
@@ -1331,7 +1331,7 @@ export function SuperAdmin() {
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
             <button 
               onClick={() => setViewingReceipt(null)}
-              className="absolute top-4 right-4 z-10 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all print:hidden"
+              className="absolute top-4 right-4 z-10 p-2 bg-white/10 hover:bg-white/20 text-zinc-50 rounded-full transition-all print:hidden"
             >
               <XCircle size={20} />
             </button>

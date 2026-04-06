@@ -219,13 +219,13 @@ export function GuestManagement() {
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Guest Management</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Guest Management</h1>
           <p className="text-zinc-400">Manage guest profiles, history, and loyalty</p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={exportGuests}
-            className="flex items-center gap-2 bg-zinc-800 text-white px-4 py-2 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
@@ -248,7 +248,7 @@ export function GuestManagement() {
             });
             setShowAddModal(true);
           }}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
         >
           <Plus size={18} />
           Add Guest
@@ -259,7 +259,7 @@ export function GuestManagement() {
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Guests</div>
-          <div className="text-2xl font-bold text-white">{guests.length}</div>
+          <div className="text-2xl font-bold text-zinc-50">{guests.length}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Repeat Guests</div>
@@ -283,7 +283,7 @@ export function GuestManagement() {
             placeholder="Search by name, email, or phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
       </div>
@@ -312,7 +312,7 @@ export function GuestManagement() {
                         {guest.name.charAt(0)}
                       </div>
                       <div>
-                        <h3 className="text-white font-bold">{guest.name}</h3>
+                        <h3 className="text-zinc-50 font-bold">{guest.name}</h3>
                         <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
                           <Star size={10} className={cn(guest.totalStays > 5 || guest.tags?.includes('VIP') ? "text-amber-500" : "text-zinc-600")} />
                           {guest.totalStays > 5 || guest.tags?.includes('VIP') ? 'VIP Guest' : 'Standard'}
@@ -352,7 +352,7 @@ export function GuestManagement() {
                           });
                           setShowAddModal(true);
                         }}
-                        className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all"
+                        className="p-2 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
                       >
                         <Edit2 size={16} />
                       </button>
@@ -394,7 +394,7 @@ export function GuestManagement() {
                     <div className="grid grid-cols-2 gap-3 pt-4">
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Total Stays</div>
-                        <div className="text-lg font-bold text-white">{guest.totalStays}</div>
+                        <div className="text-lg font-bold text-zinc-50">{guest.totalStays}</div>
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Ledger Balance</div>
@@ -430,12 +430,12 @@ export function GuestManagement() {
           >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-white">Stay History</h2>
+                <h2 className="text-xl font-bold text-zinc-50">Stay History</h2>
                 <p className="text-sm text-zinc-500">{viewingHistory.name}</p>
               </div>
               <button 
                 onClick={() => setViewingHistory(null)}
-                className="p-2 text-zinc-500 hover:text-white transition-colors"
+                className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
               >
                 <XCircle size={24} />
               </button>
@@ -445,7 +445,7 @@ export function GuestManagement() {
               <div className="grid grid-cols-3 gap-4 mb-6">
                 <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
                   <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Stays</div>
-                  <div className="text-2xl font-bold text-white">{viewingHistory.totalStays || 0}</div>
+                  <div className="text-2xl font-bold text-zinc-50">{viewingHistory.totalStays || 0}</div>
                 </div>
                 <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
                   <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Spent</div>
@@ -472,7 +472,7 @@ export function GuestManagement() {
                           <Calendar size={20} />
                         </div>
                         <div>
-                          <div className="text-sm font-bold text-white">Room {res.roomNumber}</div>
+                          <div className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
                           <div className="text-xs text-zinc-500">
                             {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
                           </div>
@@ -486,7 +486,7 @@ export function GuestManagement() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-bold text-white">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
+                        <div className="text-sm font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
                         <div className={cn(
                           "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block",
                           res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
@@ -503,7 +503,7 @@ export function GuestManagement() {
             <div className="p-6 bg-zinc-950 border-t border-zinc-800">
               <button
                 onClick={() => setViewingHistory(null)}
-                className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                className="w-full py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all"
               >
                 Close History
               </button>
@@ -518,7 +518,7 @@ export function GuestManagement() {
           <div className="relative w-full max-w-lg">
             <button 
               onClick={() => setShowReceipt(null)}
-              className="absolute -top-12 right-0 text-white hover:text-emerald-500 transition-colors flex items-center gap-2 font-bold uppercase text-xs print:hidden"
+              className="absolute -top-12 right-0 text-zinc-50 hover:text-emerald-500 transition-colors flex items-center gap-2 font-bold uppercase text-xs print:hidden"
             >
               <XCircle size={20} />
               Close
@@ -551,7 +551,7 @@ export function GuestManagement() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
           >
             <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">{editingGuest ? 'Edit Guest Profile' : 'Add New Guest'}</h2>
+              <h2 className="text-xl font-bold text-zinc-50">{editingGuest ? 'Edit Guest Profile' : 'Add New Guest'}</h2>
             </div>
             <form onSubmit={handleSaveGuest}>
               <div className="p-6 space-y-4">
@@ -562,7 +562,7 @@ export function GuestManagement() {
                     type="text"
                     value={newGuest.name}
                     onChange={(e) => setNewGuest({ ...newGuest, name: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="John Doe"
                   />
                 </div>
@@ -574,7 +574,7 @@ export function GuestManagement() {
                       type="email"
                       value={newGuest.email}
                       onChange={(e) => setNewGuest({ ...newGuest, email: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="john@example.com"
                     />
                   </div>
@@ -585,7 +585,7 @@ export function GuestManagement() {
                       type="tel"
                       value={newGuest.phone}
                       onChange={(e) => setNewGuest({ ...newGuest, phone: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="+1 234 567 890"
                     />
                   </div>
@@ -596,7 +596,7 @@ export function GuestManagement() {
                     <select
                       value={newGuest.idType}
                       onChange={(e) => setNewGuest({ ...newGuest, idType: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="Passport">Passport</option>
                       <option value="National ID">National ID</option>
@@ -609,7 +609,7 @@ export function GuestManagement() {
                       type="text"
                       value={newGuest.idNumber}
                       onChange={(e) => setNewGuest({ ...newGuest, idNumber: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="ID Number"
                     />
                   </div>
@@ -620,7 +620,7 @@ export function GuestManagement() {
                     type="text"
                     value={newGuest.address}
                     onChange={(e) => setNewGuest({ ...newGuest, address: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="Home or Business address"
                   />
                 </div>
@@ -629,7 +629,7 @@ export function GuestManagement() {
                   <select
                     value={newGuest.corporateId}
                     onChange={(e) => setNewGuest({ ...newGuest, corporateId: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   >
                     <option value="">None / Individual</option>
                     {corporateAccounts.map(acc => (
@@ -643,7 +643,7 @@ export function GuestManagement() {
                     type="text"
                     value={newGuest.tags.join(', ')}
                     onChange={(e) => setNewGuest({ ...newGuest, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="VIP, Corporate, Regular"
                   />
                 </div>
@@ -653,7 +653,7 @@ export function GuestManagement() {
                     type="text"
                     value={newGuest.preferences.join(', ')}
                     onChange={(e) => setNewGuest({ ...newGuest, preferences: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="High floor, Extra towels"
                   />
                 </div>
@@ -668,7 +668,7 @@ export function GuestManagement() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
                 >
                   {editingGuest ? 'Update Guest' : 'Add Guest'}
                 </button>

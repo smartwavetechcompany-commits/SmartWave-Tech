@@ -184,7 +184,7 @@ export function Housekeeping() {
     <div className="p-8 space-y-8">
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Housekeeping</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Housekeeping</h1>
           <p className="text-zinc-400">Manage room cleaning and maintenance status</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -193,14 +193,14 @@ export function Housekeeping() {
             <input 
               type="text"
               placeholder="Search rooms, status, or notes..."
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:border-emerald-500 outline-none transition-all"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export
@@ -256,7 +256,7 @@ export function Housekeeping() {
             {(dateRange.start || dateRange.end) && (
               <button 
                 onClick={() => setDateRange({ start: '', end: '' })}
-                className="text-zinc-500 hover:text-white transition-colors"
+                className="text-zinc-500 hover:text-zinc-50 transition-colors"
               >
                 <X size={14} />
               </button>
@@ -291,7 +291,7 @@ export function Housekeeping() {
               </button>
 
               <div className="flex items-center justify-between pr-8">
-                <span className="text-2xl font-bold text-white">Room {room.roomNumber}</span>
+                <span className="text-2xl font-bold text-zinc-50">Room {room.roomNumber}</span>
                 <span 
                   style={{ 
                     backgroundColor: `${statusColor}1a`,
@@ -310,7 +310,7 @@ export function Housekeeping() {
               <div className="flex-1 space-y-2">
                 <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Housekeeping Notes</label>
                 <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-white focus:border-emerald-500 outline-none resize-none h-20 transition-all"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20 transition-all"
                   placeholder="Add notes (e.g. broken bulb, needs deep clean...)"
                   value={roomNotes[room.id] ?? room.notes ?? ''}
                   onChange={(e) => setRoomNotes(prev => ({ ...prev, [room.id]: e.target.value }))}
@@ -375,10 +375,10 @@ export function Housekeeping() {
                 {selectedRoomIds.length}
               </div>
               <div>
-                <p className="text-white font-bold text-sm leading-none">Rooms Selected</p>
+                <p className="text-zinc-50 font-bold text-sm leading-none">Rooms Selected</p>
                 <button 
                   onClick={() => setSelectedRoomIds([])}
-                  className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-colors"
+                  className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest hover:text-zinc-50 transition-colors"
                 >
                   Clear Selection
                 </button>

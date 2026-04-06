@@ -128,7 +128,7 @@ export function Dashboard() {
         <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mb-4">
           <AlertCircle size={32} />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Subscription Expired</h2>
+        <h2 className="text-2xl font-bold text-zinc-50 mb-2">Subscription Expired</h2>
         <p className="text-zinc-400 mb-6 max-w-md">
           Your hotel's subscription has expired or been suspended. Please contact the system owner to extend your access.
         </p>
@@ -143,7 +143,7 @@ export function Dashboard() {
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Overview</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Overview</h1>
           <p className="text-zinc-400">
             {profile?.role === 'superAdmin' ? 'System-wide analytics and control' : `Welcome back to ${hotel?.name}`}
           </p>
@@ -172,7 +172,7 @@ export function Dashboard() {
                 <stat.icon size={20} />
               </div>
             </div>
-            <div className="text-2xl font-bold text-white mb-1">{stat.value}</div>
+            <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.value}</div>
             <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
           </motion.div>
         ))}
@@ -185,7 +185,7 @@ export function Dashboard() {
             <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="font-bold text-white">Revenue Overview</h3>
+                  <h3 className="font-bold text-zinc-50">Revenue Overview</h3>
                   <p className="text-xs text-zinc-500">Last 7 days performance</p>
                 </div>
                 <div className="flex items-center gap-2 text-emerald-500 text-sm font-bold">
@@ -219,7 +219,7 @@ export function Dashboard() {
           {/* Recent Reservations */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="font-bold text-white">Recent Reservations</h3>
+              <h3 className="font-bold text-zinc-50">Recent Reservations</h3>
               <Link to="/front-desk" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
             </div>
             <div className="divide-y divide-zinc-800">
@@ -233,7 +233,7 @@ export function Dashboard() {
                         <Users size={18} />
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-white">{res.guestName}</div>
+                        <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
                         <div className="text-xs text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
                       </div>
                     </div>
@@ -255,7 +255,7 @@ export function Dashboard() {
             <div className="p-6 border-b border-zinc-800">
               <div className="flex items-center gap-2">
                 <Activity size={18} className="text-emerald-500" />
-                <h3 className="font-bold text-white">Recent Activity</h3>
+                <h3 className="font-bold text-zinc-50">Recent Activity</h3>
               </div>
             </div>
             <div className="max-h-[400px] overflow-y-auto">
@@ -267,7 +267,7 @@ export function Dashboard() {
         <div className="space-y-8">
           {/* Room Status Summary */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <h3 className="font-bold text-white mb-6">Room Status</h3>
+            <h3 className="font-bold text-zinc-50 mb-6">Room Status</h3>
             <div className="space-y-4">
               {[
                 { label: 'Vacant Clean', count: rooms.filter(r => r.status === 'clean').length, color: 'bg-emerald-500' },
@@ -278,7 +278,7 @@ export function Dashboard() {
                 <div key={item.label} className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-zinc-400">{item.label}</span>
-                    <span className="text-white font-medium">{item.count}</span>
+                    <span className="text-zinc-50 font-medium">{item.count}</span>
                   </div>
                   <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
                     <div 
@@ -294,7 +294,7 @@ export function Dashboard() {
           {/* Quick Actions */}
           {profile?.role !== 'superAdmin' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-              <h3 className="font-bold text-white mb-4">Quick Actions</h3>
+              <h3 className="font-bold text-zinc-50 mb-4">Quick Actions</h3>
               <div className="grid grid-cols-2 gap-3">
                 <Link to="/front-desk" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-emerald-500/50 transition-colors text-center">
                   <Calendar size={20} className="mx-auto mb-2 text-emerald-500" />
