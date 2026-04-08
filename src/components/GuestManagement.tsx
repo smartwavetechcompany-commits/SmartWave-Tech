@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
-import { fuzzySearch } from '../utils/searchUtils';
+import Fuse from 'fuse.js';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -47,6 +47,8 @@ export function GuestManagement() {
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showFolio, setShowFolio] = useState<Reservation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [guestTypeFilter, setGuestTypeFilter] = useState<'all' | 'individual' | 'corporate'>('all');
+  const [balanceFilter, setBalanceFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [newGuest, setNewGuest] = useState({
     name: '',
@@ -64,6 +66,8 @@ export function GuestManagement() {
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [tagInput, setTagInput] = useState('');
+  const [prefInput, setPrefInput] = useState('');
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -189,16 +193,19 @@ export function GuestManagement() {
   };
 
   const exportGuests = () => {
-    const data = guests.map(g => ({
+    const data = filteredGuests.map(g => ({
       Name: g.name,
       Email: g.email,
       Phone: g.phone,
+      'Guest Type': g.corporateId ? 'Corporate' : 'Individual',
       'ID Type': g.idType,
       'ID Number': g.idNumber,
       Address: g.address,
       'Total Stays': g.totalStays || 0,
       'Total Spent': g.totalSpent || 0,
       'Balance': g.ledgerBalance || 0,
+      'Tags': (g.tags || []).join(', '),
+      'Preferences': (g.preferences || []).join(', '),
       'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
     }));
 
@@ -206,14 +213,33 @@ export function GuestManagement() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Guests");
     XLSX.writeFile(wb, `guests_export_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-    toast.success("Guest data exported to Excel");
+    toast.success("Filtered guest data exported to Excel");
   };
 
-  const filteredGuests = guests.filter(guest => {
-    return fuzzySearch(guest.name || '', searchQuery) || 
-           fuzzySearch(guest.email || '', searchQuery) || 
-           fuzzySearch(guest.phone || '', searchQuery);
-  });
+  const fuse = useMemo(() => new Fuse(guests, {
+    keys: ['name', 'email', 'phone'],
+    threshold: 0.3,
+  }), [guests]);
+
+  const filteredGuests = useMemo(() => {
+    let result = guests;
+
+    if (searchQuery.trim() !== '') {
+      result = fuse.search(searchQuery).map(r => r.item);
+    }
+
+    return result.filter(guest => {
+      // Guest Type filter
+      const matchesType = guestTypeFilter === 'all' || 
+        (guestTypeFilter === 'corporate' ? !!guest.corporateId : !guest.corporateId);
+        
+      // Balance filter
+      const matchesBalance = balanceFilter === 'all' || 
+        (balanceFilter === 'yes' ? (guest.ledgerBalance || 0) > 0 : (guest.ledgerBalance || 0) <= 0);
+
+      return matchesType && matchesBalance;
+    });
+  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter]);
 
   return (
     <div className="p-8 space-y-8">
@@ -270,7 +296,7 @@ export function GuestManagement() {
           <div className="text-2xl font-bold text-blue-500">{formatCurrency(guests.reduce((acc, g) => acc + g.totalSpent, 0), currency, exchangeRate)}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Balance</div>
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Debt</div>
           <div className="text-2xl font-bold text-red-500">{formatCurrency(Math.abs(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0)), currency, exchangeRate)}</div>
         </div>
       </div>
@@ -285,6 +311,32 @@ export function GuestManagement() {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
+        </div>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+            <Filter size={16} className="text-zinc-500" />
+            <select
+              value={guestTypeFilter}
+              onChange={(e) => setGuestTypeFilter(e.target.value as any)}
+              className="bg-transparent text-sm text-zinc-400 focus:outline-none"
+            >
+              <option value="all">All Types</option>
+              <option value="individual">Individual</option>
+              <option value="corporate">Corporate</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+            <DollarSign size={16} className="text-zinc-500" />
+            <select
+              value={balanceFilter}
+              onChange={(e) => setBalanceFilter(e.target.value as any)}
+              className="bg-transparent text-sm text-zinc-400 focus:outline-none"
+            >
+              <option value="all">All Balances</option>
+              <option value="yes">Has Balance</option>
+              <option value="no">No Balance</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -402,11 +454,25 @@ export function GuestManagement() {
                           "text-lg font-bold",
                           (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
                         )}>
-                          {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                          {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                          {(guest.ledgerBalance || 0) < 0 ? " (Debt)" : (guest.ledgerBalance || 0) > 0 ? " (Credit)" : ""}
                         </div>
                       </div>
                     </div>
                   </div>
+
+                  {guest.preferences && guest.preferences.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-zinc-800/50">
+                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Preferences</div>
+                      <div className="flex flex-wrap gap-1">
+                        {guest.preferences.map(pref => (
+                          <span key={pref} className="px-1.5 py-0.5 bg-blue-500/5 text-blue-400 rounded text-[9px]">
+                            {pref}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="px-6 py-3 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
                   <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
@@ -638,23 +704,71 @@ export function GuestManagement() {
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Tags (comma separated)</label>
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Tags</label>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {newGuest.tags.map((tag, index) => (
+                      <span key={index} className="px-2 py-1 bg-emerald-500/10 text-emerald-500 rounded-lg text-xs font-bold flex items-center gap-1">
+                        {tag}
+                        <button 
+                          type="button"
+                          onClick={() => setNewGuest({ ...newGuest, tags: newGuest.tags.filter((_, i) => i !== index) })}
+                          className="hover:text-emerald-400"
+                        >
+                          <XCircle size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
                   <input
                     type="text"
-                    value={newGuest.tags.join(', ')}
-                    onChange={(e) => setNewGuest({ ...newGuest, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = tagInput.trim();
+                        if (val && !newGuest.tags.includes(val)) {
+                          setNewGuest({ ...newGuest, tags: [...newGuest.tags, val] });
+                          setTagInput('');
+                        }
+                      }
+                    }}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                    placeholder="VIP, Corporate, Regular"
+                    placeholder="Type tag and press Enter (e.g. VIP)"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Preferences (comma separated)</label>
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Preferences</label>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {newGuest.preferences.map((pref, index) => (
+                      <span key={index} className="px-2 py-1 bg-blue-500/10 text-blue-500 rounded-lg text-xs font-bold flex items-center gap-1">
+                        {pref}
+                        <button 
+                          type="button"
+                          onClick={() => setNewGuest({ ...newGuest, preferences: newGuest.preferences.filter((_, i) => i !== index) })}
+                          className="hover:text-blue-400"
+                        >
+                          <XCircle size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
                   <input
                     type="text"
-                    value={newGuest.preferences.join(', ')}
-                    onChange={(e) => setNewGuest({ ...newGuest, preferences: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                    value={prefInput}
+                    onChange={(e) => setPrefInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = prefInput.trim();
+                        if (val && !newGuest.preferences.includes(val)) {
+                          setNewGuest({ ...newGuest, preferences: [...newGuest.preferences, val] });
+                          setPrefInput('');
+                        }
+                      }
+                    }}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                    placeholder="High floor, Extra towels"
+                    placeholder="Type preference and press Enter"
                   />
                 </div>
               </div>

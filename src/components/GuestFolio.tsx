@@ -151,8 +151,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
+  const hasPaymentInLedger = ledgerEntries.some(e => e.category === 'payment');
+  
   const grandTotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
-  const totalPaid = totalCredits + (hasRoomChargeInLedger ? 0 : (reservation.paidAmount || 0));
+  const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (reservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
   const handleDeleteEntry = async () => {
@@ -318,7 +320,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       "text-xl font-bold",
                       balance > 0 ? "text-red-500" : "text-emerald-500"
                     )}>
-                      {formatCurrency(balance, currency, exchangeRate)}
+                      {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+                      {balance > 0 ? " (Due)" : balance < 0 ? " (Credit)" : ""}
                     </span>
                     {balance !== 0 && (
                       <div className="flex flex-col items-end gap-2 mt-2">

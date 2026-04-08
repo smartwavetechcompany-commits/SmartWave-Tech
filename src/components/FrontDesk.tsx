@@ -26,11 +26,12 @@ import {
   Trash2,
   UserX,
   Download,
-  Edit2
+  Edit2,
+  DollarSign
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
-import { format, addDays } from 'date-fns';
+import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 
@@ -71,6 +72,9 @@ export function FrontDesk() {
     guestName: '',
     guestEmail: '',
     guestPhone: '',
+    idType: '',
+    idNumber: '',
+    address: '',
     roomId: '',
     checkIn: format(new Date(), 'yyyy-MM-dd'),
     checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
@@ -82,11 +86,16 @@ export function FrontDesk() {
     discountAmount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage',
     discountReason: '',
+    initialPayment: 0,
+    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer',
     additionalStays: [] as {
       id: string;
       guestName: string;
       guestEmail: string;
       guestPhone: string;
+      idType: string;
+      idNumber: string;
+      address: string;
       roomId: string;
       checkIn: string;
       checkOut: string;
@@ -274,65 +283,6 @@ export function FrontDesk() {
     setHasPermissionError(false);
   }, [profile?.uid, hotel?.id]);
 
-  const runNightlyAudit = async () => {
-    if (!hotel?.id || !profile) return;
-    
-    setIsAuditing(true);
-    try {
-      const checkedInReservations = reservations.filter(res => res.status === 'checked_in');
-      const today = format(new Date(), 'yyyy-MM-dd');
-
-      for (const res of checkedInReservations) {
-        const room = rooms.find(r => r.id === res.roomId);
-        if (!room) continue;
-
-        // Calculate nightly rate (could be corporate rate)
-        let nightlyRate = room.price;
-        if (res.corporateId) {
-          const ratesRef = collection(db, 'hotels', hotel.id, 'corporate_accounts', res.corporateId, 'rates');
-          const snap = await getDocs(ratesRef);
-          const activeRate = snap.docs.find(doc => {
-            const data = doc.data();
-            return data.status === 'active' &&
-              (data.roomTypeId === room.roomTypeId || data.roomType === room.type) &&
-              new Date(today) >= new Date(data.startDate) && new Date(today) <= new Date(data.endDate);
-          });
-          if (activeRate) nightlyRate = activeRate.data().rate;
-        }
-
-        // Post to ledger
-        await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
-          amount: nightlyRate,
-          type: 'debit',
-          category: 'room',
-          description: `Nightly room charge - Room ${res.roomNumber} (${res.guestName})`,
-          referenceId: res.id,
-          postedBy: profile.uid
-        }, profile.uid, res.corporateId);
-      }
-
-      // Log audit
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'NIGHTLY_AUDIT_RUN',
-        resource: `Audit for ${today}`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      });
-
-      toast.success(`Nightly audit completed for ${checkedInReservations.length} guests.`);
-      setShowNightAuditModal(false);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/audit`);
-      toast.error('Failed to run nightly audit');
-    } finally {
-      setIsAuditing(false);
-    }
-  };
-
   const handleBooking = async () => {
     if (!hotel?.id) return;
     
@@ -345,7 +295,10 @@ export function FrontDesk() {
         checkIn: newBooking.checkIn,
         checkOut: newBooking.checkOut,
         totalAmount: 0, // Will be recalculated
-        guestId: newBooking.guestId
+        guestId: newBooking.guestId,
+        idType: newBooking.idType,
+        idNumber: newBooking.idNumber,
+        address: newBooking.address
       },
       ...newBooking.additionalStays
     ];
@@ -394,6 +347,9 @@ export function FrontDesk() {
             name: stay.guestName,
             email: stay.guestEmail,
             phone: stay.guestPhone,
+            idType: stay.idType,
+            idNumber: stay.idNumber,
+            address: stay.address,
             corporateId: newBooking.corporateId,
             ledgerBalance: 0,
             totalStays: 0,
@@ -408,6 +364,9 @@ export function FrontDesk() {
           guestName: stay.guestName,
           guestEmail: stay.guestEmail,
           guestPhone: stay.guestPhone,
+          idType: stay.idType,
+          idNumber: stay.idNumber,
+          address: stay.address,
           guestId,
           corporateId: newBooking.corporateId,
           roomId: stay.roomId,
@@ -417,6 +376,7 @@ export function FrontDesk() {
           status: 'pending',
           totalAmount,
           paidAmount: 0,
+          totalDiscount: 0,
           paymentStatus: 'unpaid',
           notes: newBooking.notes,
           corporateReference: newBooking.corporateReference,
@@ -427,9 +387,20 @@ export function FrontDesk() {
 
         // Apply discount to the first reservation in the batch
         if (createdStays.length === 0 && newBooking.discountAmount > 0) {
+          let discountVal = newBooking.discountAmount;
+          if (newBooking.discountType === 'percentage') {
+            discountVal = (totalAmount * newBooking.discountAmount) / 100;
+          }
           resData.discountAmount = newBooking.discountAmount;
           resData.discountType = newBooking.discountType;
           resData.discountReason = newBooking.discountReason;
+          resData.totalDiscount = discountVal;
+        }
+
+        // Apply initial payment to the first reservation
+        if (createdStays.length === 0 && newBooking.initialPayment > 0) {
+          resData.paidAmount = newBooking.initialPayment;
+          resData.paymentStatus = newBooking.initialPayment >= (totalAmount - (resData.totalDiscount || 0)) ? 'paid' : 'partial';
         }
 
         batch.set(resRef, resData);
@@ -460,7 +431,7 @@ export function FrontDesk() {
 
       await batch.commit();
       
-      // Post discounts to ledger if any
+      // Post discounts and initial payments to ledger if any
       for (const stay of createdStays) {
         if (stay.discountAmount && stay.discountAmount > 0) {
           let finalDiscount = stay.discountAmount;
@@ -471,11 +442,15 @@ export function FrontDesk() {
           await postToLedger(hotel.id, stay.guestId, stay.resId, {
             amount: finalDiscount,
             type: 'credit',
-            category: 'service',
+            category: 'discount',
             description: `Booking Discount (${stay.discountType === 'percentage' ? stay.discountAmount + '%' : formatCurrency(stay.discountAmount, currency, exchangeRate)}): ${stay.discountReason || 'New Booking Discount'}`,
             referenceId: stay.resId,
             postedBy: profile.uid
           }, profile.uid, stay.corporateId);
+        }
+
+        if (createdStays.indexOf(stay) === 0 && newBooking.initialPayment > 0) {
+          await settleLedger(hotel.id, stay.guestId, stay.resId, newBooking.initialPayment, newBooking.paymentMethod, profile.uid, stay.corporateId);
         }
       }
 
@@ -487,6 +462,9 @@ export function FrontDesk() {
         guestName: '',
         guestEmail: '',
         guestPhone: '',
+        idType: '',
+        idNumber: '',
+        address: '',
         roomId: '',
         checkIn: format(new Date(), 'yyyy-MM-dd'),
         checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
@@ -498,7 +476,9 @@ export function FrontDesk() {
         discountAmount: 0,
         discountType: 'fixed',
         discountReason: '',
-        additionalStays: []
+        initialPayment: 0,
+        paymentMethod: 'cash',
+        additionalStays: [] as any[]
       });
     } catch (err) {
       console.error("Booking error:", err);
@@ -697,6 +677,100 @@ export function FrontDesk() {
     }
   };
 
+  const runNightlyAudit = async () => {
+    if (!hotel?.id || !profile) return;
+    
+    try {
+      setIsAuditing(true);
+      const today = startOfDay(new Date());
+      let auditCount = 0;
+      let totalCharged = 0;
+
+      // 1. Get all checked-in reservations
+      const q = query(
+        collection(db, 'hotels', hotel.id, 'reservations'),
+        where('status', '==', 'checked_in')
+      );
+      const querySnapshot = await getDocs(q);
+      
+      for (const resDoc of querySnapshot.docs) {
+        const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
+        if (!res.guestId) continue;
+
+        const checkInDate = startOfDay(parseISO(res.checkIn));
+        
+        // Calculate how many nights have passed since check-in
+        // differenceInDays(today, checkInDate) gives number of full nights passed
+        const nightsStayed = differenceInDays(today, checkInDate);
+        
+        // Fetch ledger entries for this reservation to see what's already charged
+        const ledgerQ = query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id),
+          where('category', '==', 'room'),
+          where('type', '==', 'debit')
+        );
+        const ledgerSnap = await getDocs(ledgerQ);
+        const existingCharges = ledgerSnap.docs.length;
+        
+        // We charge for every night from check-in up to today.
+        // If they checked in today, nightsStayed is 0. We might want to charge for the first night now or later.
+        // Usually nightly audit runs at night, so it charges for the day that just passed.
+        // If today is the 2nd and they checked in on the 1st, nightsStayed is 1. They should have 1 charge.
+        
+        // If they are still checked in, we ensure they have charges for all nights up to (and including) yesterday.
+        // If we want to charge for the current day as well (pre-emptive daily billing), we use nightsStayed + 1.
+        const targetCharges = nightsStayed; // Charge for completed nights
+        
+        if (existingCharges < targetCharges) {
+          const nightsToCharge = targetCharges - existingCharges;
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          
+          for (let i = 0; i < nightsToCharge; i++) {
+            const chargeDate = addDays(checkInDate, existingCharges + i);
+            
+            await postToLedger(hotel.id, res.guestId, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Nightly Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
+            
+            auditCount++;
+            totalCharged += rate;
+          }
+        }
+      }
+
+      if (auditCount > 0) {
+        toast.success(`Nightly audit completed. Posted ${auditCount} charges totaling ${formatCurrency(totalCharged, currency, exchangeRate)}.`);
+      } else {
+        toast.info("Nightly audit completed. No new charges to post.");
+      }
+      
+      // Log audit action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'NIGHTLY_AUDIT_RUN',
+        resource: `Audit processed ${querySnapshot.docs.length} active stays.`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
+
+    } catch (err) {
+      console.error("Audit error:", err);
+      toast.error("Failed to run nightly audit.");
+    } finally {
+      setIsAuditing(false);
+      setShowNightAuditModal(false);
+    }
+  };
+
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
     if (!hotel?.id || !profile) return;
     try {
@@ -741,7 +815,47 @@ export function FrontDesk() {
           }
         }
       } else if (status === 'checked_out') {
-        const balance = (res.totalAmount || 0) - (res.paidAmount || 0);
+        // 1. Ensure all nights stayed are charged
+        const today = startOfDay(new Date());
+        const checkInDate = startOfDay(parseISO(res.checkIn));
+        const nightsStayed = Math.max(1, differenceInDays(today, checkInDate)); // Minimum 1 night charge
+        
+        const ledgerQ = query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id),
+          where('category', '==', 'room'),
+          where('type', '==', 'debit')
+        );
+        const ledgerSnap = await getDocs(ledgerQ);
+        const existingCharges = ledgerSnap.docs.length;
+        
+        let finalTotalDebits = ledgerSnap.docs.reduce((acc, doc) => acc + doc.data().amount, 0);
+
+        if (existingCharges < nightsStayed) {
+          const nightsToCharge = nightsStayed - existingCharges;
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          
+          for (let i = 0; i < nightsToCharge; i++) {
+            const chargeDate = addDays(checkInDate, existingCharges + i);
+            await postToLedger(hotel.id, res.guestId!, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Final Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
+            finalTotalDebits += rate;
+          }
+        }
+
+        // 2. Update reservation total to reflect actual stay
+        batch.update(resRef, { 
+          totalAmount: finalTotalDebits,
+          checkOut: format(today, 'yyyy-MM-dd') // Update checkout date to actual checkout date
+        });
+
+        const balance = finalTotalDebits - (res.paidAmount || 0);
         if (balance > 0) {
           toast.warning(`Guest checked out with an outstanding balance of ${formatCurrency(balance, currency, exchangeRate)}. This debt remains on their account.`);
           // Log debt movement
@@ -1077,6 +1191,9 @@ export function FrontDesk() {
                 guestName: '',
                 guestEmail: '',
                 guestPhone: '',
+                idType: '',
+                idNumber: '',
+                address: '',
                 roomId: '',
                 checkIn: format(new Date(), 'yyyy-MM-dd'),
                 checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
@@ -1091,7 +1208,9 @@ export function FrontDesk() {
                 discountAmount: 0,
                 discountType: 'fixed',
                 discountReason: '',
-                additionalStays: [],
+                initialPayment: 0,
+                paymentMethod: 'cash',
+                additionalStays: [] as any[],
               });
               setIsBooking(true);
             }}
@@ -1106,6 +1225,9 @@ export function FrontDesk() {
                       guestName: '',
                       guestEmail: '',
                       guestPhone: '',
+                      idType: '',
+                      idNumber: '',
+                      address: '',
                       roomId: '',
                       checkIn: format(new Date(), 'yyyy-MM-dd'),
                       checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
@@ -1120,7 +1242,9 @@ export function FrontDesk() {
                       discountAmount: 0,
                       discountType: 'fixed',
                       discountReason: '',
-                      additionalStays: [],
+                      initialPayment: 0,
+                      paymentMethod: 'cash',
+                      additionalStays: [] as any[],
                     });
                     setIsBooking(true);
                   }}
@@ -1295,7 +1419,7 @@ export function FrontDesk() {
                         guestType: guest.corporateId ? 'corporate' : newBooking.guestType
                       });
                     } else {
-                      setNewBooking({ ...newBooking, guestId: '', guestName: '', guestEmail: '', guestPhone: '' });
+                      setNewBooking({ ...newBooking, guestId: '', guestName: '', guestEmail: '', guestPhone: '', idType: '', idNumber: '', address: '' });
                     }
                   }}
                 >
@@ -1335,16 +1459,52 @@ export function FrontDesk() {
                     onChange={(e) => setNewBooking({ ...newBooking, guestPhone: e.target.value })}
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Email Address</label>
+                  <input 
+                    type="email" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={newBooking.guestEmail}
+                    onChange={(e) => setNewBooking({ ...newBooking, guestEmail: e.target.value })}
+                  />
+                </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">ID Type</label>
+                  <select 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={newBooking.idType}
+                    onChange={(e) => setNewBooking({ ...newBooking, idType: e.target.value })}
+                  >
+                    <option value="">Select ID Type</option>
+                    <option value="National ID">National ID</option>
+                    <option value="Passport">Passport</option>
+                    <option value="Drivers License">Drivers License</option>
+                    <option value="Voters Card">Voters Card</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">ID Number</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={newBooking.idNumber}
+                    onChange={(e) => setNewBooking({ ...newBooking, idNumber: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Email Address</label>
-                <input 
-                  type="email" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={newBooking.guestEmail}
-                  onChange={(e) => setNewBooking({ ...newBooking, guestEmail: e.target.value })}
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Address</label>
+                <textarea 
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-16"
+                  value={newBooking.address}
+                  onChange={(e) => setNewBooking({ ...newBooking, address: e.target.value })}
                 />
               </div>
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
                 <select 
@@ -1449,6 +1609,36 @@ export function FrontDesk() {
                 </div>
               </div>
 
+              <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-4">
+                <div className="flex items-center gap-2 text-blue-500 font-bold text-xs uppercase tracking-wider">
+                  <DollarSign size={14} />
+                  Initial Payment (Optional)
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
+                    <input 
+                      type="number" 
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
+                      value={newBooking.initialPayment || ''}
+                      onChange={(e) => setNewBooking({ ...newBooking, initialPayment: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Method</label>
+                    <select 
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
+                      value={newBooking.paymentMethod}
+                      onChange={(e) => setNewBooking({ ...newBooking, paymentMethod: e.target.value as any })}
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="transfer">Transfer</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
                 <div className="flex justify-between text-xs text-zinc-500 uppercase font-bold">
                   <span>Summary</span>
@@ -1485,6 +1675,22 @@ export function FrontDesk() {
                     )}
                   </span>
                 </div>
+                {newBooking.initialPayment > 0 && (
+                  <div className="flex justify-between text-[10px] text-blue-400">
+                    <span>Initial Payment</span>
+                    <span>-{formatCurrency(newBooking.initialPayment, currency, exchangeRate)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-xs font-bold text-zinc-50 pt-1">
+                  <span>Balance Due</span>
+                  <span className="text-red-500">
+                    {formatCurrency(
+                      Math.max(0, (newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - newBooking.initialPayment),
+                      currency,
+                      exchangeRate
+                    )}
+                  </span>
+                </div>
               </div>
 
               {newBooking.guestType === 'corporate' && (
@@ -1503,6 +1709,9 @@ export function FrontDesk() {
                               guestName: '',
                               guestEmail: '',
                               guestPhone: '',
+                              idType: '',
+                              idNumber: '',
+                              address: '',
                               roomId: '',
                               checkIn: newBooking.checkIn,
                               checkOut: newBooking.checkOut,
@@ -1545,6 +1754,76 @@ export function FrontDesk() {
                           />
                         </div>
                         <div>
+                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Email</label>
+                          <input 
+                            type="email" 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={stay.guestEmail}
+                            onChange={(e) => {
+                              const updated = [...newBooking.additionalStays];
+                              updated[index].guestEmail = e.target.value;
+                              setNewBooking({ ...newBooking, additionalStays: updated });
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Phone</label>
+                          <input 
+                            type="tel" 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={stay.guestPhone}
+                            onChange={(e) => {
+                              const updated = [...newBooking.additionalStays];
+                              updated[index].guestPhone = e.target.value;
+                              setNewBooking({ ...newBooking, additionalStays: updated });
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">ID Type</label>
+                          <select 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={stay.idType}
+                            onChange={(e) => {
+                              const updated = [...newBooking.additionalStays];
+                              updated[index].idType = e.target.value;
+                              setNewBooking({ ...newBooking, additionalStays: updated });
+                            }}
+                          >
+                            <option value="">Select ID Type</option>
+                            <option value="National ID">National ID</option>
+                            <option value="Passport">Passport</option>
+                            <option value="Drivers License">Drivers License</option>
+                            <option value="Voters Card">Voters Card</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">ID Number</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={stay.idNumber}
+                            onChange={(e) => {
+                              const updated = [...newBooking.additionalStays];
+                              updated[index].idNumber = e.target.value;
+                              setNewBooking({ ...newBooking, additionalStays: updated });
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Address</label>
+                          <textarea 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            rows={1}
+                            value={stay.address}
+                            onChange={(e) => {
+                              const updated = [...newBooking.additionalStays];
+                              updated[index].address = e.target.value;
+                              setNewBooking({ ...newBooking, additionalStays: updated });
+                            }}
+                          />
+                        </div>
+                        <div className="col-span-2">
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Room</label>
                           <select 
                             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"

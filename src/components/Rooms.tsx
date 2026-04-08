@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, addDoc, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, addDoc, doc, setDoc, deleteDoc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
+import { GuestFolio } from './GuestFolio';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType, RoomType } from '../types';
+import { Room, OperationType, RoomType, Reservation } from '../types';
 import { 
   Plus, 
   Search, 
@@ -22,13 +23,17 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  Info
+  Info,
+  LogOut,
+  LogIn,
+  FileText,
+  X,
+  MoreVertical
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
-import { Reservation } from '../types';
 
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -87,6 +92,10 @@ export function Rooms() {
         : [...prev.amenities, amenity]
     }));
   };
+
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [showQuickActionMenu, setShowQuickActionMenu] = useState(false);
+  const [showFolio, setShowFolio] = useState(false);
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
@@ -317,6 +326,43 @@ export function Rooms() {
     }));
     exportToCSV(dataToExport, `rooms_list_${new Date().toISOString().split('T')[0]}.csv`);
     toast.success('Rooms list exported successfully');
+  };
+
+  const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
+    if (!hotel?.id || !profile) return;
+    try {
+      const batch = writeBatch(db);
+      const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
+      
+      batch.update(resRef, { status });
+      
+      if (status === 'checked_in') {
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
+      } else if (status === 'checked_out') {
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
+      }
+
+      await batch.commit();
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'RESERVATION_STATUS_UPDATE',
+        resource: `Reservation for ${res.guestName} updated to ${status}`,
+        hotelId: hotel.id,
+        module: 'Rooms'
+      });
+
+      toast.success(`Reservation updated to ${status.replace('_', ' ')}`);
+      setShowQuickActionMenu(false);
+      setSelectedReservation(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/reservations/${res.id}`);
+      toast.error('Failed to update reservation');
+    }
   };
 
   return (
@@ -981,24 +1027,41 @@ export function Rooms() {
 
                       return (
                         <td key={day.toISOString()} className={cn(
-                          "border-r border-b border-zinc-800 p-1 min-w-[80px] h-16 relative group/cell",
-                          isSameDay(day, new Date()) ? "bg-emerald-500/5" : "bg-zinc-950/20"
+                          "border-r border-b border-zinc-800 p-1 min-w-[80px] h-16 relative group/cell transition-colors",
+                          isSameDay(day, new Date()) ? "bg-emerald-500/5" : "bg-zinc-950/20",
+                          !reservation && room.status === 'dirty' && "bg-red-500/5",
+                          !reservation && room.status === 'maintenance' && "bg-amber-500/5"
                         )}>
                           {reservation ? (
-                            <div 
+                            <button 
+                              onClick={() => {
+                                setSelectedReservation(reservation);
+                                setShowQuickActionMenu(true);
+                              }}
                               className={cn(
-                                "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border",
+                                "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border text-left transition-all hover:scale-[1.02] active:scale-95",
                                 reservation.status === 'checked_in' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
                               )}
                               title={`${reservation.guestName} (${format(parseISO(reservation.checkIn), 'MMM dd')} - ${format(parseISO(reservation.checkOut), 'MMM dd')})`}
                             >
                               <div className="truncate">{reservation.guestName}</div>
-                              <div className="opacity-60">{reservation.status.replace('_', ' ')}</div>
-                            </div>
+                              <div className="opacity-60 flex items-center justify-between">
+                                <span>{reservation.status.replace('_', ' ')}</span>
+                                {reservation.status === 'checked_in' && <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse" />}
+                              </div>
+                            </button>
                           ) : (
                             <div className="w-full h-full flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity">
                               <Plus size={14} className="text-zinc-700" />
                             </div>
+                          )}
+                          {!reservation && isSameDay(day, new Date()) && (
+                            <div className={cn(
+                              "absolute top-1 right-1 w-1.5 h-1.5 rounded-full",
+                              room.status === 'clean' ? "bg-emerald-500" :
+                              room.status === 'dirty' ? "bg-red-500" :
+                              room.status === 'maintenance' ? "bg-amber-500" : "bg-zinc-500"
+                            )} title={`Room is ${room.status}`} />
                           )}
                         </td>
                       );
@@ -1023,6 +1086,106 @@ export function Rooms() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Quick Action Menu */}
+      <AnimatePresence>
+        {showQuickActionMenu && selectedReservation && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                <div>
+                  <h2 className="text-lg font-bold text-zinc-50">{selectedReservation.guestName}</h2>
+                  <p className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Room {selectedReservation.roomNumber}</p>
+                </div>
+                <button 
+                  onClick={() => setShowQuickActionMenu(false)}
+                  className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-3">
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
+                    <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-In</div>
+                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkIn), 'MMM dd, yyyy')}</div>
+                  </div>
+                  <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
+                    <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-Out</div>
+                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkOut), 'MMM dd, yyyy')}</div>
+                  </div>
+                </div>
+
+                {selectedReservation.status === 'pending' && (
+                  <button 
+                    onClick={() => updateReservationStatus(selectedReservation, 'checked_in')}
+                    className="w-full flex items-center gap-3 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 p-4 rounded-2xl font-bold transition-all active:scale-95"
+                  >
+                    <LogIn size={20} />
+                    Check-In Guest
+                  </button>
+                )}
+
+                {selectedReservation.status === 'checked_in' && (
+                  <button 
+                    onClick={() => updateReservationStatus(selectedReservation, 'checked_out')}
+                    className="w-full flex items-center gap-3 bg-blue-500 hover:bg-blue-600 text-zinc-50 p-4 rounded-2xl font-bold transition-all active:scale-95"
+                  >
+                    <LogOut size={20} />
+                    Check-Out Guest
+                  </button>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => {
+                      setShowFolio(true);
+                      setShowQuickActionMenu(false);
+                    }}
+                    className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 p-3 rounded-2xl text-xs font-bold transition-all active:scale-95"
+                  >
+                    <FileText size={16} />
+                    View Folio
+                  </button>
+                  <button 
+                    onClick={() => setShowQuickActionMenu(false)}
+                    className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 p-3 rounded-2xl text-xs font-bold transition-all active:scale-95"
+                  >
+                    <Info size={16} />
+                    Details
+                  </button>
+                </div>
+
+                {(selectedReservation.status === 'pending' || selectedReservation.status === 'no_show') && (
+                  <button 
+                    onClick={() => updateReservationStatus(selectedReservation, 'cancelled')}
+                    className="w-full flex items-center justify-center gap-2 text-red-500 hover:bg-red-500/10 p-3 rounded-2xl text-xs font-bold transition-all"
+                  >
+                    <XCircle size={16} />
+                    Cancel Reservation
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {showFolio && selectedReservation && (
+        <GuestFolio 
+          reservation={selectedReservation}
+          onClose={() => {
+            setShowFolio(false);
+            setSelectedReservation(null);
+          }}
+        />
       )}
     </div>
   );
