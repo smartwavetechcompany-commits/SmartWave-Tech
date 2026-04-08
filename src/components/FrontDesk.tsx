@@ -1730,7 +1730,7 @@ export function FrontDesk() {
                   </div>
 
                   {newBooking.additionalStays.map((stay, index) => (
-                    <div key={stay.id} className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4 relative">
+                    <div key={stay.id} className="p-6 bg-zinc-950 border border-zinc-800 rounded-2xl space-y-6 relative">
                       <button 
                         onClick={() => {
                           setNewBooking({
@@ -1738,17 +1738,18 @@ export function FrontDesk() {
                             additionalStays: newBooking.additionalStays.filter(s => s.id !== stay.id)
                           });
                         }}
-                        className="absolute top-2 right-2 text-zinc-500 hover:text-red-500"
+                        className="absolute top-4 right-4 text-zinc-500 hover:text-red-500 transition-colors"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={18} />
                       </button>
+                      
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Guest Name</label>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Guest Name</label>
                           <input 
                             type="text" 
                             placeholder="e.g. Jane Doe"
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.guestName}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1758,10 +1759,10 @@ export function FrontDesk() {
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Phone</label>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Phone Number</label>
                           <input 
                             type="tel" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.guestPhone}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1771,10 +1772,10 @@ export function FrontDesk() {
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Email</label>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Email Address</label>
                           <input 
                             type="email" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.guestEmail}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1787,9 +1788,9 @@ export function FrontDesk() {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">ID Type</label>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">ID Type</label>
                           <select 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.idType}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1805,10 +1806,10 @@ export function FrontDesk() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">ID Number</label>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">ID Number</label>
                           <input 
                             type="text" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.idNumber}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
@@ -1820,10 +1821,9 @@ export function FrontDesk() {
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Address</label>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Address</label>
                         <textarea 
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none h-12"
-                          rows={1}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-16"
                           value={stay.address}
                           onChange={(e) => {
                             const updated = [...newBooking.additionalStays];
@@ -1833,9 +1833,9 @@ export function FrontDesk() {
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Room</label>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
                         <select 
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                           value={stay.roomId}
                           onChange={(e) => {
                             const updated = [...newBooking.additionalStays];
