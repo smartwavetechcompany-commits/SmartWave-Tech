@@ -673,21 +673,26 @@ export function CorporateManagement() {
                             value={newRate.discountValue}
                             onChange={(e) => setNewRate({ ...newRate, discountValue: Number(e.target.value) })}
                             className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                            placeholder="0"
                           />
                           <button
                             type="button"
                             onClick={() => {
                               const selectedType = roomTypes.find(t => t.name === newRate.roomType);
-                              if (!selectedType) return;
+                              if (!selectedType) {
+                                toast.error('Please select a room type first');
+                                return;
+                              }
                               let calculatedRate = selectedType.basePrice;
                               if (newRate.discountType === 'percentage') {
                                 calculatedRate = selectedType.basePrice * (1 - newRate.discountValue / 100);
                               } else {
                                 calculatedRate = Math.max(0, selectedType.basePrice - newRate.discountValue);
                               }
-                              setNewRate({ ...newRate, rate: calculatedRate });
+                              setNewRate({ ...newRate, rate: Math.round(calculatedRate) });
+                              toast.success('Discount applied to base price');
                             }}
-                            className="px-2 bg-zinc-800 text-zinc-400 hover:text-white rounded-lg text-[10px] font-bold transition-all"
+                            className="px-3 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-black rounded-lg text-[10px] font-bold transition-all border border-emerald-500/20"
                             title="Apply Discount to Base Price"
                           >
                             Apply
@@ -810,6 +815,17 @@ export function CorporateManagement() {
                                 <Calendar size={10} />
                                 {format(new Date(rate.startDate), 'MMM d, yyyy')} - {format(new Date(rate.endDate), 'MMM d, yyyy')}
                               </div>
+                              {rate.conditions && (
+                                <div className="mt-2 p-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">
+                                  <div className="text-[9px] font-bold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                                    <FileText size={10} />
+                                    Conditions
+                                  </div>
+                                  <p className="text-[10px] text-zinc-400 leading-relaxed italic">
+                                    "{rate.conditions}"
+                                  </p>
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

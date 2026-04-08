@@ -1415,6 +1415,9 @@ export function FrontDesk() {
                         guestName: guest.name,
                         guestEmail: guest.email,
                         guestPhone: guest.phone,
+                        idType: guest.idType || '',
+                        idNumber: guest.idNumber || '',
+                        address: guest.address || '',
                         corporateId: guest.corporateId || newBooking.corporateId,
                         guestType: guest.corporateId ? 'corporate' : newBooking.guestType
                       });
@@ -1444,7 +1447,7 @@ export function FrontDesk() {
                   <input 
                     required
                     type="text" 
-                    placeholder="e.g. 101, 204A"
+                    placeholder="e.g. John Doe"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={newBooking.guestName}
                     onChange={(e) => setNewBooking({ ...newBooking, guestName: e.target.value })}
@@ -1744,24 +1747,12 @@ export function FrontDesk() {
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Guest Name</label>
                           <input 
                             type="text" 
+                            placeholder="e.g. Jane Doe"
                             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
                             value={stay.guestName}
                             onChange={(e) => {
                               const updated = [...newBooking.additionalStays];
                               updated[index].guestName = e.target.value;
-                              setNewBooking({ ...newBooking, additionalStays: updated });
-                            }}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Email</label>
-                          <input 
-                            type="email" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                            value={stay.guestEmail}
-                            onChange={(e) => {
-                              const updated = [...newBooking.additionalStays];
-                              updated[index].guestEmail = e.target.value;
                               setNewBooking({ ...newBooking, additionalStays: updated });
                             }}
                           />
@@ -1779,6 +1770,22 @@ export function FrontDesk() {
                             }}
                           />
                         </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Email</label>
+                          <input 
+                            type="email" 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={stay.guestEmail}
+                            onChange={(e) => {
+                              const updated = [...newBooking.additionalStays];
+                              updated[index].guestEmail = e.target.value;
+                              setNewBooking({ ...newBooking, additionalStays: updated });
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">ID Type</label>
                           <select 
@@ -1810,55 +1817,56 @@ export function FrontDesk() {
                             }}
                           />
                         </div>
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Address</label>
-                          <textarea 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                            rows={1}
-                            value={stay.address}
-                            onChange={(e) => {
-                              const updated = [...newBooking.additionalStays];
-                              updated[index].address = e.target.value;
-                              setNewBooking({ ...newBooking, additionalStays: updated });
-                            }}
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Room</label>
-                          <select 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                            value={stay.roomId}
-                            onChange={(e) => {
-                              const updated = [...newBooking.additionalStays];
-                              updated[index].roomId = e.target.value;
-                              setNewBooking({ ...newBooking, additionalStays: updated });
-                            }}
-                          >
-                            <option value="">Select Room</option>
-                            {rooms.filter(r => r.status === 'clean' || r.id === stay.roomId).map(room => {
-                              let displayPrice = room.price;
-                              let isNegotiated = false;
+                      </div>
 
-                              if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-                                const rate = activeCorporateRates.find(r => 
-                                  (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-                                  new Date(stay.checkIn) >= new Date(r.startDate) &&
-                                  new Date(stay.checkIn) <= new Date(r.endDate)
-                                );
-                                if (rate) {
-                                  displayPrice = rate.rate;
-                                  isNegotiated = true;
-                                }
-                              }
+                      <div>
+                        <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Address</label>
+                        <textarea 
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none h-12"
+                          rows={1}
+                          value={stay.address}
+                          onChange={(e) => {
+                            const updated = [...newBooking.additionalStays];
+                            updated[index].address = e.target.value;
+                            setNewBooking({ ...newBooking, additionalStays: updated });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Room</label>
+                        <select 
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={stay.roomId}
+                          onChange={(e) => {
+                            const updated = [...newBooking.additionalStays];
+                            updated[index].roomId = e.target.value;
+                            setNewBooking({ ...newBooking, additionalStays: updated });
+                          }}
+                        >
+                          <option value="">Select Room</option>
+                          {rooms.filter(r => r.status === 'clean' || r.id === stay.roomId).map(room => {
+                            let displayPrice = room.price;
+                            let isNegotiated = false;
 
-                              return (
-                                <option key={room.id} value={room.id}>
-                                  Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
-                                </option>
+                            if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
+                              const rate = activeCorporateRates.find(r => 
+                                (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
+                                new Date(stay.checkIn) >= new Date(r.startDate) &&
+                                new Date(stay.checkIn) <= new Date(r.endDate)
                               );
-                            })}
-                          </select>
-                        </div>
+                              if (rate) {
+                                displayPrice = rate.rate;
+                                isNegotiated = true;
+                              }
+                            }
+
+                            return (
+                              <option key={room.id} value={room.id}>
+                                Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
+                              </option>
+                            );
+                          })}
+                        </select>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
