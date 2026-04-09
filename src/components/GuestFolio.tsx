@@ -14,7 +14,7 @@ import {
   Plus, 
   History, 
   ArrowRight, 
-  DollarSign,
+  Banknote,
   Clock,
   Building2,
   XCircle,
@@ -340,7 +340,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
-                <DollarSign size={18} className="text-amber-500" />
+                <Banknote size={18} className="text-amber-500" />
                 <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
               </div>
               <div className="space-y-3">
@@ -380,7 +380,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                             }}
                             className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 font-bold"
                           >
-                            <DollarSign size={10} /> Settle Payment
+                            <Banknote size={10} /> Settle Full Balance
                           </button>
                         )}
                         {balance < 0 && (
@@ -391,7 +391,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                             }}
                             className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 font-bold"
                           >
-                            <DollarSign size={10} /> Settle Overpayment
+                            <Banknote size={10} /> Settle Overpayment
                           </button>
                         )}
                       </div>
@@ -460,7 +460,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="p-6 space-y-4">
                     <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex items-center gap-4">
                       <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
-                        <DollarSign size={20} />
+                        <Banknote size={20} />
                       </div>
                       <div>
                         <p className="text-xs font-bold text-zinc-500 uppercase">Available Credit</p>
@@ -529,7 +529,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="p-6 space-y-4">
                     <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-2xl flex items-center gap-4">
                       <div className="w-10 h-10 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center">
-                        <DollarSign size={20} />
+                        <Banknote size={20} />
                       </div>
                       <div>
                         <p className="text-xs font-bold text-zinc-500 uppercase">Balance Due</p>

@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, w
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
-import { postToLedger, settleLedger } from '../services/ledgerService';
+import { postToLedger, settleLedger, postFullStayCharge } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -787,16 +787,16 @@ export function FrontDesk() {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
-          // Post the first night's charge immediately so it shows in the ledger/balance
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          await postToLedger(hotel.id, res.guestId, res.id, {
-            amount: rate,
-            type: 'debit',
-            category: 'room',
-            description: `Initial Room Charge: ${res.roomNumber} (Night of ${format(new Date(res.checkIn), 'MMM dd, yyyy')})`,
-            referenceId: res.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId);
+          // Post full stay charge to ledger so it shows the total booking rate money
+          await postFullStayCharge(
+            hotel.id,
+            res.guestId,
+            res.id,
+            res.totalAmount,
+            res.roomNumber,
+            profile.uid,
+            res.corporateId
+          );
 
           // AUTO DEDUCTION: If guest has credit balance, apply it
           const guest = guests.find(g => g.id === res.guestId);

@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
 import { syncDailyCharges } from '../services/financeService';
+import { GuestFolio } from './GuestFolio';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -105,6 +106,8 @@ export function Finance() {
   const [isSaving, setIsSaving] = useState(false);
   const [showSettleModal, setShowSettleModal] = useState<Guest | CorporateAccount | null>(null);
   const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as const, notes: '' });
+  const [showFolio, setShowFolio] = useState(false);
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
@@ -938,7 +941,7 @@ export function Finance() {
                             <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
                               {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
                             </td>
-                            <td className="px-6 py-4 text-right">
+                            <td className="px-6 py-4 text-right space-x-3">
                               <button
                                 onClick={() => {
                                   setShowSettleModal(guest);
@@ -947,6 +950,21 @@ export function Finance() {
                                 className="text-xs font-bold text-emerald-500 hover:text-emerald-400"
                               >
                                 Settle
+                              </button>
+                              <button
+                                onClick={() => {
+                                  // Find the active reservation for this guest to open folio
+                                  const activeRes = reservations.find(r => r.guestId === guest.id && (r.status === 'checked_in' || r.status === 'pending'));
+                                  if (activeRes) {
+                                    setSelectedReservation(activeRes);
+                                    setShowFolio(true);
+                                  } else {
+                                    toast.error('No active reservation found for this guest');
+                                  }
+                                }}
+                                className="text-xs font-bold text-zinc-400 hover:text-zinc-200"
+                              >
+                                Folio
                               </button>
                             </td>
                           </tr>
@@ -1869,6 +1887,15 @@ export function Finance() {
             </form>
           </motion.div>
         </div>
+      )}
+      {showFolio && selectedReservation && (
+        <GuestFolio 
+          reservation={selectedReservation} 
+          onClose={() => {
+            setShowFolio(false);
+            setSelectedReservation(null);
+          }} 
+        />
       )}
     </div>
   );

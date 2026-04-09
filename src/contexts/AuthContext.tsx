@@ -18,6 +18,7 @@ interface AuthContextType {
   systemSettings: SystemSettings | null;
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
+  isOffline: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return (localStorage.getItem('pms_theme') as 'light' | 'dark') || 'dark';
   });
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   const setCurrency = (newCurrency: 'NGN' | 'USD') => {
     setCurrencyState(newCurrency);
@@ -112,6 +114,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false);
         }
       } catch (err: any) {
+        if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
+          setIsOffline(true);
+        }
         handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
         if (err.code === 'permission-denied') {
           console.warn("Profile access restricted.");
@@ -168,8 +173,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const snap = await getDoc(doc(db, 'system', 'settings'));
         if (snap.exists()) {
           setSystemSettings(snap.data() as SystemSettings);
+          setIsOffline(false);
         }
       } catch (err: any) {
+        if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
+          setIsOffline(true);
+        }
         handleFirestoreError(err, OperationType.GET, 'system/settings');
         console.error("System settings fetch error:", err);
       }
@@ -214,7 +223,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       exchangeRate,
       systemSettings,
       theme,
-      setTheme
+      setTheme,
+      isOffline
     }}>
       {children}
     </AuthContext.Provider>

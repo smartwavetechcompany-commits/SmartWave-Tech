@@ -8,11 +8,18 @@ export function cn(...inputs: ClassValue[]) {
 export function formatCurrency(amount: number, currency: 'NGN' | 'USD' = 'NGN', exchangeRate: number = 1500) {
   const value = currency === 'USD' ? amount / exchangeRate : amount;
   
-  return new Intl.NumberFormat(currency === 'NGN' ? 'en-NG' : 'en-US', {
+  if (currency === 'NGN') {
+    return '₦' + new Intl.NumberFormat('en-NG', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  }
+
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency,
-    minimumFractionDigits: currency === 'NGN' ? 0 : 2,
-    maximumFractionDigits: currency === 'NGN' ? 0 : 2,
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 

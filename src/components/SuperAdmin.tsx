@@ -24,7 +24,7 @@ import {
   Users
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
-import { cn } from '../utils';
+import { cn, formatCurrency } from '../utils';
 
 import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -34,7 +34,7 @@ import { SuperAdminReceipt } from './SuperAdminReceipt';
 import { toast } from 'sonner';
 
 export function SuperAdmin() {
-  const { profile } = useAuth();
+  const { profile, currency, exchangeRate } = useAuth();
   const [trackingCodes, setTrackingCodes] = useState<TrackingCode[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [requests, setRequests] = useState<TrackingCodeRequest[]>([]);
@@ -1255,7 +1255,7 @@ export function SuperAdmin() {
                             <div className="flex items-center gap-2">
                               <span>{code.plan}</span>
                               {code.price !== undefined && code.price > 0 && (
-                                <span className="text-emerald-500/80">({code.price.toLocaleString()})</span>
+                                <span className="text-emerald-500/80">({formatCurrency(code.price, currency, exchangeRate)})</span>
                               )}
                             </div>
                             <span className={isCodeExpired ? "text-red-500" : ""}>
@@ -1306,7 +1306,7 @@ export function SuperAdmin() {
                   </div>
                   {history.amount !== undefined && history.amount > 0 && (
                     <div className="text-sm font-bold text-emerald-500 mb-1">
-                      Amount: {history.amount.toLocaleString()}
+                      Amount: {formatCurrency(history.amount, currency, exchangeRate)}
                     </div>
                   )}
                   {history.reason && (

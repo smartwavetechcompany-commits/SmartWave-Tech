@@ -2,10 +2,10 @@ import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { CurrencyToggle } from './CurrencyToggle';
 import { Notifications } from './Notifications';
-import { User, Building2 } from 'lucide-react';
+import { User, Building2, WifiOff } from 'lucide-react';
 
 export function TopBar() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, isOffline } = useAuth();
 
   return (
     <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 sticky top-0 z-40">
@@ -14,6 +14,12 @@ export function TopBar() {
           <Building2 size={16} />
           <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
         </div>
+        {isOffline && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-full text-red-500 animate-pulse">
+            <WifiOff size={14} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Offline Mode</span>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2 sm:gap-6">
