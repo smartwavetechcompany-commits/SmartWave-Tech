@@ -16,8 +16,11 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
   
-  const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const debits = ledgerEntries.filter(e => e.type === 'debit');
+  const credits = ledgerEntries.filter(e => e.type === 'credit');
+  
+  const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
+  const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
@@ -39,10 +42,8 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   const taxBreakdown = activeTaxes.map(tax => {
     let amount = 0;
     if (tax.isInclusive) {
-      // Amount = Subtotal - (Subtotal / (1 + percentage/100))
       amount = subtotal - (subtotal / (1 + tax.percentage / 100));
     } else {
-      // Amount = Subtotal * (percentage/100)
       amount = subtotal * (tax.percentage / 100);
       taxTotal += amount;
     }
@@ -50,7 +51,8 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   });
 
   const grandTotal = subtotal + taxTotal;
-  const totalPaid = totalCredits + (hasRoomChargeInLedger ? 0 : (reservation.paidAmount || 0));
+  const hasPaymentInLedger = ledgerEntries.some(e => e.category === 'payment' && e.type === 'credit');
+  const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (reservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
   return (
@@ -113,16 +115,16 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
 
       <div className="border-t border-zinc-100 my-6" />
 
-      {/* Items Table */}
+      {/* Charges Section */}
       <div className="space-y-4 mb-8">
         <div className="flex justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-100 pb-2">
-          <span>Description</span>
+          <span>Charges / Description</span>
           <span className="text-right">Amount</span>
         </div>
         
         <div className="space-y-3">
           {type === 'restaurant' ? (
-            ledgerEntries.filter(e => e.category === 'restaurant').map(e => (
+            ledgerEntries.filter(e => e.category === 'restaurant' && e.type === 'debit').map(e => (
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-sm font-bold">{e.description}</p>
@@ -142,26 +144,50 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
                   <span className="font-bold text-sm text-right">{formatCurrency(reservation.totalAmount, currency, exchangeRate)}</span>
                 </div>
               )}
-              {ledgerEntries.map(e => (
+              {debits.map(e => (
                 <div key={e.id} className="flex justify-between items-start">
                   <div className="flex-1">
-                    <p className={cn("text-sm font-bold", e.type === 'credit' ? "text-emerald-600" : "")}>
-                      {e.description} {e.type === 'credit' ? '(Payment)' : ''}
-                    </p>
+                    <p className="text-sm font-bold">{e.description}</p>
                     <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
                   </div>
-                  <span className={cn(
-                    "font-bold text-sm text-right",
-                    e.type === 'credit' ? "text-emerald-600" : ""
-                  )}>
-                    {e.type === 'credit' ? '-' : ''}{formatCurrency(e.amount, currency, exchangeRate)}
-                  </span>
+                  <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
                 </div>
               ))}
             </>
           )}
         </div>
       </div>
+
+      {/* Payments Section */}
+      {type === 'comprehensive' && (credits.length > 0 || (!hasPaymentInLedger && reservation.paidAmount > 0)) && (
+        <div className="space-y-4 mb-8">
+          <div className="flex justify-between text-[10px] font-bold text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2">
+            <span>Payments / Credits</span>
+            <span className="text-right">Amount</span>
+          </div>
+          
+          <div className="space-y-3">
+            {!hasPaymentInLedger && reservation.paidAmount > 0 && (
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-emerald-600">Initial Payment</p>
+                  <p className="text-[10px] text-zinc-400">Recorded at booking</p>
+                </div>
+                <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(reservation.paidAmount, currency, exchangeRate)}</span>
+              </div>
+            )}
+            {credits.map(e => (
+              <div key={e.id} className="flex justify-between items-start">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-emerald-600">{e.description}</p>
+                  <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
+                </div>
+                <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(e.amount, currency, exchangeRate)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Totals Section */}
       <div className="bg-zinc-50 p-6 rounded-2xl space-y-3">

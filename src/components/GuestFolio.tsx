@@ -35,6 +35,7 @@ interface GuestFolioProps {
 
 export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioProps) {
   const { hotel, currency, exchangeRate, profile } = useAuth();
+  const [currentReservation, setCurrentReservation] = useState<Reservation>(reservation);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [guest, setGuest] = useState<Guest | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
@@ -139,6 +140,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   useEffect(() => {
     if (!hotel?.id || !reservation.id) return;
 
+    // Listen to reservation document for real-time updates
+    const unsubRes = onSnapshot(doc(db, 'hotels', hotel.id, 'reservations', reservation.id), (snap) => {
+      if (snap.exists()) {
+        setCurrentReservation({ id: snap.id, ...snap.data() } as Reservation);
+      }
+    });
+
     // Listen to ledger entries for this reservation
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
@@ -148,11 +156,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
-      // If no entries in collection, fallback to reservation.ledgerEntries
-      if (entries.length === 0 && reservation.ledgerEntries && reservation.ledgerEntries.length > 0) {
-        setLedgerEntries(reservation.ledgerEntries);
+      // If no entries in collection, fallback to currentReservation.ledgerEntries
+      if (entries.length === 0 && currentReservation.ledgerEntries && currentReservation.ledgerEntries.length > 0) {
+        setLedgerEntries(currentReservation.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);
       } else {
-        setLedgerEntries(entries);
+        setLedgerEntries(entries as any);
       }
       setLoading(false);
     }, (err) => {
@@ -160,28 +168,29 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     });
 
     // Fetch guest details
+    let unsubGuest = () => {};
     if (reservation.guestId) {
-      const unsubGuest = onSnapshot(doc(db, 'hotels', hotel.id, 'guests', reservation.guestId), (doc) => {
+      unsubGuest = onSnapshot(doc(db, 'hotels', hotel.id, 'guests', reservation.guestId), (doc) => {
         if (doc.exists()) setGuest({ id: doc.id, ...doc.data() } as Guest);
       });
-      return () => {
-        unsubLedger();
-        unsubGuest();
-      };
     }
 
-    return () => unsubLedger();
+    return () => {
+      unsubRes();
+      unsubLedger();
+      unsubGuest();
+    };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
   
-  // If room charges are already in ledger, don't add reservation.totalAmount again
+  // If room charges are already in ledger, don't add currentReservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
   const hasPaymentInLedger = ledgerEntries.some(e => e.category === 'payment');
   
-  const grandTotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
-  const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (reservation.paidAmount || 0));
+  const grandTotal = hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits);
+  const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (currentReservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
   const handleDeleteEntry = async () => {
@@ -260,7 +269,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               </button>
               <ReceiptGenerator 
                 hotel={hotel} 
-                reservation={reservation} 
+                reservation={currentReservation} 
                 type="comprehensive" 
                 ledgerEntries={ledgerEntries} 
               />

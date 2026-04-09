@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, where, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, getDoc, where, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
@@ -785,16 +785,15 @@ export function FrontDesk() {
     if (!hotel?.id || !profile) return;
     try {
       setLoading(true);
-      const batch = writeBatch(db);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
-      // 1. Update reservation status
-      batch.update(resRef, { status });
+      // 1. Update reservation status immediately
+      await updateDoc(resRef, { status });
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
         // Mark room as occupied
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
           // Post full stay charge to ledger so it shows the total booking rate money
@@ -809,8 +808,10 @@ export function FrontDesk() {
           );
 
           // Fetch fresh data to avoid stale state issues with auto-deduction
-          const guestSnap = await getDoc(doc(db, 'hotels', hotel.id, 'guests', res.guestId));
-          const freshResSnap = await getDoc(resRef);
+          const [guestSnap, freshResSnap] = await Promise.all([
+            getDoc(doc(db, 'hotels', hotel.id, 'guests', res.guestId)),
+            getDoc(resRef)
+          ]);
           
           if (guestSnap.exists() && freshResSnap.exists()) {
             const guestData = guestSnap.data() as Guest;
@@ -823,10 +824,11 @@ export function FrontDesk() {
               
               if (creditToApply > 0) {
                 await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
-                // Update reservation paidAmount in batch
-                batch.update(resRef, { 
-                  paidAmount: increment(creditToApply),
-                  paymentStatus: (freshResData.paidAmount || 0) + creditToApply >= freshResData.totalAmount ? 'paid' : 'partial'
+                // Update reservation paidAmount (postToLedger already does this, but we might need to sync paymentStatus if not fully handled)
+                const finalPaidAmount = (freshResData.paidAmount || 0) + creditToApply;
+                await updateDoc(resRef, { 
+                  paidAmount: finalPaidAmount,
+                  paymentStatus: finalPaidAmount >= freshResData.totalAmount ? 'paid' : 'partial'
                 });
                 toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
               }
@@ -869,7 +871,7 @@ export function FrontDesk() {
         }
 
         // 2. Update reservation total to reflect actual stay
-        batch.update(resRef, { 
+        await updateDoc(resRef, { 
           totalAmount: finalTotalDebits,
           checkOut: format(today, 'yyyy-MM-dd') // Update checkout date to actual checkout date
         });
@@ -889,15 +891,14 @@ export function FrontDesk() {
             module: 'Front Desk'
           });
         }
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
       }
 
       // 3. Log action
-      const logRef = doc(collection(db, 'hotels', hotel.id, 'activityLogs'));
-      batch.set(logRef, {
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -908,7 +909,6 @@ export function FrontDesk() {
         module: 'Front Desk'
       });
 
-      await batch.commit();
       toast.success(`Reservation status updated to ${status.replace('_', ' ')}`);
     } catch (err) {
       console.error("Update status error:", err);

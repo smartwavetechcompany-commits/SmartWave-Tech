@@ -23,50 +23,48 @@ export const postToLedger = async (
     postedBy
   };
 
-  // 1. Update Reservation ledgerEntries (for backward compatibility)
+  // 1. Prepare Reservation updates
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-  await updateDoc(resRef, {
+  const resUpdates: any = {
     ledgerEntries: arrayUnion(ledgerEntry)
-  });
+  };
 
-  // 2. Add to Ledger Collection (for better querying and GuestFolio)
+  // 2. Add to Ledger Collection
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-  const docRef = await addDoc(ledgerRef, ledgerEntry);
-  
-  // 3. Update Guest or Corporate Account balance
+  const ledgerDocPromise = addDoc(ledgerRef, ledgerEntry);
+
+  // 3. Prepare Guest or Corporate Account updates
+  let accountUpdatePromise;
   const balanceAdjustment = entry.type === 'debit' ? -entry.amount : entry.amount;
 
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
-    await updateDoc(corpRef, {
+    accountUpdatePromise = updateDoc(corpRef, {
       currentBalance: increment(balanceAdjustment)
     });
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
-    await updateDoc(guestRef, {
+    accountUpdatePromise = updateDoc(guestRef, {
       ledgerBalance: increment(balanceAdjustment),
       totalSpent: increment(entry.type === 'debit' ? entry.amount : 0)
     });
   }
 
-  // 4. Synchronize Reservation paidAmount and paymentStatus if this is a payment
+  // 4. Handle Payment Synchronization and Finance Record
+  let financeUpdatePromise;
   if (entry.category === 'payment' || entry.category === 'refund') {
-    if (entry.category === 'payment') {
-      const resSnap = await getDoc(resRef);
-      if (resSnap.exists()) {
-        const resData = resSnap.data() as Reservation;
-        const paymentAdjustment = entry.type === 'credit' ? entry.amount : -entry.amount;
-        const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + paymentAdjustment);
-        const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
-        
-        await updateDoc(resRef, {
-          paidAmount: newPaidAmount,
-          paymentStatus: newPaymentStatus
-        });
-      }
+    // We still need the current paidAmount to calculate the new status correctly
+    const resSnap = await getDoc(resRef);
+    if (resSnap.exists()) {
+      const resData = resSnap.data() as Reservation;
+      const paymentAdjustment = entry.type === 'credit' ? entry.amount : -entry.amount;
+      const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + paymentAdjustment);
+      const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+      
+      resUpdates.paidAmount = newPaidAmount;
+      resUpdates.paymentStatus = newPaymentStatus;
     }
 
-    // 5. Create Finance Record
     const financeRef = collection(db, 'hotels', hotelId, 'finance');
     const financeRecord: Omit<FinanceRecord, 'id'> = {
       type: entry.type === 'credit' ? 'income' : 'expense',
@@ -76,12 +74,20 @@ export const postToLedger = async (
       timestamp,
       paymentMethod,
       guestId,
-      referenceId: docRef.id // Link to ledger entry
+      referenceId: ledgerEntry.id // Use the generated ID for consistency
     };
-    await addDoc(financeRef, financeRecord);
+    financeUpdatePromise = addDoc(financeRef, financeRecord);
   }
 
-  return { ...ledgerEntry, firestoreId: docRef.id };
+  // 5. Execute all updates in parallel
+  const [ledgerDoc] = await Promise.all([
+    ledgerDocPromise,
+    updateDoc(resRef, resUpdates),
+    accountUpdatePromise,
+    financeUpdatePromise
+  ].filter(p => p !== undefined));
+
+  return { ...ledgerEntry, firestoreId: ledgerDoc?.id };
 };
 
 export const postFullStayCharge = async (
