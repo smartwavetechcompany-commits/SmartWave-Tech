@@ -611,6 +611,18 @@ export function FrontDesk() {
         totalAmount: newTotalAmount
       });
 
+      // Post the extra charge to the ledger if guest is checked in
+      if (res.status === 'checked_in') {
+        await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
+          amount: extraAmount,
+          type: 'debit',
+          category: 'room',
+          description: `Stay Extension: ${extraNights} additional nights until ${newCheckOutDate}`,
+          referenceId: res.id,
+          postedBy: profile?.uid || 'system'
+        }, profile?.uid || 'system', res.corporateId);
+      }
+
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
@@ -803,7 +815,7 @@ export function FrontDesk() {
           if (guest && guest.ledgerBalance > 0) {
             const creditToApply = Math.min(guest.ledgerBalance, res.totalAmount - (res.paidAmount || 0));
             if (creditToApply > 0) {
-              await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'Credit Balance', profile.uid, res.corporateId);
+              await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
               // Update reservation paidAmount in batch
               batch.update(resRef, { 
                 paidAmount: increment(creditToApply),
@@ -917,21 +929,11 @@ export function FrontDesk() {
           res.guestId, 
           res.id, 
           amount, 
-          'Cash', // Default to cash
+          'cash', 
           profile.uid,
           res.corporateId
         );
       }
-
-      // Add to finance records
-      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-        type: 'income',
-        amount: amount,
-        category: 'Room Revenue',
-        description: `Payment for booking ${res.id} (${res.guestName})`,
-        timestamp: new Date().toISOString(),
-        paymentMethod: 'cash'
-      });
 
       // Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
@@ -1591,8 +1593,14 @@ export function FrontDesk() {
                     <input 
                       type="number" 
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                      value={newBooking.discountAmount || ''}
-                      onChange={(e) => setNewBooking({ ...newBooking, discountAmount: Number(e.target.value) })}
+                      value={newBooking.discountType === 'fixed' && currency === 'USD' ? (newBooking.discountAmount / exchangeRate) || '' : newBooking.discountAmount || ''}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setNewBooking({ 
+                          ...newBooking, 
+                          discountAmount: newBooking.discountType === 'fixed' && currency === 'USD' ? val * exchangeRate : val 
+                        });
+                      }}
                     />
                   </div>
                   <div>
@@ -1630,8 +1638,11 @@ export function FrontDesk() {
                     <input 
                       type="number" 
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                      value={newBooking.initialPayment || ''}
-                      onChange={(e) => setNewBooking({ ...newBooking, initialPayment: Number(e.target.value) })}
+                      value={currency === 'USD' ? (newBooking.initialPayment / exchangeRate) || '' : newBooking.initialPayment || ''}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setNewBooking({ ...newBooking, initialPayment: currency === 'USD' ? val * exchangeRate : val });
+                      }}
                     />
                   </div>
                   <div>
@@ -2276,8 +2287,11 @@ export function FrontDesk() {
                 <input 
                   type="number" 
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={chargeDetails.amount}
-                  onChange={(e) => setChargeDetails({ ...chargeDetails, amount: Number(e.target.value) })}
+                  value={currency === 'USD' ? (chargeDetails.amount / exchangeRate) || '' : chargeDetails.amount || ''}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setChargeDetails({ ...chargeDetails, amount: currency === 'USD' ? val * exchangeRate : val });
+                  }}
                 />
               </div>
               <div>
@@ -2458,8 +2472,14 @@ export function FrontDesk() {
                 </label>
                 <input 
                   type="number"
-                  value={discountData.amount}
-                  onChange={(e) => setDiscountData({ ...discountData, amount: parseFloat(e.target.value) })}
+                  value={discountData.type === 'fixed' && currency === 'USD' ? (discountData.amount / exchangeRate) || '' : discountData.amount || ''}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setDiscountData({ 
+                      ...discountData, 
+                      amount: discountData.type === 'fixed' && currency === 'USD' ? val * exchangeRate : val 
+                    });
+                  }}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   placeholder="0.00"
                 />

@@ -65,18 +65,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         reservation.corporateId
       );
 
-      // Record as income in finance
-      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-        type: 'income',
-        amount: settleData.amount,
-        category: 'Room Revenue',
-        description: `Payment for Res #${reservation.id.slice(-6).toUpperCase()} - ${reservation.guestName} (${settleData.method})`,
-        timestamp: new Date().toISOString(),
-        paymentMethod: settleData.method,
-        referenceId: reservation.id,
-        postedBy: profile.uid
-      });
-
       toast.success('Payment recorded successfully');
       setShowSettlePayment(false);
       setSettleData({ amount: 0, method: 'cash', notes: '' });
@@ -473,10 +461,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <input
                         required
                         type="number"
-                        value={settleData.amount}
-                        onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
+                        value={currency === 'USD' ? (settleData.amount / exchangeRate) || '' : settleData.amount || ''}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setSettleData({ ...settleData, amount: currency === 'USD' ? val * exchangeRate : val });
+                        }}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                        max={Math.abs(balance)}
+                        max={currency === 'USD' ? Math.abs(balance) / exchangeRate : Math.abs(balance)}
                       />
                     </div>
 
@@ -542,10 +533,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <input
                         required
                         type="number"
-                        value={settleData.amount}
-                        onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
+                        value={currency === 'USD' ? (settleData.amount / exchangeRate) || '' : settleData.amount || ''}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setSettleData({ ...settleData, amount: currency === 'USD' ? val * exchangeRate : val });
+                        }}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                        max={balance}
+                        max={currency === 'USD' ? balance / exchangeRate : balance}
                         step="0.01"
                       />
                     </div>

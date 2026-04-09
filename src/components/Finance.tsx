@@ -284,29 +284,9 @@ export function Finance() {
       if (currentBalance < 0) {
         // Entity owes money: Post a payment (credit)
         await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, amount, settleData.method, profile.uid, isCorporate ? entityId : undefined);
-        
-        // Record as income
-        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-          type: 'income',
-          amount: amount,
-          category: 'Room Revenue',
-          description: `Balance Settlement: ${entityName} (${settleData.notes || 'No notes'})`,
-          timestamp: new Date().toISOString(),
-          paymentMethod: settleData.method
-        });
       } else {
         // Entity has credit: Post a refund/settlement (debit)
         await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, amount, settleData.method, profile.uid, isCorporate ? entityId : undefined);
-        
-        // Record as expense
-        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-          type: 'expense',
-          amount: amount,
-          category: 'Other',
-          description: `Overpayment Refund: ${entityName} (${settleData.notes || 'No notes'})`,
-          timestamp: new Date().toISOString(),
-          paymentMethod: settleData.method
-        });
       }
 
       toast.success('Balance settled successfully');
@@ -1311,8 +1291,11 @@ export function Finance() {
                       <input
                         required
                         type="number"
-                        value={newRecord.amount}
-                        onChange={(e) => setNewRecord({ ...newRecord, amount: parseFloat(e.target.value) })}
+                        value={currency === 'USD' ? (newRecord.amount / exchangeRate) || '' : newRecord.amount || ''}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setNewRecord({ ...newRecord, amount: currency === 'USD' ? val * exchangeRate : val });
+                        }}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         placeholder="0.00"
                       />
@@ -1426,8 +1409,11 @@ export function Finance() {
                           <input
                             required
                             type="number"
-                            value={settleData.amount}
-                            onChange={(e) => setSettleData({ ...settleData, amount: parseFloat(e.target.value) })}
+                            value={currency === 'USD' ? (settleData.amount / exchangeRate) || '' : settleData.amount || ''}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setSettleData({ ...settleData, amount: currency === 'USD' ? val * exchangeRate : val });
+                            }}
                             className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             placeholder="0.00"
                           />
@@ -1516,8 +1502,11 @@ export function Finance() {
                     <input
                       required
                       type="number"
-                      value={payData.amount}
-                      onChange={(e) => setPayData({ ...payData, amount: parseFloat(e.target.value) })}
+                      value={currency === 'USD' ? (payData.amount / exchangeRate) || '' : payData.amount || ''}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setPayData({ ...payData, amount: currency === 'USD' ? val * exchangeRate : val });
+                      }}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="0.00"
                     />

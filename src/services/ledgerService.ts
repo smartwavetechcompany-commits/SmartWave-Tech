@@ -1,6 +1,6 @@
 import { db } from '../firebase';
-import { doc, updateDoc, increment, arrayUnion, collection, addDoc, deleteDoc, getDoc, query, where, getDocs } from 'firebase/firestore';
-import { LedgerEntry, Guest, Reservation } from '../types';
+import { doc, updateDoc, increment, arrayUnion, collection, addDoc, deleteDoc, getDoc, query, where, getDocs, arrayRemove } from 'firebase/firestore';
+import { LedgerEntry, Guest, Reservation, FinanceRecord } from '../types';
 
 export const postToLedger = async (
   hotelId: string,
@@ -8,7 +8,8 @@ export const postToLedger = async (
   reservationId: string,
   entry: Omit<LedgerEntry, 'id' | 'timestamp' | 'hotelId' | 'guestId' | 'reservationId'>,
   postedBy: string,
-  corporateId?: string
+  corporateId?: string,
+  paymentMethod: 'cash' | 'card' | 'transfer' = 'cash'
 ) => {
   const timestamp = new Date().toISOString();
   const ledgerEntry: LedgerEntry = {
@@ -32,12 +33,7 @@ export const postToLedger = async (
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
   const docRef = await addDoc(ledgerRef, ledgerEntry);
   
-  // Update the entry with the actual firestore ID if needed, 
-  // but we use the custom ID for arrayUnion/arrayRemove consistency
-  
   // 3. Update Guest or Corporate Account balance
-  // User requested: "OVERSTAY SHOULD GIVE NEGATIVE TO SHOW THE GUEST IS OWNING"
-  // So: Debit (Charge) = Negative, Credit (Payment) = Positive
   const balanceAdjustment = entry.type === 'debit' ? -entry.amount : entry.amount;
 
   if (corporateId) {
@@ -54,18 +50,35 @@ export const postToLedger = async (
   }
 
   // 4. Synchronize Reservation paidAmount and paymentStatus if this is a payment
-  if (entry.type === 'credit' && entry.category === 'payment') {
-    const resSnap = await getDoc(resRef);
-    if (resSnap.exists()) {
-      const resData = resSnap.data() as Reservation;
-      const newPaidAmount = (resData.paidAmount || 0) + entry.amount;
-      const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
-      
-      await updateDoc(resRef, {
-        paidAmount: newPaidAmount,
-        paymentStatus: newPaymentStatus
-      });
+  if (entry.category === 'payment' || entry.category === 'refund') {
+    if (entry.category === 'payment') {
+      const resSnap = await getDoc(resRef);
+      if (resSnap.exists()) {
+        const resData = resSnap.data() as Reservation;
+        const paymentAdjustment = entry.type === 'credit' ? entry.amount : -entry.amount;
+        const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + paymentAdjustment);
+        const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+        
+        await updateDoc(resRef, {
+          paidAmount: newPaidAmount,
+          paymentStatus: newPaymentStatus
+        });
+      }
     }
+
+    // 5. Create Finance Record
+    const financeRef = collection(db, 'hotels', hotelId, 'finance');
+    const financeRecord: Omit<FinanceRecord, 'id'> = {
+      type: entry.type === 'credit' ? 'income' : 'expense',
+      amount: entry.amount,
+      category: entry.category === 'payment' ? 'Room Revenue' : 'Other',
+      description: entry.description,
+      timestamp,
+      paymentMethod,
+      guestId,
+      referenceId: docRef.id // Link to ledger entry
+    };
+    await addDoc(financeRef, financeRecord);
   }
 
   return { ...ledgerEntry, firestoreId: docRef.id };
@@ -104,18 +117,46 @@ export const deleteLedgerEntry = async (
   hotelId: string,
   ledgerEntry: LedgerEntry & { firestoreId?: string }
 ) => {
-  const { id, firestoreId, reservationId, guestId, corporateId, amount, type } = ledgerEntry;
+  const { id, firestoreId, reservationId, guestId, corporateId, amount, type, category } = ledgerEntry;
 
   // 1. Remove from Ledger Collection
   if (firestoreId) {
     await deleteDoc(doc(db, 'hotels', hotelId, 'ledger', firestoreId));
   }
 
-  // 2. Remove from Reservation array (matching by the custom ID)
+  // 2. Remove from Reservation array
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-  // Note: arrayRemove needs the EXACT object. This might be tricky if we don't have the full original object.
-  // We'll try to find it first or just rely on the ledger collection for the folio.
-  // For now, let's focus on the ledger collection which is what GuestFolio uses.
+  const resSnap = await getDoc(resRef);
+  if (resSnap.exists()) {
+    const resData = resSnap.data() as Reservation;
+    const entryToRemove = resData.ledgerEntries?.find(e => e.id === id);
+    if (entryToRemove) {
+      await updateDoc(resRef, {
+        ledgerEntries: arrayRemove(entryToRemove)
+      });
+    }
+
+    // 4. Synchronize Reservation paidAmount and paymentStatus if this was a payment
+    if (type === 'credit' && category === 'payment') {
+      const newPaidAmount = Math.max(0, (resData.paidAmount || 0) - amount);
+      const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+      
+      await updateDoc(resRef, {
+        paidAmount: newPaidAmount,
+        paymentStatus: newPaymentStatus
+      });
+
+      // 5. Delete corresponding Finance Record
+      const financeQ = query(
+        collection(db, 'hotels', hotelId, 'finance'),
+        where('referenceId', '==', firestoreId)
+      );
+      const financeSnap = await getDocs(financeQ);
+      for (const fDoc of financeSnap.docs) {
+        await deleteDoc(fDoc.ref);
+      }
+    }
+  }
 
   // 3. Reverse the balance update
   const reverseAmount = type === 'debit' ? amount : -amount;
@@ -139,7 +180,7 @@ export const settleLedger = async (
   guestId: string,
   reservationId: string,
   amount: number,
-  paymentMethod: string,
+  paymentMethod: 'cash' | 'card' | 'transfer',
   postedBy: string,
   corporateId?: string
 ) => {
@@ -150,7 +191,7 @@ export const settleLedger = async (
     description: `Payment via ${paymentMethod}`,
     referenceId: reservationId,
     postedBy
-  }, postedBy, corporateId);
+  }, postedBy, corporateId, paymentMethod);
 };
 
 export const transferLedgerBalance = async (
@@ -207,7 +248,7 @@ export const settleOverpayment = async (
   guestId: string,
   reservationId: string,
   amount: number,
-  method: string,
+  method: 'cash' | 'card' | 'transfer',
   postedBy: string,
   corporateId?: string
 ) => {
@@ -218,5 +259,5 @@ export const settleOverpayment = async (
     description: `Overpayment Settlement (${method})`,
     referenceId: reservationId,
     postedBy
-  }, postedBy, corporateId);
+  }, postedBy, corporateId, method);
 };
