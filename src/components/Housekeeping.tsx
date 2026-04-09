@@ -14,7 +14,8 @@ import {
   Filter,
   X,
   CheckSquare,
-  Square
+  Square,
+  Calendar
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
 import { format, isWithinInterval, parseISO } from 'date-fns';
@@ -238,21 +239,24 @@ export function Housekeeping() {
             ))}
           </select>
 
-          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 relative">
             <span className="text-[10px] font-bold text-zinc-500 uppercase">From:</span>
             <input 
               type="date"
-              className="bg-transparent text-xs text-white outline-none"
+              className="bg-transparent text-xs text-white outline-none appearance-none"
+              style={{ colorScheme: 'dark' }}
               value={dateRange.start}
               onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
             />
             <span className="text-[10px] font-bold text-zinc-500 uppercase">To:</span>
             <input 
               type="date"
-              className="bg-transparent text-xs text-white outline-none"
+              className="bg-transparent text-xs text-white outline-none appearance-none"
+              style={{ colorScheme: 'dark' }}
               value={dateRange.end}
               onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
             />
+            <Calendar size={14} className="text-zinc-500 pointer-events-none" />
             {(dateRange.start || dateRange.end) && (
               <button 
                 onClick={() => setDateRange({ start: '', end: '' })}

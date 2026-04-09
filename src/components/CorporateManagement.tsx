@@ -726,23 +726,31 @@ export function CorporateManagement() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-zinc-500 uppercase">Start Date</label>
-                        <input
-                          required
-                          type="date"
-                          value={newRate.startDate}
-                          onChange={(e) => setNewRate({ ...newRate, startDate: e.target.value })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
-                        />
+                        <div className="relative">
+                          <input
+                            required
+                            type="date"
+                            value={newRate.startDate}
+                            onChange={(e) => setNewRate({ ...newRate, startDate: e.target.value })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50 appearance-none"
+                            style={{ colorScheme: 'dark' }}
+                          />
+                          <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={14} />
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-zinc-500 uppercase">End Date</label>
-                        <input
-                          required
-                          type="date"
-                          value={newRate.endDate}
-                          onChange={(e) => setNewRate({ ...newRate, endDate: e.target.value })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
-                        />
+                        <div className="relative">
+                          <input
+                            required
+                            type="date"
+                            value={newRate.endDate}
+                            onChange={(e) => setNewRate({ ...newRate, endDate: e.target.value })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50 appearance-none"
+                            style={{ colorScheme: 'dark' }}
+                          />
+                          <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={14} />
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-1">

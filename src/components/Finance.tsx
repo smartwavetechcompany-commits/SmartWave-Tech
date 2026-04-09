@@ -1736,13 +1736,17 @@ export function Finance() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Due Date</label>
-                    <input
-                      required
-                      type="date"
-                      value={newPO.dueDate}
-                      onChange={(e) => setNewPO({ ...newPO, dueDate: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                    />
+                    <div className="relative">
+                      <input
+                        required
+                        type="date"
+                        value={newPO.dueDate}
+                        onChange={(e) => setNewPO({ ...newPO, dueDate: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 appearance-none"
+                        style={{ colorScheme: 'dark' }}
+                      />
+                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                    </div>
                   </div>
                 </div>
 

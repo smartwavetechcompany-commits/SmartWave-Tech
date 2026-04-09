@@ -787,17 +787,16 @@ export function FrontDesk() {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
-          // REMOVED: Redundant with manual posting or nightly audit
-          /*
+          // Post the first night's charge immediately so it shows in the ledger/balance
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           await postToLedger(hotel.id, res.guestId, res.id, {
-            amount: res.totalAmount,
+            amount: rate,
             type: 'debit',
             category: 'room',
-            description: `Room Charge: ${res.roomNumber} (${res.checkIn} to ${res.checkOut})`,
+            description: `Initial Room Charge: ${res.roomNumber} (Night of ${format(new Date(res.checkIn), 'MMM dd, yyyy')})`,
             referenceId: res.id,
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
-          */
 
           // AUTO DEDUCTION: If guest has credit balance, apply it
           const guest = guests.find(g => g.id === res.guestId);
@@ -1546,22 +1545,30 @@ export function FrontDesk() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
-                  <input 
-                    type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={newBooking.checkIn}
-                    min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
-                    onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
-                  />
+                  <div className="relative">
+                    <input 
+                      type="date" 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                      style={{ colorScheme: 'dark' }}
+                      value={newBooking.checkIn}
+                      min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
+                      onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
+                    />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
-                  <input 
-                    type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={newBooking.checkOut}
-                    onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
-                  />
+                  <div className="relative">
+                    <input 
+                      type="date" 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                      style={{ colorScheme: 'dark' }}
+                      value={newBooking.checkOut}
+                      onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
+                    />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                  </div>
                 </div>
               </div>
               <div>
@@ -1870,30 +1877,38 @@ export function FrontDesk() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Check In</label>
-                          <input 
-                            type="date" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                            value={stay.checkIn}
-                            onChange={(e) => {
-                              const updated = [...newBooking.additionalStays];
-                              updated[index].checkIn = e.target.value;
-                              setNewBooking({ ...newBooking, additionalStays: updated });
-                            }}
-                          />
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
+                          <div className="relative">
+                            <input 
+                              type="date" 
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                              style={{ colorScheme: 'dark' }}
+                              value={stay.checkIn}
+                              onChange={(e) => {
+                                const updated = [...newBooking.additionalStays];
+                                updated[index].checkIn = e.target.value;
+                                setNewBooking({ ...newBooking, additionalStays: updated });
+                              }}
+                            />
+                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                          </div>
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Check Out</label>
-                          <input 
-                            type="date" 
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                            value={stay.checkOut}
-                            onChange={(e) => {
-                              const updated = [...newBooking.additionalStays];
-                              updated[index].checkOut = e.target.value;
-                              setNewBooking({ ...newBooking, additionalStays: updated });
-                            }}
-                          />
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
+                          <div className="relative">
+                            <input 
+                              type="date" 
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                              style={{ colorScheme: 'dark' }}
+                              value={stay.checkOut}
+                              onChange={(e) => {
+                                const updated = [...newBooking.additionalStays];
+                                updated[index].checkOut = e.target.value;
+                                setNewBooking({ ...newBooking, additionalStays: updated });
+                              }}
+                            />
+                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2134,22 +2149,30 @@ export function FrontDesk() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
-                  <input 
-                    type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={editForm.checkIn}
-                    min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
-                    onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })}
-                  />
+                  <div className="relative">
+                    <input 
+                      type="date" 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                      style={{ colorScheme: 'dark' }}
+                      value={editForm.checkIn}
+                      min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
+                      onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })}
+                    />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
-                  <input 
-                    type="date" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={editForm.checkOut}
-                    onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })}
-                  />
+                  <div className="relative">
+                    <input 
+                      type="date" 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                      style={{ colorScheme: 'dark' }}
+                      value={editForm.checkOut}
+                      onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })}
+                    />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                  </div>
                 </div>
               </div>
               <div>
@@ -2348,13 +2371,17 @@ export function FrontDesk() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">New Check-out Date</label>
-                <input 
-                  type="date"
-                  min={addDays(new Date(showPostponeModal.checkOut), 1).toISOString().split('T')[0]}
-                  value={newCheckOutDate}
-                  onChange={(e) => setNewCheckOutDate(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                />
+                <div className="relative">
+                  <input 
+                    type="date"
+                    min={addDays(new Date(showPostponeModal.checkOut), 1).toISOString().split('T')[0]}
+                    value={newCheckOutDate}
+                    onChange={(e) => setNewCheckOutDate(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                    style={{ colorScheme: 'dark' }}
+                  />
+                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                </div>
               </div>
               
               {newCheckOutDate && (

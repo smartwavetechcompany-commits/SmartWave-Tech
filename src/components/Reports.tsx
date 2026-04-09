@@ -265,20 +265,22 @@ export function Reports() {
         </div>
         
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-xl">
-            <Calendar size={16} className="text-zinc-500 ml-2" />
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-xl relative">
+            <Calendar size={16} className="text-zinc-500 ml-2 pointer-events-none" />
             <input 
               type="date" 
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1"
+              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
+              style={{ colorScheme: 'dark' }}
             />
             <span className="text-zinc-600">to</span>
             <input 
               type="date" 
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1"
+              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
+              style={{ colorScheme: 'dark' }}
             />
           </div>
 
