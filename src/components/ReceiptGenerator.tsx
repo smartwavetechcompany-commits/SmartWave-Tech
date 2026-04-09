@@ -21,9 +21,11 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
+  const totalPayments = credits.filter(e => e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
+  const totalOtherCredits = totalCredits - totalPayments;
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
-  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
+  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   const subtotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
   
   // Calculate Taxes
@@ -51,7 +53,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   });
 
   const grandTotal = subtotal + taxTotal;
-  const hasPaymentInLedger = ledgerEntries.some(e => e.category === 'payment' && e.type === 'credit');
+  const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (reservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
@@ -213,9 +215,15 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
         {type === 'comprehensive' && (
           <>
             <div className="flex justify-between items-center text-emerald-600">
-              <span className="text-xs font-bold uppercase tracking-widest">Total Paid</span>
-              <span className="font-bold">{formatCurrency(Math.abs(totalPaid), currency, exchangeRate)}</span>
+              <span className="text-xs font-bold uppercase tracking-widest">Payments Received</span>
+              <span className="font-bold">{formatCurrency(hasPaymentInLedger ? totalPayments : (reservation.paidAmount || 0), currency, exchangeRate)}</span>
             </div>
+            {totalOtherCredits > 0 && (
+              <div className="flex justify-between items-center text-emerald-600">
+                <span className="text-xs font-bold uppercase tracking-widest">Discounts & Transfers</span>
+                <span className="font-bold">{formatCurrency(totalOtherCredits, currency, exchangeRate)}</span>
+              </div>
+            )}
             <div className="border-t border-zinc-200 pt-3 flex justify-between items-center">
               <span className="text-sm font-black uppercase tracking-tighter">
                 {balance < 0 ? 'Credit Balance' : 'Balance Due'}

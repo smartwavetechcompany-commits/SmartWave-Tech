@@ -17,7 +17,8 @@ import {
   ArrowDownRight,
   Calendar,
   DollarSign,
-  Activity
+  Activity,
+  Download
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -30,6 +31,9 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
+import { exportToCSV } from '../utils';
+import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 export function Dashboard() {
   const { hotel, profile, isSubscriptionActive, currency, exchangeRate } = useAuth();
@@ -121,6 +125,19 @@ export function Dashboard() {
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
   const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
   const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
+
+  const handleExportTransactions = () => {
+    const dataToExport = finance.slice(0, 100).map(f => ({
+      Date: format(new Date(f.timestamp), 'MMM d, yyyy HH:mm'),
+      Type: f.type.toUpperCase(),
+      Category: f.category,
+      Description: f.description,
+      Amount: f.amount,
+      Method: f.paymentMethod
+    }));
+    exportToCSV(dataToExport, `transactions_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    toast.success('Transactions exported successfully');
+  };
 
   if (!isSubscriptionActive && profile?.role !== 'superAdmin') {
     return (
@@ -249,6 +266,56 @@ export function Dashboard() {
               )}
             </div>
           </div>
+
+          {/* Recent Transactions */}
+          {profile?.role !== 'superAdmin' && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <DollarSign size={18} className="text-emerald-500" />
+                  <h3 className="font-bold text-zinc-50">Recent Transactions</h3>
+                </div>
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={handleExportTransactions}
+                    className="text-zinc-400 hover:text-zinc-50 transition-colors"
+                    title="Download Transactions"
+                  >
+                    <Download size={18} />
+                  </button>
+                  <Link to="/finance" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
+                </div>
+              </div>
+              <div className="divide-y divide-zinc-800">
+                {finance.length === 0 ? (
+                  <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
+                ) : (
+                  finance.slice(0, 5).map(record => (
+                    <div key={record.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-4">
+                        <div className={cn(
+                          "w-10 h-10 rounded-full flex items-center justify-center",
+                          record.type === 'income' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                        )}>
+                          {record.type === 'income' ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium text-zinc-50">{record.description}</div>
+                          <div className="text-xs text-zinc-500">{record.category} • {format(new Date(record.timestamp), 'MMM d, HH:mm')}</div>
+                        </div>
+                      </div>
+                      <div className={cn(
+                        "text-sm font-bold",
+                        record.type === 'income' ? "text-emerald-500" : "text-red-500"
+                      )}>
+                        {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Audit Logs Section */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">

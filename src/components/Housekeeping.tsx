@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, setDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType } from '../types';
+import { Room, OperationType, UserProfile } from '../types';
 import { 
   ClipboardList, 
   CheckCircle2, 
@@ -15,7 +15,8 @@ import {
   X,
   CheckSquare,
   Square,
-  Calendar
+  Calendar,
+  User as UserIcon
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
 import { format, isWithinInterval, parseISO } from 'date-fns';
@@ -25,6 +26,7 @@ import { toast } from 'sonner';
 export function Housekeeping() {
   const { hotel, profile } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [staff, setStaff] = useState<UserProfile[]>([]);
   const [filter, setFilter] = useState<'all' | 'dirty' | 'clean' | 'maintenance' | 'out_of_service'>('all');
   const [roomTypeFilter, setRoomTypeFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,7 +56,18 @@ export function Housekeeping() {
     return () => unsub();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
-  const updateRoomStatus = async (roomId: string, status: Room['status']) => {
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    
+    const q = query(collection(db, 'users'), where('hotelId', '==', hotel.id));
+    const unsub = onSnapshot(q, (snap) => {
+      setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+    });
+
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  const updateRoomStatus = async (roomId: string, status: Room['status'], assignedTo?: string) => {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
     const notes = roomNotes[roomId] ?? room?.notes ?? '';
@@ -66,6 +79,7 @@ export function Housekeeping() {
         notes 
       };
 
+      if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
       if (status === 'clean') updateData.lastCleanedAt = now;
       if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = now;
 
@@ -78,14 +92,14 @@ export function Housekeeping() {
         userEmail: profile?.email || 'system',
         userRole: profile?.role || 'staff',
         action: 'HOUSEKEEPING_UPDATE',
-        resource: `Room ${room?.roomNumber || roomId}: ${status}${notes ? ` (Note: ${notes})` : ''}`,
+        resource: `Room ${room?.roomNumber || roomId}: ${status}${notes ? ` (Note: ${notes})` : ''}${assignedTo ? ` (Assigned to: ${staff.find(s => s.uid === assignedTo)?.displayName || assignedTo})` : ''}`,
         hotelId: hotel.id,
         module: 'Housekeeping'
       });
-      toast.success(`Room ${room?.roomNumber} marked as ${status.replace('_', ' ')}`);
+      toast.success(`Room ${room?.roomNumber} updated`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
-      toast.error('Failed to update room status');
+      toast.error('Failed to update room');
     }
   };
 
@@ -309,6 +323,20 @@ export function Housekeeping() {
               
               <div className="text-xs text-zinc-500 uppercase font-bold tracking-widest">
                 {room.type} • Floor {room.floor}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Assigned To</label>
+                <select
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none transition-all"
+                  value={room.assignedTo || ''}
+                  onChange={(e) => updateRoomStatus(room.id, room.status, e.target.value)}
+                >
+                  <option value="">Unassigned</option>
+                  {staff.map(s => (
+                    <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex-1 space-y-2">

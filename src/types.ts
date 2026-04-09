@@ -162,6 +162,7 @@ export interface Room {
   notes?: string;
   lastCleanedAt?: string;
   lastFlaggedAt?: string;
+  assignedTo?: string; // Staff UID
 }
 
 export interface Reservation {

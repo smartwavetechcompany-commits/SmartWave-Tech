@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, orderBy, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, addDoc, updateDoc, doc, onSnapshot, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { MaintenanceRequest, OperationType, Room } from '../types';
+import { MaintenanceRequest, OperationType, Room, UserProfile } from '../types';
 import { 
   Wrench, 
   AlertTriangle, 
@@ -16,7 +16,8 @@ import {
   Calendar,
   ChevronRight,
   AlertCircle,
-  Download
+  Download,
+  UserPlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
@@ -27,6 +28,7 @@ export function Maintenance() {
   const { hotel, profile } = useAuth();
   const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [staff, setStaff] = useState<UserProfile[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high' | 'urgent'>('all');
@@ -35,7 +37,8 @@ export function Maintenance() {
     roomNumber: '',
     issue: '',
     priority: 'medium' as MaintenanceRequest['priority'],
-    notes: ''
+    notes: '',
+    assignedTo: ''
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -57,9 +60,14 @@ export function Maintenance() {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
     });
 
+    const unsubStaff = onSnapshot(query(collection(db, 'users'), where('hotelId', '==', hotel.id)), (snap) => {
+      setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+    });
+
     return () => {
       unsub();
       unsubRooms();
+      unsubStaff();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -89,17 +97,18 @@ export function Maintenance() {
 
       toast.success('Maintenance request created');
       setShowAddModal(false);
-      setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '' });
+      setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/maintenance`);
       toast.error('Failed to create request');
     }
   };
 
-  const updateRequestStatus = async (requestId: string, status: MaintenanceRequest['status']) => {
+  const updateRequestStatus = async (requestId: string, status: MaintenanceRequest['status'], assignedTo?: string) => {
     if (!hotel?.id) return;
     const updates: any = { status };
     if (status === 'completed') updates.completedAt = new Date().toISOString();
+    if (assignedTo !== undefined) updates.assignedTo = assignedTo;
 
     try {
       await updateDoc(doc(db, 'hotels', hotel.id, 'maintenance', requestId), updates);
@@ -111,7 +120,7 @@ export function Maintenance() {
         userEmail: profile?.email,
         userRole: profile?.role,
         action: 'MAINTENANCE_STATUS_UPDATE',
-        resource: `Request ${requestId}: ${status}`,
+        resource: `Request ${requestId}: ${status}${assignedTo ? ` (Assigned to: ${staff.find(s => s.uid === assignedTo)?.displayName || assignedTo})` : ''}`,
         hotelId: hotel.id,
         module: 'Maintenance'
       });
@@ -264,6 +273,19 @@ export function Maintenance() {
                       <User size={12} />
                       <span>Reported by: {request.reportedBy.split('@')[0]}</span>
                     </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <UserPlus size={12} className="text-zinc-500" />
+                      <select
+                        value={request.assignedTo || ''}
+                        onChange={(e) => updateRequestStatus(request.id, request.status, e.target.value)}
+                        className="bg-transparent text-zinc-400 focus:text-zinc-50 outline-none cursor-pointer hover:text-zinc-300 transition-colors"
+                      >
+                        <option value="">Unassigned</option>
+                        {staff.map(s => (
+                          <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
@@ -352,6 +374,19 @@ export function Maintenance() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
                     placeholder="Describe the problem..."
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Assign To (Optional)</label>
+                  <select
+                    value={newRequest.assignedTo}
+                    onChange={(e) => setNewRequest({ ...newRequest, assignedTo: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="">Select Staff Member</option>
+                    {staff.map(s => (
+                      <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Additional Notes</label>

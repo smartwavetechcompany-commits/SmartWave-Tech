@@ -184,10 +184,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const totalPayments = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
+  const totalOtherCredits = totalCredits - totalPayments;
   
   // If room charges are already in ledger, don't add currentReservation.totalAmount again
-  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category === 'room' && e.type === 'debit');
-  const hasPaymentInLedger = ledgerEntries.some(e => e.category === 'payment');
+  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment');
   
   const grandTotal = hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits);
   const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (currentReservation.paidAmount || 0));
@@ -346,9 +348,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <span className="text-zinc-50 font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Total Payments</span>
-                  <span className="text-emerald-500 font-bold">{formatCurrency(totalPaid, currency, exchangeRate)}</span>
+                  <span className="text-zinc-500">Payments Received</span>
+                  <span className="text-emerald-500 font-bold">{formatCurrency(hasPaymentInLedger ? totalPayments : (currentReservation.paidAmount || 0), currency, exchangeRate)}</span>
                 </div>
+                {totalOtherCredits > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Discounts & Transfers</span>
+                    <span className="text-emerald-500 font-bold">{formatCurrency(totalOtherCredits, currency, exchangeRate)}</span>
+                  </div>
+                )}
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
                   <span className="text-sm font-bold text-zinc-50 uppercase">Balance Due</span>
                   <div className="flex flex-col items-end">
@@ -669,10 +677,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <tr>
                     <td colSpan={3} className="px-6 py-4 text-right text-[10px] font-bold text-zinc-500 uppercase">Totals</td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-500">
-                      {formatCurrency(totalDebits, currency, exchangeRate)}
+                      {formatCurrency(grandTotal, currency, exchangeRate)}
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
-                      {formatCurrency(totalCredits, currency, exchangeRate)}
+                      {formatCurrency(totalPaid, currency, exchangeRate)}
                     </td>
                     {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                       <td className="px-6 py-4"></td>

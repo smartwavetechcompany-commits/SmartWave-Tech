@@ -284,7 +284,7 @@ export function FrontDesk() {
   }, [profile?.uid, hotel?.id]);
 
   const handleBooking = async () => {
-    if (!hotel?.id) return;
+    if (!hotel?.id || loading) return;
     
     const allStays = [
       {
@@ -920,17 +920,11 @@ export function FrontDesk() {
 
   const updatePayment = async (res: Reservation, amount: number) => {
     if (!hotel?.id || !profile) return;
-    const newPaidAmount = (res.paidAmount || 0) + amount;
-    const paymentStatus = newPaidAmount >= res.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
     
     try {
       setLoading(true);
-      await setDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
-        paidAmount: newPaidAmount,
-        paymentStatus 
-      }, { merge: true });
-
       // Use settleLedger to record payment and update guest balance
+      // settleLedger also updates reservation.paidAmount and paymentStatus automatically
       if (res.guestId) {
         await settleLedger(
           hotel.id, 
@@ -1944,9 +1938,10 @@ export function FrontDesk() {
               </button>
               <button 
                 onClick={handleBooking}
-                className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                disabled={loading}
+                className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirm Booking
+                {loading ? 'Processing...' : 'Confirm Booking'}
               </button>
             </div>
           </div>
@@ -2078,8 +2073,9 @@ export function FrontDesk() {
                           </button>
                           <button 
                             onClick={() => updateReservationStatus(res, 'checked_out')}
-                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
                             title="Check Out"
+                            disabled={loading}
                           >
                             <LogOut size={18} />
                           </button>
@@ -2090,22 +2086,25 @@ export function FrontDesk() {
                         <>
                           <button 
                             onClick={() => updateReservationStatus(res, 'checked_in')}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
                             title="Check In"
+                            disabled={loading}
                           >
                             <CheckCircle2 size={18} />
                           </button>
                           <button 
                             onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
                             title="Mark No-Show"
+                            disabled={loading}
                           >
                             <UserX size={18} />
                           </button>
                           <button 
                             onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
-                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
+                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
                             title="Cancel"
+                            disabled={loading}
                           >
                             <XCircle size={18} />
                           </button>
@@ -2140,8 +2139,9 @@ export function FrontDesk() {
                       {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                         <button 
                           onClick={() => setShowConfirmAction({ res, action: 'delete' })}
-                          className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90"
+                          className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
                           title="Delete Reservation"
+                          disabled={loading}
                         >
                           <Trash2 size={18} />
                         </button>
