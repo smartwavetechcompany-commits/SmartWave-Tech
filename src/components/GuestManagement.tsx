@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Guest, OperationType, Reservation, CorporateAccount } from '../types';
+import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
 import { 
   Users, 
   Plus, 
@@ -44,6 +44,8 @@ export function GuestManagement() {
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
   const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
+  const [guestLedger, setGuestLedger] = useState<LedgerEntry[]>([]);
+  const [historyTab, setHistoryTab] = useState<'reservations' | 'ledger'>('reservations');
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showFolio, setShowFolio] = useState<Reservation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,15 +88,29 @@ export function GuestManagement() {
   useEffect(() => {
     if (!viewingHistory || !hotel?.id) return;
     
-    const q = query(
+    // Fetch reservations
+    const qRes = query(
       collection(db, 'hotels', hotel.id, 'reservations'),
       where('guestEmail', '==', viewingHistory.email)
     );
-    const unsub = onSnapshot(q, (snap) => {
+    const unsubRes = onSnapshot(qRes, (snap) => {
       setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
     });
+
+    // Fetch full ledger history for guest
+    const qLedger = query(
+      collection(db, 'hotels', hotel.id, 'ledger'),
+      where('guestId', '==', viewingHistory.id),
+      orderBy('timestamp', 'desc')
+    );
+    const unsubLedger = onSnapshot(qLedger, (snap) => {
+      setGuestLedger(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+    });
     
-    return () => unsub();
+    return () => {
+      unsubRes();
+      unsubLedger();
+    };
   }, [viewingHistory, hotel?.id]);
 
   useEffect(() => {
@@ -519,50 +535,114 @@ export function GuestManagement() {
                 </div>
                 <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
                   <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Ledger Balance</div>
-                  <div className="text-2xl font-bold text-blue-500">{formatCurrency(viewingHistory.ledgerBalance || 0, currency, exchangeRate)}</div>
+                  <div className={cn(
+                    "text-2xl font-bold",
+                    (viewingHistory.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
+                  )}>
+                    {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
+                    {(viewingHistory.ledgerBalance || 0) < 0 ? " (Debt)" : (viewingHistory.ledgerBalance || 0) > 0 ? " (Credit)" : ""}
+                  </div>
                 </div>
               </div>
 
-              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Recent Reservations</h3>
-              {guestHistory.length === 0 ? (
-                <div className="text-center py-12 text-zinc-500 bg-zinc-950 rounded-2xl border border-dashed border-zinc-800">
-                  <Clock size={32} className="mx-auto mb-2 opacity-20" />
-                  <p>No reservation history found</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
-                    <div key={res.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-emerald-500">
-                          <Calendar size={20} />
-                        </div>
-                        <div>
-                          <div className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
-                          <div className="text-xs text-zinc-500">
-                            {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
-                          </div>
-                          <button 
-                            onClick={() => setShowFolio(res)}
-                            className="mt-2 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
-                          >
-                            <Receipt size={10} />
-                            View Folio
-                          </button>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
-                        <div className={cn(
-                          "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block",
-                          res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
-                        )}>
-                          {res.status.replace('_', ' ')}
-                        </div>
-                      </div>
+              {/* Tabs */}
+              <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl border border-zinc-800 mb-6">
+                <button
+                  onClick={() => setHistoryTab('reservations')}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg text-xs font-bold transition-all",
+                    historyTab === 'reservations' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
+                  )}
+                >
+                  Reservations
+                </button>
+                <button
+                  onClick={() => setHistoryTab('ledger')}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg text-xs font-bold transition-all",
+                    historyTab === 'ledger' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
+                  )}
+                >
+                  Account Ledger
+                </button>
+              </div>
+
+              {historyTab === 'reservations' ? (
+                <>
+                  <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Recent Reservations</h3>
+                  {guestHistory.length === 0 ? (
+                    <div className="text-center py-12 text-zinc-500 bg-zinc-950 rounded-2xl border border-dashed border-zinc-800">
+                      <Clock size={32} className="mx-auto mb-2 opacity-20" />
+                      <p>No reservation history found</p>
                     </div>
-                  ))}
-                </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
+                        <div key={res.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-emerald-500">
+                              <Calendar size={20} />
+                            </div>
+                            <div>
+                              <div className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
+                              <div className="text-xs text-zinc-500">
+                                {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                              </div>
+                              <button 
+                                onClick={() => setShowFolio(res)}
+                                className="mt-2 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
+                              >
+                                <Receipt size={10} />
+                                View Folio
+                              </button>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
+                            <div className={cn(
+                              "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block",
+                              res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
+                            )}>
+                              {res.status.replace('_', ' ')}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Transaction History</h3>
+                  {guestLedger.length === 0 ? (
+                    <div className="text-center py-12 text-zinc-500 bg-zinc-950 rounded-2xl border border-dashed border-zinc-800">
+                      <CreditCard size={32} className="mx-auto mb-2 opacity-20" />
+                      <p>No transactions found</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {guestLedger.map(entry => (
+                        <div key={entry.id} className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-bold text-zinc-50">{entry.description}</div>
+                            <div className="text-[10px] text-zinc-500 flex items-center gap-2">
+                              {format(new Date(entry.timestamp), 'MMM d, yyyy HH:mm')}
+                              <span className="px-1.5 py-0.5 bg-zinc-900 rounded text-[8px] font-bold uppercase tracking-wider">
+                                {entry.category}
+                              </span>
+                            </div>
+                          </div>
+                          <div className={cn(
+                            "text-sm font-bold",
+                            entry.type === 'credit' ? "text-emerald-500" : "text-red-500"
+                          )}>
+                            {entry.type === 'credit' ? '+' : '-'}{formatCurrency(entry.amount, currency, exchangeRate)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
             
