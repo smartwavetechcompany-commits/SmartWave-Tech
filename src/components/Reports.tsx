@@ -266,7 +266,7 @@ export function Reports() {
         
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-xl relative">
-            <Calendar size={16} className="text-zinc-500 ml-2 pointer-events-none" />
+            <Calendar size={18} className="text-emerald-500 ml-2 pointer-events-none" />
             <input 
               type="date" 
               value={dateRange.start}

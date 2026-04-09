@@ -1554,7 +1554,7 @@ export function FrontDesk() {
                       min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                       onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                   </div>
                 </div>
                 <div>
@@ -1567,7 +1567,7 @@ export function FrontDesk() {
                       value={newBooking.checkOut}
                       onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                   </div>
                 </div>
               </div>
@@ -1890,7 +1890,7 @@ export function FrontDesk() {
                                 setNewBooking({ ...newBooking, additionalStays: updated });
                               }}
                             />
-                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                           </div>
                         </div>
                         <div>
@@ -1907,7 +1907,7 @@ export function FrontDesk() {
                                 setNewBooking({ ...newBooking, additionalStays: updated });
                               }}
                             />
-                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                           </div>
                         </div>
                       </div>
@@ -2158,7 +2158,7 @@ export function FrontDesk() {
                       min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                       onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })}
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                   </div>
                 </div>
                 <div>
@@ -2171,7 +2171,7 @@ export function FrontDesk() {
                       value={editForm.checkOut}
                       onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })}
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                   </div>
                 </div>
               </div>
@@ -2380,7 +2380,7 @@ export function FrontDesk() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
                     style={{ colorScheme: 'dark' }}
                   />
-                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                 </div>
               </div>
               

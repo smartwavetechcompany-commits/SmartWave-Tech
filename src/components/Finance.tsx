@@ -1745,7 +1745,7 @@ export function Finance() {
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 appearance-none"
                         style={{ colorScheme: 'dark' }}
                       />
-                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={16} />
+                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                     </div>
                   </div>
                 </div>

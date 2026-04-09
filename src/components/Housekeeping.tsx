@@ -256,7 +256,7 @@ export function Housekeeping() {
               value={dateRange.end}
               onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
             />
-            <Calendar size={14} className="text-zinc-500 pointer-events-none" />
+            <Calendar size={16} className="text-emerald-500 pointer-events-none" />
             {(dateRange.start || dateRange.end) && (
               <button 
                 onClick={() => setDateRange({ start: '', end: '' })}

@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, updateDoc, increment, arrayUnion, collection, addDoc, deleteDoc, arrayRemove } from 'firebase/firestore';
+import { doc, updateDoc, increment, arrayUnion, collection, addDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import { LedgerEntry, Guest, Reservation } from '../types';
 
 export const postToLedger = async (
@@ -51,6 +51,21 @@ export const postToLedger = async (
       ledgerBalance: increment(balanceAdjustment),
       totalSpent: increment(entry.type === 'debit' ? entry.amount : 0)
     });
+  }
+
+  // 4. Synchronize Reservation paidAmount and paymentStatus if this is a payment
+  if (entry.type === 'credit' && entry.category === 'payment') {
+    const resSnap = await getDoc(resRef);
+    if (resSnap.exists()) {
+      const resData = resSnap.data() as Reservation;
+      const newPaidAmount = (resData.paidAmount || 0) + entry.amount;
+      const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+      
+      await updateDoc(resRef, {
+        paidAmount: newPaidAmount,
+        paymentStatus: newPaymentStatus
+      });
+    }
   }
 
   return { ...ledgerEntry, firestoreId: docRef.id };
