@@ -375,7 +375,7 @@ export function FrontDesk() {
           checkOut: stay.checkOut,
           status: 'pending',
           totalAmount,
-          paidAmount: 0,
+          paidAmount: 0, // Initialize to 0, settleLedger will update this
           totalDiscount: 0,
           paymentStatus: 'unpaid',
           notes: newBooking.notes,
@@ -397,11 +397,9 @@ export function FrontDesk() {
           resData.totalDiscount = discountVal;
         }
 
-        // Apply initial payment to the first reservation
-        if (createdStays.length === 0 && newBooking.initialPayment > 0) {
-          resData.paidAmount = newBooking.initialPayment;
-          resData.paymentStatus = newBooking.initialPayment >= (totalAmount - (resData.totalDiscount || 0)) ? 'paid' : 'partial';
-        }
+        // Note: We don't set paidAmount here anymore because settleLedger 
+        // (called after batch.commit) will handle the increment correctly.
+        // This prevents doubling the paidAmount.
 
         batch.set(resRef, resData);
         createdStays.push({ 
@@ -810,18 +808,28 @@ export function FrontDesk() {
             res.corporateId
           );
 
-          // AUTO DEDUCTION: If guest has credit balance, apply it
-          const guest = guests.find(g => g.id === res.guestId);
-          if (guest && guest.ledgerBalance > 0) {
-            const creditToApply = Math.min(guest.ledgerBalance, res.totalAmount - (res.paidAmount || 0));
-            if (creditToApply > 0) {
-              await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
-              // Update reservation paidAmount in batch
-              batch.update(resRef, { 
-                paidAmount: increment(creditToApply),
-                paymentStatus: (res.paidAmount || 0) + creditToApply >= res.totalAmount ? 'paid' : 'partial'
-              });
-              toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
+          // Fetch fresh data to avoid stale state issues with auto-deduction
+          const guestSnap = await getDoc(doc(db, 'hotels', hotel.id, 'guests', res.guestId));
+          const freshResSnap = await getDoc(resRef);
+          
+          if (guestSnap.exists() && freshResSnap.exists()) {
+            const guestData = guestSnap.data() as Guest;
+            const freshResData = freshResSnap.data() as Reservation;
+            
+            // AUTO DEDUCTION: If guest has credit balance, apply it
+            if (guestData.ledgerBalance > 0) {
+              const remainingBalance = freshResData.totalAmount - (freshResData.paidAmount || 0) - (freshResData.totalDiscount || 0);
+              const creditToApply = Math.min(guestData.ledgerBalance, Math.max(0, remainingBalance));
+              
+              if (creditToApply > 0) {
+                await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
+                // Update reservation paidAmount in batch
+                batch.update(resRef, { 
+                  paidAmount: increment(creditToApply),
+                  paymentStatus: (freshResData.paidAmount || 0) + creditToApply >= freshResData.totalAmount ? 'paid' : 'partial'
+                });
+                toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
+              }
             }
           }
         }
