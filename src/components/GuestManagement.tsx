@@ -819,6 +819,22 @@ export function GuestManagement() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Preferences</label>
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {['Extra Pillows', 'Non-Smoking', 'Late Checkout', 'Quiet Room', 'High Floor'].map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => {
+                          if (!newGuest.preferences.includes(p)) {
+                            setNewGuest({ ...newGuest, preferences: [...newGuest.preferences, p] });
+                          }
+                        }}
+                        className="px-2 py-1 bg-zinc-800 text-zinc-400 rounded-lg text-[10px] font-bold hover:bg-zinc-700 hover:text-zinc-50 transition-all"
+                      >
+                        + {p}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {newGuest.preferences.map((pref, index) => (
                       <span key={index} className="px-2 py-1 bg-blue-500/10 text-blue-500 rounded-lg text-xs font-bold flex items-center gap-1">

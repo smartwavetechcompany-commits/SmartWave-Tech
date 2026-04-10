@@ -83,52 +83,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // 2. Profile Fetcher
+  // 2. Profile Fetcher (Real-time)
   useEffect(() => {
     if (!user || hasProfileError) return;
 
-    const fetchProfile = async () => {
-      const profileRef = doc(db, 'users', user.uid);
-      try {
-        const snap = await getDoc(profileRef);
-        if (snap.exists()) {
-          const data = snap.data() as UserProfile;
-          setProfile(data);
-          setLoading(false);
-        } else if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
-          // Auto-bootstrap Super Admin profile if it doesn't exist
-          const bootstrapProfile: UserProfile = {
-            email: user.email,
-            hotelId: 'system',
-            role: 'superAdmin',
-            displayName: user.displayName || 'System Owner',
-            createdAt: new Date().toISOString(),
-            status: 'active',
-            uid: user.uid
-          };
-          await setDoc(profileRef, bootstrapProfile);
-          setProfile(bootstrapProfile);
-          setLoading(false);
-        } else {
-          setProfile(null);
-          setLoading(false);
-        }
-      } catch (err: any) {
-        if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
-          setIsOffline(true);
-        }
-        handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
-        if (err.code === 'permission-denied') {
-          console.warn("Profile access restricted.");
-          setHasProfileError(true);
-        } else {
-          console.error("Profile fetch error:", err);
-        }
+    const profileRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(profileRef, async (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as UserProfile;
+        setProfile(data);
+        setLoading(false);
+      } else if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
+        // Auto-bootstrap Super Admin profile if it doesn't exist
+        const bootstrapProfile: UserProfile = {
+          email: user.email,
+          hotelId: 'system',
+          role: 'superAdmin',
+          displayName: user.displayName || 'System Owner',
+          createdAt: new Date().toISOString(),
+          status: 'active',
+          uid: user.uid
+        };
+        await setDoc(profileRef, bootstrapProfile);
+        setProfile(bootstrapProfile);
+        setLoading(false);
+      } else {
+        setProfile(null);
         setLoading(false);
       }
-    };
+    }, (err: any) => {
+      if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
+        setIsOffline(true);
+      }
+      handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+      if (err.code === 'permission-denied') {
+        console.warn("Profile access restricted.");
+        setHasProfileError(true);
+      } else {
+        console.error("Profile fetch error:", err);
+      }
+      setLoading(false);
+    });
 
-    fetchProfile();
+    return () => unsubscribe();
   }, [user?.uid, hasProfileError]);
 
   // 3. Hotel Fetcher (Real-time)

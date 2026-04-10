@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType, RoomType, Reservation } from '../types';
+import { Room, OperationType, RoomType, Reservation, UserProfile } from '../types';
 import { 
   Plus, 
   Search, 
@@ -38,6 +38,7 @@ import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInte
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [staff, setStaff] = useState<UserProfile[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [isManagingTypes, setIsManagingTypes] = useState(false);
@@ -141,6 +142,19 @@ export function Rooms() {
       setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
     }, (err: any) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+    });
+
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const staffRef = collection(db, 'hotels', hotel.id, 'staff');
+    
+    const unsub = onSnapshot(staffRef, (snap) => {
+      setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+    }, (err: any) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/staff`);
     });
 
     return () => unsub();
@@ -331,15 +345,19 @@ export function Rooms() {
   });
 
   const handleExport = () => {
-    const dataToExport = filteredRooms.map(r => ({
-      Room: r.roomNumber,
-      Type: r.type,
-      Price: r.price,
-      Status: r.status,
-      Floor: r.floor,
-      Capacity: r.capacity,
-      Amenities: (r.amenities || []).join(', ')
-    }));
+    const dataToExport = filteredRooms.map(r => {
+      const assignedStaff = staff.find(s => s.uid === r.assignedTo);
+      return {
+        Room: r.roomNumber,
+        Type: r.type,
+        Price: r.price,
+        Status: r.status,
+        Floor: r.floor,
+        Capacity: r.capacity,
+        'Assigned Staff': assignedStaff ? (assignedStaff.displayName || assignedStaff.email) : 'Unassigned',
+        Amenities: (r.amenities || []).join(', ')
+      };
+    });
     exportToCSV(dataToExport, `rooms_list_${new Date().toISOString().split('T')[0]}.csv`);
     toast.success('Rooms list exported successfully');
   };

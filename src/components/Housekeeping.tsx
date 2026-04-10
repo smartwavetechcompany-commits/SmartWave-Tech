@@ -33,6 +33,8 @@ export function Housekeeping() {
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [roomNotes, setRoomNotes] = useState<Record<string, string>>({});
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
+  const [assignStaffId, setAssignStaffId] = useState<string>('');
+  const [showBulkAssign, setShowBulkAssign] = useState(false);
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
@@ -139,6 +141,43 @@ export function Housekeeping() {
       toast.dismiss(loadingToast);
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/bulk`);
       toast.error('Failed to update rooms');
+    }
+  };
+
+  const handleBulkAssign = async () => {
+    if (!hotel?.id || selectedRoomIds.length === 0 || !assignStaffId) return;
+    
+    const loadingToast = toast.loading(`Assigning ${selectedRoomIds.length} rooms...`);
+    const now = new Date().toISOString();
+    const staffMember = staff.find(s => s.uid === assignStaffId);
+
+    try {
+      await Promise.all(selectedRoomIds.map(async (roomId) => {
+        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { 
+          assignedTo: assignStaffId 
+        }, { merge: true });
+
+        await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+          timestamp: now,
+          userId: profile?.uid || 'system',
+          userEmail: profile?.email || 'system',
+          userRole: profile?.role || 'staff',
+          action: 'HOUSEKEEPING_ASSIGN',
+          resource: `Room ${rooms.find(r => r.id === roomId)?.roomNumber || roomId} assigned to ${staffMember?.displayName || staffMember?.email || assignStaffId}`,
+          hotelId: hotel.id,
+          module: 'Housekeeping'
+        });
+      }));
+
+      toast.dismiss(loadingToast);
+      toast.success(`Successfully assigned ${selectedRoomIds.length} rooms to ${staffMember?.displayName || staffMember?.email}`);
+      setSelectedRoomIds([]);
+      setAssignStaffId('');
+      setShowBulkAssign(false);
+    } catch (err) {
+      toast.dismiss(loadingToast);
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/bulk-assign`);
+      toast.error('Failed to assign rooms');
     }
   };
 
@@ -308,18 +347,26 @@ export function Housekeeping() {
                 {isSelected ? <CheckSquare size={20} className="text-emerald-500" /> : <Square size={20} />}
               </button>
 
-              <div className="flex items-center justify-between pr-8">
-                <span className="text-2xl font-bold text-zinc-50">Room {room.roomNumber}</span>
-                <span 
-                  style={{ 
-                    backgroundColor: `${statusColor}1a`,
-                    color: statusColor
-                  }}
-                  className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider"
-                >
-                  {room.status.replace(/_/g, ' ')}
-                </span>
-              </div>
+          <div className="flex items-center justify-between pr-8">
+            <span className="text-2xl font-bold text-zinc-50">Room {room.roomNumber}</span>
+            <div className="flex flex-col items-end gap-1">
+              <span 
+                style={{ 
+                  backgroundColor: `${statusColor}1a`,
+                  color: statusColor
+                }}
+                className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider"
+              >
+                {room.status.replace(/_/g, ' ')}
+              </span>
+              {room.assignedTo && (
+                <div className="flex items-center gap-1 text-[9px] text-emerald-500 font-bold uppercase tracking-tighter">
+                  <UserIcon size={10} />
+                  {staff.find(s => s.uid === room.assignedTo)?.displayName?.split(' ')[0] || 'Assigned'}
+                </div>
+              )}
+            </div>
+          </div>
               
               <div className="text-xs text-zinc-500 uppercase font-bold tracking-widest">
                 {room.type} • Floor {room.floor}
@@ -418,6 +465,31 @@ export function Housekeeping() {
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="h-8 w-px bg-zinc-800 mx-2" />
+              
+              <div className="flex items-center gap-2">
+                <select
+                  className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none transition-all w-40"
+                  value={assignStaffId}
+                  onChange={(e) => setAssignStaffId(e.target.value)}
+                >
+                  <option value="">Select Staff...</option>
+                  {staff.map(s => (
+                    <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                  ))}
+                </select>
+                <button 
+                  onClick={handleBulkAssign}
+                  disabled={!assignStaffId}
+                  className="px-4 py-2 bg-zinc-800 text-zinc-50 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 flex items-center gap-2 disabled:opacity-50"
+                >
+                  <UserIcon size={14} />
+                  Assign Staff
+                </button>
+              </div>
+
+              <div className="h-8 w-px bg-zinc-800 mx-2" />
+
               <button 
                 onClick={() => handleBulkUpdate('clean')}
                 className="px-4 py-2 bg-emerald-500 text-black rounded-xl text-xs font-bold hover:bg-emerald-400 transition-all active:scale-95 flex items-center gap-2"
