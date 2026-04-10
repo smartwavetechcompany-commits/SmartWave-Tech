@@ -282,3 +282,55 @@ export const settleOverpayment = async (
     postedBy
   }, postedBy, corporateId, method);
 };
+
+export const transferToCityLedger = async (
+  hotelId: string,
+  guestId: string,
+  reservationId: string,
+  amount: number,
+  postedBy: string,
+  corporateId?: string
+) => {
+  // 1. Post credit to reservation to clear folio
+  await postToLedger(hotelId, guestId, reservationId, {
+    amount,
+    type: 'credit',
+    category: 'city_ledger',
+    description: 'Transfer to City Ledger',
+    referenceId: reservationId,
+    postedBy
+  }, postedBy, corporateId);
+
+  // 2. Post debit to guest/corporate account to maintain the debt
+  // We do this by posting a debit that doesn't affect the reservation's paidAmount logic
+  // but affects the ledgerBalance. 
+  // Actually, postToLedger already updated the balance (credit reduced it).
+  // So we need to add it back.
+  
+  if (corporateId) {
+    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
+    await updateDoc(corpRef, {
+      currentBalance: increment(amount)
+    });
+  } else {
+    const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
+    await updateDoc(guestRef, {
+      ledgerBalance: increment(amount)
+    });
+  }
+
+  // 3. Log the transfer
+  await addDoc(collection(db, 'hotels', hotelId, 'ledger'), {
+    hotelId,
+    guestId,
+    corporateId,
+    reservationId: 'CITY_LEDGER', // Special ID for non-folio debt
+    timestamp: new Date().toISOString(),
+    amount,
+    type: 'debit',
+    category: 'city_ledger',
+    description: `City Ledger Debt from Res #${reservationId.slice(-6).toUpperCase()}`,
+    referenceId: reservationId,
+    postedBy
+  });
+};

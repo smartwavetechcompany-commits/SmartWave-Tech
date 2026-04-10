@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { UserProfile, Hotel, Room, FinanceRecord, CorporateAccount, Reservation, LedgerEntry } from '../types';
+import { UserProfile, Hotel, Room, FinanceRecord, CorporateAccount, Reservation, LedgerEntry, Guest } from '../types';
 import { 
   BarChart3, 
   PieChart, 
@@ -36,7 +36,7 @@ import {
   Cell,
   Pie
 } from 'recharts';
-import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay, isWithinInterval, addDays } from 'date-fns';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -63,6 +63,11 @@ export function Reports() {
   const [occupancyData, setOccupancyData] = useState<{ name: string; rate: number }[]>([]);
   const [corporateData, setCorporateData] = useState<{ name: string; value: number }[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
+  const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
+  const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -84,6 +89,26 @@ export function Reports() {
         const ledgerSnap = await getDocs(collection(db, 'hotels', hotel.id, 'ledger'));
         const allEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
         
+        // Fetch all other data needed for reports
+        const [rSnap, gSnap, cSnap, fSnap] = await Promise.all([
+          getDocs(collection(db, 'hotels', hotel.id, 'reservations')),
+          getDocs(collection(db, 'hotels', hotel.id, 'guests')),
+          getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts')),
+          getDocs(collection(db, 'hotels', hotel.id, 'finance'))
+        ]);
+
+        const allReservations = rSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+        const allRooms = roomsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room));
+        const allGuests = gSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
+        const allCorps = cSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount));
+        const allFinance = fSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
+
+        setReservations(allReservations);
+        setRooms(allRooms);
+        setGuests(allGuests);
+        setCorporateAccounts(allCorps);
+        setFinanceRecords(allFinance);
+
         const filteredEntries = allEntries.filter(entry => {
           const entryDate = new Date(entry.timestamp);
           return isWithinInterval(entryDate, { start: startDate, end: endDate });
@@ -171,43 +196,215 @@ export function Reports() {
     fetchData();
   }, [hotel?.id, dateRange]);
 
+  const getReportHeaders = (type: string): string[] => {
+    switch (type) {
+      case 'occupancy': return ['Date', 'Total Rooms', 'Occupied', 'Occupancy %'];
+      case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Nights', 'Balance'];
+      case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
+      case 'daily_sales': return ['Date', 'Room Revenue', 'F & B', 'Other', 'Total'];
+      case 'monthly_sales': return ['Month', 'Room Revenue', 'F & B', 'Other', 'Total'];
+      case 'payments': return ['Date', 'Guest', 'Method', 'Description', 'Amount'];
+      case 'balance': return ['Guest Name', 'Room', 'Total Charges', 'Total Paid', 'Balance'];
+      case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
+      case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Total Spent'];
+      case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
+      case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
+      case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
+      default: return ['Date', 'Description', 'Category', 'Amount'];
+    }
+  };
+
+  const getReportData = (type: string): any[] => {
+    const startDate = startOfDay(new Date(dateRange.start));
+    const endDate = endOfDay(new Date(dateRange.end));
+
+    switch (type) {
+      case 'occupancy': {
+        const data: any[] = [];
+        let curr = new Date(startDate);
+        while (curr <= endDate) {
+          const dayStr = format(curr, 'yyyy-MM-dd');
+          const occupied = reservations.filter(res => {
+            const checkIn = new Date(res.checkIn);
+            const checkOut = new Date(res.checkOut);
+            return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut) && (res.status === 'checked_in' || res.status === 'checked_out');
+          }).length;
+          data.push({
+            Date: dayStr,
+            'Total Rooms': rooms.length,
+            Occupied: occupied,
+            'Occupancy %': rooms.length > 0 ? `${Math.round((occupied / rooms.length) * 100)}%` : '0%'
+          });
+          curr = addDays(curr, 1);
+        }
+        return data;
+      }
+      case 'inhouse': {
+        return reservations
+          .filter(res => res.status === 'checked_in')
+          .map(res => ({
+            Room: res.roomNumber,
+            'Guest Name': res.guestName,
+            Arrival: res.checkIn,
+            Departure: res.checkOut,
+            Nights: res.nights || 0,
+            Balance: res.totalAmount - (res.paidAmount || 0)
+          }));
+      }
+      case 'reservations': {
+        return reservations
+          .filter(res => {
+            const date = new Date(res.createdAt || res.checkIn);
+            return isWithinInterval(date, { start: startDate, end: endDate });
+          })
+          .map(res => ({
+            'Res #': res.id.slice(-6).toUpperCase(),
+            'Guest Name': res.guestName,
+            Room: res.roomNumber,
+            Arrival: res.checkIn,
+            Departure: res.checkOut,
+            Status: res.status.replace('_', ' ').toUpperCase(),
+            Total: res.totalAmount
+          }));
+      }
+      case 'daily_sales': {
+        const data: any[] = [];
+        let curr = new Date(startDate);
+        while (curr <= endDate) {
+          const dayStr = format(curr, 'yyyy-MM-dd');
+          const dayEntries = ledgerEntries.filter(e => format(new Date(e.timestamp), 'yyyy-MM-dd') === dayStr);
+          const roomRev = dayEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const fbRev = dayEntries.filter(e => e.category === 'F & B' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const otherRev = dayEntries.filter(e => !['room', 'F & B'].includes(e.category) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          data.push({
+            Date: dayStr,
+            'Room Revenue': roomRev,
+            'F & B': fbRev,
+            Other: otherRev,
+            Total: roomRev + fbRev + otherRev
+          });
+          curr = addDays(curr, 1);
+        }
+        return data;
+      }
+      case 'payments': {
+        return ledgerEntries
+          .filter(e => e.category === 'payment' && e.type === 'credit')
+          .map(e => ({
+            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
+            Method: e.description.split('via ')[1] || 'Cash',
+            Description: e.description,
+            Amount: e.amount
+          }));
+      }
+      case 'balance': {
+        return reservations
+          .filter(res => res.status === 'checked_in')
+          .map(res => ({
+            'Guest Name': res.guestName,
+            Room: res.roomNumber,
+            'Total Charges': res.totalAmount,
+            'Total Paid': res.paidAmount || 0,
+            Balance: res.totalAmount - (res.paidAmount || 0)
+          }));
+      }
+      case 'rooms': {
+        return rooms.map(room => {
+          const roomRes = reservations.filter(r => r.roomId === room.id);
+          const revenue = ledgerEntries.filter(e => e.reservationId && roomRes.find(r => r.id === e.reservationId) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          return {
+            'Room #': room.roomNumber,
+            Type: room.type,
+            Status: room.status.toUpperCase(),
+            'Total Revenue': revenue,
+            'Occupancy Count': roomRes.length
+          };
+        });
+      }
+      case 'guests': {
+        return guests.map(guest => ({
+          'Guest Name': guest.name,
+          Email: guest.email,
+          Phone: guest.phone,
+          'Total Stays': guest.totalStays || 0,
+          'Total Spent': guest.totalSpent || 0
+        }));
+      }
+      case 'services': {
+        return ledgerEntries
+          .filter(e => ['restaurant', 'laundry', 'F & B', 'service'].includes(e.category) && e.type === 'debit')
+          .map(e => ({
+            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Service: e.category.toUpperCase(),
+            Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
+            Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
+            Amount: e.amount
+          }));
+      }
+      case 'laundry': {
+        return ledgerEntries
+          .filter(e => e.category === 'laundry' && e.type === 'debit')
+          .map(e => ({
+            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
+            Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
+            Description: e.description,
+            Amount: e.amount
+          }));
+      }
+      case 'staff_sales': {
+        const staffSales: Record<string, { name: string; module: string; total: number; count: number }> = {};
+        ledgerEntries.filter(e => e.type === 'debit').forEach(e => {
+          const key = `${e.postedBy}_${e.category}`;
+          if (!staffSales[key]) {
+            staffSales[key] = { name: e.postedBy, module: e.category, total: 0, count: 0 };
+          }
+          staffSales[key].total += e.amount;
+          staffSales[key].count += 1;
+        });
+        return Object.values(staffSales).map(s => ({
+          'Staff Name': s.name,
+          Module: s.module.toUpperCase(),
+          'Total Sales': s.total,
+          Count: s.count
+        }));
+      }
+      default: return [];
+    }
+  };
+
   const exportPDF = () => {
     const doc = new jsPDF();
+    const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
     
     // Add header
     doc.setFontSize(20);
-    doc.text(`${hotel?.name || 'Hotel'} - Financial Report`, 14, 22);
+    doc.text(`${hotel?.name || 'Hotel'} - ${reportLabel}`, 14, 22);
     doc.setFontSize(10);
     doc.text(`Period: ${dateRange.start} to ${dateRange.end}`, 14, 30);
     doc.text(`Generated on: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`, 14, 35);
 
-    // Add stats summary
-    doc.setFontSize(14);
-    doc.text('Summary Statistics', 14, 45);
-    doc.setFontSize(10);
-    doc.text(`Total Revenue: ${formatForExport(stats.totalRevenue)}`, 14, 52);
-    doc.text(`Corporate Revenue: ${formatForExport(stats.corporateRevenue)}`, 14, 57);
-    doc.text(`Individual Revenue: ${formatForExport(stats.individualRevenue)}`, 14, 62);
-    doc.text(`Total Guests: ${stats.totalGuests}`, 14, 67);
-
     // Add table
-    const tableData = ledgerEntries.map(entry => [
-      format(new Date(entry.timestamp), 'yyyy-MM-dd HH:mm'),
-      entry.description,
-      entry.category,
-      entry.type.toUpperCase(),
-      formatForExport(entry.amount)
-    ]);
+    const headers = getReportHeaders(activeReport);
+    const data = getReportData(activeReport);
+    
+    const tableData = data.map(row => Object.values(row).map((val: any, j) => {
+      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => Object.keys(row)[j].includes(k))) {
+        return formatForExport(val);
+      }
+      return val;
+    }));
 
     (doc as any).autoTable({
-      startY: 75,
-      head: [['Date', 'Description', 'Category', 'Type', 'Amount']],
+      startY: 45,
+      head: [headers],
       body: tableData,
       theme: 'grid',
       headStyles: { fillColor: [16, 185, 129] }
     });
 
-    doc.save(`hotel_report_${dateRange.start}_to_${dateRange.end}.pdf`);
+    doc.save(`hotel_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.pdf`);
     toast.success("PDF exported successfully");
   };
 
@@ -216,18 +413,24 @@ export function Reports() {
   };
 
   const exportExcel = () => {
-    const worksheet = XLSX.utils.json_to_sheet(ledgerEntries.map(entry => ({
-      Date: format(new Date(entry.timestamp), 'yyyy-MM-dd HH:mm'),
-      Description: entry.description,
-      Category: entry.category,
-      Type: entry.type.toUpperCase(),
-      Amount: entry.amount,
-      Currency: currency
-    })));
+    const data = getReportData(activeReport);
+    const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
+    
+    const worksheet = XLSX.utils.json_to_sheet(data.map(row => {
+      const formattedRow: any = {};
+      Object.entries(row).forEach(([key, val], j) => {
+        if (typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => key.includes(k))) {
+          formattedRow[key] = val; // Keep as number for Excel
+        } else {
+          formattedRow[key] = val;
+        }
+      });
+      return formattedRow;
+    }));
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Ledger Entries");
-    XLSX.writeFile(workbook, `hotel_report_${dateRange.start}_to_${dateRange.end}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, reportLabel.slice(0, 31));
+    XLSX.writeFile(workbook, `hotel_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.xlsx`);
     toast.success("Excel exported successfully");
   };
 
@@ -435,25 +638,57 @@ export function Reports() {
               <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
                 <div>
                   <h3 className="font-bold text-zinc-50">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
-                  <p className="text-xs text-zinc-500">Detailed report for the selected period</p>
+                  <p className="text-xs text-zinc-500">Detailed report for the period {dateRange.start} to {dateRange.end}</p>
                 </div>
                 <div className="flex gap-2">
                   <button 
                     onClick={exportExcel}
-                    className="p-2 bg-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-xs font-bold"
                   >
-                    <Download size={16} />
+                    <FileSpreadsheet size={14} />
+                    Excel
+                  </button>
+                  <button 
+                    onClick={exportPDF}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500 hover:text-zinc-50 transition-colors text-xs font-bold"
+                  >
+                    <FileText size={14} />
+                    PDF
                   </button>
                 </div>
               </div>
-              <div className="p-12 text-center">
-                <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <FileText className="text-zinc-500" size={32} />
-                </div>
-                <h4 className="text-zinc-50 font-bold mb-2">Report Ready for Generation</h4>
-                <p className="text-sm text-zinc-500 max-w-xs mx-auto mb-6">
-                  Click the export buttons above to download the full {reportTypes.find(r => r.id === activeReport)?.label} in your preferred format.
-                </p>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-zinc-950 border-b border-zinc-800">
+                    <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">
+                      {getReportHeaders(activeReport).map(header => (
+                        <th key={header} className="px-6 py-4">{header}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {getReportData(activeReport).length === 0 ? (
+                      <tr>
+                        <td colSpan={getReportHeaders(activeReport).length} className="px-6 py-12 text-center text-zinc-500 italic">
+                          No data found for this period
+                        </td>
+                      </tr>
+                    ) : (
+                      getReportData(activeReport).map((row, i) => (
+                        <tr key={i} className="hover:bg-zinc-800/50 transition-colors">
+                          {Object.values(row).map((val: any, j) => (
+                            <td key={j} className="px-6 py-4 text-sm text-zinc-400">
+                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => Object.keys(row)[j].includes(k))
+                                ? formatCurrency(val, currency, exchangeRate)
+                                : val}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

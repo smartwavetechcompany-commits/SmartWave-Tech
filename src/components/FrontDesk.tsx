@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, g
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
-import { postToLedger, settleLedger, postFullStayCharge } from '../services/ledgerService';
+import { postToLedger, settleLedger, postFullStayCharge, transferToCityLedger } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -475,7 +475,9 @@ export function FrontDesk() {
         address: '',
         roomId: '',
         checkIn: format(new Date(), 'yyyy-MM-dd'),
+        checkInTime: '14:00',
         checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
+        checkOutTime: '12:00',
         totalAmount: 0,
         paidAmount: 0,
         paymentStatus: 'unpaid',
@@ -897,15 +899,19 @@ export function FrontDesk() {
 
         const balance = finalTotalDebits - (res.paidAmount || 0);
         if (balance > 0) {
-          toast.warning(`Guest checked out with an outstanding balance of ${formatCurrency(balance, currency, exchangeRate)}. This debt remains on their account.`);
+          // Transfer to City Ledger
+          await transferToCityLedger(hotel.id, res.guestId!, res.id, balance, profile.uid, res.corporateId);
+          
+          toast.info(`Outstanding balance of ${formatCurrency(balance, currency, exchangeRate)} transferred to City Ledger.`);
+          
           // Log debt movement
           await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
             timestamp: new Date().toISOString(),
             userId: profile.uid,
             userEmail: profile.email,
             userRole: profile.role,
-            action: 'DEBT_RETAINED',
-            resource: `Guest ${res.guestName} checked out with ${formatCurrency(balance, currency, exchangeRate)} debt.`,
+            action: 'CITY_LEDGER_TRANSFER',
+            resource: `Guest ${res.guestName} balance of ${formatCurrency(balance, currency, exchangeRate)} moved to City Ledger at checkout.`,
             hotelId: hotel.id,
             module: 'Front Desk'
           });
@@ -1218,7 +1224,9 @@ export function FrontDesk() {
                 address: '',
                 roomId: '',
                 checkIn: format(new Date(), 'yyyy-MM-dd'),
+                checkInTime: '14:00',
                 checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+                checkOutTime: '12:00',
                 guestType: 'corporate',
                 corporateId: '',
                 guestId: '',
@@ -1252,7 +1260,9 @@ export function FrontDesk() {
                       address: '',
                       roomId: '',
                       checkIn: format(new Date(), 'yyyy-MM-dd'),
+                      checkInTime: '14:00',
                       checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+                      checkOutTime: '12:00',
                       guestType: 'individual',
                       corporateId: '',
                       guestId: '',
@@ -2121,6 +2131,18 @@ export function FrontDesk() {
                       
                       {res.status === 'pending' && (
                         <>
+                          <button 
+                            onClick={() => {
+                              const amount = prompt("Enter payment amount:");
+                              if (amount && !isNaN(Number(amount))) {
+                                updatePayment(res, Number(amount));
+                              }
+                            }}
+                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                            title="Take Prepayment / Deposit"
+                          >
+                            <DollarSign size={18} />
+                          </button>
                           <button 
                             onClick={() => updateReservationStatus(res, 'checked_in')}
                             className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"

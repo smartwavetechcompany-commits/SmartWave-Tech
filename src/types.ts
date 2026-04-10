@@ -190,6 +190,7 @@ export interface Reservation {
   discountReason?: string;
   nightlyRate?: number; // Added for nightly audit synchronization
   totalDiscount?: number; // Added to track total discounts separately from payments
+  advanceDeposit?: number;
   createdAt: string;
   ledgerEntries?: LedgerEntry[]; // Changed from string[] to LedgerEntry[]
 }
@@ -342,7 +343,7 @@ export interface LedgerEntry {
   timestamp: string;
   reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry';
   postedBy: string;
 }
 

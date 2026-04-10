@@ -194,7 +194,7 @@ export function OperationsDashboard() {
                         "text-sm font-bold",
                         (res.totalAmount - res.paidAmount) > 0 ? "text-red-400" : "text-emerald-400"
                       )}>
-                        ${(res.totalAmount - res.paidAmount).toFixed(2)}
+                        ${Math.round(res.totalAmount - res.paidAmount)}
                       </div>
                     </td>
                   </motion.tr>

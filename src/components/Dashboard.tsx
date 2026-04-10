@@ -119,6 +119,14 @@ export function Dashboard() {
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
         { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
+        { label: 'Outstanding', value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
+          const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
+          if (res) {
+            const balance = res.totalAmount - (res.paidAmount || 0);
+            return acc + Math.max(0, balance);
+          }
+          return acc;
+        }, 0), currency, exchangeRate), icon: DollarSign, color: 'text-red-500' },
         { label: 'Dirty Rooms', value: rooms.filter(r => r.status === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
       ];
 

@@ -56,6 +56,7 @@ export function Rooms() {
   const [view, setView] = useState<'grid' | 'list' | 'calendar'>('grid');
   const [calendarStartDate, setCalendarStartDate] = useState(startOfDay(new Date()));
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
     roomNumber: '',
@@ -191,6 +192,21 @@ export function Rooms() {
       setEditingRoomType(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/room_types`);
+    }
+  };
+
+  const updateRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !editingRoom) return;
+    try {
+      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
+        ...editingRoom,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      toast.success('Room updated successfully');
+      setEditingRoom(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${editingRoom.id}`);
     }
   };
 
@@ -859,19 +875,47 @@ export function Rooms() {
                 </div>
               )}
               <div className="flex justify-between items-start">
-                <span className="text-lg font-bold">{room.roomNumber}</span>
+                <div className="flex flex-col">
+                  <span className="text-lg font-bold">{room.roomNumber}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">{room.type}</span>
+                </div>
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
-                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'clean'); }} className="p-1 hover:bg-white/10 rounded"><CheckCircle2 size={14} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'dirty'); }} className="p-1 hover:bg-white/10 rounded"><AlertCircle size={14} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'maintenance'); }} className="p-1 hover:bg-white/10 rounded"><Wrench size={14} /></button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
+                    className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                    title="Edit Room Details"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'clean'); }} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors" title="Mark Clean"><CheckCircle2 size={14} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'dirty'); }} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors" title="Mark Dirty"><AlertCircle size={14} /></button>
                 </div>
               </div>
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider opacity-60">{room.type} • {room.capacity} Pax</div>
-                <div className="text-xs font-medium">{(room.status || 'unknown').replace('_', ' ')}</div>
+              
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className={cn(
+                    "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border",
+                    room.status === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
+                    room.status === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
+                    room.status === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
+                    room.status === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
+                    "bg-zinc-800 border-zinc-700 text-zinc-400"
+                  )}>
+                    {room.status.replace('_', ' ')}
+                  </div>
+                  <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
+                </div>
+
                 {room.notes && (
-                  <div className="mt-1 text-[8px] text-zinc-500 truncate" title={room.notes}>
-                    {room.notes}
+                  <div className="bg-black/20 p-2 rounded-lg border border-white/5">
+                    <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider opacity-50 mb-0.5">
+                      <FileText size={8} />
+                      Notes
+                    </div>
+                    <p className="text-[9px] leading-tight line-clamp-2 opacity-80 italic">
+                      {room.notes}
+                    </p>
                   </div>
                 )}
               </div>
@@ -940,6 +984,7 @@ export function Rooms() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => setEditingRoom(room)} className="p-1 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded" title="Edit Room"><Edit2 size={16} /></button>
                       <button onClick={() => updateStatus(room.id, 'clean')} className="p-1 text-emerald-500 hover:bg-emerald-500/10 rounded" title="Mark Clean"><CheckCircle2 size={16} /></button>
                       <button onClick={() => updateStatus(room.id, 'dirty')} className="p-1 text-red-500 hover:bg-red-500/10 rounded" title="Mark Dirty"><AlertCircle size={16} /></button>
                       <button onClick={() => updateStatus(room.id, 'maintenance')} className="p-1 text-amber-500 hover:bg-amber-500/10 rounded" title="Maintenance"><Wrench size={16} /></button>
@@ -1220,6 +1265,110 @@ export function Rooms() {
           }}
         />
       )}
+
+      {/* Edit Room Modal */}
+      <AnimatePresence>
+        {editingRoom && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-50">Room {editingRoom.roomNumber}</h2>
+                  <p className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Edit Room Details</p>
+                </div>
+                <button 
+                  onClick={() => setEditingRoom(null)}
+                  className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={updateRoom} className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room Number</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingRoom.roomNumber}
+                      onChange={(e) => setEditingRoom({ ...editingRoom, roomNumber: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Status</label>
+                    <select
+                      value={editingRoom.status}
+                      onChange={(e) => setEditingRoom({ ...editingRoom, status: e.target.value as any })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="clean">Clean</option>
+                      <option value="dirty">Dirty</option>
+                      <option value="occupied">Occupied</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="vacant">Vacant</option>
+                      <option value="out_of_service">Out of Service</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room Notes</label>
+                  <textarea
+                    value={editingRoom.notes || ''}
+                    onChange={(e) => setEditingRoom({ ...editingRoom, notes: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500/50 h-32 resize-none"
+                    placeholder="Add notes about repairs, special requests, or room condition..."
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Floor</label>
+                    <input
+                      type="text"
+                      value={editingRoom.floor}
+                      onChange={(e) => setEditingRoom({ ...editingRoom, floor: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Price per Night</label>
+                    <input
+                      type="number"
+                      value={editingRoom.price}
+                      onChange={(e) => setEditingRoom({ ...editingRoom, price: Number(e.target.value) })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setEditingRoom(null)}
+                    className="flex-1 px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 rounded-xl font-bold transition-all active:scale-95"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

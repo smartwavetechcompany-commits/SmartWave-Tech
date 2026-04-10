@@ -19,7 +19,7 @@ export function formatCurrency(amount: number, currency: 'NGN' | 'USD' = 'NGN', 
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 0,
   }).format(value);
 }
 
