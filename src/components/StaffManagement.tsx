@@ -27,7 +27,7 @@ const AVAILABLE_ROLES = [
   { id: 'frontDesk', label: 'Front Desk' },
   { id: 'rooms', label: 'Rooms' },
   { id: 'housekeeping', label: 'Housekeeping' },
-  { id: 'kitchen', label: 'Kitchen' },
+  { id: 'kitchen', label: 'F & B' },
   { id: 'inventory', label: 'Inventory' },
   { id: 'maintenance', label: 'Maintenance' },
   { id: 'guests', label: 'Guests' },

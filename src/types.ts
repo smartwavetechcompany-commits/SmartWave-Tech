@@ -175,7 +175,9 @@ export interface Reservation {
   roomId: string;
   roomNumber: string;
   checkIn: string;
+  checkInTime?: string; // e.g. "14:00"
   checkOut: string;
+  checkOutTime?: string; // e.g. "12:00"
   nights?: number;
   status: 'pending' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
   totalAmount: number;
@@ -320,6 +322,8 @@ export interface Guest {
   preferences?: string[];
   corporateId?: string; // Link to CorporateAccount
   ledgerBalance: number;
+  creditLimit?: number;
+  paymentTerms?: string;
   totalStays: number;
   totalSpent: number;
   lastStay?: string;

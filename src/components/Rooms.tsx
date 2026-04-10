@@ -1019,10 +1019,25 @@ export function Rooms() {
                       const reservation = reservations.find(res => 
                         res.roomId === room.id && 
                         res.status !== 'cancelled' &&
+                        res.status !== 'no_show' &&
                         isWithinInterval(day, {
-                          start: parseISO(res.checkIn),
-                          end: subDays(parseISO(res.checkOut), 1) // checkOut day is usually available for next guest
+                          start: startOfDay(parseISO(res.checkIn)),
+                          end: subDays(startOfDay(parseISO(res.checkOut)), 1)
                         })
+                      );
+
+                      const checkoutToday = reservations.find(res =>
+                        res.roomId === room.id &&
+                        res.status !== 'cancelled' &&
+                        res.status !== 'no_show' &&
+                        isSameDay(day, parseISO(res.checkOut))
+                      );
+
+                      const checkinToday = reservations.find(res =>
+                        res.roomId === room.id &&
+                        res.status !== 'cancelled' &&
+                        res.status !== 'no_show' &&
+                        isSameDay(day, parseISO(res.checkIn))
                       );
 
                       return (
@@ -1039,7 +1054,7 @@ export function Rooms() {
                                 setShowQuickActionMenu(true);
                               }}
                               className={cn(
-                                "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border text-left transition-all hover:scale-[1.02] active:scale-95",
+                                "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border text-left transition-all hover:scale-[1.02] active:scale-95 z-10",
                                 reservation.status === 'checked_in' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
                               )}
                               title={`${reservation.guestName} (${format(parseISO(reservation.checkIn), 'MMM dd')} - ${format(parseISO(reservation.checkOut), 'MMM dd')})`}
@@ -1050,12 +1065,30 @@ export function Rooms() {
                                 {reservation.status === 'checked_in' && <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse" />}
                               </div>
                             </button>
+                          ) : checkoutToday ? (
+                            <button
+                              onClick={() => {
+                                setSelectedReservation(checkoutToday);
+                                setShowQuickActionMenu(true);
+                              }}
+                              className="absolute inset-x-1 top-1 h-1/2 bg-zinc-800/50 border border-zinc-700 rounded-t-md p-1 text-[6px] font-bold text-zinc-500 overflow-hidden hover:bg-zinc-700 transition-colors z-10"
+                            >
+                              <div className="truncate">Out: {checkoutToday.guestName}</div>
+                            </button>
                           ) : (
                             <div className="w-full h-full flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity">
                               <Plus size={14} className="text-zinc-700" />
                             </div>
                           )}
-                          {!reservation && isSameDay(day, new Date()) && (
+                          
+                          {/* If someone is checking in today and it's not already occupied by a stay night */}
+                          {!reservation && checkinToday && !checkoutToday && (
+                            <div className="absolute inset-x-1 bottom-1 h-1/2 bg-emerald-500/5 border border-emerald-500/10 rounded-b-md p-1 flex items-end">
+                              <span className="text-[6px] font-bold text-emerald-500/50 uppercase">In: {checkinToday.guestName}</span>
+                            </div>
+                          )}
+
+                          {!reservation && !checkoutToday && isSameDay(day, new Date()) && (
                             <div className={cn(
                               "absolute top-1 right-1 w-1.5 h-1.5 rounded-full",
                               room.status === 'clean' ? "bg-emerald-500" :

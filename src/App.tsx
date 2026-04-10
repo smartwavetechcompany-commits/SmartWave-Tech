@@ -11,7 +11,7 @@ import { FrontDesk } from './components/FrontDesk';
 import { StaffManagement } from './components/StaffManagement';
 import { Settings } from './components/Settings';
 import { Housekeeping } from './components/Housekeeping';
-import { Kitchen } from './components/Kitchen';
+import { FandB } from './components/FandB';
 import { Inventory } from './components/Inventory';
 import { Maintenance } from './components/Maintenance';
 import { GuestManagement } from './components/GuestManagement';
@@ -84,7 +84,7 @@ function AppContent() {
             <Route path="/rooms" element={<Rooms />} />
             <Route path="/front-desk" element={<FrontDesk />} />
             <Route path="/housekeeping" element={<Housekeeping />} />
-            <Route path="/kitchen" element={<Kitchen />} />
+            <Route path="/f-and-b" element={<FandB />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/maintenance" element={<Maintenance />} />
             <Route path="/guests" element={<GuestManagement />} />

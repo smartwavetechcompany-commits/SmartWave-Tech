@@ -35,7 +35,9 @@ export const postToLedger = async (
 
   // 3. Prepare Guest or Corporate Account updates
   let accountUpdatePromise;
-  const balanceAdjustment = entry.type === 'debit' ? -entry.amount : entry.amount;
+  // Debit (charge) increases what the guest owes. Credit (payment) decreases it.
+  // We'll treat ledgerBalance as "Amount Owed" (positive = owes money, negative = credit).
+  const balanceAdjustment = entry.type === 'debit' ? entry.amount : -entry.amount;
 
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
@@ -59,7 +61,20 @@ export const postToLedger = async (
       const resData = resSnap.data() as Reservation;
       const paymentAdjustment = entry.type === 'credit' ? entry.amount : -entry.amount;
       const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + paymentAdjustment);
-      const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+      
+      // Correct payment status logic
+      let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
+      const totalToPay = resData.totalAmount || 0;
+      
+      if (totalToPay > 0) {
+        if (newPaidAmount >= totalToPay) {
+          newPaymentStatus = 'paid';
+        } else if (newPaidAmount > 0) {
+          newPaymentStatus = 'partial';
+        }
+      } else if (newPaidAmount > 0) {
+        newPaymentStatus = 'paid'; // If total is 0 but they paid something, it's paid
+      }
       
       resUpdates.paidAmount = newPaidAmount;
       resUpdates.paymentStatus = newPaymentStatus;

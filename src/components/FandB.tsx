@@ -33,7 +33,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
 import { toast } from 'sonner';
 
-export function Kitchen() {
+export function FandB() {
   const { hotel, profile } = useAuth();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -185,11 +185,11 @@ export function Kitchen() {
 
       console.log('Attempting to add kitchen order to Firestore...');
       const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
-      console.log('Kitchen order added with ID:', orderRef.id);
+      console.log('F & B order added with ID:', orderRef.id);
 
-      // Create notification for kitchen staff
+      // Create notification for F & B staff
       await createNotification(hotel.id, {
-        title: 'New Kitchen Order',
+        title: 'New F & B Order',
         message: `New order for Room ${newOrder.roomNumber}: ${newOrder.items}`,
         type: 'info',
         userId: 'all'
@@ -204,8 +204,8 @@ export function Kitchen() {
           await postToLedger(hotel.id, guestId, res.id, {
             amount: newOrder.price,
             type: 'debit',
-            category: 'restaurant',
-            description: `Kitchen Order (Room Service): ${newOrder.items}`,
+            category: 'F & B',
+            description: `F & B Order (Room Service): ${newOrder.items}`,
             referenceId: orderRef.id,
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
@@ -218,8 +218,8 @@ export function Kitchen() {
         await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
           type: 'income',
           amount: newOrder.price,
-          category: 'Restaurant Revenue',
-          description: `Kitchen Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${newOrder.paymentMethod.toUpperCase()}`,
+          category: 'F & B Revenue',
+          description: `F & B Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${newOrder.paymentMethod.toUpperCase()}`,
           timestamp: new Date().toISOString(),
           paymentMethod: newOrder.paymentMethod,
           referenceId: orderRef.id,
@@ -233,13 +233,13 @@ export function Kitchen() {
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
-        action: 'KITCHEN_ORDER_CREATED',
+        action: 'F&B_ORDER_CREATED',
         resource: `Room ${newOrder.roomNumber}: ${newOrder.items} (${newOrder.paymentMethod})`,
         hotelId: hotel.id,
-        module: 'Kitchen'
+        module: 'F & B'
       });
 
-      toast.success('Kitchen order created');
+      toast.success('F & B order created');
       setShowAddModal(false);
       setCart([]);
       setNewOrder({ roomNumber: '', guestId: '', items: '', notes: '', category: 'all', price: 0, paymentMethod: 'cash' });
@@ -272,10 +272,10 @@ export function Kitchen() {
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
-        action: 'KITCHEN_ORDER_DELETED',
+        action: 'F&B_ORDER_DELETED',
         resource: `Order ${orderId} (Room ${roomNumber})`,
         hotelId: hotel.id,
-        module: 'Kitchen'
+        module: 'F & B'
       });
       
       toast.success('Order deleted successfully');
@@ -302,10 +302,10 @@ export function Kitchen() {
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
-        action: 'KITCHEN_ORDER_STATUS_UPDATE',
+        action: 'F&B_ORDER_STATUS_UPDATE',
         resource: `Order ${orderId}: ${status}`,
         hotelId: hotel.id,
-        module: 'Kitchen'
+        module: 'F & B'
       });
       toast.success(`Order status updated to ${status}`);
     } catch (err) {
@@ -345,16 +345,16 @@ export function Kitchen() {
       Status: order.status,
       Notes: order.notes || ''
     }));
-    exportToCSV(dataToExport, `kitchen_orders_${new Date().toISOString().split('T')[0]}.csv`);
-    toast.success('Kitchen orders exported successfully');
+    exportToCSV(dataToExport, `fandb_orders_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('F & B orders exported successfully');
   };
 
   return (
     <div className="p-8 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Kitchen Management</h1>
-          <p className="text-zinc-400">Manage room service orders and kitchen workflow</p>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">F & B Management</h1>
+          <p className="text-zinc-400">Manage room service orders and F & B workflow</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
@@ -572,7 +572,7 @@ export function Kitchen() {
             {/* Docket View */}
             <div className="bg-white text-black p-8 font-mono shadow-2xl print:shadow-none print:p-0">
               <div className="text-center border-b-2 border-black pb-4 mb-4">
-                <h2 className="text-xl font-black uppercase tracking-tighter">KITCHEN DOCKET</h2>
+                <h2 className="text-xl font-black uppercase tracking-tighter">F & B DOCKET</h2>
                 <p className="text-xs font-bold mt-1">{hotel?.name}</p>
                 <p className="text-[10px]">{new Date(printingOrder.timestamp).toLocaleString()}</p>
               </div>
@@ -651,7 +651,7 @@ export function Kitchen() {
           >
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-zinc-50">Kitchen POS</h2>
+                <h2 className="text-xl font-bold text-zinc-50">F & B POS</h2>
                 <p className="text-xs text-zinc-500">Create new room service or walk-in order</p>
               </div>
               <button 

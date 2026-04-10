@@ -33,7 +33,7 @@ export function Sidebar() {
     { icon: CalendarDays, label: 'Front Desk', path: '/front-desk', roles: ['hotelAdmin', 'staff'], permission: 'frontDesk' },
     { icon: Bed, label: 'Rooms', path: '/rooms', roles: ['hotelAdmin', 'staff'], permission: 'rooms' },
     { icon: ClipboardList, label: 'Housekeeping', path: '/housekeeping', roles: ['hotelAdmin', 'staff'], permission: 'housekeeping' },
-    { icon: ChefHat, label: 'Kitchen', path: '/kitchen', roles: ['hotelAdmin', 'staff'], permission: 'kitchen' },
+    { icon: ChefHat, label: 'F & B', path: '/f-and-b', roles: ['hotelAdmin', 'staff'], permission: 'kitchen' },
     { icon: Package, label: 'Inventory', path: '/inventory', roles: ['hotelAdmin', 'staff'], permission: 'inventory' },
     { icon: Wrench, label: 'Maintenance', path: '/maintenance', roles: ['hotelAdmin', 'staff'], permission: 'maintenance' },
     { icon: Users, label: 'Guests', path: '/guests', roles: ['hotelAdmin', 'staff'], permission: 'guests' },

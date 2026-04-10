@@ -203,7 +203,7 @@ export function AuditLogs() {
             <option value="Front Desk">Front Desk</option>
             <option value="Guests">Guests</option>
             <option value="Corporate">Corporate</option>
-            <option value="Kitchen">Kitchen</option>
+            <option value="F & B">F & B</option>
             <option value="Rooms">Rooms</option>
             <option value="Finance">Finance</option>
             <option value="Settings">Settings</option>

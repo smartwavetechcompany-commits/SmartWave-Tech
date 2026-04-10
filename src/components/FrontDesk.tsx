@@ -77,7 +77,9 @@ export function FrontDesk() {
     address: '',
     roomId: '',
     checkIn: format(new Date(), 'yyyy-MM-dd'),
+    checkInTime: '14:00',
     checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
+    checkOutTime: '12:00',
     totalAmount: 0,
     paidAmount: 0,
     paymentStatus: 'unpaid' as const,
@@ -231,9 +233,10 @@ export function FrontDesk() {
       }
     }
 
-    const checkIn = new Date(newBooking.checkIn);
-    const checkOut = new Date(newBooking.checkOut);
-    const nights = Math.max(1, Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
+    const checkInDateTime = new Date(`${newBooking.checkIn}T${newBooking.checkInTime || '14:00'}`);
+    const checkOutDateTime = new Date(`${newBooking.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+    const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+    const nights = Math.max(1, Math.ceil(hours / 24));
     
     setIsNegotiatedRate(negotiated);
     
@@ -255,9 +258,10 @@ export function FrontDesk() {
         if (rate) stayPrice = rate.rate;
       }
       
-      const sCheckIn = new Date(stay.checkIn);
-      const sCheckOut = new Date(stay.checkOut);
-      const sNights = Math.max(1, Math.ceil((sCheckOut.getTime() - sCheckIn.getTime()) / (1000 * 60 * 60 * 24)));
+      const sCheckInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
+      const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+      const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
+      const sNights = Math.max(1, Math.ceil(sHours / 24));
       const newTotal = stayPrice * sNights;
       
       if (newTotal !== stay.totalAmount) {
@@ -337,7 +341,10 @@ export function FrontDesk() {
           if (activeRate) pricePerNight = activeRate.rate;
         }
 
-        const nights = Math.max(1, Math.ceil((new Date(stay.checkOut).getTime() - new Date(stay.checkIn).getTime()) / (1000 * 60 * 60 * 24)));
+        const checkInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
+        const checkOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+        const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+        const nights = Math.max(1, Math.ceil(hours / 24));
         const totalAmount = pricePerNight * nights;
 
         let guestId = stay.guestId;
@@ -372,7 +379,10 @@ export function FrontDesk() {
           roomId: stay.roomId,
           roomNumber: selectedRoom.roomNumber,
           checkIn: stay.checkIn,
+          checkInTime: newBooking.checkInTime || '14:00',
           checkOut: stay.checkOut,
+          checkOutTime: newBooking.checkOutTime || '12:00',
+          nights,
           status: 'pending',
           totalAmount,
           paidAmount: 0, // Initialize to 0, settleLedger will update this
@@ -707,11 +717,12 @@ export function FrontDesk() {
         const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
         if (!res.guestId) continue;
 
-        const checkInDate = startOfDay(parseISO(res.checkIn));
+        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
+        const now = new Date();
         
-        // Calculate how many nights have passed since check-in
-        // differenceInDays(today, checkInDate) gives number of full nights passed
-        const nightsStayed = differenceInDays(today, checkInDate);
+        // Calculate how many nights have passed since check-in based on 24-hour rolling
+        const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+        const targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
         
         // Fetch ledger entries for this reservation to see what's already charged
         const ledgerQ = query(
@@ -723,21 +734,12 @@ export function FrontDesk() {
         const ledgerSnap = await getDocs(ledgerQ);
         const existingCharges = ledgerSnap.docs.length;
         
-        // We charge for every night from check-in up to today.
-        // If they checked in today, nightsStayed is 0. We might want to charge for the first night now or later.
-        // Usually nightly audit runs at night, so it charges for the day that just passed.
-        // If today is the 2nd and they checked in on the 1st, nightsStayed is 1. They should have 1 charge.
-        
-        // If they are still checked in, we ensure they have charges for all nights up to (and including) yesterday.
-        // If we want to charge for the current day as well (pre-emptive daily billing), we use nightsStayed + 1.
-        const targetCharges = nightsStayed; // Charge for completed nights
-        
         if (existingCharges < targetCharges) {
           const nightsToCharge = targetCharges - existingCharges;
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           
           for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(checkInDate, existingCharges + i);
+            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
             
             await postToLedger(hotel.id, res.guestId, res.id, {
               amount: rate,
@@ -837,9 +839,10 @@ export function FrontDesk() {
         }
       } else if (status === 'checked_out') {
         // 1. Ensure all nights stayed are charged
-        const today = startOfDay(new Date());
-        const checkInDate = startOfDay(parseISO(res.checkIn));
-        const nightsStayed = Math.max(1, differenceInDays(today, checkInDate)); // Minimum 1 night charge
+        const now = new Date();
+        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
+        const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+        const nightsStayed = Math.max(1, Math.ceil(hoursStayed / 24));
         
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
@@ -857,7 +860,7 @@ export function FrontDesk() {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           
           for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(checkInDate, existingCharges + i);
+            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
             await postToLedger(hotel.id, res.guestId!, res.id, {
               amount: rate,
               type: 'debit',
@@ -868,12 +871,28 @@ export function FrontDesk() {
             }, profile.uid, res.corporateId);
             finalTotalDebits += rate;
           }
+        } else if (existingCharges > nightsStayed) {
+          const nightsToRefund = existingCharges - nightsStayed;
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          
+          for (let i = 0; i < nightsToRefund; i++) {
+            await postToLedger(hotel.id, res.guestId!, res.id, {
+              amount: rate,
+              type: 'credit',
+              category: 'refund',
+              description: `Room Charge Refund: ${res.roomNumber} (Early Checkout)`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
+            finalTotalDebits -= rate;
+          }
         }
 
         // 2. Update reservation total to reflect actual stay
         await updateDoc(resRef, { 
           totalAmount: finalTotalDebits,
-          checkOut: format(today, 'yyyy-MM-dd') // Update checkout date to actual checkout date
+          checkOut: format(now, 'yyyy-MM-dd'),
+          checkOutTime: format(now, 'HH:mm')
         });
 
         const balance = finalTotalDebits - (res.paidAmount || 0);
@@ -1549,29 +1568,47 @@ export function FrontDesk() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
-                  <div className="relative">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input 
+                        type="date" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                        style={{ colorScheme: 'dark' }}
+                        value={newBooking.checkIn}
+                        min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
+                        onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
+                      />
+                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
+                    </div>
                     <input 
-                      type="date" 
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                      type="time"
+                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       style={{ colorScheme: 'dark' }}
-                      value={newBooking.checkIn}
-                      min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
-                      onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
+                      value={newBooking.checkInTime}
+                      onChange={(e) => setNewBooking({ ...newBooking, checkInTime: e.target.value })}
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                   </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
-                  <div className="relative">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input 
+                        type="date" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                        style={{ colorScheme: 'dark' }}
+                        value={newBooking.checkOut}
+                        onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
+                      />
+                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
+                    </div>
                     <input 
-                      type="date" 
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                      type="time"
+                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       style={{ colorScheme: 'dark' }}
-                      value={newBooking.checkOut}
-                      onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
+                      value={newBooking.checkOutTime}
+                      onChange={(e) => setNewBooking({ ...newBooking, checkOutTime: e.target.value })}
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                   </div>
                 </div>
               </div>

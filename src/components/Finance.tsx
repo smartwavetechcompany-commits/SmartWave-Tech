@@ -92,7 +92,7 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports'>('overview');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -150,6 +150,7 @@ export function Finance() {
     { id: 'overview', label: 'Overview', icon: PieChart },
     { id: 'transactions', label: 'Transactions', icon: RefreshCw },
     { id: 'ledger', label: 'Guest Accounts', icon: Users },
+    { id: 'city_ledger', label: 'City Ledger', icon: Building2 },
     { id: 'suppliers', label: 'Supplier Accounts', icon: Building2 },
     { id: 'accounts', label: 'Chart of Accounts', icon: Wallet },
     { id: 'expenses', label: 'Expense Records', icon: TrendingDown },
@@ -998,6 +999,145 @@ export function Finance() {
                           </tr>
                         ))
                       )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'city_ledger' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3 rounded-2xl bg-red-500/10 text-red-500">
+                      <TrendingDown size={24} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-zinc-500 uppercase">Total Receivables</p>
+                      <h3 className="text-2xl font-bold text-zinc-50">
+                        {formatCurrency(
+                          guests.reduce((acc, g) => acc + (g.ledgerBalance < 0 ? Math.abs(g.ledgerBalance) : 0), 0) +
+                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance < 0 ? Math.abs(c.currentBalance) : 0), 0),
+                          currency, exchangeRate
+                        )}
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-500">
+                      <AlertCircle size={24} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-zinc-500 uppercase">Overdue (&gt;30 Days)</p>
+                      <h3 className="text-2xl font-bold text-zinc-50">
+                        {/* Simplified calculation for now */}
+                        {formatCurrency(
+                          guests.reduce((acc, g) => acc + (g.ledgerBalance < -100000 ? Math.abs(g.ledgerBalance) : 0), 0),
+                          currency, exchangeRate
+                        )}
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-500">
+                      <CheckCircle2 size={24} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-zinc-500 uppercase">Credit Available</p>
+                      <h3 className="text-2xl font-bold text-zinc-50">
+                        {formatCurrency(
+                          guests.reduce((acc, g) => acc + (g.ledgerBalance > 0 ? g.ledgerBalance : 0), 0) +
+                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance > 0 ? c.currentBalance : 0), 0),
+                          currency, exchangeRate
+                        )}
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
+                <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                  <h3 className="font-bold text-zinc-50">Aging Report (Accounts Receivable)</h3>
+                  <button 
+                    onClick={() => exportToCSV(
+                      [...guests, ...corporateAccounts]
+                        .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) < 0)
+                        .map(a => ({
+                          Name: a.name,
+                          Type: 'ledgerBalance' in a ? 'Individual' : 'Corporate',
+                          Balance: 'ledgerBalance' in a ? a.ledgerBalance : a.currentBalance,
+                          CreditLimit: a.creditLimit || 0,
+                          Terms: 'paymentTerms' in a ? a.paymentTerms : 'N/A'
+                        })),
+                      'aging_report'
+                    )}
+                    className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <Download size={14} /> Export Aging
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-zinc-950/50 border-b border-zinc-800">
+                        <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Entity</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Type</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Balance</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Credit Limit</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Terms</th>
+                        <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800">
+                      {[...guests, ...corporateAccounts]
+                        .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) !== 0)
+                        .sort((a, b) => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) - ('ledgerBalance' in b ? b.ledgerBalance : b.currentBalance))
+                        .map((account) => {
+                          const balance = 'ledgerBalance' in account ? account.ledgerBalance : account.currentBalance;
+                          return (
+                            <tr key={account.id} className="hover:bg-zinc-800/50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="text-sm font-bold text-zinc-50">{account.name}</div>
+                                <div className="text-[10px] text-zinc-500">{account.email}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={cn(
+                                  "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                                  'ledgerBalance' in account ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"
+                                )}>
+                                  {'ledgerBalance' in account ? 'Individual' : 'Corporate'}
+                                </span>
+                              </td>
+                              <td className={cn(
+                                "px-6 py-4 text-right font-bold",
+                                balance < 0 ? "text-red-500" : "text-emerald-500"
+                              )}>
+                                {formatCurrency(balance, currency, exchangeRate)}
+                              </td>
+                              <td className="px-6 py-4 text-right text-sm text-zinc-400">
+                                {formatCurrency(account.creditLimit || 0, currency, exchangeRate)}
+                              </td>
+                              <td className="px-6 py-4 text-xs text-zinc-500">
+                                {'paymentTerms' in account ? account.paymentTerms || 'N/A' : 'N/A'}
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button 
+                                  onClick={() => setShowSettleModal(account)}
+                                  className="px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-zinc-50 rounded-lg text-[10px] font-bold transition-all"
+                                >
+                                  Settle
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

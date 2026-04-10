@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
+import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch } from 'firebase/firestore';
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { Tax } from '../types';
@@ -41,6 +41,7 @@ export function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [showConfirmSystemReset, setShowConfirmSystemReset] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -286,6 +287,100 @@ export function Settings() {
       toast.error('Failed to send reset email. Please try again later.');
     } finally {
       setShowConfirmReset(false);
+    }
+  };
+
+  const handleSystemReset = async () => {
+    if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
+    
+    setIsSaving(true);
+    try {
+      const collectionsToClear = [
+        'reservations',
+        'guests',
+        'ledger',
+        'finance',
+        'activityLogs',
+        'auditLogs',
+        'maintenance',
+        'housekeeping',
+        'inventory',
+        'purchaseOrders',
+        'suppliers',
+        'accounts',
+        'commissions',
+        'corporate_accounts'
+      ];
+
+      for (const collName of collectionsToClear) {
+        const q = query(collection(db, 'hotels', hotel.id, collName));
+        const snap = await getDocs(q);
+        
+        // Delete in batches of 500 (Firestore limit)
+        const batches = [];
+        let currentBatch = writeBatch(db);
+        let count = 0;
+
+        for (const docSnap of snap.docs) {
+          currentBatch.delete(docSnap.ref);
+          count++;
+          if (count === 500) {
+            batches.push(currentBatch.commit());
+            currentBatch = writeBatch(db);
+            count = 0;
+          }
+        }
+        if (count > 0) {
+          batches.push(currentBatch.commit());
+        }
+        await Promise.all(batches);
+      }
+
+      // Reset room statuses to vacant/clean
+      const roomsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'rooms'));
+      const roomBatches = [];
+      let roomBatch = writeBatch(db);
+      let rCount = 0;
+      for (const rSnap of roomsSnap.docs) {
+        roomBatch.update(rSnap.ref, {
+          status: 'vacant',
+          housekeepingStatus: 'clean',
+          currentGuestId: null,
+          currentReservationId: null,
+          assignedTo: null
+        });
+        rCount++;
+        if (rCount === 500) {
+          roomBatches.push(roomBatch.commit());
+          roomBatch = writeBatch(db);
+          rCount = 0;
+        }
+      }
+      if (rCount > 0) {
+        roomBatches.push(roomBatch.commit());
+      }
+      await Promise.all(roomBatches);
+
+      // Log the reset
+      await addDoc(collection(db, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'SYSTEM_RESET',
+        resource: 'All System Data',
+        hotelId: hotel.id
+      });
+
+      toast.success('System data cleared successfully!');
+      setShowConfirmSystemReset(false);
+      // Refresh page to clear local state
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to reset system data.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1141,6 +1236,40 @@ export function Settings() {
                   </div>
                 </div>
               </div>
+
+              {profile?.role === 'hotelAdmin' && (
+                <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6 space-y-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center">
+                      <Trash2 size={24} />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-red-500">Danger Zone: System Reset</h4>
+                      <p className="text-sm text-zinc-500">Permanently delete all reservations, transactions, and guest data. This action cannot be undone.</p>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-red-500/10">
+                    <button 
+                      onClick={() => setShowConfirmSystemReset(true)}
+                      className="flex items-center justify-center gap-2 w-full bg-red-500 text-white font-bold py-3 rounded-lg hover:bg-red-600 transition-all active:scale-95"
+                    >
+                      <RefreshCw size={18} />
+                      Reset All System Data
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <ConfirmModal
+                isOpen={showConfirmSystemReset}
+                title="CRITICAL: System Reset"
+                message="Are you sure you want to clear ALL system data? This will delete all reservations, guest history, financial records, and reset all rooms. This action is PERMANENT and cannot be undone."
+                onConfirm={handleSystemReset}
+                onCancel={() => setShowConfirmSystemReset(false)}
+                type="danger"
+                confirmText="Yes, Reset Everything"
+              />
             </div>
           )}
         </main>
