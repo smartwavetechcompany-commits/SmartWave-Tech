@@ -39,7 +39,7 @@ import { format, isValid } from 'date-fns';
 export function Settings() {
   const { profile, hotel, isSubscriptionActive, systemSettings, theme, setTheme } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences' | 'danger'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmSystemReset, setShowConfirmSystemReset] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
@@ -476,6 +476,19 @@ export function Settings() {
             <Mail size={18} />
             Help & Support
           </button>
+
+          {profile?.role === 'hotelAdmin' && (
+            <button 
+              onClick={() => setActiveTab('danger')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
+                activeTab === 'danger' ? "bg-red-500 text-white" : "text-red-500/60 hover:bg-red-500/10 hover:text-red-500"
+              )}
+            >
+              <Shield size={18} />
+              Danger Zone
+            </button>
+          )}
         </aside>
 
         {/* Main Content */}
@@ -1236,30 +1249,37 @@ export function Settings() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              {profile?.role === 'hotelAdmin' && (
-                <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6 space-y-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center">
-                      <Trash2 size={24} />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-red-500">Danger Zone: System Reset</h4>
-                      <p className="text-sm text-zinc-500">Permanently delete all reservations, transactions, and guest data. This action cannot be undone.</p>
-                    </div>
+          {activeTab === 'danger' && profile?.role === 'hotelAdmin' && (
+            <div className="space-y-8">
+              <div className="mb-8">
+                <h3 className="text-lg font-bold text-zinc-50 mb-1">Danger Zone</h3>
+                <p className="text-sm text-zinc-500">Highly sensitive actions that can permanently affect your data.</p>
+              </div>
+
+              <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6 space-y-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center">
+                    <Trash2 size={24} />
                   </div>
-
-                  <div className="pt-4 border-t border-red-500/10">
-                    <button 
-                      onClick={() => setShowConfirmSystemReset(true)}
-                      className="flex items-center justify-center gap-2 w-full bg-red-500 text-white font-bold py-3 rounded-lg hover:bg-red-600 transition-all active:scale-95"
-                    >
-                      <RefreshCw size={18} />
-                      Reset All System Data
-                    </button>
+                  <div>
+                    <h4 className="font-bold text-red-500">System Reset</h4>
+                    <p className="text-sm text-zinc-500">Permanently delete all reservations, transactions, and guest data. This action cannot be undone.</p>
                   </div>
                 </div>
-              )}
+
+                <div className="pt-4 border-t border-red-500/10">
+                  <button 
+                    onClick={() => setShowConfirmSystemReset(true)}
+                    className="flex items-center justify-center gap-2 w-full bg-red-500 text-white font-bold py-3 rounded-lg hover:bg-red-600 transition-all active:scale-95"
+                  >
+                    <RefreshCw size={18} />
+                    Reset All System Data
+                  </button>
+                </div>
+              </div>
 
               <ConfirmModal
                 isOpen={showConfirmSystemReset}
