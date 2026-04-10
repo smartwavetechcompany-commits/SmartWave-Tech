@@ -36,7 +36,10 @@ import { cn } from '../utils';
 import { toast } from 'sonner';
 import { format, isValid } from 'date-fns';
 
+import { useTranslation } from 'react-i18next';
+
 export function Settings() {
+  const { t, i18n } = useTranslation();
   const { profile, hotel, isSubscriptionActive, systemSettings, theme, setTheme } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences' | 'danger'>('profile');
@@ -387,7 +390,7 @@ export function Settings() {
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-8">
       <header>
-        <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Settings</h1>
+        <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">{t('settings.title')}</h1>
         <p className="text-zinc-400">Manage your account and system preferences</p>
       </header>
 
@@ -402,7 +405,7 @@ export function Settings() {
             )}
           >
             <User size={18} />
-            Profile
+            {t('settings.profile')}
           </button>
           
           {profile?.role === 'hotelAdmin' && (
@@ -414,7 +417,7 @@ export function Settings() {
               )}
             >
               <Building2 size={18} />
-              Hotel Settings
+              {t('settings.hotelSettings')}
             </button>
           )}
 
@@ -427,7 +430,7 @@ export function Settings() {
               )}
             >
               <Smartphone size={18} />
-              Branding
+              {t('settings.branding')}
             </button>
           )}
 
@@ -440,7 +443,7 @@ export function Settings() {
               )}
             >
               <Percent size={18} />
-              Taxes
+              {t('settings.taxes')}
             </button>
           )}
 
@@ -452,7 +455,7 @@ export function Settings() {
             )}
           >
             <Moon size={18} />
-            Preferences
+            {t('settings.preferences')}
           </button>
 
           <button 
@@ -463,7 +466,7 @@ export function Settings() {
             )}
           >
             <Shield size={18} />
-            Security
+            {t('settings.security')}
           </button>
 
           <button 
@@ -474,7 +477,7 @@ export function Settings() {
             )}
           >
             <Mail size={18} />
-            Help & Support
+            {t('settings.support')}
           </button>
 
           {profile?.role === 'hotelAdmin' && (
@@ -486,7 +489,7 @@ export function Settings() {
               )}
             >
               <Shield size={18} />
-              Danger Zone
+              {t('settings.dangerZone')}
             </button>
           )}
         </aside>
@@ -926,7 +929,7 @@ export function Settings() {
                       {theme === 'dark' ? <Moon size={24} /> : <Sun size={24} />}
                     </div>
                     <div>
-                      <p className="font-bold text-zinc-50">Dark Mode</p>
+                      <p className="font-bold text-zinc-50">{t('settings.darkMode')}</p>
                       <p className="text-xs text-zinc-500">Switch between light and dark visual themes</p>
                     </div>
                   </div>
@@ -950,14 +953,21 @@ export function Settings() {
                       <Globe size={24} />
                     </div>
                     <div>
-                      <p className="font-bold text-zinc-50">Language</p>
+                      <p className="font-bold text-zinc-50">{t('settings.language')}</p>
                       <p className="text-xs text-zinc-500">Select your preferred display language</p>
                     </div>
                   </div>
-                  <select className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-50 focus:border-emerald-500 outline-none">
+                  <select 
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={i18n.language}
+                    onChange={(e) => {
+                      i18n.changeLanguage(e.target.value);
+                      toast.success(`Language changed to ${e.target.value === 'en' ? 'English' : e.target.value === 'fr' ? 'French' : 'Spanish'}`);
+                    }}
+                  >
                     <option value="en">English</option>
-                    <option value="fr">French (Coming Soon)</option>
-                    <option value="es">Spanish (Coming Soon)</option>
+                    <option value="fr">French</option>
+                    <option value="es">Spanish</option>
                   </select>
                 </div>
               </div>

@@ -23,26 +23,29 @@ import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../utils';
 import { auth } from '../firebase';
 
+import { useTranslation } from 'react-i18next';
+
 export function Sidebar() {
+  const { t } = useTranslation();
   const { profile, hotel, isSubscriptionActive, systemSettings } = useAuth();
   const location = useLocation();
 
   const menuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/', roles: ['hotelAdmin', 'staff', 'superAdmin'], permission: 'dashboard' },
+    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', roles: ['hotelAdmin', 'staff', 'superAdmin'], permission: 'dashboard' },
     { icon: Activity, label: 'Operations', path: '/operations', roles: ['hotelAdmin', 'staff'], permission: 'dashboard' },
-    { icon: CalendarDays, label: 'Front Desk', path: '/front-desk', roles: ['hotelAdmin', 'staff'], permission: 'frontDesk' },
-    { icon: Bed, label: 'Rooms', path: '/rooms', roles: ['hotelAdmin', 'staff'], permission: 'rooms' },
-    { icon: ClipboardList, label: 'Housekeeping', path: '/housekeeping', roles: ['hotelAdmin', 'staff'], permission: 'housekeeping' },
+    { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', roles: ['hotelAdmin', 'staff'], permission: 'frontDesk' },
+    { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', roles: ['hotelAdmin', 'staff'], permission: 'rooms' },
+    { icon: ClipboardList, label: t('sidebar.housekeeping'), path: '/housekeeping', roles: ['hotelAdmin', 'staff'], permission: 'housekeeping' },
     { icon: ChefHat, label: 'F & B', path: '/f-and-b', roles: ['hotelAdmin', 'staff'], permission: 'kitchen' },
-    { icon: Package, label: 'Inventory', path: '/inventory', roles: ['hotelAdmin', 'staff'], permission: 'inventory' },
-    { icon: Wrench, label: 'Maintenance', path: '/maintenance', roles: ['hotelAdmin', 'staff'], permission: 'maintenance' },
-    { icon: Users, label: 'Guests', path: '/guests', roles: ['hotelAdmin', 'staff'], permission: 'guests' },
+    { icon: Package, label: t('sidebar.inventory'), path: '/inventory', roles: ['hotelAdmin', 'staff'], permission: 'inventory' },
+    { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', roles: ['hotelAdmin', 'staff'], permission: 'maintenance' },
+    { icon: Users, label: t('sidebar.guests'), path: '/guests', roles: ['hotelAdmin', 'staff'], permission: 'guests' },
     { icon: Building2, label: 'Corporate', path: '/corporate', roles: ['hotelAdmin', 'staff'], permission: 'corporate' },
-    { icon: DollarSign, label: 'Finance', path: '/finance', roles: ['hotelAdmin', 'staff'], permission: 'finance' },
-    { icon: BarChart3, label: 'Reports', path: '/reports', roles: ['hotelAdmin', 'staff'], permission: 'reports' },
-    { icon: UserCog, label: 'Staff', path: '/staff', roles: ['hotelAdmin', 'staff'], permission: 'staff' },
+    { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', roles: ['hotelAdmin', 'staff'], permission: 'finance' },
+    { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', roles: ['hotelAdmin', 'staff'], permission: 'reports' },
+    { icon: UserCog, label: t('sidebar.staff'), path: '/staff', roles: ['hotelAdmin', 'staff'], permission: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', roles: ['superAdmin'] },
-    { icon: Settings, label: 'Settings', path: '/settings', roles: ['hotelAdmin', 'superAdmin', 'staff'], permission: 'settings' },
+    { icon: Settings, label: t('sidebar.settings'), path: '/settings', roles: ['hotelAdmin', 'superAdmin', 'staff'], permission: 'settings' },
   ];
 
   const filteredItems = menuItems.filter(item => {
@@ -127,7 +130,7 @@ export function Sidebar() {
           className="flex items-center gap-3 px-3 py-2 w-full text-left rounded-lg hover:bg-red-500/10 hover:text-red-500 transition-all duration-200 active:scale-[0.98]"
         >
           <LogOut size={18} />
-          <span className="text-sm font-medium">Logout</span>
+          <span className="text-sm font-medium">{t('sidebar.logout')}</span>
         </button>
       </div>
     </div>
