@@ -3,7 +3,7 @@ import { collection, onSnapshot, collectionGroup } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { AuditLog, OperationType } from '../types';
-import { format, isValid } from 'date-fns';
+import { format, isValid, subDays, startOfDay, endOfDay } from 'date-fns';
 import { 
   ClipboardList, 
   User, 
@@ -16,7 +16,8 @@ import {
   ChevronUp,
   ChevronDown,
   Filter,
-  Download
+  Download,
+  Calendar
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
 import { toast } from 'sonner';
@@ -27,7 +28,11 @@ export function AuditLogs() {
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState<string>('all');
-  const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId'; direction: 'asc' | 'desc' }>({
+  const [dateRange, setDateRange] = useState({
+    start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
+    end: format(new Date(), 'yyyy-MM-dd')
+  });
+  const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId' | 'module'; direction: 'asc' | 'desc' }>({
     key: 'timestamp',
     direction: 'desc'
   });
@@ -130,6 +135,23 @@ export function AuditLogs() {
       result = result.filter(log => (log as any).module === moduleFilter);
     }
 
+    if (dateRange.start && dateRange.end) {
+      const start = startOfDay(new Date(dateRange.start)).getTime();
+      const end = endOfDay(new Date(dateRange.end)).getTime();
+      
+      result = result.filter(log => {
+        const ts = (log as any).timestamp;
+        const getTime = (t: any) => {
+          if (!t) return 0;
+          if (t.toMillis) return t.toMillis();
+          if (t.seconds) return t.seconds * 1000;
+          return new Date(t).getTime() || 0;
+        };
+        const logTime = getTime(ts);
+        return logTime >= start && logTime <= end;
+      });
+    }
+
     result.sort((a, b) => {
       const aValue = (a as any)[sortConfig.key];
       const bValue = (b as any)[sortConfig.key];
@@ -194,6 +216,25 @@ export function AuditLogs() {
         </div>
         
         <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 px-3 py-1.5 rounded-xl">
+            <Calendar size={14} className="text-emerald-500" />
+            <input 
+              type="date" 
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none"
+              style={{ colorScheme: 'dark' }}
+            />
+            <span className="text-zinc-600 text-[10px]">to</span>
+            <input 
+              type="date" 
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none"
+              style={{ colorScheme: 'dark' }}
+            />
+          </div>
+
           <select
             value={moduleFilter}
             onChange={(e) => setModuleFilter(e.target.value)}
@@ -207,6 +248,10 @@ export function AuditLogs() {
             <option value="Rooms">Rooms</option>
             <option value="Finance">Finance</option>
             <option value="Settings">Settings</option>
+            <option value="Housekeeping">Housekeeping</option>
+            <option value="Staff">Staff</option>
+            <option value="Maintenance">Maintenance</option>
+            <option value="Inventory">Inventory</option>
           </select>
           <button 
             onClick={handleExport}
@@ -260,6 +305,12 @@ export function AuditLogs() {
                     <SortIcon column="action" />
                   </div>
                 </th>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('module')}>
+                  <div className="flex items-center gap-2">
+                    Module
+                    <SortIcon column="module" />
+                  </div>
+                </th>
                 <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden md:table-cell" onClick={() => handleSort('target')}>
                   <div className="flex items-center gap-2">
                     Target
@@ -306,6 +357,11 @@ export function AuditLogs() {
                     <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                         {log.action}
+                      </span>
+                    </td>
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
+                      <span className="text-[10px] sm:text-xs text-zinc-400 font-medium">
+                        {(log as any).module || 'System'}
                       </span>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4 hidden md:table-cell">

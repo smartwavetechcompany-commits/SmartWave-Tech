@@ -21,7 +21,9 @@ import {
   CreditCard,
   Receipt,
   Link as LinkIcon,
-  Users
+  Users,
+  Building2,
+  ClipboardList
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { cn, formatCurrency } from '../utils';
@@ -68,7 +70,8 @@ export function SuperAdmin() {
   const [codeSearchTerm, setCodeSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'hotels' | 'requests' | 'codes' | 'audit' | 'settings'>('hotels');
+  const [loading, setLoading] = useState(true);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
@@ -591,29 +594,64 @@ export function SuperAdmin() {
         </div>
       </header>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Hotels</div>
-          <div className="text-3xl font-bold text-zinc-50">{stats.totalHotels}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active</div>
-          <div className="text-3xl font-bold text-zinc-50">{stats.activeHotels}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired</div>
-          <div className="text-3xl font-bold text-zinc-50">{stats.expiredHotels}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">Pending Requests</div>
-          <div className="text-3xl font-bold text-zinc-50">{stats.pendingRequests}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Active Codes</div>
-          <div className="text-3xl font-bold text-zinc-50">{stats.activeCodes}</div>
-        </div>
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-2 border-b border-zinc-800 pb-px">
+        {[
+          { id: 'hotels', label: 'Hotels', icon: Building2 },
+          { id: 'requests', label: 'Requests', icon: Mail },
+          { id: 'codes', label: 'Tracking Codes', icon: Key },
+          { id: 'audit', label: 'Global Audit', icon: ClipboardList },
+          { id: 'settings', label: 'System Settings', icon: Settings },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={cn(
+              "flex items-center gap-2 px-6 py-3 text-sm font-bold transition-all relative",
+              activeTab === tab.id 
+                ? "text-emerald-500" 
+                : "text-zinc-500 hover:text-zinc-300"
+            )}
+          >
+            <tab.icon size={16} />
+            {tab.label}
+            {activeTab === tab.id && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />
+            )}
+            {tab.id === 'requests' && stats.pendingRequests > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full">
+                {stats.pendingRequests}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
+
+      {/* KPI Cards */}
+      {activeTab === 'hotels' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Hotels</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.totalHotels}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.activeHotels}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.expiredHotels}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">Pending Requests</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.pendingRequests}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Active Codes</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.activeCodes}</div>
+          </div>
+        </div>
+      )}
 
       {isAddingCode && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -852,9 +890,8 @@ export function SuperAdmin() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        <div className="xl:col-span-2 space-y-8">
-          {/* Hotels List */}
+      <div className="space-y-8">
+        {activeTab === 'hotels' && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <h3 className="font-bold text-zinc-50">Registered Hotels</h3>
@@ -989,8 +1026,9 @@ export function SuperAdmin() {
               </table>
             </div>
           </div>
-          
-          {/* Tracking Code Requests */}
+        )}
+
+        {activeTab === 'requests' && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="font-bold text-zinc-50 flex items-center gap-2">
@@ -1090,14 +1128,99 @@ export function SuperAdmin() {
               )}
             </div>
           </div>
+        )}
 
+        {activeTab === 'codes' && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800 space-y-4">
+              <h3 className="font-bold text-zinc-50 flex items-center gap-2">
+                <Key size={18} className="text-emerald-500" />
+                Active Tracking Codes
+              </h3>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                <input 
+                  type="text" 
+                  placeholder="Search codes..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+                  value={codeSearchTerm}
+                  onChange={(e) => setCodeSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
+              {filteredCodes.filter(c => c.status !== 'used').length === 0 ? (
+                <div className="p-8 text-center text-zinc-500 text-xs">No active codes found</div>
+              ) : (
+                filteredCodes.filter(c => c.status !== 'used').map(code => {
+                  const isCodeExpired = new Date(code.expiryDate).getTime() < Date.now();
+                  return (
+                    <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={cn(
+                          "font-mono font-bold tracking-widest",
+                          isCodeExpired ? "text-red-500" : "text-emerald-500"
+                        )}>
+                          {code.code}
+                        </span>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                          <button 
+                            onClick={() => setExtendingCode(code)}
+                            className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
+                            title="Extend Expiry"
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setConfirmAction({
+                                title: 'Delete Tracking Code',
+                                message: `Are you sure you want to delete code ${code.code}? This action cannot be undone.`,
+                                onConfirm: async () => {
+                                  try {
+                                    await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
+                                    toast.success('Tracking code deleted');
+                                    setConfirmAction(null);
+                                  } catch (err) {
+                                    handleFirestoreError(err, OperationType.DELETE, `trackingCodes/${code.code}`);
+                                    toast.error('Failed to delete code');
+                                  }
+                                }
+                              });
+                            }}
+                            className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
+                            title="Delete Code"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
+                        <div className="flex items-center gap-2">
+                          <span>{code.plan}</span>
+                          {code.price !== undefined && code.price > 0 && (
+                            <span className="text-emerald-500/80">({formatCurrency(code.price, currency, exchangeRate)})</span>
+                          )}
+                        </div>
+                        <span className={isCodeExpired ? "text-red-500" : ""}>
+                          {isCodeExpired ? 'Expired' : `Exp: ${safeFormat(code.expiryDate, 'MMM d, yyyy')}`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'audit' && (
           <ErrorBoundary>
             <AuditLogs />
           </ErrorBoundary>
-        </div>
+        )}
 
-        <div className="xl:col-span-1 space-y-8">
-          {/* System Settings */}
+        {activeTab === 'settings' && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800">
               <h3 className="font-bold text-zinc-50 flex items-center gap-2">
@@ -1105,64 +1228,66 @@ export function SuperAdmin() {
                 System Settings
               </h3>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
-                  <Settings size={12} />
-                  Exchange Rate (1 USD = ? NGN)
-                </label>
-                <input 
-                  type="number" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
-                  value={settings.exchangeRate}
-                  onChange={(e) => setSettings({ ...settings, exchangeRate: Number(e.target.value) })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
-                  <LinkIcon size={12} />
-                  Support Email
-                </label>
-                <input 
-                  type="email" 
-                  placeholder="support@example.com"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
-                  value={settings.supportEmail}
-                  onChange={(e) => setSettings({ ...settings, supportEmail: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
-                  Bank Name
-                </label>
-                <input 
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
-                  value={settings.bankName}
-                  onChange={(e) => setSettings({ ...settings, bankName: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
-                  Account Number
-                </label>
-                <input 
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
-                  value={settings.accountNumber}
-                  onChange={(e) => setSettings({ ...settings, accountNumber: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
-                  Account Name
-                </label>
-                <input 
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
-                  value={settings.accountName}
-                  onChange={(e) => setSettings({ ...settings, accountName: e.target.value })}
-                />
+            <div className="p-6 space-y-4 max-w-2xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                    <Settings size={12} />
+                    Exchange Rate (1 USD = ? NGN)
+                  </label>
+                  <input 
+                    type="number" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
+                    value={settings.exchangeRate}
+                    onChange={(e) => setSettings({ ...settings, exchangeRate: Number(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                    <LinkIcon size={12} />
+                    Support Email
+                  </label>
+                  <input 
+                    type="email" 
+                    placeholder="support@example.com"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
+                    value={settings.supportEmail}
+                    onChange={(e) => setSettings({ ...settings, supportEmail: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                    Bank Name
+                  </label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
+                    value={settings.bankName}
+                    onChange={(e) => setSettings({ ...settings, bankName: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                    Account Number
+                  </label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
+                    value={settings.accountNumber}
+                    onChange={(e) => setSettings({ ...settings, accountNumber: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                    Account Name
+                  </label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
+                    value={settings.accountName}
+                    onChange={(e) => setSettings({ ...settings, accountName: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
@@ -1185,90 +1310,7 @@ export function SuperAdmin() {
               </button>
             </div>
           </div>
-
-          {/* Tracking Codes List */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800 space-y-4">
-              <h3 className="font-bold text-zinc-50 flex items-center gap-2">
-                <Key size={18} className="text-emerald-500" />
-                Active Tracking Codes
-              </h3>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
-                <input 
-                  type="text" 
-                  placeholder="Search codes..."
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-                  value={codeSearchTerm}
-                  onChange={(e) => setCodeSearchTerm(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
-                  {filteredCodes.filter(c => c.status !== 'used').length === 0 ? (
-                    <div className="p-8 text-center text-zinc-500 text-xs">No active codes found</div>
-                  ) : (
-                    filteredCodes.filter(c => c.status !== 'used').map(code => {
-                      const isCodeExpired = new Date(code.expiryDate).getTime() < Date.now();
-                      return (
-                        <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className={cn(
-                              "font-mono font-bold tracking-widest",
-                              isCodeExpired ? "text-red-500" : "text-emerald-500"
-                            )}>
-                              {code.code}
-                            </span>
-                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                              <button 
-                                onClick={() => setExtendingCode(code)}
-                                className="p-1.5 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded"
-                                title="Extend Expiry"
-                              >
-                                <RefreshCw size={14} />
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  setConfirmAction({
-                                    title: 'Delete Tracking Code',
-                                    message: `Are you sure you want to delete code ${code.code}? This action cannot be undone.`,
-                                    onConfirm: async () => {
-                                      try {
-                                        await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
-                                        toast.success('Tracking code deleted');
-                                        setConfirmAction(null);
-                                      } catch (err) {
-                                        handleFirestoreError(err, OperationType.DELETE, `trackingCodes/${code.code}`);
-                                        toast.error('Failed to delete code');
-                                      }
-                                    }
-                                  });
-                                }}
-                                className="p-1.5 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded"
-                                title="Delete Code"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
-                            <div className="flex items-center gap-2">
-                              <span>{code.plan}</span>
-                              {code.price !== undefined && code.price > 0 && (
-                                <span className="text-emerald-500/80">({formatCurrency(code.price, currency, exchangeRate)})</span>
-                              )}
-                            </div>
-                            <span className={isCodeExpired ? "text-red-500" : ""}>
-                              {isCodeExpired ? 'Expired' : `Exp: ${safeFormat(code.expiryDate, 'MMM d, yyyy')}`}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
       {/* Plan History Modal */}
       {showHistoryHotel && (
