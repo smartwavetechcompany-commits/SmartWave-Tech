@@ -32,6 +32,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
+import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 
 export function FandB() {
   const { hotel, profile } = useAuth();
@@ -48,6 +49,11 @@ export function FandB() {
   const [now, setNow] = useState(new Date());
   
   const [cart, setCart] = useState<{ id: string; name: string; price: number; quantity: number }[]>([]);
+  const [reportFilter, setReportFilter] = useState({
+    type: 'all' as 'all' | 'food' | 'drink' | 'other',
+    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd')
+  });
   const [newOrder, setNewOrder] = useState({
     roomNumber: '',
     guestId: '',
@@ -337,16 +343,34 @@ export function FandB() {
   };
 
   const handleExport = () => {
-    const dataToExport = filteredOrders.map(order => ({
-      Timestamp: new Date(order.timestamp).toLocaleString(),
-      Room: order.roomNumber,
-      Items: order.items,
-      Category: order.category,
-      Status: order.status,
-      Notes: order.notes || ''
-    }));
-    exportToCSV(dataToExport, `fandb_orders_${new Date().toISOString().split('T')[0]}.csv`);
-    toast.success('F & B orders exported successfully');
+    const start = startOfDay(new Date(reportFilter.startDate));
+    const end = endOfDay(new Date(reportFilter.endDate));
+
+    const dataToExport = orders
+      .filter(order => {
+        const orderDate = new Date(order.timestamp);
+        const matchesDate = orderDate >= start && orderDate <= end;
+        const matchesType = reportFilter.type === 'all' || order.category === reportFilter.type;
+        return matchesDate && matchesType;
+      })
+      .map(order => ({
+        Timestamp: new Date(order.timestamp).toLocaleString(),
+        Room: order.roomNumber,
+        Items: order.items,
+        Category: order.category,
+        Status: order.status,
+        Price: order.price,
+        Payment: order.paymentMethod,
+        Notes: order.notes || ''
+      }));
+
+    if (dataToExport.length === 0) {
+      toast.info('No data found for the selected filters');
+      return;
+    }
+
+    exportToCSV(dataToExport, `fandb_report_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`);
+    toast.success('F & B report exported successfully');
   };
 
   return (
@@ -357,12 +381,39 @@ export function FandB() {
           <p className="text-zinc-400">Manage room service orders and F & B workflow</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+            <select
+              value={reportFilter.type}
+              onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
+              className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Types</option>
+              <option value="food">Food Only</option>
+              <option value="drink">Drink Only</option>
+              <option value="other">Other Only</option>
+            </select>
+            <div className="w-px h-4 bg-zinc-800" />
+            <input
+              type="date"
+              value={reportFilter.startDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+              className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <span className="text-zinc-600 text-xs">-</span>
+            <input
+              type="date"
+              value={reportFilter.endDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+              className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+          </div>
           <button 
             onClick={handleExport}
             className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
-            Export CSV
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </button>
           <button
             onClick={() => setShowAddModal(true)}
@@ -371,6 +422,37 @@ export function FandB() {
             <Plus size={18} />
             New Order
           </button>
+        </div>
+      </div>
+      
+      {/* Mobile Report Filters */}
+      <div className="md:hidden flex flex-col gap-2 bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
+        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Report Filters</p>
+        <div className="grid grid-cols-1 gap-3">
+          <select
+            value={reportFilter.type}
+            onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
+          >
+            <option value="all">All Types</option>
+            <option value="food">Food Only</option>
+            <option value="drink">Drink Only</option>
+            <option value="other">Other Only</option>
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="date"
+              value={reportFilter.startDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
+            />
+            <input
+              type="date"
+              value={reportFilter.endDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
+            />
+          </div>
         </div>
       </div>
 

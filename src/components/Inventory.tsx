@@ -7,7 +7,7 @@ import { InventoryItem, OperationType } from '../types';
 import { Package, Plus, Search, Filter, AlertTriangle, History, ArrowUp, ArrowDown, Trash2, Edit2, MoreHorizontal, ChevronRight, Box, ShoppingCart, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
-import { format } from 'date-fns';
+import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { createNotification } from './Notifications';
 import { toast } from 'sonner';
 
@@ -15,9 +15,19 @@ export function Inventory() {
   const { hotel, profile } = useAuth();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showRestockModal, setShowRestockModal] = useState<InventoryItem | null>(null);
+  const [restockData, setRestockData] = useState({
+    quantityToAdd: 0,
+    newUnitPrice: 0
+  });
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'food' | 'drink' | 'cleaning' | 'other'>('all');
+  const [reportFilter, setReportFilter] = useState({
+    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+    category: 'all' as 'all' | 'food' | 'drink' | 'cleaning' | 'other'
+  });
   const [newItem, setNewItem] = useState({
     name: '',
     category: 'food' as InventoryItem['category'],
@@ -100,17 +110,80 @@ export function Inventory() {
   };
 
   const adjustQuantity = async (item: InventoryItem, amount: number) => {
-    if (!hotel?.id) return;
+    if (!hotel?.id || !profile) return;
     const newQty = Math.max(0, item.quantity + amount);
     try {
       await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', item.id), {
         quantity: newQty,
         lastUpdated: new Date().toISOString()
       });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'INVENTORY_QUANTITY_ADJUSTED',
+        resource: `${item.name} adjusted by ${amount > 0 ? '+' : ''}${amount} ${item.unit}`,
+        hotelId: hotel.id,
+        module: 'Inventory'
+      });
+
       toast.success(`Quantity adjusted for ${item.name}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/inventory/${item.id}`);
       toast.error('Failed to adjust quantity');
+    }
+  };
+
+  const handleRestock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !showRestockModal) return;
+
+    try {
+      const item = showRestockModal;
+      const newQty = item.quantity + restockData.quantityToAdd;
+      
+      await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', item.id), {
+        quantity: newQty,
+        price: restockData.newUnitPrice || item.price,
+        lastUpdated: new Date().toISOString()
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'INVENTORY_RESTOCK',
+        resource: `Restocked ${restockData.quantityToAdd} ${item.unit} of ${item.name}`,
+        hotelId: hotel.id,
+        module: 'Inventory'
+      });
+
+      // Also create a finance record for the restock expense
+      const totalCost = restockData.quantityToAdd * (restockData.newUnitPrice || item.price || 0);
+      if (totalCost > 0) {
+        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'expense',
+          category: 'Inventory Restock',
+          amount: totalCost,
+          description: `Restock: ${restockData.quantityToAdd} ${item.unit} of ${item.name}`,
+          date: new Date().toISOString(),
+          status: 'completed',
+          paymentMethod: 'cash',
+          createdBy: profile.uid
+        });
+      }
+
+      toast.success(`Restocked ${item.name} successfully`);
+      setShowRestockModal(null);
+      setRestockData({ quantityToAdd: 0, newUnitPrice: 0 });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/inventory/${showRestockModal.id}`);
+      toast.error('Failed to restock item');
     }
   };
 
@@ -135,18 +208,36 @@ export function Inventory() {
   const lowStockItems = items.filter(i => i.quantity <= i.minThreshold);
 
   const handleExport = () => {
-    const dataToExport = items.map(item => ({
-      Name: item.name,
-      Category: item.category,
-      Quantity: item.quantity,
-      Unit: item.unit,
-      Price: item.price || 0,
-      TotalValue: (item.quantity || 0) * (item.price || 0),
-      MinThreshold: item.minThreshold,
-      LastUpdated: item.lastUpdated ? format(new Date(item.lastUpdated), 'yyyy-MM-dd HH:mm') : 'N/A'
-    }));
-    exportToCSV(dataToExport, `inventory_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-    toast.success('Inventory exported successfully');
+    const dataToExport = items
+      .filter(item => {
+        const matchesCategory = reportFilter.category === 'all' || item.category === reportFilter.category;
+        
+        const itemDate = item.lastUpdated ? new Date(item.lastUpdated) : null;
+        const matchesDate = !itemDate || isWithinInterval(itemDate, {
+          start: startOfDay(new Date(reportFilter.startDate)),
+          end: endOfDay(new Date(reportFilter.endDate))
+        });
+
+        return matchesCategory && matchesDate;
+      })
+      .map(item => ({
+        Name: item.name,
+        Category: item.category,
+        Quantity: item.quantity,
+        Unit: item.unit,
+        Price: item.price || 0,
+        TotalValue: (item.quantity || 0) * (item.price || 0),
+        MinThreshold: item.minThreshold,
+        LastUpdated: item.lastUpdated ? format(new Date(item.lastUpdated), 'yyyy-MM-dd HH:mm') : 'N/A'
+      }));
+
+    if (dataToExport.length === 0) {
+      toast.info('No inventory items found for the selected report filters');
+      return;
+    }
+
+    exportToCSV(dataToExport, `inventory_report_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`);
+    toast.success('Inventory report exported successfully');
   };
 
   return (
@@ -167,12 +258,40 @@ export function Inventory() {
           <p className="text-zinc-400">Manage supplies, food, and beverage stock</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+            <input
+              type="date"
+              value={reportFilter.startDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <span className="text-zinc-600 text-[10px]">to</span>
+            <input
+              type="date"
+              value={reportFilter.endDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <div className="w-px h-4 bg-zinc-800" />
+            <select
+              value={reportFilter.category}
+              onChange={(e) => setReportFilter({ ...reportFilter, category: e.target.value as any })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Categories</option>
+              <option value="food">Food</option>
+              <option value="drink">Drink</option>
+              <option value="cleaning">Cleaning</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
           <button 
             onClick={handleExport}
             className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
-            Export CSV
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </button>
           <button
             onClick={() => {
@@ -339,6 +458,16 @@ export function Inventory() {
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
                         onClick={() => {
+                          setShowRestockModal(item);
+                          setRestockData({ quantityToAdd: 0, newUnitPrice: item.price || 0 });
+                        }}
+                        className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                        title="Restock"
+                      >
+                        <ShoppingCart size={16} />
+                      </button>
+                      <button 
+                        onClick={() => {
                           setEditingItem(item);
                           setNewItem({ 
                             name: item.name, 
@@ -368,6 +497,65 @@ export function Inventory() {
           </tbody>
         </table>
       </div>
+
+      {/* Restock Modal */}
+      {showRestockModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-zinc-50">Restock {showRestockModal.name}</h2>
+              <p className="text-xs text-zinc-400 mt-1">Current stock: {showRestockModal.quantity} {showRestockModal.unit}</p>
+            </div>
+            <form onSubmit={handleRestock}>
+              <div className="p-6 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Quantity to Add ({showRestockModal.unit})</label>
+                  <input
+                    required
+                    type="number"
+                    min="1"
+                    value={restockData.quantityToAdd}
+                    onChange={(e) => setRestockData({ ...restockData, quantityToAdd: parseInt(e.target.value) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Unit Cost (NGN)</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={restockData.newUnitPrice}
+                    onChange={(e) => setRestockData({ ...restockData, newUnitPrice: parseFloat(e.target.value) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                  />
+                  <p className="text-[10px] text-zinc-500">Total restock cost: {new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(restockData.quantityToAdd * restockData.newUnitPrice)}</p>
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRestockModal(null)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
+                >
+                  Confirm Restock
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {showAddModal && (

@@ -54,6 +54,11 @@ export function Rooms() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [capacityFilter, setCapacityFilter] = useState<string>('all');
+  const [reportFilter, setReportFilter] = useState({
+    status: 'all',
+    type: 'all',
+    capacity: 'all'
+  });
   const [view, setView] = useState<'grid' | 'list' | 'calendar'>('grid');
   const [calendarStartDate, setCalendarStartDate] = useState(startOfDay(new Date()));
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
@@ -345,21 +350,34 @@ export function Rooms() {
   });
 
   const handleExport = () => {
-    const dataToExport = filteredRooms.map(r => {
-      const assignedStaff = staff.find(s => s.uid === r.assignedTo);
-      return {
-        Room: r.roomNumber,
-        Type: r.type,
-        Price: r.price,
-        Status: r.status,
-        Floor: r.floor,
-        Capacity: r.capacity,
-        'Assigned Staff': assignedStaff ? (assignedStaff.displayName || assignedStaff.email) : 'Unassigned',
-        Amenities: (r.amenities || []).join(', ')
-      };
-    });
-    exportToCSV(dataToExport, `rooms_list_${new Date().toISOString().split('T')[0]}.csv`);
-    toast.success('Rooms list exported successfully');
+    const dataToExport = rooms
+      .filter(room => {
+        const matchesStatus = reportFilter.status === 'all' || room.status === reportFilter.status;
+        const matchesType = reportFilter.type === 'all' || room.type === reportFilter.type;
+        const matchesCapacity = reportFilter.capacity === 'all' || room.capacity === Number(reportFilter.capacity);
+        return matchesStatus && matchesType && matchesCapacity;
+      })
+      .map(r => {
+        const assignedStaff = staff.find(s => s.uid === r.assignedTo);
+        return {
+          Room: r.roomNumber,
+          Type: r.type,
+          Price: r.price,
+          Status: r.status,
+          Floor: r.floor,
+          Capacity: r.capacity,
+          'Assigned Staff': assignedStaff ? (assignedStaff.displayName || assignedStaff.email) : 'Unassigned',
+          Amenities: (r.amenities || []).join(', ')
+        };
+      });
+
+    if (dataToExport.length === 0) {
+      toast.info('No rooms found for the selected report filters');
+      return;
+    }
+
+    exportToCSV(dataToExport, `rooms_report_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Rooms report exported successfully');
   };
 
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
@@ -407,6 +425,45 @@ export function Rooms() {
           <p className="text-zinc-400">Manage room inventory and status</p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+            <select
+              value={reportFilter.status}
+              onChange={(e) => setReportFilter({ ...reportFilter, status: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Statuses</option>
+              <option value="clean">Clean</option>
+              <option value="dirty">Dirty</option>
+              <option value="occupied">Occupied</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="vacant">Vacant</option>
+              <option value="out_of_service">Out of Service</option>
+            </select>
+            <div className="w-px h-4 bg-zinc-800" />
+            <select
+              value={reportFilter.type}
+              onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Types</option>
+              {roomTypes.map(type => (
+                <option key={type.id} value={type.name}>{type.name}</option>
+              ))}
+            </select>
+            <div className="w-px h-4 bg-zinc-800" />
+            <select
+              value={reportFilter.capacity}
+              onChange={(e) => setReportFilter({ ...reportFilter, capacity: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Cap.</option>
+              <option value="1">1 Pax</option>
+              <option value="2">2 Pax</option>
+              <option value="3">3 Pax</option>
+              <option value="4">4 Pax</option>
+              <option value="5">5+ Pax</option>
+            </select>
+          </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <div className="relative flex-1 sm:min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
@@ -482,7 +539,8 @@ export function Rooms() {
             className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
           >
             <Download size={18} />
-            Export CSV
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </button>
           <button 
             onClick={() => setIsAddingRoom(true)}

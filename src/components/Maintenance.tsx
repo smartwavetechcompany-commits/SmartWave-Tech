@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
-import { format } from 'date-fns';
+import { format, isWithinInterval, startOfDay, endOfDay, startOfMonth } from 'date-fns';
 import { toast } from 'sonner';
 
 export function Maintenance() {
@@ -32,6 +32,12 @@ export function Maintenance() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high' | 'urgent'>('all');
+  const [reportFilter, setReportFilter] = useState({
+    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+    status: 'all',
+    priority: 'all'
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [newRequest, setNewRequest] = useState({
     roomNumber: '',
@@ -145,18 +151,37 @@ export function Maintenance() {
   ];
 
   const handleExport = () => {
-    const dataToExport = filteredRequests.map(req => ({
-      Timestamp: new Date(req.timestamp).toLocaleString(),
-      Room: req.roomNumber,
-      Issue: req.issue,
-      Priority: req.priority,
-      Status: req.status,
-      ReportedBy: req.reportedBy,
-      Notes: req.notes || '',
-      CompletedAt: req.completedAt ? new Date(req.completedAt).toLocaleString() : 'N/A'
-    }));
-    exportToCSV(dataToExport, `maintenance_requests_${new Date().toISOString().split('T')[0]}.csv`);
-    toast.success('Maintenance requests exported successfully');
+    const dataToExport = requests
+      .filter(req => {
+        const matchesStatus = reportFilter.status === 'all' || req.status === reportFilter.status;
+        const matchesPriority = reportFilter.priority === 'all' || req.priority === reportFilter.priority;
+        
+        const reqDate = new Date(req.timestamp);
+        const matchesDate = isWithinInterval(reqDate, {
+          start: startOfDay(new Date(reportFilter.startDate)),
+          end: endOfDay(new Date(reportFilter.endDate))
+        });
+
+        return matchesStatus && matchesPriority && matchesDate;
+      })
+      .map(req => ({
+        Timestamp: new Date(req.timestamp).toLocaleString(),
+        Room: req.roomNumber,
+        Issue: req.issue,
+        Priority: req.priority,
+        Status: req.status,
+        ReportedBy: req.reportedBy,
+        Notes: req.notes || '',
+        CompletedAt: req.completedAt ? new Date(req.completedAt).toLocaleString() : 'N/A'
+      }));
+
+    if (dataToExport.length === 0) {
+      toast.info('No maintenance requests found for the selected report filters');
+      return;
+    }
+
+    exportToCSV(dataToExport, `maintenance_report_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`);
+    toast.success('Maintenance report exported successfully');
   };
 
   return (
@@ -167,12 +192,39 @@ export function Maintenance() {
           <p className="text-zinc-400">Track and manage room repairs and facility maintenance</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+            <input
+              type="date"
+              value={reportFilter.startDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <span className="text-zinc-600 text-[10px]">to</span>
+            <input
+              type="date"
+              value={reportFilter.endDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <div className="w-px h-4 bg-zinc-800" />
+            <select
+              value={reportFilter.status}
+              onChange={(e) => setReportFilter({ ...reportFilter, status: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
           <button 
             onClick={handleExport}
             className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
-            Export CSV
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </button>
           <button
             onClick={() => setShowAddModal(true)}

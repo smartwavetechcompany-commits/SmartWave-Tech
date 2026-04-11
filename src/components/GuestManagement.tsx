@@ -30,7 +30,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import Fuse from 'fuse.js';
-import { format } from 'date-fns';
+import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -51,6 +51,11 @@ export function GuestManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [guestTypeFilter, setGuestTypeFilter] = useState<'all' | 'individual' | 'corporate'>('all');
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'yes' | 'no'>('all');
+  const [reportFilter, setReportFilter] = useState({
+    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+    type: 'all' as 'all' | 'individual' | 'corporate'
+  });
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [newGuest, setNewGuest] = useState({
     name: '',
@@ -209,27 +214,45 @@ export function GuestManagement() {
   };
 
   const exportGuests = () => {
-    const data = filteredGuests.map(g => ({
-      Name: g.name,
-      Email: g.email,
-      Phone: g.phone,
-      'Guest Type': g.corporateId ? 'Corporate' : 'Individual',
-      'ID Type': g.idType,
-      'ID Number': g.idNumber,
-      Address: g.address,
-      'Total Stays': g.totalStays || 0,
-      'Total Spent': g.totalSpent || 0,
-      'Balance': g.ledgerBalance || 0,
-      'Tags': (g.tags || []).join(', '),
-      'Preferences': (g.preferences || []).join(', '),
-      'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
-    }));
+    const data = guests
+      .filter(guest => {
+        const matchesType = reportFilter.type === 'all' || 
+          (reportFilter.type === 'corporate' ? !!guest.corporateId : !guest.corporateId);
+        
+        const guestDate = guest.createdAt ? new Date(guest.createdAt) : null;
+        const matchesDate = !guestDate || isWithinInterval(guestDate, {
+          start: startOfDay(new Date(reportFilter.startDate)),
+          end: endOfDay(new Date(reportFilter.endDate))
+        });
+
+        return matchesType && matchesDate;
+      })
+      .map(g => ({
+        Name: g.name,
+        Email: g.email,
+        Phone: g.phone,
+        'Guest Type': g.corporateId ? 'Corporate' : 'Individual',
+        'ID Type': g.idType,
+        'ID Number': g.idNumber,
+        Address: g.address,
+        'Total Stays': g.totalStays || 0,
+        'Total Spent': g.totalSpent || 0,
+        'Balance': g.ledgerBalance || 0,
+        'Tags': (g.tags || []).join(', '),
+        'Preferences': (g.preferences || []).join(', '),
+        'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
+      }));
+
+    if (data.length === 0) {
+      toast.info("No guests found for the selected report filters");
+      return;
+    }
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Guests");
-    XLSX.writeFile(wb, `guests_export_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-    toast.success("Filtered guest data exported to Excel");
+    XLSX.writeFile(wb, `guests_report_${reportFilter.startDate}_to_${reportFilter.endDate}.xlsx`);
+    toast.success("Guest report exported to Excel");
   };
 
   const fuse = useMemo(() => new Fuse(guests, {
@@ -265,12 +288,38 @@ export function GuestManagement() {
           <p className="text-zinc-400">Manage guest profiles, history, and loyalty</p>
         </div>
         <div className="flex gap-3">
+          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+            <input
+              type="date"
+              value={reportFilter.startDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <span className="text-zinc-600 text-[10px]">to</span>
+            <input
+              type="date"
+              value={reportFilter.endDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            />
+            <div className="w-px h-4 bg-zinc-800" />
+            <select
+              value={reportFilter.type}
+              onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+            >
+              <option value="all">All Types</option>
+              <option value="individual">Individual</option>
+              <option value="corporate">Corporate</option>
+            </select>
+          </div>
           <button
             onClick={exportGuests}
             className="flex items-center gap-2 bg-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >
             <Download size={18} />
-            Export CSV
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
           </button>
           <button
             onClick={() => {

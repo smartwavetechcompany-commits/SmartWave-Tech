@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
-import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays } from 'date-fns';
+import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
@@ -89,6 +89,12 @@ export function Finance() {
     status: 'pending' as const,
     paymentStatus: 'unpaid' as const,
     dueDate: format(addDays(new Date(), 7), 'yyyy-MM-dd')
+  });
+
+  const [reportFilter, setReportFilter] = useState({
+    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+    category: 'all'
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -523,11 +529,19 @@ export function Finance() {
 
   const handleDownloadReport = (reportTitle: string) => {
     let data: any[] = [];
-    let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`;
+
+    const start = startOfDay(new Date(reportFilter.startDate));
+    const end = endOfDay(new Date(reportFilter.endDate));
+
+    const filterByDate = (items: any[]) => items.filter(item => {
+      const date = new Date(item.timestamp || item.createdAt || item.date);
+      return date >= start && date <= end;
+    });
 
     switch (reportTitle) {
       case 'Expense Type Report':
-        const expenseRecords = records.filter(r => r.type === 'expense');
+        const expenseRecords = filterByDate(records.filter(r => r.type === 'expense'));
         const byCategory = categories.expense.map(cat => ({
           Category: cat,
           Total: expenseRecords.filter(r => r.category === cat).reduce((acc, r) => acc + r.amount, 0)
@@ -535,21 +549,26 @@ export function Finance() {
         data = byCategory;
         break;
       case 'Net Income Report':
+        const periodRecords = filterByDate(records);
+        const pIncome = periodRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+        const pExpense = periodRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
         data = [
-          { Item: 'Total Income', Amount: totalIncome },
-          { Item: 'Total Expense', Amount: totalExpense },
-          { Item: 'Net Income', Amount: balance }
+          { Item: 'Total Income', Amount: pIncome },
+          { Item: 'Total Expense', Amount: pExpense },
+          { Item: 'Net Income', Amount: pIncome - pExpense }
         ];
         break;
       case 'Transaction Report':
-        data = filteredRecords.map(r => ({
-          Date: format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
-          Description: r.description,
-          Category: r.category,
-          Type: r.type,
-          Amount: r.amount,
-          Method: r.paymentMethod
-        }));
+        data = filterByDate(records)
+          .filter(r => reportFilter.category === 'all' || r.category === reportFilter.category)
+          .map(r => ({
+            Date: format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
+            Description: r.description,
+            Category: r.category,
+            Type: r.type,
+            Amount: r.amount,
+            Method: r.paymentMethod
+          }));
         break;
       case 'Balance Sheet':
         data = accounts.map(a => ({
@@ -570,14 +589,14 @@ export function Finance() {
         }));
         break;
       case 'Store Balance':
-        // Summary based on finance records by payment method
+        const periodStoreRecords = filterByDate(records);
         const methods = ['cash', 'card', 'transfer'];
         data = methods.map(method => ({
           'Store Point': method.toUpperCase(),
-          Income: records.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0),
-          Expense: records.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0),
-          Balance: records.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0) - 
-                   records.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0)
+          Income: periodStoreRecords.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0),
+          Expense: periodStoreRecords.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0),
+          Balance: periodStoreRecords.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0) - 
+                   periodStoreRecords.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0)
         }));
         break;
       default:
@@ -1375,30 +1394,72 @@ export function Finance() {
           )}
 
           {activeTab === 'reports' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[
-                { title: 'Expense Type Report', icon: TrendingDown, desc: 'Breakdown of expenses by category' },
-                { title: 'Net Income Report', icon: BarChart3, desc: 'Profit and loss statement' },
-                { title: 'Transaction Report', icon: History, desc: 'Detailed list of all financial movements' },
-                { title: 'Balance Sheet', icon: Wallet, desc: 'Assets, liabilities, and equity' },
-                { title: 'Inventory Value', icon: LayoutDashboard, desc: 'Current value of stock on hand' },
-                { title: 'Store Balance', icon: Receipt, desc: 'Financial status of different store points' },
-              ].map((report) => (
-                <button 
-                  key={report.title} 
-                  onClick={() => handleDownloadReport(report.title)}
-                  className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl text-left hover:border-emerald-500/50 transition-all group"
-                >
-                  <div className="p-3 rounded-xl bg-zinc-950 w-fit mb-4 group-hover:bg-emerald-500/10 transition-colors">
-                    <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
+            <div className="space-y-6">
+              <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-zinc-50">Report Parameters</h3>
+                  <p className="text-xs text-zinc-500">Select date range and filters for your reports</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Category</label>
+                    <select
+                      value={reportFilter.category}
+                      onChange={(e) => setReportFilter({ ...reportFilter, category: e.target.value })}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="all">All Categories</option>
+                      {[...categories.income, ...categories.expense].map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-zinc-50 mb-1">{report.title}</h4>
-                    <Download size={14} className="text-zinc-600 group-hover:text-emerald-500" />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Start Date</label>
+                    <input
+                      type="date"
+                      value={reportFilter.startDate}
+                      onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    />
                   </div>
-                  <p className="text-xs text-zinc-500">{report.desc}</p>
-                </button>
-              ))}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">End Date</label>
+                    <input
+                      type="date"
+                      value={reportFilter.endDate}
+                      onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[
+                  { title: 'Expense Type Report', icon: TrendingDown, desc: 'Breakdown of expenses by category' },
+                  { title: 'Net Income Report', icon: BarChart3, desc: 'Profit and loss statement' },
+                  { title: 'Transaction Report', icon: History, desc: 'Detailed list of all financial movements' },
+                  { title: 'Balance Sheet', icon: Wallet, desc: 'Assets, liabilities, and equity' },
+                  { title: 'Inventory Value', icon: LayoutDashboard, desc: 'Current value of stock on hand' },
+                  { title: 'Store Balance', icon: Receipt, desc: 'Financial status of different store points' },
+                ].map((report) => (
+                  <button 
+                    key={report.title} 
+                    onClick={() => handleDownloadReport(report.title)}
+                    className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl text-left hover:border-emerald-500/50 transition-all group"
+                  >
+                    <div className="p-3 rounded-xl bg-zinc-950 w-fit mb-4 group-hover:bg-emerald-500/10 transition-colors">
+                      <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-zinc-50 mb-1">{report.title}</h4>
+                      <Download size={14} className="text-zinc-600 group-hover:text-emerald-500" />
+                    </div>
+                    <p className="text-xs text-zinc-500">{report.desc}</p>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
