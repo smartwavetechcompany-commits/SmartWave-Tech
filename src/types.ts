@@ -198,6 +198,8 @@ export interface Reservation {
 export interface KitchenOrder {
   id: string;
   roomNumber: string;
+  tableId?: string;
+  tableNumber?: string;
   guestId?: string;
   guestName?: string;
   items: string;
@@ -211,6 +213,19 @@ export interface KitchenOrder {
   preparedAt?: string;
   readyAt?: string;
   deliveredAt?: string;
+}
+
+export interface BarTable {
+  id: string;
+  tableNumber: string;
+  status: 'available' | 'occupied' | 'reserved';
+  currentOrderId?: string;
+  currentGuestName?: string;
+  currentGuestId?: string;
+  currentReservationId?: string;
+  capacity?: number;
+  totalSpend?: number;
+  lastUpdated?: string;
 }
 
 export interface FinanceRecord {

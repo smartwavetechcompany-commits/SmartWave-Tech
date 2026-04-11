@@ -75,6 +75,21 @@ export function GuestManagement() {
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [tagInput, setTagInput] = useState('');
   const [prefInput, setPrefInput] = useState('');
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+
+  const allExistingTags = useMemo(() => {
+    const tags = new Set<string>();
+    guests.forEach(g => (g.tags || []).forEach(t => tags.add(t)));
+    return Array.from(tags);
+  }, [guests]);
+
+  const tagSuggestions = useMemo(() => {
+    if (!tagInput.trim()) return [];
+    return allExistingTags.filter(t => 
+      t.toLowerCase().includes(tagInput.toLowerCase()) && 
+      !newGuest.tags.includes(t)
+    );
+  }, [tagInput, allExistingTags, newGuest.tags]);
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -637,20 +652,33 @@ export function GuestManagement() {
                               <div className="text-xs text-zinc-500">
                                 {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
                               </div>
-                              <button 
-                                onClick={() => setShowFolio(res)}
-                                className="mt-2 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
-                              >
-                                <Receipt size={10} />
-                                View Folio
-                              </button>
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className={cn(
+                                  "text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
+                                  res.paymentStatus === 'paid' ? "bg-emerald-500/10 text-emerald-500" :
+                                  res.paymentStatus === 'partial' ? "bg-amber-500/10 text-amber-500" :
+                                  "bg-red-500/10 text-red-500"
+                                )}>
+                                  {res.paymentStatus}
+                                </div>
+                                <button 
+                                  onClick={() => setShowFolio(res)}
+                                  className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
+                                >
+                                  <Receipt size={10} />
+                                  View Folio
+                                </button>
+                              </div>
                             </div>
                           </div>
                           <div className="text-right">
                             <div className="text-sm font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
                             <div className={cn(
-                              "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block",
-                              res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
+                              "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block mt-1",
+                              res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : 
+                              res.status === 'checked_in' ? "bg-blue-500/10 text-blue-500" :
+                              res.status === 'cancelled' ? "bg-red-500/10 text-red-500" :
+                              "bg-zinc-800 text-zinc-500"
                             )}>
                               {res.status.replace('_', ' ')}
                             </div>
@@ -848,28 +876,53 @@ export function GuestManagement() {
                       </span>
                     ))}
                   </div>
-                  <input
-                    type="text"
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const val = tagInput.trim();
-                        if (val && !newGuest.tags.includes(val)) {
-                          setNewGuest({ ...newGuest, tags: [...newGuest.tags, val] });
-                          setTagInput('');
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => {
+                        setTagInput(e.target.value);
+                        setShowTagSuggestions(true);
+                      }}
+                      onFocus={() => setShowTagSuggestions(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const val = tagInput.trim();
+                          if (val && !newGuest.tags.includes(val)) {
+                            setNewGuest({ ...newGuest, tags: [...newGuest.tags, val] });
+                            setTagInput('');
+                            setShowTagSuggestions(false);
+                          }
                         }
-                      }
-                    }}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                    placeholder="Type tag and press Enter (e.g. VIP)"
-                  />
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      placeholder="Type tag and press Enter (e.g. VIP)"
+                    />
+                    {showTagSuggestions && tagSuggestions.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl max-h-40 overflow-y-auto">
+                        {tagSuggestions.map(suggestion => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            onClick={() => {
+                              setNewGuest({ ...newGuest, tags: [...newGuest.tags, suggestion] });
+                              setTagInput('');
+                              setShowTagSuggestions(false);
+                            }}
+                            className="w-full px-4 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 transition-colors"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Preferences</label>
                   <div className="flex flex-wrap gap-1 mb-2">
-                    {['Extra Pillows', 'Non-Smoking', 'Late Checkout', 'Quiet Room', 'High Floor'].map(p => (
+                    {['Pillow Preference', 'Room Temperature', 'Newspaper Preference', 'Extra Pillows', 'Non-Smoking', 'Late Checkout'].map(p => (
                       <button
                         key={p}
                         type="button"
@@ -913,7 +966,7 @@ export function GuestManagement() {
                       }
                     }}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                    placeholder="Type preference and press Enter"
+                    placeholder="Type custom preference (e.g. Firm Pillow) and press Enter"
                   />
                 </div>
               </div>

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem } from '../types';
+import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { 
@@ -27,7 +27,8 @@ import {
   XCircle,
   ShoppingCart,
   Trash2,
-  Minus
+  Minus,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV, safeStringify } from '../utils';
@@ -40,7 +41,10 @@ export function FandB() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [tables, setTables] = useState<BarTable[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showTableModal, setShowTableModal] = useState(false);
+  const [editingTable, setEditingTable] = useState<BarTable | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [printingOrder, setPrintingOrder] = useState<KitchenOrder | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
@@ -56,6 +60,8 @@ export function FandB() {
   });
   const [newOrder, setNewOrder] = useState({
     roomNumber: '',
+    tableId: '',
+    tableNumber: '',
     guestId: '',
     items: '',
     notes: '',
@@ -119,11 +125,22 @@ export function FandB() {
       }
     );
 
+    const unsubTables = onSnapshot(
+      query(collection(db, 'hotels', hotel.id, 'tables'), orderBy('tableNumber', 'asc')),
+      (snap) => {
+        setTables(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as BarTable)));
+      },
+      (error: any) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/tables`);
+      }
+    );
+
     return () => {
       unsubOrders();
       unsubReservations();
       unsubGuests();
       unsubInventory();
+      unsubTables();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
@@ -173,25 +190,33 @@ export function FandB() {
     if (!hotel?.id || !profile || isSaving) return;
 
     setIsSaving(true);
-    console.log('Starting handleAddOrder with data:', newOrder);
-
     try {
-      console.log("Creating kitchen order for hotel:", hotel.id);
-      console.log("Order data:", newOrder);
-      
       const res = reservations.find(r => r.roomNumber === newOrder.roomNumber);
       const orderData = {
         ...newOrder,
         itemsList: cart,
-        guestName: res?.guestName || 'Walk-in',
-        hotelId: hotel.id, // Ensure hotelId is explicitly set
+        guestName: res?.guestName || guests.find(g => g.id === newOrder.guestId)?.name || 'Walk-in',
+        hotelId: hotel.id,
         status: 'pending',
         timestamp: new Date().toISOString()
       };
 
-      console.log('Attempting to add kitchen order to Firestore...');
       const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
-      console.log('F & B order added with ID:', orderRef.id);
+
+      // Update table status if assigned
+      if (newOrder.tableId) {
+        const table = tables.find(t => t.id === newOrder.tableId);
+        if (table) {
+          await updateDoc(doc(db, 'hotels', hotel.id, 'tables', table.id), {
+            status: 'occupied',
+            currentOrderId: orderRef.id,
+            currentGuestName: orderData.guestName,
+            currentGuestId: newOrder.guestId || res?.guestId || '',
+            totalSpend: (table.totalSpend || 0) + newOrder.price,
+            lastUpdated: new Date().toISOString()
+          });
+        }
+      }
 
       // Create notification for F & B staff
       await createNotification(hotel.id, {
@@ -248,7 +273,7 @@ export function FandB() {
       toast.success('F & B order created');
       setShowAddModal(false);
       setCart([]);
-      setNewOrder({ roomNumber: '', guestId: '', items: '', notes: '', category: 'all', price: 0, paymentMethod: 'cash' });
+      setNewOrder({ roomNumber: '', tableId: '', tableNumber: '', guestId: '', items: '', notes: '', category: 'all', price: 0, paymentMethod: 'cash' });
     } catch (err: any) {
       console.error('Error in handleAddOrder:', err.message || safeStringify(err));
       if (err.message === 'No active reservation or guest found for this room') {
@@ -340,6 +365,66 @@ export function FandB() {
     if (diff < 1) return 'Just now';
     if (diff < 60) return `${diff}m ago`;
     return `${Math.floor(diff / 60)}h ${diff % 60}m ago`;
+  };
+
+  const [activeTab, setActiveTab] = useState<'orders' | 'tables'>('orders');
+
+  const handleAddTable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile) return;
+
+    const tableData = {
+      tableNumber: editingTable?.tableNumber || '',
+      capacity: editingTable?.capacity || 4,
+      status: editingTable?.status || 'available',
+      totalSpend: editingTable?.totalSpend || 0,
+      lastUpdated: new Date().toISOString()
+    };
+
+    try {
+      if (editingTable?.id) {
+        await updateDoc(doc(db, 'hotels', hotel.id, 'tables', editingTable.id), tableData);
+        toast.success('Table updated');
+      } else {
+        await addDoc(collection(db, 'hotels', hotel.id, 'tables'), tableData);
+        toast.success('Table added');
+      }
+      setShowTableModal(false);
+      setEditingTable(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/tables`);
+      toast.error('Failed to save table');
+    }
+  };
+
+  const handleDeleteTable = async (tableId: string) => {
+    if (!hotel?.id || !profile || !window.confirm('Are you sure you want to delete this table?')) return;
+
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'tables', tableId));
+      toast.success('Table deleted');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/tables/${tableId}`);
+      toast.error('Failed to delete table');
+    }
+  };
+
+  const handleClearTable = async (tableId: string) => {
+    if (!hotel?.id || !profile || !window.confirm('Are you sure you want to clear this table? This will mark it as available.')) return;
+
+    try {
+      await updateDoc(doc(db, 'hotels', hotel.id, 'tables', tableId), {
+        status: 'available',
+        currentOrderId: '',
+        currentGuestName: '',
+        currentGuestId: '',
+        currentReservationId: ''
+      });
+      toast.success('Table cleared');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/tables/${tableId}`);
+      toast.error('Failed to clear table');
+    }
   };
 
   const handleExport = () => {
@@ -456,189 +541,306 @@ export function FandB() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {stats.map((stat) => (
-          <div key={stat.label} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
-              <stat.icon className={stat.color} size={20} />
-            </div>
-            <div className="text-2xl font-bold text-zinc-50">{stat.count}</div>
+      <div className="flex items-center gap-4 border-b border-zinc-800 mb-6">
+        <button
+          onClick={() => setActiveTab('orders')}
+          className={cn(
+            "pb-4 px-2 text-sm font-bold transition-all relative",
+            activeTab === 'orders' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          Orders
+          {activeTab === 'orders' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+        </button>
+        <button
+          onClick={() => setActiveTab('tables')}
+          className={cn(
+            "pb-4 px-2 text-sm font-bold transition-all relative",
+            activeTab === 'tables' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          Tables
+          {activeTab === 'tables' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+        </button>
+      </div>
+
+      {activeTab === 'orders' ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            {stats.map((stat) => (
+              <div key={stat.label} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
+                  <stat.icon className={stat.color} size={20} />
+                </div>
+                <div className="text-2xl font-bold text-zinc-50">{stat.count}</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-          <input
-            type="text"
-            placeholder="Search by room or items..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
-          {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
-                filter === f ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
-              )}
-            >
-              {f}
-            </button>
-          ))}
-          <div className="w-px h-4 bg-zinc-800 mx-1" />
-          {(['all', 'food', 'drink', 'other'] as const).map((c) => (
-            <button
-              key={c}
-              onClick={() => setCategoryFilter(c)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
-                categoryFilter === c ? "bg-emerald-500/10 text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
-              )}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <AnimatePresence mode="popLayout">
-          {filteredOrders.length === 0 ? (
-            <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
-              <UtensilsCrossed size={48} className="mx-auto text-zinc-700 mb-4" />
-              <p>No orders found</p>
+          <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+              <input
+                type="text"
+                placeholder="Search by room or items..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+              />
             </div>
-          ) : (
-            filteredOrders.map((order) => (
-              <motion.div
-                key={order.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col"
-              >
-                <div className="p-5 flex-1">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-50 font-bold">
-                        {order.roomNumber === 'Walk-in' ? 'W' : order.roomNumber}
-                      </div>
-                      <div>
-                        <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
-                          {order.roomNumber === 'Walk-in' ? 'Walk-in' : `Room ${order.roomNumber}`}
-                        </div>
-                        <div className="text-[10px] text-zinc-400 font-bold">
-                          {order.guestName}
-                        </div>
-                        <div className="text-[10px] text-zinc-500 flex items-center gap-1">
-                          <Clock size={10} />
-                          {getWaitTime(order.timestamp)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
-                        <button
-                          onClick={() => handleDeleteOrder(order.id, order.roomNumber)}
-                          className="p-1.5 hover:bg-red-500/10 text-zinc-600 hover:text-red-500 rounded-lg transition-colors"
-                          title="Delete Order"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                      <div className={cn(
-                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1",
-                        order.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
-                        order.status === 'preparing' ? "bg-amber-500/10 text-amber-500" :
-                        order.status === 'ready' ? "bg-emerald-500/10 text-emerald-500" :
-                        "bg-zinc-800 text-zinc-500"
-                      )}>
-                        {order.status === 'preparing' && <RefreshCw size={10} className="animate-spin" />}
-                        {order.status}
-                      </div>
-                    </div>
-                  </div>
+            <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
+              {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
+                    filter === f ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  {f}
+                </button>
+              ))}
+              <div className="w-px h-4 bg-zinc-800 mx-1" />
+              {(['all', 'food', 'drink', 'other'] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCategoryFilter(c)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
+                    categoryFilter === c ? "bg-emerald-500/10 text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
 
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      {order.category === 'food' ? <Pizza size={14} className="text-amber-500" /> :
-                       order.category === 'drink' ? <Coffee size={14} className="text-blue-500" /> :
-                       <MoreHorizontal size={14} className="text-zinc-500" />}
-                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{order.category}</span>
-                    </div>
-                    <div>
-                      <p className="text-sm text-zinc-50 leading-relaxed font-medium">{order.items}</p>
-                    </div>
-                    {(order.price > 0) && (
-                      <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
-                        <div className="text-xs font-bold text-emerald-500">
-                          {order.price.toLocaleString()}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <AnimatePresence mode="popLayout">
+              {filteredOrders.length === 0 ? (
+                <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
+                  <UtensilsCrossed size={48} className="mx-auto text-zinc-700 mb-4" />
+                  <p>No orders found</p>
+                </div>
+              ) : (
+                filteredOrders.map((order) => (
+                  <motion.div
+                    key={order.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col"
+                  >
+                    <div className="p-5 flex-1">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-50 font-bold">
+                            {order.roomNumber === 'Walk-in' ? 'W' : order.roomNumber}
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
+                              {order.roomNumber === 'Walk-in' ? (order.tableNumber ? `Table ${order.tableNumber}` : 'Walk-in') : `Room ${order.roomNumber}`}
+                            </div>
+                            <div className="text-[10px] text-zinc-400 font-bold">
+                              {order.guestName}
+                            </div>
+                            <div className="text-[10px] text-zinc-500 flex items-center gap-1">
+                              <Clock size={10} />
+                              {getWaitTime(order.timestamp)}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider bg-zinc-800 px-2 py-0.5 rounded">
-                          {order.paymentMethod === 'room' ? 'Post to Room' : order.paymentMethod}
+                        <div className="flex items-center gap-2">
+                          {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                            <button
+                              onClick={() => handleDeleteOrder(order.id, order.roomNumber)}
+                              className="p-1.5 hover:bg-red-500/10 text-zinc-600 hover:text-red-500 rounded-lg transition-colors"
+                              title="Delete Order"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                          <div className={cn(
+                            "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1",
+                            order.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
+                            order.status === 'preparing' ? "bg-amber-500/10 text-amber-500" :
+                            order.status === 'ready' ? "bg-emerald-500/10 text-emerald-500" :
+                            "bg-zinc-800 text-zinc-500"
+                          )}>
+                            {order.status === 'preparing' && <RefreshCw size={10} className="animate-spin" />}
+                            {order.status}
+                          </div>
                         </div>
                       </div>
-                    )}
-                    {order.notes && (
-                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Notes</div>
-                        <p className="text-xs text-zinc-400 italic">{order.notes}</p>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          {order.category === 'food' ? <Pizza size={14} className="text-amber-500" /> :
+                           order.category === 'drink' ? <Coffee size={14} className="text-blue-500" /> :
+                           <MoreHorizontal size={14} className="text-zinc-500" />}
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{order.category}</span>
+                        </div>
+                        <div>
+                          <p className="text-sm text-zinc-50 leading-relaxed font-medium">{order.items}</p>
+                        </div>
+                        {(order.price > 0) && (
+                          <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
+                            <div className="text-xs font-bold text-emerald-500">
+                              {order.price.toLocaleString()}
+                            </div>
+                            <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider bg-zinc-800 px-2 py-0.5 rounded">
+                              {order.paymentMethod === 'room' ? 'Post to Room' : order.paymentMethod}
+                            </div>
+                          </div>
+                        )}
+                        {order.notes && (
+                          <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                            <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Notes</div>
+                            <p className="text-xs text-zinc-400 italic">{order.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {order.status !== 'delivered' && (
+                      <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
+                        {order.status === 'pending' && (
+                          <button
+                            onClick={() => updateOrderStatus(order.id, 'preparing')}
+                            className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                          >
+                            <ChefHat size={14} />
+                            Start Preparing
+                          </button>
+                        )}
+                        {order.status === 'preparing' && (
+                          <button
+                            onClick={() => updateOrderStatus(order.id, 'ready')}
+                            className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                          >
+                            <Bell size={14} />
+                            Mark as Ready
+                          </button>
+                        )}
+                        {order.status === 'ready' && (
+                          <button
+                            onClick={() => updateOrderStatus(order.id, 'delivered')}
+                            className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                          >
+                            <CheckCircle2 size={14} />
+                            Confirm Delivery
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setPrintingOrder(order)}
+                          className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                        >
+                          <Printer size={14} />
+                          Print Docket
+                        </button>
                       </div>
                     )}
+                  </motion.div>
+                ))
+              )}
+            </AnimatePresence>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-zinc-50">Bar Tables</h2>
+              <p className="text-sm text-zinc-400">Manage and track table occupancy and spending</p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingTable(null);
+                setShowTableModal(true);
+              }}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            >
+              <Plus size={18} />
+              Add Table
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {tables.map((table) => (
+              <div
+                key={table.id}
+                className={cn(
+                  "bg-zinc-900 border border-zinc-800 rounded-2xl p-6 transition-all hover:border-zinc-700",
+                  table.status === 'occupied' ? "ring-1 ring-amber-500/20" : ""
+                )}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-zinc-800 rounded-2xl flex items-center justify-center text-xl font-black text-zinc-50">
+                    {table.tableNumber}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setEditingTable(table);
+                        setShowTableModal(true);
+                      }}
+                      className="p-2 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-lg transition-colors"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTable(table.id)}
+                      className="p-2 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 rounded-lg transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </div>
 
-                {order.status !== 'delivered' && (
-                  <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
-                    {order.status === 'pending' && (
-                      <button
-                        onClick={() => updateOrderStatus(order.id, 'preparing')}
-                        className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
-                      >
-                        <ChefHat size={14} />
-                        Start Preparing
-                      </button>
-                    )}
-                    {order.status === 'preparing' && (
-                      <button
-                        onClick={() => updateOrderStatus(order.id, 'ready')}
-                        className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
-                      >
-                        <Bell size={14} />
-                        Mark as Ready
-                      </button>
-                    )}
-                    {order.status === 'ready' && (
-                      <button
-                        onClick={() => updateOrderStatus(order.id, 'delivered')}
-                        className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
-                      >
-                        <CheckCircle2 size={14} />
-                        Confirm Delivery
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setPrintingOrder(order)}
-                      className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
-                    >
-                      <Printer size={14} />
-                      Print Docket
-                    </button>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Status</span>
+                    <span className={cn(
+                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                      table.status === 'available' ? "bg-emerald-500/10 text-emerald-500" :
+                      table.status === 'occupied' ? "bg-amber-500/10 text-amber-500" :
+                      "bg-zinc-800 text-zinc-500"
+                    )}>
+                      {table.status}
+                    </span>
                   </div>
-                )}
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
-      </div>
+
+                  {table.status === 'occupied' && (
+                    <>
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Current Guest</div>
+                        <div className="text-sm font-bold text-zinc-50">{table.currentGuestName || 'Unknown'}</div>
+                      </div>
+                      <button
+                        onClick={() => handleClearTable(table.id)}
+                        className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                      >
+                        Clear Table
+                      </button>
+                    </>
+                  )}
+
+                  <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
+                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Total Spend</div>
+                    <div className="text-sm font-black text-emerald-500">
+                      {(table.totalSpend || 0).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Print Docket Modal */}
       {printingOrder && (
@@ -873,6 +1075,25 @@ export function FandB() {
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Table (Optional)</label>
+                    <select
+                      value={newOrder.tableId}
+                      onChange={(e) => {
+                        const table = tables.find(t => t.id === e.target.value);
+                        setNewOrder({ ...newOrder, tableId: e.target.value, tableNumber: table?.tableNumber || '' });
+                      }}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="">No Table</option>
+                      {tables.map(table => (
+                        <option key={table.id} value={table.id}>
+                          Table {table.tableNumber} ({table.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room & Guest</label>
                     <select
                       required
@@ -952,6 +1173,65 @@ export function FandB() {
                 </div>
               </div>
             </div>
+          </motion.div>
+        </div>
+      )}
+      {/* Table Management Modal */}
+      {showTableModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-zinc-50">{editingTable ? 'Edit Table' : 'Add New Table'}</h2>
+              <button onClick={() => setShowTableModal(false)} className="text-zinc-500 hover:text-zinc-300">
+                <XCircle size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleAddTable} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Table Number</label>
+                <input
+                  type="text"
+                  required
+                  value={editingTable?.tableNumber || ''}
+                  onChange={(e) => setEditingTable(prev => ({ ...prev!, tableNumber: e.target.value }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                  placeholder="e.g. 1, 2, B1, etc."
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Capacity</label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={editingTable?.capacity || 4}
+                  onChange={(e) => setEditingTable(prev => ({ ...prev!, capacity: parseInt(e.target.value) }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Status</label>
+                <select
+                  value={editingTable?.status || 'available'}
+                  onChange={(e) => setEditingTable(prev => ({ ...prev!, status: e.target.value as any }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                >
+                  <option value="available">Available</option>
+                  <option value="occupied">Occupied</option>
+                  <option value="reserved">Reserved</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-bold py-4 rounded-xl transition-all active:scale-95 mt-4"
+              >
+                {editingTable ? 'Update Table' : 'Add Table'}
+              </button>
+            </form>
           </motion.div>
         </div>
       )}
