@@ -14,7 +14,7 @@ import {
   Settings as SettingsIcon,
   CheckCircle2
 } from 'lucide-react';
-import { cn } from '../utils';
+import { cn, safeStringify } from '../utils';
 
 interface Step {
   title: string;
@@ -76,8 +76,8 @@ export function OnboardingTour() {
         hasCompletedOnboarding: true
       });
       setIsVisible(false);
-    } catch (err) {
-      console.error("Failed to complete onboarding:", err);
+    } catch (err: any) {
+      console.error("Failed to complete onboarding:", err.message || safeStringify(err));
       setIsVisible(false);
     }
   };

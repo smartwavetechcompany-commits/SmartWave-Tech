@@ -12,12 +12,22 @@ export const auth = getAuth(app);
 // Use initializeFirestore with optimized settings for sandboxed environments
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: false,
+  ignoreUndefinedProperties: true,
 });
 export const storage = getStorage(app);
 
 export function handleFirestoreError(error: any, operationType: OperationType, path: string | null) {
+  // Extract a clean error message
+  const errorMessage = error?.message || (typeof error === 'string' ? error : 'Unknown Firestore error');
+  
+  // Check if it's an offline error to avoid excessive logging
+  const isOfflineError = errorMessage.toLowerCase().includes('offline') || 
+                        error?.code === 'unavailable' || 
+                        error?.code === 'network-request-failed';
+
   const errInfo: FirestoreErrorInfo = {
-    error: error?.message || String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email || undefined,
@@ -34,18 +44,19 @@ export function handleFirestoreError(error: any, operationType: OperationType, p
     operationType,
     path
   }
+  
   const stringifiedErr = safeStringify(errInfo);
-  console.error('Firestore Error:', stringifiedErr);
-  throw new Error(stringifiedErr);
-}
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. The client is offline.");
-    }
+  
+  if (isOfflineError) {
+    console.warn('Firestore Offline:', errorMessage, path);
+  } else {
+    console.error('Firestore Error:', stringifiedErr);
   }
+  
+  // Create a clean error object to avoid circular references in the error itself
+  const cleanError = new Error(errorMessage);
+  (cleanError as any).details = stringifiedErr;
+  (cleanError as any).code = error?.code;
+  
+  throw cleanError;
 }
-testConnection();

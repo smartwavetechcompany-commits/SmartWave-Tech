@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, Reservation, FinanceRecord, Hotel } from '../types';
+import { Room, Reservation, FinanceRecord, Hotel, OperationType } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { 
   Users, 
@@ -60,29 +60,34 @@ export function Dashboard() {
         setAllHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
         setLoading(false);
       }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'hotels');
         if (err.code === 'permission-denied') setHasPermissionError(true);
       });
     } else if (hotel?.id) {
       unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
         setLoading(false);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
       });
-
+ 
       unsubRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), limit(5)), (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
       });
-
+ 
       unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
         const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
         setFinance(records);
-
+ 
         // Process revenue chart data for last 7 days
         const last7Days = Array.from({ length: 7 }, (_, i) => {
           const d = new Date();
           d.setDate(d.getDate() - i);
           return d.toISOString().split('T')[0];
         }).reverse();
-
+ 
         const chartData = last7Days.map(date => {
           const dayRevenue = records
             .filter(r => r.type === 'income' && r.timestamp.startsWith(date))
@@ -93,6 +98,8 @@ export function Dashboard() {
           };
         });
         setRevenueChartData(chartData);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
       });
     }
 

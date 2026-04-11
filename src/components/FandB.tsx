@@ -30,7 +30,7 @@ import {
   Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, exportToCSV } from '../utils';
+import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
 export function FandB() {
@@ -244,7 +244,7 @@ export function FandB() {
       setCart([]);
       setNewOrder({ roomNumber: '', guestId: '', items: '', notes: '', category: 'all', price: 0, paymentMethod: 'cash' });
     } catch (err: any) {
-      console.error('Error in handleAddOrder:', err);
+      console.error('Error in handleAddOrder:', err.message || safeStringify(err));
       if (err.message === 'No active reservation or guest found for this room') {
         toast.error(err.message);
       } else {

@@ -23,7 +23,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, safeStringify } from '../utils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -69,8 +69,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       toast.success('Payment recorded successfully');
       setShowSettlePayment(false);
       setSettleData({ amount: 0, method: 'cash', notes: '' });
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Settle payment error:", err.message || safeStringify(err));
       toast.error('Failed to record payment');
     } finally {
       setIsSaving(false);
@@ -85,8 +85,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       await settleOverpayment(hotel.id, reservation.guestId || 'unknown', reservation.id, settleData.amount, settleData.method, profile.uid, reservation.corporateId);
       toast.success('Overpayment settled successfully');
       setShowSettleOverpayment(false);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Settle overpayment error:", err.message || safeStringify(err));
       toast.error('Failed to settle overpayment');
     } finally {
       setIsSaving(false);
@@ -129,8 +129,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       );
       toast.success('Balance transferred successfully');
       setShowTransferBalanceModal(false);
-    } catch (err) {
-      console.error("Transfer error:", err);
+    } catch (err: any) {
+      console.error("Transfer error:", err.message || safeStringify(err));
       toast.error('Failed to transfer balance');
     } finally {
       setLoading(false);
@@ -216,8 +216,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       
       toast.success('Transaction deleted');
       setConfirmDelete(null);
-    } catch (err) {
-      console.error("Delete error:", err);
+    } catch (err: any) {
+      console.error("Delete error:", err.message || safeStringify(err));
       toast.error('Failed to delete transaction');
     } finally {
       setIsDeleting(false);

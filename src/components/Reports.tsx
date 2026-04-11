@@ -18,9 +18,14 @@ import {
   LayoutDashboard,
   CreditCard,
   Wallet,
-  Receipt
+  Receipt,
+  Trash2
 } from 'lucide-react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, safeStringify } from '../utils';
+import { ConfirmModal } from './ConfirmModal';
+import { deleteDoc, doc, addDoc } from 'firebase/firestore';
+import { handleFirestoreError } from '../firebase';
+import { OperationType } from '../types';
 import { 
   BarChart, 
   Bar, 
@@ -43,7 +48,7 @@ import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 
 export function Reports() {
-  const { hotel, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [dateRange, setDateRange] = useState({
     start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
@@ -69,6 +74,8 @@ export function Reports() {
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [recordToDelete, setRecordToDelete] = useState<{ id: string; collection: string; label: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id) return;
@@ -185,8 +192,8 @@ export function Reports() {
         }
         setOccupancyData(trend);
 
-      } catch (error) {
-        console.error("Error fetching report data:", error);
+      } catch (err: any) {
+        console.error("Error fetching report data:", err.message || safeStringify(err));
         toast.error("Failed to load report data");
       } finally {
         setLoading(false);
@@ -197,21 +204,30 @@ export function Reports() {
   }, [hotel?.id, dateRange]);
 
   const getReportHeaders = (type: string): string[] => {
-    switch (type) {
-      case 'occupancy': return ['Date', 'Total Rooms', 'Occupied', 'Occupancy %'];
-      case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Nights', 'Balance'];
-      case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
-      case 'daily_sales': return ['Date', 'Room Revenue', 'F & B', 'Other', 'Total'];
-      case 'monthly_sales': return ['Month', 'Room Revenue', 'F & B', 'Other', 'Total'];
-      case 'payments': return ['Date', 'Guest', 'Method', 'Description', 'Amount'];
-      case 'balance': return ['Guest Name', 'Room', 'Total Charges', 'Total Paid', 'Balance'];
-      case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
-      case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Total Spent'];
-      case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
-      case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
-      case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
-      default: return ['Date', 'Description', 'Category', 'Amount'];
+    const headers = (() => {
+      switch (type) {
+        case 'occupancy': return ['Date', 'Total Rooms', 'Occupied', 'Occupancy %'];
+        case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Nights', 'Balance'];
+        case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
+        case 'daily_sales': return ['Date', 'Room Revenue', 'F & B', 'Other', 'Total'];
+        case 'monthly_sales': return ['Month', 'Room Revenue', 'F & B', 'Other', 'Total'];
+        case 'payments': return ['Date', 'Guest', 'Method', 'Description', 'Amount'];
+        case 'balance': return ['Guest Name', 'Room', 'Total Charges', 'Total Paid', 'Balance'];
+        case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
+        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Total Spent'];
+        case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
+        case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
+        case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
+        default: return ['Date', 'Description', 'Category', 'Amount'];
+      }
+    })();
+
+    // Add Actions header for deletable reports
+    const deletableReports = ['reservations', 'payments', 'services', 'laundry', 'inhouse', 'balance'];
+    if (deletableReports.includes(type) && (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin')) {
+      return [...headers, 'Actions'];
     }
+    return headers;
   };
 
   const getReportData = (type: string): any[] => {
@@ -248,7 +264,10 @@ export function Reports() {
             Arrival: res.checkIn,
             Departure: res.checkOut,
             Nights: res.nights || 0,
-            Balance: res.totalAmount - (res.paidAmount || 0)
+            Balance: res.totalAmount - (res.paidAmount || 0),
+            _id: res.id,
+            _collection: 'reservations',
+            _label: `In-House Reservation: ${res.guestName}`
           }));
       }
       case 'reservations': {
@@ -264,7 +283,10 @@ export function Reports() {
             Arrival: res.checkIn,
             Departure: res.checkOut,
             Status: res.status.replace('_', ' ').toUpperCase(),
-            Total: res.totalAmount
+            Total: res.totalAmount,
+            _id: res.id,
+            _collection: 'reservations',
+            _label: `Reservation ${res.id.slice(-6).toUpperCase()}`
           }));
       }
       case 'daily_sales': {
@@ -295,7 +317,10 @@ export function Reports() {
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Method: e.description.split('via ')[1] || 'Cash',
             Description: e.description,
-            Amount: e.amount
+            Amount: e.amount,
+            _id: e.id,
+            _collection: 'ledger',
+            _label: `Payment: ${e.description}`
           }));
       }
       case 'balance': {
@@ -306,7 +331,10 @@ export function Reports() {
             Room: res.roomNumber,
             'Total Charges': res.totalAmount,
             'Total Paid': res.paidAmount || 0,
-            Balance: res.totalAmount - (res.paidAmount || 0)
+            Balance: res.totalAmount - (res.paidAmount || 0),
+            _id: res.id,
+            _collection: 'reservations',
+            _label: `Balance Record: ${res.guestName}`
           }));
       }
       case 'rooms': {
@@ -339,7 +367,10 @@ export function Reports() {
             Service: e.category.toUpperCase(),
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
-            Amount: e.amount
+            Amount: e.amount,
+            _id: e.id,
+            _collection: 'ledger',
+            _label: `${e.category.toUpperCase()} Service: ${e.amount}`
           }));
       }
       case 'laundry': {
@@ -350,7 +381,10 @@ export function Reports() {
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
             Description: e.description,
-            Amount: e.amount
+            Amount: e.amount,
+            _id: e.id,
+            _collection: 'ledger',
+            _label: `Laundry: ${e.description}`
           }));
       }
       case 'staff_sales': {
@@ -406,6 +440,46 @@ export function Reports() {
 
     doc.save(`hotel_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.pdf`);
     toast.success("PDF exported successfully");
+  };
+
+  const handleDeleteRecord = async () => {
+    if (!hotel?.id || !recordToDelete || !profile) return;
+    
+    setIsDeleting(true);
+    try {
+      const { id, collection: colName, label } = recordToDelete;
+      await deleteDoc(doc(db, 'hotels', hotel.id, colName, id));
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'REPORT_RECORD_DELETED',
+        resource: `${label} deleted from ${activeReport} report`,
+        hotelId: hotel.id,
+        module: 'Reports'
+      });
+
+      toast.success('Record deleted successfully');
+      
+      // Refresh data locally by removing from state
+      if (colName === 'reservations') {
+        setReservations(prev => prev.filter(r => r.id !== id));
+      } else if (colName === 'ledger') {
+        setLedgerEntries(prev => prev.filter(e => e.id !== id));
+      } else if (colName === 'finance') {
+        setFinanceRecords(prev => prev.filter(f => f.id !== id));
+      }
+      
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/${recordToDelete.collection}/${recordToDelete.id}`);
+      toast.error('Failed to delete record');
+    } finally {
+      setIsDeleting(false);
+      setRecordToDelete(null);
+    }
   };
 
   const formatForExport = (amount: number) => {
@@ -677,13 +751,24 @@ export function Reports() {
                     ) : (
                       getReportData(activeReport).map((row, i) => (
                         <tr key={i} className="hover:bg-zinc-800/50 transition-colors">
-                          {Object.values(row).map((val: any, j) => (
+                          {Object.entries(row).filter(([key]) => !key.startsWith('_')).map(([key, val]: [string, any], j) => (
                             <td key={j} className="px-6 py-4 text-sm text-zinc-400">
-                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => Object.keys(row)[j].includes(k))
+                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => key.includes(k))
                                 ? formatCurrency(val, currency, exchangeRate)
                                 : val}
                             </td>
                           ))}
+                          {row._id && row._collection && (
+                            <td className="px-6 py-4 text-right">
+                              <button
+                                onClick={() => setRecordToDelete({ id: row._id, collection: row._collection, label: row._label || 'Record' })}
+                                className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                title="Delete Record"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
@@ -694,6 +779,17 @@ export function Reports() {
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={!!recordToDelete}
+        title="Delete Record"
+        message={`Are you sure you want to delete "${recordToDelete?.label}"? This action cannot be undone and will affect hotel balances and statistics.`}
+        onConfirm={handleDeleteRecord}
+        onCancel={() => setRecordToDelete(null)}
+        type="danger"
+        confirmText="Delete Permanently"
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

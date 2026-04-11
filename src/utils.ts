@@ -6,19 +6,53 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function safeStringify(obj: any): string {
+  if (obj === undefined) return 'undefined';
+  if (obj === null) return 'null';
+  if (typeof obj !== 'object') return String(obj);
+
+  // Extract safe properties if it's an error-like object to avoid circularity in internal state
+  let target = obj;
+  if (obj instanceof Error || (obj && typeof obj === 'object' && 'message' in obj && 'stack' in obj)) {
+    target = {
+      name: obj.name || 'Error',
+      message: obj.message,
+      stack: obj.stack,
+      code: obj.code,
+      details: obj.details,
+      ...(typeof obj.toJSON === 'function' ? {} : obj) // Only spread if no toJSON to avoid triggering it
+    };
+  }
+
   try {
     const cache = new Set();
-    return JSON.stringify(obj, (key, value) => {
+    return JSON.stringify(target, (key, value) => {
       if (typeof value === 'object' && value !== null) {
         if (cache.has(value)) {
           return '[Circular]';
         }
         cache.add(value);
+
+        // Handle nested errors
+        if (value instanceof Error || (value && typeof value === 'object' && 'message' in value && 'stack' in value)) {
+          return {
+            name: value.name || 'Error',
+            message: value.message,
+            stack: value.stack,
+            code: value.code,
+            details: value.details
+          };
+        }
       }
       return value;
-    });
+    }, 2);
   } catch (e) {
-    return "Error stringifying object: " + String(obj);
+    try {
+      // Final fallback: just get the message if it's an error, or a basic string representation
+      if (obj.message) return `Error: ${obj.message}`;
+      return String(obj);
+    } catch (finalError) {
+      return '[Unstringifiable Object]';
+    }
   }
 }
 

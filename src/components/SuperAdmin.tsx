@@ -26,7 +26,7 @@ import {
   ClipboardList
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, safeStringify } from '../utils';
 
 import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -458,8 +458,8 @@ export function SuperAdmin() {
               price: (tcDoc.data() as TrackingCode).price || 0 + planChangeAmount
             });
           }
-        } catch (err) {
-          console.error("Failed to update tracking code plan:", err);
+        } catch (err: any) {
+          console.error("Failed to update tracking code plan:", err.message || safeStringify(err));
           // Don't fail the whole operation if tracking code update fails
         }
       }
@@ -1060,13 +1060,20 @@ export function SuperAdmin() {
               {requests.filter(r => r.status === filterStatus).length === 0 ? (
                 <div className="p-8 text-center text-zinc-500 text-sm">No {filterStatus} requests</div>
               ) : (
-                requests.filter(r => r.status === filterStatus).map(request => (
-                  <div key={request.id} className="p-6 hover:bg-zinc-800/50 transition-colors">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold text-zinc-50">{request.hotelName}</span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                requests.filter(r => r.status === filterStatus).map(request => {
+                  const currentHotel = hotels.find(h => h.adminUIDs?.includes(request.id) || h.branding?.email?.toLowerCase() === request.email.toLowerCase());
+                  const displayName = currentHotel?.name || request.hotelName;
+                  
+                  return (
+                    <div key={request.id} className="p-6 hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-bold text-zinc-50">{displayName}</span>
+                            {currentHotel && currentHotel.name !== request.hotelName && (
+                              <span className="text-[10px] text-zinc-500 italic">(Formerly: {request.hotelName})</span>
+                            )}
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-500">
                             {request.plan}
                           </span>
                           {request.type === 'extension' && (
@@ -1124,8 +1131,9 @@ export function SuperAdmin() {
                       </div>
                     </div>
                   </div>
-                ))
-              )}
+                );
+              })
+            )}
             </div>
           </div>
         )}
@@ -1377,7 +1385,13 @@ export function SuperAdmin() {
             >
               <XCircle size={20} />
             </button>
-            <SuperAdminReceipt request={viewingReceipt} settings={settings} />
+            <SuperAdminReceipt 
+              request={{
+                ...viewingReceipt,
+                hotelName: hotels.find(h => h.adminUIDs?.includes(viewingReceipt.id) || h.branding?.email?.toLowerCase() === viewingReceipt.email.toLowerCase())?.name || viewingReceipt.hotelName
+              }} 
+              settings={settings} 
+            />
           </div>
         </div>
       )}

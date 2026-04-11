@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 
 export function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [hotels, setHotels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,12 +56,22 @@ export function AuditLogs() {
     if (profile.role === 'hotelAdmin' && !hotel?.id) return;
 
     setLoading(true);
-    let unsub: () => void = () => {};
+    let unsubLogs: () => void = () => {};
+    let unsubHotels: () => void = () => {};
 
     try {
       if (profile.role === 'superAdmin') {
+        // Fetch hotels to resolve names
+        unsubHotels = onSnapshot(collection(db, 'hotels'), (snap) => {
+          const hotelMap: Record<string, string> = {};
+          snap.docs.forEach(doc => {
+            hotelMap[doc.id] = doc.data().name;
+          });
+          setHotels(hotelMap);
+        });
+
         const q = collectionGroup(db, 'activityLogs');
-        unsub = onSnapshot(q, (snap) => {
+        unsubLogs = onSnapshot(q, (snap) => {
           const allLogs = snap.docs.map(doc => {
             const data = doc.data();
             return { 
@@ -80,7 +91,7 @@ export function AuditLogs() {
         });
       } else if (hotel?.id) {
         const q = collection(db, 'hotels', hotel.id, 'activityLogs');
-        unsub = onSnapshot(q, (snap) => {
+        unsubLogs = onSnapshot(q, (snap) => {
           const allLogs = snap.docs.map(doc => {
             const data = doc.data();
             return { 
@@ -103,7 +114,10 @@ export function AuditLogs() {
       setLoading(false);
     }
 
-    return () => unsub();
+    return () => {
+      unsubLogs();
+      unsubHotels();
+    };
   }, [hotel?.id, profile?.uid, profile?.role, hasPermissionError]);
 
   const handleSort = (key: typeof sortConfig.key) => {
@@ -320,7 +334,7 @@ export function AuditLogs() {
                 {profile.role === 'superAdmin' && (
                   <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden lg:table-cell" onClick={() => handleSort('hotelId')}>
                     <div className="flex items-center gap-2">
-                      Hotel
+                      Hotel Name
                       <SortIcon column="hotelId" />
                     </div>
                   </th>
@@ -372,9 +386,14 @@ export function AuditLogs() {
                     </td>
                     {profile.role === 'superAdmin' && (
                       <td className="px-4 sm:px-6 py-3 sm:py-4 hidden lg:table-cell">
-                        <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-blue-400 font-bold uppercase tracking-tight">
-                          <Building2 size={10} />
-                          {(log as any).hotelId || 'N/A'}
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1 text-[10px] sm:text-xs text-blue-400 font-bold uppercase tracking-tight">
+                            <Building2 size={10} />
+                            {hotels[log.hotelId || ''] || 'N/A'}
+                          </div>
+                          {log.hotelId && (
+                            <span className="text-[8px] text-zinc-600 font-mono">{log.hotelId}</span>
+                          )}
                         </div>
                       </td>
                     )}

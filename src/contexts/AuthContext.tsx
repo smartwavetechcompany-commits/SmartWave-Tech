@@ -20,6 +20,7 @@ interface AuthContextType {
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
   isOffline: boolean;
+  retryConnection: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,6 +40,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+
+  const retryConnection = () => {
+    setIsOffline(false);
+    setLoading(true);
+    window.location.reload();
+  };
 
   const setCurrency = (newCurrency: 'NGN' | 'USD') => {
     setCurrencyState(newCurrency);
@@ -120,8 +127,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (err.code === 'permission-denied') {
         console.warn("Profile access restricted.");
         setHasProfileError(true);
-      } else {
-        console.error("Profile fetch error:", err.message || safeStringify(err));
       }
       setLoading(false);
     });
@@ -156,8 +161,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (err.code === 'permission-denied') {
         console.warn("Hotel access restricted.");
         setHasHotelError(true);
-      } else {
-        console.error("Hotel fetch error:", err.message || safeStringify(err));
       }
     });
 
@@ -186,7 +189,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         handleFirestoreError(err, OperationType.GET, 'system/settings');
-        console.error("System settings fetch error:", err.message || safeStringify(err));
       }
     };
 
@@ -230,7 +232,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       systemSettings,
       theme,
       setTheme,
-      isOffline
+      isOffline,
+      retryConnection
     }}>
       {children}
     </AuthContext.Provider>

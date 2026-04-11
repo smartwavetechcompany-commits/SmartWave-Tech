@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Sidebar } from './components/Sidebar';
+import { WifiOff, RefreshCw } from 'lucide-react';
 import { AuthPage } from './components/AuthPage';
 import { Dashboard } from './components/Dashboard';
 import { SuperAdmin } from './components/SuperAdmin';
@@ -29,7 +30,7 @@ import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
 import { OnboardingTour } from './components/OnboardingTour';
 
 function AppContent() {
-  const { user, loading, profile, isSubscriptionActive } = useAuth();
+  const { user, loading, profile, isSubscriptionActive, isOffline, retryConnection } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -73,6 +74,23 @@ function AppContent() {
   return (
     <div className="flex h-screen bg-zinc-950 overflow-hidden">
       <Toaster position="top-right" theme="dark" richColors />
+      
+      {isOffline && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-red-500 text-white px-4 py-2 flex items-center justify-center gap-4 animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-2">
+            <WifiOff size={16} />
+            <span className="text-sm font-bold">You are currently offline. Some features may be unavailable.</span>
+          </div>
+          <button 
+            onClick={retryConnection}
+            className="flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold transition-all"
+          >
+            <RefreshCw size={12} />
+            Retry Connection
+          </button>
+        </div>
+      )}
+
       <OnboardingTour />
       <Sidebar />
       <main className="flex-1 flex flex-col overflow-hidden">

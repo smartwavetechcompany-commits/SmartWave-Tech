@@ -115,26 +115,36 @@ export function Finance() {
     // Fetch Suppliers
     const unsubSuppliers = onSnapshot(collection(db, 'hotels', hotel.id, 'suppliers'), (snap) => {
       setSuppliers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supplier)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/suppliers`);
     });
 
     // Fetch Accounts
     const unsubAccounts = onSnapshot(collection(db, 'hotels', hotel.id, 'accounts'), (snap) => {
       setAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/accounts`);
     });
 
     // Fetch Purchase Orders
     const unsubPOs = onSnapshot(collection(db, 'hotels', hotel.id, 'purchaseOrders'), (snap) => {
       setPurchaseOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PurchaseOrder)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/purchaseOrders`);
     });
 
     // Fetch Commissions
     const unsubCommissions = onSnapshot(collection(db, 'hotels', hotel.id, 'commissions'), (snap) => {
       setCommissions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Commission)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/commissions`);
     });
 
     // Fetch Inventory for POs
     const unsubInv = onSnapshot(collection(db, 'hotels', hotel.id, 'inventory'), (snap) => {
       setInventoryItems(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/inventory`);
     });
 
     return () => {
@@ -193,14 +203,20 @@ export function Finance() {
     // Fetch reservations and rooms for syncing
     const unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
       setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
     });
 
     const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
     });
 
     const unsubCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), (snap) => {
       setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts`);
     });
 
     return () => {
@@ -293,8 +309,8 @@ export function Finance() {
       toast.success('Balance settled successfully');
       setShowSettleModal(null);
       setSettleData({ amount: 0, method: 'cash', notes: '' });
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Settle balance error:", err.message || safeStringify(err));
       toast.error('Failed to settle balance');
     } finally {
       setIsSaving(false);

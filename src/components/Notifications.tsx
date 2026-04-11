@@ -13,7 +13,7 @@ import {
   Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../utils';
+import { cn, safeStringify } from '../utils';
 import { format } from 'date-fns';
 
 interface Notification {
@@ -70,8 +70,8 @@ export function Notifications() {
       await Promise.all(unread.map(n => 
         updateDoc(doc(db, 'hotels', hotel.id, 'notifications', n.id), { read: true })
       ));
-    } catch (err) {
-      console.error('Error marking all as read:', err);
+    } catch (err: any) {
+      console.error('Error marking all as read:', err.message || safeStringify(err));
     }
   };
 
@@ -185,7 +185,7 @@ export async function createNotification(hotelId: string, notification: Omit<Not
       read: false,
       timestamp: new Date().toISOString()
     });
-  } catch (err) {
-    console.error('Error creating notification:', err);
+  } catch (err: any) {
+    console.error('Error creating notification:', err.message || safeStringify(err));
   }
 }
