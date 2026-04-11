@@ -10,44 +10,57 @@ export function safeStringify(obj: any): string {
   if (obj === null) return 'null';
   if (typeof obj !== 'object') return String(obj);
 
-  // Extract safe properties if it's an error-like object to avoid circularity in internal state
-  let target = obj;
-  if (obj instanceof Error || (obj && typeof obj === 'object' && 'message' in obj && 'stack' in obj)) {
-    target = {
-      name: obj.name || 'Error',
-      message: obj.message,
-      stack: obj.stack,
-      code: obj.code,
-      details: obj.details,
-      ...(typeof obj.toJSON === 'function' ? {} : obj) // Only spread if no toJSON to avoid triggering it
-    };
+  // Create a safe version of the object to stringify
+  const cache = new Set();
+  
+  function getSafeValue(val: any): any {
+    if (val === null || typeof val !== 'object') {
+      return val;
+    }
+
+    if (cache.has(val)) {
+      return '[Circular]';
+    }
+    cache.add(val);
+
+    // Handle Errors specifically
+    if (val instanceof Error || (val.message && val.stack)) {
+      return {
+        name: val.name || 'Error',
+        message: val.message,
+        code: val.code,
+        stack: val.stack,
+        details: val.details ? getSafeValue(val.details) : undefined
+      };
+    }
+
+    // Handle Arrays
+    if (Array.isArray(val)) {
+      return val.map(item => getSafeValue(item));
+    }
+
+    // Handle Plain Objects
+    const safeObj: any = {};
+    for (const key in val) {
+      if (Object.prototype.hasOwnProperty.call(val, key)) {
+        // Skip potentially problematic internal properties (starting with _)
+        if (key.startsWith('_')) continue;
+        
+        try {
+          safeObj[key] = getSafeValue(val[key]);
+        } catch (e) {
+          safeObj[key] = '[Unserializable Property]';
+        }
+      }
+    }
+    return safeObj;
   }
 
   try {
-    const cache = new Set();
-    return JSON.stringify(target, (key, value) => {
-      if (typeof value === 'object' && value !== null) {
-        if (cache.has(value)) {
-          return '[Circular]';
-        }
-        cache.add(value);
-
-        // Handle nested errors
-        if (value instanceof Error || (value && typeof value === 'object' && 'message' in value && 'stack' in value)) {
-          return {
-            name: value.name || 'Error',
-            message: value.message,
-            stack: value.stack,
-            code: value.code,
-            details: value.details
-          };
-        }
-      }
-      return value;
-    }, 2);
+    const safeTarget = getSafeValue(obj);
+    return JSON.stringify(safeTarget, null, 2);
   } catch (e) {
     try {
-      // Final fallback: just get the message if it's an error, or a basic string representation
       if (obj.message) return `Error: ${obj.message}`;
       return String(obj);
     } catch (finalError) {

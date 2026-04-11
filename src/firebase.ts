@@ -12,7 +12,7 @@ export const auth = getAuth(app);
 // Use initializeFirestore with optimized settings for sandboxed environments
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-  experimentalAutoDetectLongPolling: false,
+  experimentalAutoDetectLongPolling: true, // Allow it to detect if long polling is needed
   ignoreUndefinedProperties: true,
 });
 export const storage = getStorage(app);

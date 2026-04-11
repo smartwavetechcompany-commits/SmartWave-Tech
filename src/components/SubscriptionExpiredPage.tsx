@@ -244,7 +244,7 @@ export function SubscriptionExpiredPage() {
                 <input
                   required
                   type="text"
-                  placeholder="Enter your 12-digit code"
+                  placeholder="Enter your tracking code"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono focus:outline-none focus:border-emerald-500 transition-colors"
                   value={trackingCode}
                   onChange={(e) => setTrackingCode(e.target.value.toUpperCase())}

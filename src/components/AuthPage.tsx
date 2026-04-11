@@ -598,6 +598,7 @@ export function AuthPage() {
                 <input
                   required
                   type="text"
+                  placeholder="Enter your tracking code"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors"
                   value={formData.trackingCode}
                   onChange={(e) => setFormData({ ...formData, trackingCode: e.target.value })}
