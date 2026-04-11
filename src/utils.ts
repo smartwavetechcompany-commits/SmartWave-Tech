@@ -10,10 +10,12 @@ export function safeStringify(obj: any): string {
   if (obj === null) return 'null';
   if (typeof obj !== 'object') return String(obj);
 
-  // Create a safe version of the object to stringify
   const cache = new Set();
   
-  function getSafeValue(val: any): any {
+  function getSafeValue(val: any, depth: number = 0): any {
+    // Prevent deep recursion
+    if (depth > 5) return '[Max Depth Reached]';
+    
     if (val === null || typeof val !== 'object') {
       return val;
     }
@@ -30,24 +32,36 @@ export function safeStringify(obj: any): string {
         message: val.message,
         code: val.code,
         stack: val.stack,
-        details: val.details ? getSafeValue(val.details) : undefined
+        details: val.details ? getSafeValue(val.details, depth + 1) : undefined
       };
     }
 
     // Handle Arrays
     if (Array.isArray(val)) {
-      return val.map(item => getSafeValue(item));
+      // Limit array size in logs
+      if (val.length > 50) {
+        return val.slice(0, 50).map(item => getSafeValue(item, depth + 1)).concat(['... and ' + (val.length - 50) + ' more items']);
+      }
+      return val.map(item => getSafeValue(item, depth + 1));
     }
 
     // Handle Plain Objects
     const safeObj: any = {};
+    let count = 0;
+    const MAX_KEYS = 50; // Limit keys to prevent hanging on massive objects
+    
     for (const key in val) {
       if (Object.prototype.hasOwnProperty.call(val, key)) {
+        if (count++ > MAX_KEYS) {
+          safeObj['...'] = 'Truncated (' + Object.keys(val).length + ' total keys)';
+          break;
+        }
+        
         // Skip potentially problematic internal properties (starting with _)
         if (key.startsWith('_')) continue;
         
         try {
-          safeObj[key] = getSafeValue(val[key]);
+          safeObj[key] = getSafeValue(val[key], depth + 1);
         } catch (e) {
           safeObj[key] = '[Unserializable Property]';
         }
