@@ -47,7 +47,7 @@ export function SubscriptionExpiredPage() {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  const handleRequestExtension = async (e: React.FormEvent) => {
+  const handleRequestRenewal = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
@@ -59,10 +59,10 @@ export function SubscriptionExpiredPage() {
         hotelId: hotel?.id || 'unknown',
         status: 'pending',
         timestamp: new Date().toISOString(),
-        type: 'extension'
+        type: 'renewal'
       });
 
-      showNotification('Extension request submitted! We will review your payment and issue a new code.');
+      showNotification('Renewal request submitted! We will review your payment and issue your renewal code.');
       setIsRequesting(false);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.CREATE, 'trackingCodeRequests');
@@ -187,7 +187,7 @@ export function SubscriptionExpiredPage() {
                 <h3 className="font-bold uppercase text-xs tracking-widest">How to regain access</h3>
               </div>
               <p className="text-sm text-zinc-400 leading-relaxed">
-                To restore your hotel's data and modules, please complete a payment for your chosen plan and submit an extension request. Once confirmed, your access will be automatically restored.
+                To renew your subscription and restore access to your hotel's data, please complete a payment for your chosen plan and submit a renewal request. Once confirmed, your access will be automatically restored.
               </p>
             </div>
 
@@ -205,7 +205,7 @@ export function SubscriptionExpiredPage() {
                   className="bg-zinc-800 text-white font-bold py-3 rounded-xl hover:bg-zinc-700 transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
                   <CreditCard size={20} />
-                  Request Code
+                  Request Renewal
                 </button>
                 <button 
                   onClick={() => auth.signOut()}
@@ -274,7 +274,7 @@ export function SubscriptionExpiredPage() {
               >
                 <ArrowLeft size={20} />
               </button>
-              <h2 className="text-2xl font-bold text-white">Extend Access</h2>
+              <h2 className="text-2xl font-bold text-white">Renew Subscription</h2>
             </div>
 
             <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-6 space-y-4">
@@ -306,7 +306,7 @@ export function SubscriptionExpiredPage() {
               </div>
             </div>
 
-            <form onSubmit={handleRequestExtension} className="space-y-4">
+            <form onSubmit={handleRequestRenewal} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Hotel Name</label>
                 <input
@@ -345,7 +345,7 @@ export function SubscriptionExpiredPage() {
                 {loading ? 'Submitting...' : (
                   <>
                     <Upload size={18} />
-                    Submit Request
+                    Submit Renewal Request
                   </>
                 )}
               </button>
