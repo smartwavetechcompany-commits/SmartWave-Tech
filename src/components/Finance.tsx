@@ -37,7 +37,7 @@ import {
   Percent,
   Trash2
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -250,8 +250,8 @@ export function Finance() {
       } else {
         toast.info('All guest accounts are up to date.');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Sync charges error:", err.message || safeStringify(err));
       toast.error('Failed to sync charges');
     } finally {
       setIsSyncing(false);
@@ -315,8 +315,8 @@ export function Finance() {
       toast.success('Supplier added successfully');
       setShowAddSupplierModal(false);
       setNewSupplier({ name: '', email: '', phone: '', address: '', category: 'Supplies', balance: 0 });
-    } catch (err) {
-      console.error('Error in handleAddSupplier:', err);
+    } catch (err: any) {
+      console.error('Error in handleAddSupplier:', err.message || safeStringify(err));
       handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/suppliers`);
     } finally {
       setIsSaving(false);
@@ -370,8 +370,8 @@ export function Finance() {
       toast.success('Account created successfully');
       setShowAddAccountModal(false);
       setNewAccount({ code: '', name: '', type: 'asset', description: '', balance: 0 });
-    } catch (err) {
-      console.error('Error in handleCreateAccount:', err);
+    } catch (err: any) {
+      console.error('Error in handleCreateAccount:', err.message || safeStringify(err));
       handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/accounts`);
     } finally {
       setIsSaving(false);
@@ -403,8 +403,8 @@ export function Finance() {
       toast.success('Purchase Order created successfully');
       setShowAddPOModal(false);
       setNewPO({ supplierId: '', items: [], totalAmount: 0, status: 'pending', paymentStatus: 'unpaid', dueDate: format(addDays(new Date(), 7), 'yyyy-MM-dd') });
-    } catch (err) {
-      console.error('Error in handleCreatePO:', err);
+    } catch (err: any) {
+      console.error('Error in handleCreatePO:', err.message || safeStringify(err));
       handleFirestoreError(err, OperationType.CREATE, `hotels/${hotel.id}/purchaseOrders`);
     } finally {
       setIsSaving(false);

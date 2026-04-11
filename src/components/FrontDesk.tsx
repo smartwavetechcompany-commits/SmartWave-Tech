@@ -29,7 +29,7 @@ import {
   Edit2,
   DollarSign
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -490,8 +490,8 @@ export function FrontDesk() {
         paymentMethod: 'cash',
         additionalStays: [] as any[]
       });
-    } catch (err) {
-      console.error("Booking error:", err);
+    } catch (err: any) {
+      console.error("Booking error:", err.message || safeStringify(err));
       toast.error('Failed to create bookings');
     } finally {
       setLoading(false);
@@ -531,8 +531,8 @@ export function FrontDesk() {
       
       await batch.commit();
       toast.success('Reservation deleted successfully');
-    } catch (err) {
-      console.error("Delete reservation error:", err);
+    } catch (err: any) {
+      console.error("Delete reservation error:", err.message || safeStringify(err));
       toast.error('Failed to delete reservation');
     } finally {
       setLoading(false);
@@ -568,8 +568,8 @@ export function FrontDesk() {
 
       toast.success('Reservation updated successfully');
       setEditingReservation(null);
-    } catch (err) {
-      console.error("Edit reservation error:", err);
+    } catch (err: any) {
+      console.error("Edit reservation error:", err.message || safeStringify(err));
       toast.error('Failed to update reservation');
     } finally {
       setLoading(false);
@@ -588,8 +588,8 @@ export function FrontDesk() {
         await updateReservationStatus(res, action);
       }
       setShowConfirmAction(null);
-    } catch (err) {
-      console.error("Confirm action error:", err);
+    } catch (err: any) {
+      console.error("Confirm action error:", err.message || safeStringify(err));
     } finally {
       setLoading(false);
     }
@@ -776,8 +776,8 @@ export function FrontDesk() {
         module: 'Front Desk'
       });
 
-    } catch (err) {
-      console.error("Audit error:", err);
+    } catch (err: any) {
+      console.error("Audit error:", err.message || safeStringify(err));
       toast.error("Failed to run nightly audit.");
     } finally {
       setIsAuditing(false);
@@ -935,8 +935,8 @@ export function FrontDesk() {
       });
 
       toast.success(`Reservation status updated to ${status.replace('_', ' ')}`);
-    } catch (err) {
-      console.error("Update status error:", err);
+    } catch (err: any) {
+      console.error("Update status error:", err.message || safeStringify(err));
       toast.error('Failed to update status');
     } finally {
       setLoading(false);
@@ -974,8 +974,8 @@ export function FrontDesk() {
         module: 'Finance'
       });
       toast.success('Payment recorded successfully');
-    } catch (err) {
-      console.error("Payment update error:", err);
+    } catch (err: any) {
+      console.error("Payment update error:", err.message || safeStringify(err));
       toast.error('Failed to record payment');
     } finally {
       setLoading(false);

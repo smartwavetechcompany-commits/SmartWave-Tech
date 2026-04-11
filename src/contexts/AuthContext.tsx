@@ -3,6 +3,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { UserProfile, Hotel, SystemSettings, OperationType } from '../types';
+import { safeStringify } from '../utils';
 
 const SUPER_ADMIN_EMAIL = 'smartwavetechcompany@gmail.com';
 
@@ -120,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn("Profile access restricted.");
         setHasProfileError(true);
       } else {
-        console.error("Profile fetch error:", err);
+        console.error("Profile fetch error:", err.message || safeStringify(err));
       }
       setLoading(false);
     });
@@ -156,15 +157,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn("Hotel access restricted.");
         setHasHotelError(true);
       } else {
-        console.error("Hotel fetch error:", err);
+        console.error("Hotel fetch error:", err.message || safeStringify(err));
       }
     });
 
     return () => unsub();
   }, [profile?.hotelId, profile?.role, hasHotelError]);
 
-  // 4. System Settings Fetcher
+  // 4. System Settings Fetcher (with retry)
   useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 3;
+
     const fetchSettings = async () => {
       try {
         const snap = await getDoc(doc(db, 'system', 'settings'));
@@ -175,9 +179,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err: any) {
         if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
           setIsOffline(true);
+          if (retryCount < maxRetries) {
+            retryCount++;
+            setTimeout(fetchSettings, 2000 * retryCount);
+            return;
+          }
         }
         handleFirestoreError(err, OperationType.GET, 'system/settings');
-        console.error("System settings fetch error:", err);
+        console.error("System settings fetch error:", err.message || safeStringify(err));
       }
     };
 

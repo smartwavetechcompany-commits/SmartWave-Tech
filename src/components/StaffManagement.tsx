@@ -19,7 +19,7 @@ import {
   RefreshCw,
   Download
 } from 'lucide-react';
-import { cn, exportToCSV } from '../utils';
+import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
 const AVAILABLE_ROLES = [
@@ -115,6 +115,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       toast.success('Staff member added successfully. They can now login with the password you provided.');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
+      console.error("Add staff error:", err.message || safeStringify(err));
       toast.error('Failed to add staff member');
     }
   };
@@ -140,6 +141,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       setShowConfirmRemove(null);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
+      console.error("Remove staff error:", err.message || safeStringify(err));
       toast.error('Failed to remove staff member');
     }
   };
@@ -166,7 +168,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       
       toast.success(`Password reset email sent to ${email}`);
     } catch (err: any) {
-      console.error(err);
+      console.error("Reset password error:", err.message || safeStringify(err));
       toast.error('Failed to send reset email: ' + err.message);
     } finally {
       setIsResetting(null);

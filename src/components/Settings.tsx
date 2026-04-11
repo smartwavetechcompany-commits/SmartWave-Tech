@@ -32,7 +32,7 @@ import {
   Globe,
   RefreshCw
 } from 'lucide-react';
-import { cn } from '../utils';
+import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { format, isValid } from 'date-fns';
 
@@ -126,8 +126,8 @@ export function Settings() {
         taxes: localTaxes
       }, { merge: true });
       toast.success('Taxes updated successfully');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Save taxes error:", err.message || safeStringify(err));
       toast.error('Failed to update taxes');
     } finally {
       setIsSaving(false);
@@ -167,7 +167,7 @@ export function Settings() {
       toast.success('Password changed successfully!');
       setFormData({ ...formData, currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err: any) {
-      console.error(err);
+      console.error("Change password error:", err.message || safeStringify(err));
       if (err.code === 'auth/wrong-password') {
         toast.error('Current password is incorrect');
       } else {
@@ -203,8 +203,8 @@ export function Settings() {
       }
 
       toast.success('Profile updated successfully!');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Save profile error:", err.message || safeStringify(err));
       toast.error('Failed to update profile.');
     } finally {
       setIsSaving(false);
@@ -242,8 +242,8 @@ export function Settings() {
       });
 
       toast.success('Hotel settings updated!');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Save hotel error:", err.message || safeStringify(err));
       toast.error('Failed to update hotel settings.');
     } finally {
       setIsSaving(false);
@@ -272,8 +272,8 @@ export function Settings() {
       });
 
       toast.success('Hotel branding updated!');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Save branding error:", err.message || safeStringify(err));
       toast.error('Failed to update hotel branding.');
     } finally {
       setIsSaving(false);
@@ -285,8 +285,8 @@ export function Settings() {
     try {
       await sendPasswordResetEmail(auth, profile.email);
       toast.success('Password reset link sent to: ' + profile.email);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Reset password error:", err.message || safeStringify(err));
       toast.error('Failed to send reset email. Please try again later.');
     } finally {
       setShowConfirmReset(false);
@@ -379,8 +379,8 @@ export function Settings() {
       setShowConfirmSystemReset(false);
       // Refresh page to clear local state
       window.location.reload();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("System reset error:", err.message || safeStringify(err));
       toast.error('Failed to reset system data.');
     } finally {
       setIsSaving(false);

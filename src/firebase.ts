@@ -3,35 +3,17 @@ import { getAuth } from "firebase/auth";
 import { initializeFirestore, getDocFromServer, doc } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { OperationType, FirestoreErrorInfo } from "./types";
+import { safeStringify } from "./utils";
 import firebaseConfig from "../firebase-applet-config.json";
 
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-// Use initializeFirestore to enable experimentalForceLongPolling
-// This helps prevent "INTERNAL ASSERTION FAILED" errors in certain environments
+// Use initializeFirestore with optimized settings for sandboxed environments
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-  experimentalAutoDetectLongPolling: false,
 });
 export const storage = getStorage(app);
-
-export function safeStringify(obj: any): string {
-  try {
-    const cache = new Set();
-    return JSON.stringify(obj, (key, value) => {
-      if (typeof value === 'object' && value !== null) {
-        if (cache.has(value)) {
-          return '[Circular]';
-        }
-        cache.add(value);
-      }
-      return value;
-    });
-  } catch (e) {
-    return "Error stringifying object: " + String(obj);
-  }
-}
 
 export function handleFirestoreError(error: any, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
@@ -44,16 +26,17 @@ export function handleFirestoreError(error: any, operationType: OperationType, p
       tenantId: auth.currentUser?.tenantId,
       providerInfo: auth.currentUser?.providerData.map(provider => ({
         providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
+        displayName: provider.displayName || '',
+        email: provider.email || '',
+        photoUrl: provider.photoURL || ''
       })) || []
     },
     operationType,
     path
   }
-  console.error('Firestore Error:', errInfo);
-  throw new Error(safeStringify(errInfo));
+  const stringifiedErr = safeStringify(errInfo);
+  console.error('Firestore Error:', stringifiedErr);
+  throw new Error(stringifiedErr);
 }
 
 async function testConnection() {
