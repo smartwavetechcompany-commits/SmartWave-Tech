@@ -1,13 +1,20 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { CurrencyToggle } from './CurrencyToggle';
 import { Notifications } from './Notifications';
-import { User, Building2, WifiOff, XCircle } from 'lucide-react';
+import { User, Building2, WifiOff, XCircle, LogOut } from 'lucide-react';
 
 export function TopBar() {
+  const navigate = useNavigate();
   const { hotel, profile, isOffline, setSelectedHotelId } = useAuth();
 
   const isManaging = profile?.role === 'superAdmin' && hotel?.id;
+
+  const handleStopManaging = () => {
+    setSelectedHotelId(null);
+    navigate('/super-admin');
+  };
 
   return (
     <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 sticky top-0 z-40">
@@ -20,10 +27,11 @@ export function TopBar() {
           <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-500">
             <span className="text-[10px] font-bold uppercase tracking-wider">Management Mode</span>
             <button 
-              onClick={() => setSelectedHotelId(null)}
-              className="hover:text-emerald-400 transition-colors"
+              onClick={handleStopManaging}
+              className="hover:text-emerald-400 transition-colors flex items-center gap-1"
               title="Exit Management Mode"
             >
+              <span className="text-[10px] font-bold">Exit</span>
               <XCircle size={14} />
             </button>
           </div>

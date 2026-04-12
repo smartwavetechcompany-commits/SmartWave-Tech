@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Bed, 
@@ -17,7 +17,8 @@ import {
   UserCog,
   Building2,
   Activity,
-  Mail
+  Mail,
+  XCircle
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../utils';
@@ -26,8 +27,9 @@ import { auth } from '../firebase';
 import { useTranslation } from 'react-i18next';
 
 export function Sidebar() {
+  const navigate = useNavigate();
   const { t } = useTranslation();
-  const { profile, hotel, isSubscriptionActive, systemSettings } = useAuth();
+  const { profile, hotel, isSubscriptionActive, systemSettings, setSelectedHotelId } = useAuth();
   const location = useLocation();
 
   const menuItems = [
@@ -116,6 +118,18 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-zinc-800 space-y-2">
+        {profile?.role === 'superAdmin' && hotel?.id && (
+          <button 
+            onClick={() => {
+              setSelectedHotelId(null);
+              navigate('/super-admin');
+            }}
+            className="flex items-center gap-3 px-3 py-2 w-full text-left rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-all duration-200 active:scale-[0.98]"
+          >
+            <XCircle size={18} />
+            <span className="text-sm font-medium">Stop Managing Hotel</span>
+          </button>
+        )}
         {systemSettings?.supportEmail && (
           <a 
             href={`mailto:${systemSettings.supportEmail}`}
