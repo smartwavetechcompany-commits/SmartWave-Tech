@@ -29,6 +29,7 @@ import {
 import { format, isValid } from 'date-fns';
 import { cn, formatCurrency, safeStringify } from '../utils';
 
+import { useNavigate } from 'react-router-dom';
 import { AuditLogs } from './AuditLogs';
 import { ErrorBoundary } from './ErrorBoundary';
 import { StaffManagement } from './StaffManagement';
@@ -37,6 +38,7 @@ import { SuperAdminReceipt } from './SuperAdminReceipt';
 import { toast } from 'sonner';
 
 export function SuperAdmin() {
+  const navigate = useNavigate();
   const { profile, currency, exchangeRate, setSelectedHotelId } = useAuth();
   const [trackingCodes, setTrackingCodes] = useState<TrackingCode[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
@@ -977,6 +979,7 @@ export function SuperAdmin() {
                                 onClick={() => {
                                   setSelectedHotelId(hotel.id);
                                   toast.success(`Now managing ${hotel.name}`);
+                                  navigate('/');
                                 }}
                                 className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
                                 title="Manage Hotel Inventory & Accounts"

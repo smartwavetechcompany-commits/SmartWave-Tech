@@ -18,6 +18,7 @@ import { cn } from '../utils';
 import { db, handleFirestoreError } from '../firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 // Sub-modules
 import { InventoryDashboard } from './inventory/InventoryDashboard';
@@ -30,6 +31,7 @@ import { InventoryReports } from './inventory/InventoryReports';
 type InventoryTab = 'dashboard' | 'items' | 'procurement' | 'movements' | 'auditing' | 'reports';
 
 export function Inventory() {
+  const navigate = useNavigate();
   const { hotel, currency, exchangeRate, profile } = useAuth();
   const [activeTab, setActiveTab] = useState<InventoryTab>('dashboard');
   
@@ -122,7 +124,7 @@ export function Inventory() {
           </p>
         </div>
         <button 
-          onClick={() => window.location.href = '/super-admin'}
+          onClick={() => navigate('/super-admin')}
           className="px-8 py-3 bg-emerald-500 text-black font-bold rounded-xl hover:bg-emerald-400 transition-all active:scale-95 flex items-center gap-2 mx-auto"
         >
           <ArrowRight size={18} />

@@ -466,8 +466,8 @@ export function Rooms() {
           <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Rooms</h1>
           <p className="text-zinc-400">Manage room inventory and status</p>
         </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
             <select
               value={reportFilter.status}
               onChange={(e) => setReportFilter({ ...reportFilter, status: e.target.value })}

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable } from '../types';
+import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { 
@@ -41,6 +41,7 @@ export function FandB() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [categories, setCategories] = useState<InventoryCategory[]>([]);
   const [tables, setTables] = useState<BarTable[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showTableModal, setShowTableModal] = useState(false);
@@ -54,7 +55,7 @@ export function FandB() {
   
   const [cart, setCart] = useState<{ id: string; name: string; price: number; quantity: number }[]>([]);
   const [reportFilter, setReportFilter] = useState({
-    type: 'all' as 'all' | 'food' | 'drink' | 'other',
+    type: 'all' as string,
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd')
   });
@@ -65,7 +66,7 @@ export function FandB() {
     guestId: '',
     items: '',
     notes: '',
-    category: 'all' as 'all' | 'food' | 'drink' | 'other',
+    category: 'all' as string,
     price: 0,
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer' | 'room'
   });
@@ -116,12 +117,22 @@ export function FandB() {
     );
 
     const unsubInventory = onSnapshot(
-      query(collection(db, 'hotels', hotel.id, 'inventory'), where('category', 'in', ['food', 'drink', 'other'])),
+      collection(db, 'hotels', hotel.id, 'inventory'),
       (snap) => {
         setInventory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
       },
       (error: any) => {
         handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
+      }
+    );
+
+    const unsubCategories = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'inventory_categories'),
+      (snap) => {
+        setCategories(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryCategory)));
+      },
+      (error: any) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_categories`);
       }
     );
 
@@ -140,11 +151,21 @@ export function FandB() {
       unsubReservations();
       unsubGuests();
       unsubInventory();
+      unsubCategories();
       unsubTables();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   const [customItem, setCustomItem] = useState({ name: '', price: 0 });
+
+  const fbCategories = categories.filter(c => c.isFB);
+  const fbCategoryNames = fbCategories.map(c => c.name);
+
+  const filteredInventory = inventory.filter(item => {
+    const isFBItem = fbCategoryNames.includes(item.category);
+    const matchesCategory = newOrder.category === 'all' ? true : item.category === newOrder.category;
+    return isFBItem && matchesCategory;
+  });
 
   const addToCart = (item: InventoryItem | { name: string; price: number; id?: string }) => {
     setCart(prev => {
@@ -949,37 +970,47 @@ export function FandB() {
             <div className="flex-1 flex overflow-hidden">
               {/* Left Column: Menu */}
               <div className="flex-1 border-r border-zinc-800 flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-zinc-800 flex gap-2">
-                  {(['all', 'food', 'drink', 'other'] as const).map(cat => (
+                <div className="p-4 border-b border-zinc-800 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewOrder(prev => ({ ...prev, category: 'all' }))}
+                    className={cn(
+                      "px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                      newOrder.category === 'all' 
+                        ? "bg-emerald-500 text-black" 
+                        : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                    )}
+                  >
+                    All
+                  </button>
+                  {fbCategories.map(cat => (
                     <button
-                      key={cat}
+                      key={cat.id}
                       type="button"
-                      onClick={() => setNewOrder(prev => ({ ...prev, category: cat }))}
+                      onClick={() => setNewOrder(prev => ({ ...prev, category: cat.name }))}
                       className={cn(
                         "px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
-                        newOrder.category === cat 
+                        newOrder.category === cat.name 
                           ? "bg-emerald-500 text-black" 
                           : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
                       )}
                     >
-                      {cat}
+                      {cat.name}
                     </button>
                   ))}
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    {inventory
-                      .filter(item => newOrder.category === 'all' ? true : item.category === newOrder.category)
-                      .map(item => (
+                    {filteredInventory.map(item => (
                         <button
                           key={item.id}
                           onClick={() => addToCart(item)}
                           className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl text-left hover:border-emerald-500/50 transition-all group active:scale-95"
                         >
                           <div className="flex items-center justify-between mb-2">
-                            {item.category === 'food' ? <Pizza size={16} className="text-amber-500" /> : 
-                             item.category === 'drink' ? <Coffee size={16} className="text-blue-500" /> :
-                             <MoreHorizontal size={16} className="text-zinc-500" />}
+                            {item.category.toLowerCase().includes('food') || item.category.toLowerCase().includes('meal') ? <Pizza size={16} className="text-amber-500" /> : 
+                             item.category.toLowerCase().includes('drink') || item.category.toLowerCase().includes('bev') ? <Coffee size={16} className="text-blue-500" /> :
+                             <Utensils size={16} className="text-zinc-500" />}
                             <Plus size={14} className="text-zinc-500 group-hover:text-emerald-500" />
                           </div>
                           <div className="text-sm font-bold text-zinc-50 mb-1 line-clamp-1">{item.name}</div>

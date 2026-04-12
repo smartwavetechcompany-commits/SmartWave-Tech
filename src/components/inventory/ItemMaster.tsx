@@ -26,6 +26,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, onModalClos
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(defaultShowAddModal || false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -141,6 +142,14 @@ export function ItemMaster({ items, categories, defaultShowAddModal, onModalClos
             <option value="all">All Categories</option>
             {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
+          <button
+            onClick={() => setShowCategoryModal(true)}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-3 rounded-2xl font-bold transition-all active:scale-95 whitespace-nowrap"
+            title="Manage Categories"
+          >
+            <Layers size={20} />
+            Categories
+          </button>
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-6 py-3 rounded-2xl font-bold transition-all active:scale-95 whitespace-nowrap"
@@ -293,6 +302,16 @@ export function ItemMaster({ items, categories, defaultShowAddModal, onModalClos
       </div>
 
       {/* Add/Edit Modal */}
+      <AnimatePresence>
+        {showCategoryModal && (
+          <CategoryManager 
+            categories={categories} 
+            onClose={() => setShowCategoryModal(false)} 
+            hotelId={hotel?.id || ''} 
+          />
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -559,6 +578,164 @@ export function ItemMaster({ items, categories, defaultShowAddModal, onModalClos
           </div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+interface CategoryManagerProps {
+  categories: InventoryCategory[];
+  onClose: () => void;
+  hotelId: string;
+}
+
+function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps) {
+  const [newCategory, setNewCategory] = useState({ name: '', description: '', isFB: false });
+  const [editingCategory, setEditingCategory] = useState<InventoryCategory | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotelId) return;
+    setLoading(true);
+
+    try {
+      if (editingCategory) {
+        await updateDoc(doc(db, 'hotels', hotelId, 'inventory_categories', editingCategory.id), newCategory);
+        toast.success('Category updated');
+      } else {
+        await addDoc(collection(db, hotelId ? `hotels/${hotelId}/inventory_categories` : ''), newCategory);
+        toast.success('Category created');
+      }
+      setNewCategory({ name: '', description: '', isFB: false });
+      setEditingCategory(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotelId}/inventory_categories`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this category? Items using it will remain but category link will be broken.')) return;
+    try {
+      await deleteDoc(doc(db, 'hotels', hotelId, 'inventory_categories', id));
+      toast.success('Category deleted');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotelId}/inventory_categories/${id}`);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]"
+      >
+        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Layers className="text-emerald-500" size={24} />
+            <h2 className="text-xl font-bold text-white">Manage Categories</h2>
+          </div>
+          <button onClick={onClose} className="p-2 text-zinc-500 hover:text-white">
+            <XCircle size={24} />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto space-y-6">
+          <form onSubmit={handleSave} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Category Name</label>
+                <input
+                  required
+                  type="text"
+                  value={newCategory.name}
+                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500/50"
+                  placeholder="e.g. Beverages"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Description</label>
+                <input
+                  type="text"
+                  value={newCategory.description}
+                  onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500/50"
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <div className={cn(
+                  "w-10 h-5 rounded-full p-1 transition-colors",
+                  newCategory.isFB ? "bg-emerald-500" : "bg-zinc-800"
+                )}>
+                  <div className={cn(
+                    "w-3 h-3 bg-white rounded-full transition-transform",
+                    newCategory.isFB ? "translate-x-5" : "translate-x-0"
+                  )} />
+                </div>
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={newCategory.isFB}
+                  onChange={(e) => setNewCategory({ ...newCategory, isFB: e.target.checked })}
+                />
+                <span className="text-xs font-bold text-zinc-400 group-hover:text-zinc-200 transition-colors">
+                  Available in F&B Module
+                </span>
+              </label>
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {editingCategory ? 'Update' : 'Add Category'}
+              </button>
+            </div>
+          </form>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-zinc-500 uppercase ml-1">Existing Categories</h3>
+            <div className="grid grid-cols-1 gap-2">
+              {categories.map(cat => (
+                <div key={cat.id} className="flex items-center justify-between bg-zinc-950/50 p-3 rounded-xl border border-zinc-800 group hover:border-zinc-700 transition-all">
+                  <div>
+                    <div className="text-sm font-bold text-white flex items-center gap-2">
+                      {cat.name}
+                      {cat.isFB && (
+                        <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 text-[8px] font-bold rounded uppercase">F&B</span>
+                      )}
+                    </div>
+                    {cat.description && <div className="text-[10px] text-zinc-500">{cat.description}</div>}
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => {
+                        setEditingCategory(cat);
+                        setNewCategory({ name: cat.name, description: cat.description || '', isFB: cat.isFB || false });
+                      }}
+                      className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(cat.id)}
+                      className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }

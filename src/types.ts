@@ -370,6 +370,7 @@ export interface InventoryCategory {
   name: string;
   parentId?: string;
   description?: string;
+  isFB?: boolean;
 }
 
 export interface InventoryLocation {

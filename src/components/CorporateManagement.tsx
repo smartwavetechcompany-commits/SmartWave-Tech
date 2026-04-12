@@ -21,7 +21,8 @@ import {
   Lock,
   Download,
   Clock,
-  ArrowRight
+  ArrowRight,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
@@ -157,7 +158,7 @@ export function CorporateManagement() {
     
     try {
       setLoading(true);
-      const today = format(new Date(), 'yyyy-MM-dd');
+      const todayFormatted = format(new Date(), 'MMM dd, yyyy');
       
       // 1. Fetch all checked-in reservations
       const resQ = query(
@@ -167,6 +168,12 @@ export function CorporateManagement() {
       const resSnap = await getDocs(resQ);
       const activeReservations = resSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
       
+      if (activeReservations.length === 0) {
+        toast.info('No checked-in reservations found to charge.');
+        setLoading(false);
+        return;
+      }
+
       let chargedCount = 0;
       
       for (const res of activeReservations) {
@@ -176,18 +183,18 @@ export function CorporateManagement() {
           where('reservationId', '==', res.id),
           where('category', '==', 'room'),
           where('type', '==', 'debit'),
-          where('description', '>=', `Daily Room Charge: ${res.roomNumber} (${today}`)
+          where('description', '==', `Daily Room Charge: ${res.roomNumber} (${todayFormatted})`)
         );
         const ledgerSnap = await getDocs(ledgerQ);
         
         if (ledgerSnap.empty) {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          if (rate > 0) {
-            await postToLedger(hotel.id, res.guestId!, res.id, {
+          if (rate > 0 && res.guestId) {
+            await postToLedger(hotel.id, res.guestId, res.id, {
               amount: rate,
               type: 'debit',
               category: 'room',
-              description: `Daily Room Charge: ${res.roomNumber} (${format(new Date(), 'MMM dd, yyyy')})`,
+              description: `Daily Room Charge: ${res.roomNumber} (${todayFormatted})`,
               referenceId: res.id,
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
@@ -199,7 +206,7 @@ export function CorporateManagement() {
       if (chargedCount > 0) {
         toast.success(`Successfully posted daily charges for ${chargedCount} reservations.`);
       } else {
-        toast.info('All daily charges for today have already been posted.');
+        toast.info('Daily charges for all active reservations have already been posted today.');
       }
       
       // Log action
@@ -440,7 +447,7 @@ export function CorporateManagement() {
           </p>
         </div>
         <button 
-          onClick={() => window.location.href = '/super-admin'}
+          onClick={() => navigate('/super-admin')}
           className="px-8 py-3 bg-emerald-500 text-black font-bold rounded-xl hover:bg-emerald-400 transition-all active:scale-95 flex items-center gap-2 mx-auto"
         >
           <ArrowRight size={18} />
@@ -472,8 +479,8 @@ export function CorporateManagement() {
                 disabled={loading}
                 className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
               >
-                <Clock size={18} />
-                Post Daily Charges
+                {loading ? <RefreshCw size={18} className="animate-spin" /> : <Clock size={18} />}
+                {loading ? 'Posting...' : 'Post Daily Charges'}
               </button>
               <button 
                 onClick={() => {
