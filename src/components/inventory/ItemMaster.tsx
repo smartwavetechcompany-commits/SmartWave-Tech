@@ -17,15 +17,30 @@ import { toast } from 'sonner';
 interface ItemMasterProps {
   items: InventoryItem[];
   categories: InventoryCategory[];
+  defaultShowAddModal?: boolean;
+  onModalClose?: () => void;
 }
 
-export function ItemMaster({ items, categories }: ItemMasterProps) {
+export function ItemMaster({ items, categories, defaultShowAddModal, onModalClose }: ItemMasterProps) {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(defaultShowAddModal || false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Sync modal state with prop
+  React.useEffect(() => {
+    if (defaultShowAddModal) {
+      setShowAddModal(true);
+    }
+  }, [defaultShowAddModal]);
+
+  const handleCloseModal = () => {
+    setShowAddModal(false);
+    setEditingItem(null);
+    if (onModalClose) onModalClose();
+  };
 
   const [formData, setFormData] = useState({
     sku: '',
@@ -77,8 +92,7 @@ export function ItemMaster({ items, categories }: ItemMasterProps) {
         toast.success('Item created successfully');
       }
 
-      setShowAddModal(false);
-      setEditingItem(null);
+      handleCloseModal();
       setFormData({
         sku: '', name: '', description: '', category: '', subcategory: '',
         unit: 'pcs', barcode: '', type: 'consumable', department: '',
@@ -298,7 +312,7 @@ export function ItemMaster({ items, categories }: ItemMasterProps) {
                     <p className="text-sm text-zinc-500">Define item master details and stock parameters</p>
                   </div>
                 </div>
-                <button onClick={() => setShowAddModal(false)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <button onClick={handleCloseModal} className="p-2 text-zinc-500 hover:text-white transition-colors">
                   <XCircle size={24} />
                 </button>
               </div>
@@ -523,7 +537,7 @@ export function ItemMaster({ items, categories }: ItemMasterProps) {
               <div className="p-8 bg-zinc-950 border-t border-zinc-800 flex gap-4">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={handleCloseModal}
                   className="flex-1 px-6 py-4 bg-zinc-900 text-zinc-400 rounded-2xl font-bold hover:bg-zinc-800 transition-all active:scale-95"
                 >
                   Cancel

@@ -23,7 +23,8 @@ import {
   Link as LinkIcon,
   Users,
   Building2,
-  ClipboardList
+  ClipboardList,
+  ArrowRight
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { cn, formatCurrency, safeStringify } from '../utils';
@@ -36,7 +37,7 @@ import { SuperAdminReceipt } from './SuperAdminReceipt';
 import { toast } from 'sonner';
 
 export function SuperAdmin() {
-  const { profile, currency, exchangeRate } = useAuth();
+  const { profile, currency, exchangeRate, setSelectedHotelId } = useAuth();
   const [trackingCodes, setTrackingCodes] = useState<TrackingCode[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [requests, setRequests] = useState<TrackingCodeRequest[]>([]);
@@ -71,20 +72,29 @@ export function SuperAdmin() {
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [activeTab, setActiveTab] = useState<'hotels' | 'requests' | 'codes' | 'audit' | 'settings'>('hotels');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
   // Real-time listeners
   useEffect(() => {
-    // Wait for both auth and profile to be ready
-    if (!auth.currentUser || profile?.role !== 'superAdmin') {
+    // Wait for auth to be ready
+    if (!auth.currentUser) {
+      setLoading(false);
+      return;
+    }
+
+    // Only proceed if superAdmin
+    if (profile?.role !== 'superAdmin') {
       return;
     }
 
     setLoading(true);
     
+    // Fallback to stop rotation if listeners take too long
+    const timeout = setTimeout(() => setLoading(false), 5000);
+
     const unsubCodes = onSnapshot(collection(db, 'trackingCodes'), (snap) => {
       setTrackingCodes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrackingCode)));
     }, (err: any) => {
@@ -114,6 +124,7 @@ export function SuperAdmin() {
     });
 
     return () => {
+      clearTimeout(timeout);
       unsubCodes();
       unsubHotels();
       unsubRequests();
@@ -962,6 +973,16 @@ export function SuperAdmin() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  setSelectedHotelId(hotel.id);
+                                  toast.success(`Now managing ${hotel.name}`);
+                                }}
+                                className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                                title="Manage Hotel Inventory & Accounts"
+                              >
+                                <ArrowRight size={18} />
+                              </button>
                               <button 
                                 onClick={() => setManagingStaffHotel(hotel)}
                                 className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all active:scale-90"

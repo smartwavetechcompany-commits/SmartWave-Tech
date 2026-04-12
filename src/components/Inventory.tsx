@@ -4,7 +4,7 @@ import {
   Edit2, Trash2, AlertTriangle, CheckCircle2, 
   TrendingUp, TrendingDown, History, ShoppingCart,
   Users, ClipboardCheck, BarChart3, LayoutDashboard,
-  Box, Layers, ArrowRight, Download
+  Box, Layers, ArrowRight, Download, Building2
 } from 'lucide-react';
 import { 
   InventoryItem, InventoryTransaction, InventoryCategory, 
@@ -44,7 +44,7 @@ export function Inventory() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [shouldOpenAddModal, setShouldOpenAddModal] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id) {
@@ -110,16 +110,24 @@ export function Inventory() {
 
   if (!hotel?.id) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
-        <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center text-zinc-500">
-          <Package size={32} />
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6">
+        <div className="w-20 h-20 bg-emerald-500/10 rounded-3xl flex items-center justify-center text-emerald-500">
+          <Building2 size={40} />
         </div>
-        <div>
-          <h2 className="text-xl font-bold text-white">No Hotel Selected</h2>
-          <p className="text-zinc-500 max-w-xs mx-auto">
-            Please select a hotel from the Super Admin dashboard to manage its inventory.
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold text-zinc-50">No Hotel Selected</h2>
+          <p className="text-zinc-400 max-w-md mx-auto">
+            As a Super Admin, you must select a specific hotel to manage its inventory.
+            Go to the Super Admin dashboard to select a hotel.
           </p>
         </div>
+        <button 
+          onClick={() => window.location.href = '/super-admin'}
+          className="px-8 py-3 bg-emerald-500 text-black font-bold rounded-xl hover:bg-emerald-400 transition-all active:scale-95 flex items-center gap-2 mx-auto"
+        >
+          <ArrowRight size={18} />
+          Go to Super Admin
+        </button>
       </div>
     );
   }
@@ -147,7 +155,10 @@ export function Inventory() {
             Export Report
           </button>
           <button 
-            onClick={() => setActiveTab('items')}
+            onClick={() => {
+              setActiveTab('items');
+              setShouldOpenAddModal(true);
+            }}
             className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-lg text-sm font-bold transition-all"
           >
             <Plus size={16} />
@@ -272,7 +283,14 @@ export function Inventory() {
           className="min-h-[40vh]"
         >
           {activeTab === 'dashboard' && <InventoryDashboard items={items} transactions={transactions} />}
-          {activeTab === 'items' && <ItemMaster items={items} categories={categories} />}
+          {activeTab === 'items' && (
+            <ItemMaster 
+              items={items} 
+              categories={categories} 
+              defaultShowAddModal={shouldOpenAddModal}
+              onModalClose={() => setShouldOpenAddModal(false)}
+            />
+          )}
           {activeTab === 'procurement' && <Procurement vendors={vendors} purchaseOrders={purchaseOrders} items={items} />}
           {activeTab === 'movements' && <StockMovements items={items} transactions={transactions} locations={locations} />}
           {activeTab === 'auditing' && <InventoryAuditing items={items} audits={audits} locations={locations} />}

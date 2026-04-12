@@ -424,7 +424,7 @@ export function Reports() {
     const data = getReportData(activeReport);
     
     const tableData = data.map(row => Object.values(row).map((val: any, j) => {
-      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => Object.keys(row)[j].includes(k))) {
+      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied'].some(k => Object.keys(row)[j].includes(k))) {
         return formatForExport(val);
       }
       return val;
@@ -493,7 +493,7 @@ export function Reports() {
     const worksheet = XLSX.utils.json_to_sheet(data.map(row => {
       const formattedRow: any = {};
       Object.entries(row).forEach(([key, val], j) => {
-        if (typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => key.includes(k))) {
+        if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied'].some(k => key.includes(k))) {
           formattedRow[key] = val; // Keep as number for Excel
         } else {
           formattedRow[key] = val;
@@ -753,7 +753,7 @@ export function Reports() {
                         <tr key={i} className="hover:bg-zinc-800/50 transition-colors">
                           {Object.entries(row).filter(([key]) => !key.startsWith('_')).map(([key, val]: [string, any], j) => (
                             <td key={j} className="px-6 py-4 text-sm text-zinc-400">
-                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count'].some(k => key.includes(k))
+                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied'].some(k => key.includes(k))
                                 ? formatCurrency(val, currency, exchangeRate)
                                 : val}
                             </td>

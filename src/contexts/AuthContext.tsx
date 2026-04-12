@@ -21,6 +21,7 @@ interface AuthContextType {
   setTheme: (theme: 'light' | 'dark') => void;
   isOffline: boolean;
   retryConnection: () => void;
+  setSelectedHotelId: (id: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,6 +41,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+  const [selectedHotelId, setSelectedHotelIdState] = useState<string | null>(() => {
+    return localStorage.getItem('pms_selected_hotel_id');
+  });
+
+  const setSelectedHotelId = (id: string | null) => {
+    setSelectedHotelIdState(id);
+    if (id) {
+      localStorage.setItem('pms_selected_hotel_id', id);
+    } else {
+      localStorage.removeItem('pms_selected_hotel_id');
+    }
+  };
 
   const retryConnection = () => {
     setIsOffline(false);
@@ -136,16 +149,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 3. Hotel Fetcher (Real-time)
   useEffect(() => {
-    const hotelId = profile?.hotelId;
+    let hotelId = profile?.hotelId;
     const role = profile?.role;
 
-    if (!hotelId || hotelId === 'system' || hasHotelError) {
+    // Super Admin can override hotelId with selectedHotelId
+    if (role === 'superAdmin' && selectedHotelId) {
+      hotelId = selectedHotelId;
+    }
+
+    if (!hotelId || (hotelId === 'system' && role !== 'superAdmin') || hasHotelError) {
       setHotel(null);
       return;
     }
 
-    // Only hotelAdmin, staff and superAdmin can read hotel docs
-    if (role !== 'hotelAdmin' && role !== 'superAdmin' && role !== 'staff') {
+    // Special case: Super Admin with 'system' hotelId and no selection
+    if (hotelId === 'system' && role === 'superAdmin' && !selectedHotelId) {
       setHotel(null);
       return;
     }
@@ -233,7 +251,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       theme,
       setTheme,
       isOffline,
-      retryConnection
+      retryConnection,
+      setSelectedHotelId
     }}>
       {children}
     </AuthContext.Provider>
