@@ -48,12 +48,75 @@
       "type": "object",
       "properties": {
         "roomNumber": { "type": "string" },
+        "name": { "type": "string" },
         "type": { "type": "string" },
+        "roomTypeId": { "type": "string" },
         "price": { "type": "number" },
-        "status": { "type": "string", "enum": ["available", "occupied", "dirty", "maintenance"] },
-        "floor": { "type": "integer" }
+        "status": { "type": "string", "enum": ["clean", "dirty", "occupied", "maintenance", "vacant", "out_of_service", "inspected", "out_of_order", "reserved"] },
+        "floor": { "type": "string" },
+        "building": { "type": "string" },
+        "wing": { "type": "string" },
+        "capacity": { "type": "integer" },
+        "amenities": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "notes": { "type": "string" },
+        "assignedTo": { "type": "string" }
       },
       "required": ["roomNumber", "type", "price", "status"]
+    },
+    "RoomType": {
+      "title": "Room Type",
+      "description": "Room category and configuration",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "basePrice": { "type": "number" },
+        "capacity": { "type": "integer" },
+        "capacityAdults": { "type": "integer" },
+        "capacityChildren": { "type": "integer" },
+        "amenities": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "basePrice", "capacity"]
+    },
+    "RoomBlocking": {
+      "title": "Room Blocking",
+      "description": "Room unavailability records",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "enum": ["maintenance", "vip", "event", "temporary", "permanent"] },
+        "blockedBy": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "startDate", "endDate", "reason"]
+    },
+    "RateConfiguration": {
+      "title": "Rate Configuration",
+      "description": "Pricing rules for room types",
+      "type": "object",
+      "properties": {
+        "roomTypeId": { "type": "string" },
+        "baseRate": { "type": "number" },
+        "weekendRate": { "type": "number" },
+        "weekdayRate": { "type": "number" },
+        "hourlyRate": { "type": "number" }
+      },
+      "required": ["roomTypeId", "baseRate"]
+    },
+    "InventoryConsumptionRule": {
+      "title": "Inventory Consumption Rule",
+      "description": "Automatic inventory deduction rules",
+      "type": "object",
+      "properties": {
+        "roomTypeId": { "type": "string" },
+        "itemId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "trigger": { "type": "string", "enum": ["check_in", "check_out", "daily_cleaning", "deep_cleaning"] }
+      },
+      "required": ["itemId", "quantity", "trigger"]
     },
     "Reservation": {
       "title": "Reservation",
@@ -275,6 +338,61 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["type", "amount", "category", "date", "timestamp"]
+    },
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "Item master record",
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "type": { "type": "string", "enum": ["consumable", "non-consumable", "perishable"] },
+        "quantity": { "type": "number" },
+        "minThreshold": { "type": "number" },
+        "price": { "type": "number" },
+        "valuationMethod": { "type": "string", "enum": ["FIFO", "LIFO", "WAC"] },
+        "status": { "type": "string", "enum": ["active", "discontinued", "out_of_stock"] }
+      },
+      "required": ["sku", "name", "category", "unit", "type", "quantity", "minThreshold", "price", "valuationMethod", "status"]
+    },
+    "InventoryVendor": {
+      "title": "Inventory Vendor",
+      "description": "Supplier profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
+      },
+      "required": ["name", "status"]
+    },
+    "PurchaseOrder": {
+      "title": "Purchase Order",
+      "description": "Procurement order",
+      "type": "object",
+      "properties": {
+        "poNumber": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "received", "partial", "cancelled"] },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "partial", "paid"] }
+      },
+      "required": ["poNumber", "supplierId", "totalAmount", "status", "paymentStatus"]
+    },
+    "InventoryTransaction": {
+      "title": "Inventory Transaction",
+      "description": "Stock movement record",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["stock_in", "stock_out", "transfer", "adjustment", "consumption", "return"] },
+        "itemId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "userId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "itemId", "quantity", "userId", "timestamp"]
     }
   },
   "firestore": {
@@ -286,9 +404,41 @@
       "schema": "Hotel",
       "description": "Hotel properties"
     },
+    "/hotels/{hotelId}/inventory/{itemId}": {
+      "schema": "InventoryItem",
+      "description": "Inventory items"
+    },
+    "/hotels/{hotelId}/inventory_vendors/{vendorId}": {
+      "schema": "InventoryVendor",
+      "description": "Inventory vendors"
+    },
+    "/hotels/{hotelId}/purchase_orders/{poId}": {
+      "schema": "PurchaseOrder",
+      "description": "Purchase orders"
+    },
+    "/hotels/{hotelId}/inventory_transactions/{txId}": {
+      "schema": "InventoryTransaction",
+      "description": "Inventory transactions"
+    },
     "/hotels/{hotelId}/rooms/{roomId}": {
       "schema": "Room",
       "description": "Hotel rooms"
+    },
+    "/hotels/{hotelId}/room_types/{typeId}": {
+      "schema": "RoomType",
+      "description": "Room types"
+    },
+    "/hotels/{hotelId}/room_blockings/{blockingId}": {
+      "schema": "RoomBlocking",
+      "description": "Room blockings"
+    },
+    "/hotels/{hotelId}/rate_configurations/{rateId}": {
+      "schema": "RateConfiguration",
+      "description": "Rate configurations"
+    },
+    "/hotels/{hotelId}/inventory_consumption_rules/{ruleId}": {
+      "schema": "InventoryConsumptionRule",
+      "description": "Inventory consumption rules"
     },
     "/hotels/{hotelId}/reservations/{resId}": {
       "schema": "Reservation",

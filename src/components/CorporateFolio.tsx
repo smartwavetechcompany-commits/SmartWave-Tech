@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, LedgerEntry, OperationType } from '../types';
@@ -25,11 +25,24 @@ interface CorporateFolioProps {
 
 export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   const { hotel, currency, exchangeRate } = useAuth();
+  const [currentAccount, setCurrentAccount] = useState<CorporateAccount>(account);
+
+  useEffect(() => {
+    setCurrentAccount(account);
+  }, [account]);
+
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!hotel?.id || !account.id) return;
+
+    // Listen to account document for real-time updates
+    const unsubAccount = onSnapshot(doc(db, 'hotels', hotel.id, 'corporate_accounts', account.id), (snap) => {
+      if (snap.exists()) {
+        setCurrentAccount({ id: snap.id, ...snap.data() } as CorporateAccount);
+      }
+    });
 
     // Listen to ledger entries for this corporate account
     const q = query(
@@ -45,7 +58,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
     });
 
-    return () => unsubLedger();
+    return () => {
+      unsubAccount();
+      unsubLedger();
+    };
   }, [hotel?.id, account.id]);
 
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
@@ -67,7 +83,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Corporate Folio</h2>
-              <p className="text-sm text-zinc-500">{account.name}</p>
+              <p className="text-sm text-zinc-500">{currentAccount.name}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -96,10 +112,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Account Details</h3>
               </div>
               <div className="space-y-2">
-                <p className="text-lg font-bold text-white">{account.name}</p>
-                <p className="text-sm text-zinc-400">{account.contactPerson}</p>
-                <p className="text-sm text-zinc-400">{account.email}</p>
-                <p className="text-sm text-zinc-400">{account.phone}</p>
+                <p className="text-lg font-bold text-white">{currentAccount.name}</p>
+                <p className="text-sm text-zinc-400">{currentAccount.contactPerson}</p>
+                <p className="text-sm text-zinc-400">{currentAccount.email}</p>
+                <p className="text-sm text-zinc-400">{currentAccount.phone}</p>
               </div>
             </div>
 
@@ -111,15 +127,15 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Tax ID</span>
-                  <span className="text-white font-medium">{account.taxId}</span>
+                  <span className="text-white font-medium">{currentAccount.taxId}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Cycle</span>
-                  <span className="text-white font-medium capitalize">{account.billingCycle}</span>
+                  <span className="text-white font-medium capitalize">{currentAccount.billingCycle}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Credit Limit</span>
-                  <span className="text-white font-bold">{formatCurrency(account.creditLimit, currency, exchangeRate)}</span>
+                  <span className="text-white font-bold">{formatCurrency(currentAccount.creditLimit, currency, exchangeRate)}</span>
                 </div>
               </div>
             </div>
@@ -240,7 +256,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
               link.href = URL.createObjectURL(blob);
-              link.download = `corporate_folio_${account.name.replace(/\s+/g, '_')}.csv`;
+              link.download = `corporate_folio_${currentAccount.name.replace(/\s+/g, '_')}.csv`;
               link.click();
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"

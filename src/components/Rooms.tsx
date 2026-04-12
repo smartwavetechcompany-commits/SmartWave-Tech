@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType, RoomType, Reservation, UserProfile } from '../types';
+import { Room, OperationType, RoomType, Reservation, UserProfile, RoomBlocking, RateConfiguration, InventoryConsumptionRule, InventoryItem } from '../types';
 import { 
   Plus, 
   Search, 
@@ -28,12 +28,15 @@ import {
   LogIn,
   FileText,
   X,
-  MoreVertical
+  MoreVertical,
+  TrendingUp,
+  Package
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
+import { roomService } from '../services/roomService';
 
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -48,8 +51,17 @@ export function Rooms() {
     description: '',
     basePrice: 0,
     capacity: 2,
+    capacityAdults: 2,
+    capacityChildren: 0,
     amenities: [] as string[],
   });
+  const [isManagingBlockings, setIsManagingBlockings] = useState(false);
+  const [isManagingRates, setIsManagingRates] = useState(false);
+  const [isManagingConsumptionRules, setIsManagingConsumptionRules] = useState(false);
+  const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
+  const [rateConfigs, setRateConfigs] = useState<RateConfiguration[]>([]);
+  const [consumptionRules, setConsumptionRules] = useState<InventoryConsumptionRule[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -66,9 +78,12 @@ export function Rooms() {
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
     roomNumber: '',
+    name: '',
     type: '',
     price: 0,
     floor: '1',
+    building: '',
+    wing: '',
     capacity: 0,
     amenities: [] as string[],
     description: '',
@@ -154,14 +169,37 @@ export function Rooms() {
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
-    const staffRef = collection(db, 'hotels', hotel.id, 'staff');
-    
-    const unsub = onSnapshot(staffRef, (snap) => {
-      setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
-    }, (err: any) => {
-      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/staff`);
+    const blockingsRef = collection(db, 'hotels', hotel.id, 'room_blockings');
+    const unsub = onSnapshot(blockingsRef, (snap) => {
+      setBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
     });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
 
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const ratesRef = collection(db, 'hotels', hotel.id, 'rate_configurations');
+    const unsub = onSnapshot(ratesRef, (snap) => {
+      setRateConfigs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RateConfiguration)));
+    });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const rulesRef = collection(db, 'hotels', hotel.id, 'inventory_consumption_rules');
+    const unsub = onSnapshot(rulesRef, (snap) => {
+      setConsumptionRules(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryConsumptionRule)));
+    });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const invRef = collection(db, 'hotels', hotel.id, 'inventory');
+    const unsub = onSnapshot(invRef, (snap) => {
+      setInventoryItems(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+    });
     return () => unsub();
   }, [hotel?.id, profile?.uid]);
 
@@ -176,9 +214,11 @@ export function Rooms() {
         capacity: selectedType?.capacity || newRoom.capacity,
         price: selectedType?.basePrice || newRoom.price,
         amenities: selectedType?.amenities || newRoom.amenities,
-        status: 'clean',
+        status: 'vacant',
+        createdAt: new Date().toISOString()
       });
       setIsAddingRoom(false);
+      toast.success('Room added successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms`);
     }
@@ -205,7 +245,9 @@ export function Rooms() {
         name: '',
         description: '',
         basePrice: 0,
-        capacity: 0,
+        capacity: 2,
+        capacityAdults: 2,
+        capacityChildren: 0,
         amenities: [],
       });
       setEditingRoomType(null);
@@ -556,6 +598,27 @@ export function Rooms() {
             <Settings2 size={18} />
             Types
           </button>
+          <button 
+            onClick={() => setIsManagingBlockings(true)}
+            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+          >
+            <XCircle size={18} />
+            Blockings
+          </button>
+          <button 
+            onClick={() => setIsManagingRates(true)}
+            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+          >
+            <TrendingUp size={18} />
+            Rates
+          </button>
+          <button 
+            onClick={() => setIsManagingConsumptionRules(true)}
+            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+          >
+            <Package size={18} />
+            Inv Sync
+          </button>
         </div>
       </header>
 
@@ -665,6 +728,28 @@ export function Rooms() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Building</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Main, Annex"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={newRoom.building}
+                    onChange={(e) => setNewRoom({ ...newRoom, building: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Wing</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. East, West"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={newRoom.wing}
+                    onChange={(e) => setNewRoom({ ...newRoom, wing: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Capacity</label>
                   <input 
                     type="number" 
@@ -732,6 +817,286 @@ export function Rooms() {
         </div>
       )}
 
+      {isManagingBlockings && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-zinc-50">Room Blockings</h3>
+              <button onClick={() => setIsManagingBlockings(false)} className="text-zinc-500 hover:text-zinc-50">
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto">
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">New Blocking</h4>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  const roomId = formData.get('roomId') as string;
+                  const startDate = formData.get('startDate') as string;
+                  const endDate = formData.get('endDate') as string;
+                  const reason = formData.get('reason') as any;
+                  const notes = formData.get('notes') as string;
+
+                  if (!hotel?.id || !profile?.uid) return;
+                  try {
+                    await roomService.blockRoom(hotel.id, {
+                      roomId,
+                      startDate,
+                      endDate,
+                      reason,
+                      notes,
+                      blockedBy: profile.uid
+                    });
+                    toast.success('Room blocked successfully');
+                    e.currentTarget.reset();
+                  } catch (err) {
+                    toast.error('Failed to block room');
+                  }
+                }} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
+                    <select name="roomId" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                      {rooms.map(r => <option key={r.id} value={r.id}>{r.roomNumber} - {r.type}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Start Date</label>
+                      <input name="startDate" type="date" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">End Date</label>
+                      <input name="endDate" type="date" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Reason</label>
+                    <select name="reason" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                      <option value="maintenance">Maintenance</option>
+                      <option value="vip">VIP Guest</option>
+                      <option value="event">Event</option>
+                      <option value="temporary">Temporary</option>
+                      <option value="permanent">Permanent</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
+                    <textarea name="notes" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20" />
+                  </div>
+                  <button type="submit" className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95">
+                    Block Room
+                  </button>
+                </form>
+              </div>
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Active Blockings</h4>
+                <div className="space-y-3">
+                  {blockings.map(b => (
+                    <div key={b.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-zinc-50">Room {rooms.find(r => r.id === b.roomId)?.roomNumber}</div>
+                        <div className="text-xs text-zinc-500">{format(new Date(b.startDate), 'MMM dd')} - {format(new Date(b.endDate), 'MMM dd')}</div>
+                        <div className="text-[10px] text-emerald-500 font-bold uppercase mt-1">{b.reason}</div>
+                      </div>
+                      <button 
+                        onClick={() => hotel?.id && roomService.unblockRoom(hotel.id, b.id, b.roomId)}
+                        className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isManagingRates && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-zinc-50">Rate Configuration</h3>
+              <button onClick={() => setIsManagingRates(false)} className="text-zinc-500 hover:text-zinc-50">
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto">
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">New Rate Rule</h4>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  const roomTypeId = formData.get('roomTypeId') as string;
+                  const baseRate = Number(formData.get('baseRate'));
+                  const weekendRate = Number(formData.get('weekendRate'));
+                  const weekdayRate = Number(formData.get('weekdayRate'));
+
+                  if (!hotel?.id) return;
+                  try {
+                    await addDoc(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
+                      roomTypeId,
+                      baseRate,
+                      weekendRate,
+                      weekdayRate,
+                      timestamp: new Date().toISOString()
+                    });
+                    toast.success('Rate rule added');
+                    e.currentTarget.reset();
+                  } catch (err) {
+                    toast.error('Failed to add rate rule');
+                  }
+                }} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room Type</label>
+                    <select name="roomTypeId" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                      {roomTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Rate</label>
+                    <input name="baseRate" type="number" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Weekend Rate</label>
+                      <input name="weekendRate" type="number" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Weekday Rate</label>
+                      <input name="weekdayRate" type="number" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95">
+                    Save Rate Rule
+                  </button>
+                </form>
+              </div>
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Configured Rates</h4>
+                <div className="space-y-3">
+                  {rateConfigs.map(c => (
+                    <div key={c.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-zinc-50">{roomTypes.find(t => t.id === c.roomTypeId)?.name}</div>
+                        <div className="text-xs text-zinc-500">Base: {formatCurrency(c.baseRate, currency, exchangeRate)}</div>
+                        <div className="flex gap-2 mt-1">
+                          {c.weekendRate && <span className="text-[8px] px-1 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20">WE: {formatCurrency(c.weekendRate, currency, exchangeRate)}</span>}
+                          {c.weekdayRate && <span className="text-[8px] px-1 bg-blue-500/10 text-blue-500 rounded border border-blue-500/20">WD: {formatCurrency(c.weekdayRate, currency, exchangeRate)}</span>}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => hotel?.id && deleteDoc(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id))}
+                        className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isManagingConsumptionRules && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-zinc-50">Inventory Sync Rules</h3>
+              <button onClick={() => setIsManagingConsumptionRules(false)} className="text-zinc-500 hover:text-zinc-50">
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto">
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">New Consumption Rule</h4>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  const roomTypeId = formData.get('roomTypeId') as string;
+                  const itemId = formData.get('itemId') as string;
+                  const quantity = Number(formData.get('quantity'));
+                  const trigger = formData.get('trigger') as any;
+
+                  if (!hotel?.id) return;
+                  try {
+                    await addDoc(collection(db, 'hotels', hotel.id, 'inventory_consumption_rules'), {
+                      roomTypeId: roomTypeId === 'all' ? null : roomTypeId,
+                      itemId,
+                      quantity,
+                      trigger,
+                      timestamp: new Date().toISOString()
+                    });
+                    toast.success('Consumption rule added');
+                    e.currentTarget.reset();
+                  } catch (err) {
+                    toast.error('Failed to add rule');
+                  }
+                }} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room Type</label>
+                    <select name="roomTypeId" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                      <option value="all">All Room Types</option>
+                      {roomTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Inventory Item</label>
+                    <select name="itemId" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                      {inventoryItems.map(i => <option key={i.id} value={i.id}>{i.name} ({i.quantity} {i.unit})</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Quantity</label>
+                      <input name="quantity" type="number" step="0.01" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Trigger</label>
+                      <select name="trigger" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                        <option value="check_in">Check-in</option>
+                        <option value="check_out">Check-out</option>
+                        <option value="daily_cleaning">Daily Cleaning</option>
+                        <option value="deep_cleaning">Deep Cleaning</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95">
+                    Add Sync Rule
+                  </button>
+                </form>
+              </div>
+              <div className="space-y-6">
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Active Rules</h4>
+                <div className="space-y-3">
+                  {consumptionRules.map(r => (
+                    <div key={r.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-zinc-50">{inventoryItems.find(i => i.id === r.itemId)?.name}</div>
+                        <div className="text-xs text-zinc-500">{r.quantity} units on {r.trigger.replace('_', ' ')}</div>
+                        <div className="text-[10px] text-zinc-600 mt-1">
+                          Applies to: {r.roomTypeId ? roomTypes.find(t => t.id === r.roomTypeId)?.name : 'All Rooms'}
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => hotel?.id && deleteDoc(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id))}
+                        className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isManagingTypes && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -741,7 +1106,6 @@ export function Rooms() {
                 <XCircle size={24} />
               </button>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto">
               <div className="space-y-6">
                 <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">{editingRoomType ? 'Edit Type' : 'Add New Type'}</h4>
@@ -757,9 +1121,9 @@ export function Rooms() {
                       onChange={(e) => setNewRoomType({ ...newRoomType, name: e.target.value })}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Capacity</label>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Total Capacity</label>
                       <input 
                         type="number" 
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
@@ -768,14 +1132,32 @@ export function Rooms() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Price</label>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Adults</label>
                       <input 
                         type="number" 
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                        value={newRoomType.basePrice}
-                        onChange={(e) => setNewRoomType({ ...newRoomType, basePrice: Number(e.target.value) })}
+                        value={newRoomType.capacityAdults}
+                        onChange={(e) => setNewRoomType({ ...newRoomType, capacityAdults: Number(e.target.value) })}
                       />
                     </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Children</label>
+                      <input 
+                        type="number" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                        value={newRoomType.capacityChildren}
+                        onChange={(e) => setNewRoomType({ ...newRoomType, capacityChildren: Number(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Price</label>
+                    <input 
+                      type="number" 
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                      value={newRoomType.basePrice}
+                      onChange={(e) => setNewRoomType({ ...newRoomType, basePrice: Number(e.target.value) })}
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Amenities</label>
@@ -823,6 +1205,8 @@ export function Rooms() {
                             description: '',
                             basePrice: 0,
                             capacity: 2,
+                            capacityAdults: 2,
+                            capacityChildren: 0,
                             amenities: [],
                           });
                         }}
@@ -878,6 +1262,8 @@ export function Rooms() {
                               description: type.description || '',
                               basePrice: type.basePrice,
                               capacity: type.capacity,
+                              capacityAdults: type.capacityAdults || 2,
+                              capacityChildren: type.capacityChildren || 0,
                               amenities: type.amenities || [],
                             });
                           }}

@@ -36,6 +36,11 @@ interface GuestFolioProps {
 export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioProps) {
   const { hotel, currency, exchangeRate, profile } = useAuth();
   const [currentReservation, setCurrentReservation] = useState<Reservation>(reservation);
+
+  useEffect(() => {
+    setCurrentReservation(reservation);
+  }, [reservation]);
+
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [guest, setGuest] = useState<Guest | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
@@ -58,12 +63,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setIsSaving(true);
       await settleLedger(
         hotel.id, 
-        reservation.guestId || 'unknown', 
-        reservation.id, 
+        currentReservation.guestId || 'unknown', 
+        currentReservation.id, 
         settleData.amount, 
         settleData.method, 
         profile.uid, 
-        reservation.corporateId
+        currentReservation.corporateId
       );
 
       toast.success('Payment recorded successfully');
@@ -82,7 +87,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile) return;
     try {
       setIsSaving(true);
-      await settleOverpayment(hotel.id, reservation.guestId || 'unknown', reservation.id, settleData.amount, settleData.method, profile.uid, reservation.corporateId);
+      await settleOverpayment(hotel.id, currentReservation.guestId || 'unknown', currentReservation.id, settleData.amount, settleData.method, profile.uid, currentReservation.corporateId);
       toast.success('Overpayment settled successfully');
       setShowSettleOverpayment(false);
     } catch (err: any) {
@@ -120,12 +125,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setLoading(true);
       await transferLedgerBalance(
         hotel.id,
-        reservation.guestId!,
-        reservation.id,
+        currentReservation.guestId!,
+        currentReservation.id,
         transferTargetId,
         balance,
         profile.uid,
-        reservation.corporateId
+        currentReservation.corporateId
       );
       toast.success('Balance transferred successfully');
       setShowTransferBalanceModal(false);
@@ -239,7 +244,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
             <div>
               <h2 className="text-xl font-bold text-zinc-50">Guest Folio</h2>
-              <p className="text-sm text-zinc-500">Reservation #{reservation.id.slice(-6).toUpperCase()}</p>
+              <p className="text-sm text-zinc-500">Reservation #{currentReservation.id.slice(-6).toUpperCase()}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -288,10 +293,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Guest Details</h3>
               </div>
               <div className="space-y-2">
-                <p className="text-lg font-bold text-zinc-50">{reservation.guestName}</p>
-                <p className="text-sm text-zinc-400">{reservation.guestEmail}</p>
-                <p className="text-sm text-zinc-400">{reservation.guestPhone}</p>
-                {reservation.corporateId && (
+                <p className="text-lg font-bold text-zinc-50">{currentReservation.guestName}</p>
+                <p className="text-sm text-zinc-400">{currentReservation.guestEmail}</p>
+                <p className="text-sm text-zinc-400">{currentReservation.guestPhone}</p>
+                {currentReservation.corporateId && (
                   <div className="mt-4 pt-4 border-t border-zinc-800">
                     <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Corporate Account</p>
                     <p className="text-sm text-emerald-500 font-bold flex items-center gap-2">
@@ -312,26 +317,26 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Room</p>
-                    <p className="text-lg font-bold text-zinc-50">{reservation.roomNumber}</p>
+                    <p className="text-lg font-bold text-zinc-50">{currentReservation.roomNumber}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Status</p>
                     <span className={cn(
                       "text-[10px] font-bold uppercase px-2 py-0.5 rounded",
-                      reservation.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
+                      currentReservation.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
                     )}>
-                      {reservation.status.replace('_', ' ')}
+                      {currentReservation.status.replace('_', ' ')}
                     </span>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check In</p>
-                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(reservation.checkIn), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkIn), 'MMM d, yyyy')}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
-                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(reservation.checkOut), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkOut), 'MMM d, yyyy')}</p>
                   </div>
                 </div>
               </div>
@@ -412,7 +417,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-md">
                 <h3 className="text-lg font-bold text-zinc-50 mb-4">Transfer Balance</h3>
                 <p className="text-sm text-zinc-400 mb-6">
-                  Select another active reservation for {reservation.guestName} to transfer the current balance of {formatCurrency(balance, currency, exchangeRate)}.
+                  Select another active reservation for {currentReservation.guestName} to transfer the current balance of {formatCurrency(balance, currency, exchangeRate)}.
                 </p>
                 <div className="space-y-4">
                   <div>
@@ -459,7 +464,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               >
                 <div className="p-6 border-b border-zinc-800">
                   <h2 className="text-xl font-bold text-zinc-50">Settle Overpayment</h2>
-                  <p className="text-sm text-zinc-500 mt-1">Refund or balance adjustment for {reservation.guestName}</p>
+                  <p className="text-sm text-zinc-500 mt-1">Refund or balance adjustment for {currentReservation.guestName}</p>
                 </div>
                 <form onSubmit={handleSettleOverpayment}>
                   <div className="p-6 space-y-4">
@@ -531,7 +536,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               >
                 <div className="p-6 border-b border-zinc-800">
                   <h2 className="text-xl font-bold text-zinc-50">Settle Payment</h2>
-                  <p className="text-sm text-zinc-500 mt-1">Record payment for {reservation.guestName}</p>
+                  <p className="text-sm text-zinc-500 mt-1">Record payment for {currentReservation.guestName}</p>
                 </div>
                 <form onSubmit={handleSettlePayment}>
                   <div className="p-6 space-y-4">
@@ -599,7 +604,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Transaction History</h3>
-              {onPostCharge && reservation.status === 'checked_in' && (
+              {onPostCharge && currentReservation.status === 'checked_in' && (
                 <button 
                   onClick={onPostCharge}
                   className="flex items-center gap-2 text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
@@ -711,7 +716,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
               link.href = URL.createObjectURL(blob);
-              link.download = `folio_${reservation.id.slice(-6)}.csv`;
+              link.download = `folio_${currentReservation.id.slice(-6)}.csv`;
               link.click();
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"

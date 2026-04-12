@@ -118,6 +118,40 @@ export function FrontDesk() {
   });
   const [isNegotiatedRate, setIsNegotiatedRate] = useState(false);
 
+  // Keep modals in sync with real-time reservation updates
+  useEffect(() => {
+    if (showFolioModal) {
+      const updated = reservations.find(r => r.id === showFolioModal.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(showFolioModal)) {
+        setShowFolioModal(updated);
+      }
+    }
+    if (showChargeModal) {
+      const updated = reservations.find(r => r.id === showChargeModal.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(showChargeModal)) {
+        setShowChargeModal(updated);
+      }
+    }
+    if (showTransferModal) {
+      const updated = reservations.find(r => r.id === showTransferModal.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(showTransferModal)) {
+        setShowTransferModal(updated);
+      }
+    }
+    if (showPostponeModal) {
+      const updated = reservations.find(r => r.id === showPostponeModal.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(showPostponeModal)) {
+        setShowPostponeModal(updated);
+      }
+    }
+    if (showDiscountModal) {
+      const updated = reservations.find(r => r.id === showDiscountModal.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(showDiscountModal)) {
+        setShowDiscountModal(updated);
+      }
+    }
+  }, [reservations, showFolioModal, showChargeModal, showTransferModal, showPostponeModal, showDiscountModal]);
+
   useEffect(() => {
     const action = searchParams.get('action');
     const corporateId = searchParams.get('corporateId');
@@ -1022,24 +1056,31 @@ export function FrontDesk() {
       }
 
       // 1. Mark old room as dirty
-      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
+      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+        status: 'dirty',
+        updatedAt: new Date().toISOString()
+      });
       
       // 2. Mark new room as occupied
-      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', newRoomId), { status: 'occupied' });
+      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', newRoomId), { 
+        status: 'occupied',
+        updatedAt: new Date().toISOString()
+      });
 
       // 3. Update reservation
       const newTotalAmount = (res.totalAmount || 0) + priceDifference;
       await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
         roomId: newRoomId,
         roomNumber: newRoom.roomNumber,
-        totalAmount: newTotalAmount
+        totalAmount: newTotalAmount,
+        updatedAt: new Date().toISOString()
       });
 
       // 4. Post transfer note to ledger
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
         amount: Math.abs(priceDifference),
         type: priceDifference >= 0 ? 'debit' : 'credit',
-        category: 'service',
+        category: 'room',
         description: `Room Transfer: From ${res.roomNumber} to ${newRoom.roomNumber}${priceDifference !== 0 ? ` (Price Adj: ${formatCurrency(priceDifference, currency, exchangeRate)})` : ''}`,
         referenceId: res.id,
         postedBy: profile.uid
@@ -1057,9 +1098,9 @@ export function FrontDesk() {
         module: 'Front Desk'
       });
 
+      toast.success(`Transferred to Room ${newRoom.roomNumber}`);
       setShowTransferModal(null);
-      toast.success(`Successfully transferred to Room ${newRoom.roomNumber}`);
-    } catch (err) {
+    } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/reservations/${res.id}`);
       toast.error('Failed to transfer room');
     } finally {
@@ -1995,6 +2036,32 @@ export function FrontDesk() {
         </div>
       )}
 
+      {/* Room Inventory Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        {roomTypes.map(type => {
+          const totalRooms = rooms.filter(r => r.type === type.name).length;
+          const availableRooms = rooms.filter(r => r.type === type.name && r.status === 'clean').length;
+          return (
+            <div key={type.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">{type.name}</div>
+              <div className="flex items-end justify-between">
+                <div className="text-xl font-bold text-zinc-50">{availableRooms}</div>
+                <div className="text-[10px] text-zinc-500">of {totalRooms}</div>
+              </div>
+              <div className="mt-2 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
+                <div 
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500",
+                    availableRooms === 0 ? "bg-red-500" : availableRooms < totalRooms * 0.3 ? "bg-amber-500" : "bg-emerald-500"
+                  )}
+                  style={{ width: `${totalRooms ? (availableRooms / totalRooms) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
           <h3 className="font-bold text-zinc-50">Active Reservations</h3>
@@ -2053,11 +2120,14 @@ export function FrontDesk() {
                   <td className="px-6 py-4 text-sm text-zinc-400">
                     <div>{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
                     <div className={cn(
-                      "text-[10px] font-bold uppercase",
+                      "text-[10px] font-bold uppercase flex items-center gap-1",
                       res.paymentStatus === 'paid' ? "text-emerald-500" :
                       res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
                     )}>
                       {res.paymentStatus} ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)})
+                      {res.status === 'pending' && res.paidAmount > 0 && (
+                        <span className="px-1 bg-emerald-500/20 text-emerald-500 rounded-[4px] text-[8px]">Deposit</span>
+                      )}
                     </div>
                     {res.guestId && (
                       <div className="text-[10px] text-zinc-500 mt-1">

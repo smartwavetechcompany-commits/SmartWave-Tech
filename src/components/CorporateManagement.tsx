@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, addDoc, query, orderBy, doc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, addDoc, query, orderBy, doc, updateDoc, deleteDoc, onSnapshot, where, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { CorporateAccount, CorporateRate, Room, OperationType, RoomType } from '../types';
+import { CorporateAccount, CorporateRate, Room, OperationType, RoomType, Reservation } from '../types';
 import { 
   Building2, 
   Plus, 
@@ -19,7 +19,8 @@ import {
   DollarSign,
   X,
   Lock,
-  Download
+  Download,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
@@ -27,6 +28,7 @@ import { fuzzySearch } from '../utils/searchUtils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { postToLedger } from '../services/ledgerService';
 
 import { CorporateFolio } from './CorporateFolio';
 import { ConfirmModal } from './ConfirmModal';
@@ -74,7 +76,7 @@ export function CorporateManagement() {
 
   const hasPermission = () => {
     if (!profile) return false;
-    if (profile.role === 'hotelAdmin') return true;
+    if (profile.role === 'hotelAdmin' || profile.role === 'superAdmin') return true;
     const roles = (profile.roles || profile.permissions || []) as string[];
     return roles.includes('manager') || roles.includes('corporate');
   };
@@ -139,6 +141,146 @@ export function CorporateManagement() {
   const availableRoomTypes = roomTypes.length > 0 
     ? roomTypes.map(t => t.name)
     : Array.from(new Set(rooms.map(r => r.type)));
+
+  const [loading, setLoading] = useState(false);
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState<CorporateAccount | null>(null);
+  const [adjustmentData, setAdjustmentData] = useState({
+    amount: 0,
+    type: 'debit' as 'debit' | 'credit',
+    description: '',
+    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer'
+  });
+
+  const postDailyCharges = async () => {
+    if (!hotel?.id || !profile) return;
+    
+    try {
+      setLoading(true);
+      const today = format(new Date(), 'yyyy-MM-dd');
+      
+      // 1. Fetch all checked-in reservations
+      const resQ = query(
+        collection(db, 'hotels', hotel.id, 'reservations'),
+        where('status', '==', 'checked_in')
+      );
+      const resSnap = await getDocs(resQ);
+      const activeReservations = resSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+      
+      let chargedCount = 0;
+      
+      for (const res of activeReservations) {
+        // 2. Check if already charged for today
+        const ledgerQ = query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id),
+          where('category', '==', 'room'),
+          where('type', '==', 'debit'),
+          where('description', '>=', `Daily Room Charge: ${res.roomNumber} (${today}`)
+        );
+        const ledgerSnap = await getDocs(ledgerQ);
+        
+        if (ledgerSnap.empty) {
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          if (rate > 0) {
+            await postToLedger(hotel.id, res.guestId!, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Daily Room Charge: ${res.roomNumber} (${format(new Date(), 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
+            chargedCount++;
+          }
+        }
+      }
+      
+      if (chargedCount > 0) {
+        toast.success(`Successfully posted daily charges for ${chargedCount} reservations.`);
+      } else {
+        toast.info('All daily charges for today have already been posted.');
+      }
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'DAILY_CHARGES_POSTED',
+        resource: `Posted daily charges for ${chargedCount} rooms`,
+        hotelId: hotel.id,
+        module: 'Corporate'
+      });
+    } catch (err) {
+      console.error("Daily charge error:", err);
+      toast.error('Failed to post daily charges');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleManualAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !showAdjustmentModal) return;
+
+    try {
+      const account = showAdjustmentModal;
+      const timestamp = new Date().toISOString();
+      
+      // 1. Update account balance
+      const balanceAdjustment = adjustmentData.type === 'debit' ? adjustmentData.amount : -adjustmentData.amount;
+      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', account.id), {
+        currentBalance: increment(balanceAdjustment)
+      });
+
+      // 2. Add to Ledger
+      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+        hotelId: hotel.id,
+        corporateId: account.id,
+        reservationId: 'MANUAL_ADJUSTMENT',
+        timestamp,
+        amount: adjustmentData.amount,
+        type: adjustmentData.type,
+        category: 'adjustment',
+        description: adjustmentData.description || `Manual ${adjustmentData.type} adjustment`,
+        paymentMethod: adjustmentData.paymentMethod,
+        postedBy: profile.uid
+      });
+
+      // 3. If it's a payment (credit), log to finance
+      if (adjustmentData.type === 'credit') {
+        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'income',
+          amount: adjustmentData.amount,
+          category: 'Corporate Payment',
+          description: `Corporate Payment: ${account.name} - ${adjustmentData.description}`,
+          timestamp,
+          paymentMethod: adjustmentData.paymentMethod,
+          referenceId: account.id
+        });
+      }
+
+      // 4. Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp,
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'CORPORATE_BALANCE_ADJUSTED',
+        resource: `${account.name} adjusted by ${adjustmentData.type === 'debit' ? '+' : '-'}${formatCurrency(adjustmentData.amount, currency, exchangeRate)}`,
+        hotelId: hotel.id,
+        module: 'Corporate'
+      });
+
+      toast.success('Balance adjusted successfully');
+      setShowAdjustmentModal(null);
+      setAdjustmentData({ amount: 0, type: 'debit', description: '', paymentMethod: 'cash' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/corporate_accounts/${showAdjustmentModal.id}`);
+      toast.error('Failed to adjust balance');
+    }
+  };
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,6 +425,22 @@ export function CorporateManagement() {
     toast.success('Corporate accounts exported successfully');
   };
 
+  if (!hotel?.id) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
+        <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center text-zinc-500">
+          <Building2 size={32} />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-white">No Hotel Selected</h2>
+          <p className="text-zinc-500 max-w-xs mx-auto">
+            Please select a hotel from the Super Admin dashboard to manage its corporate accounts.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -299,20 +457,30 @@ export function CorporateManagement() {
             Export CSV
           </button>
           {hasPermission() && (
-            <button 
-              onClick={() => {
-                setEditingAccount(null);
-                setNewAccount({
-                  name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
-                  creditLimit: 0, currentBalance: 0, billingCycle: 'monthly'
-                });
-                setShowAddModal(true);
-              }}
-              className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-            >
-              <Plus size={18} />
-              Add Account
-            </button>
+            <>
+              <button 
+                onClick={postDailyCharges}
+                disabled={loading}
+                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Clock size={18} />
+                Post Daily Charges
+              </button>
+              <button 
+                onClick={() => {
+                  setEditingAccount(null);
+                  setNewAccount({
+                    name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
+                    creditLimit: 0, currentBalance: 0, billingCycle: 'monthly'
+                  });
+                  setShowAddModal(true);
+                }}
+                className="bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+              >
+                <Plus size={18} />
+                Add Account
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -410,6 +578,16 @@ export function CorporateManagement() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
                       <button 
+                        onClick={() => {
+                          setAdjustmentData({ amount: 0, type: 'credit', description: '', paymentMethod: 'cash' });
+                          setShowAdjustmentModal(account);
+                        }}
+                        className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                        title="Manual Adjustment / Payment"
+                      >
+                        <DollarSign size={18} />
+                      </button>
+                      <button 
                         onClick={() => navigate(`/front-desk?action=book&corporateId=${account.id}`)}
                         className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
                         title="Book Room"
@@ -460,6 +638,89 @@ export function CorporateManagement() {
           </table>
         </div>
       </div>
+
+      {/* Adjustment Modal */}
+      {showAdjustmentModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h2 className="text-xl font-bold text-white">Manual Adjustment</h2>
+              <p className="text-sm text-zinc-500">{showAdjustmentModal.name}</p>
+            </div>
+            <form onSubmit={handleManualAdjustment}>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Adjustment Type</label>
+                    <select
+                      value={adjustmentData.type}
+                      onChange={(e) => setAdjustmentData({ ...adjustmentData, type: e.target.value as any })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="credit">Payment / Credit (-)</option>
+                      <option value="debit">Charge / Debit (+)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      value={adjustmentData.amount}
+                      onChange={(e) => setAdjustmentData({ ...adjustmentData, amount: Number(e.target.value) })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                </div>
+                {adjustmentData.type === 'credit' && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
+                    <select
+                      value={adjustmentData.paymentMethod}
+                      onChange={(e) => setAdjustmentData({ ...adjustmentData, paymentMethod: e.target.value as any })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="transfer">Bank Transfer</option>
+                    </select>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Description / Reason</label>
+                  <textarea
+                    required
+                    value={adjustmentData.description}
+                    onChange={(e) => setAdjustmentData({ ...adjustmentData, description: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                    placeholder="e.g. Monthly settlement, Service charge adjustment..."
+                  />
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustmentModal(null)}
+                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
+                >
+                  Apply Adjustment
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {showAddModal && (

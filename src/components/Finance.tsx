@@ -446,7 +446,7 @@ export function Finance() {
 
       // Update inventory for each item
       for (const item of po.items) {
-        const itemRef = doc(db, 'hotels', hotel.id, 'inventory', item.inventoryItemId);
+        const itemRef = doc(db, 'hotels', hotel.id, 'inventory', item.itemId);
         const itemDoc = await getDoc(itemRef);
         if (itemDoc.exists()) {
           const currentQty = itemDoc.data().quantity || 0;
@@ -1982,7 +1982,7 @@ export function Finance() {
                       onClick={() => {
                         setNewPO({
                           ...newPO,
-                          items: [...newPO.items, { inventoryItemId: '', quantity: 1, unitPrice: 0, total: 0 }]
+                          items: [...newPO.items, { itemId: '', quantity: 1, unitPrice: 0, receivedQuantity: 0, total: 0 }]
                         });
                       }}
                       className="text-xs font-bold text-emerald-500 flex items-center gap-1"
@@ -1998,10 +1998,10 @@ export function Finance() {
                           <label className="text-[10px] font-bold text-zinc-600 uppercase">Inventory Item</label>
                           <select
                             required
-                            value={item.inventoryItemId}
+                            value={item.itemId}
                             onChange={(e) => {
                               const items = [...newPO.items];
-                              items[index].inventoryItemId = e.target.value;
+                              items[index].itemId = e.target.value;
                               setNewPO({ ...newPO, items });
                             }}
                             className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"

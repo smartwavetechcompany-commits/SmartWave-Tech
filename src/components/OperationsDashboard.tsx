@@ -3,7 +3,7 @@ import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestor
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, OperationType } from '../types';
-import { cn } from '../utils';
+import { cn, formatCurrency } from '../utils';
 import { 
   Users, 
   LogIn, 
@@ -19,7 +19,7 @@ import { motion } from 'motion/react';
 import { format } from 'date-fns';
 
 export function OperationsDashboard() {
-  const { hotel } = useAuth();
+  const { hotel, currency, exchangeRate } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -194,7 +194,7 @@ export function OperationsDashboard() {
                         "text-sm font-bold",
                         (res.totalAmount - res.paidAmount) > 0 ? "text-red-400" : "text-emerald-400"
                       )}>
-                        ${Math.round(res.totalAmount - res.paidAmount)}
+                        {formatCurrency(res.totalAmount - res.paidAmount, currency, exchangeRate)}
                       </div>
                     </td>
                   </motion.tr>

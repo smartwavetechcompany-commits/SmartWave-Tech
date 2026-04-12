@@ -1,666 +1,284 @@
-import React, { useEffect, useState } from 'react';
-import { collection, query, orderBy, addDoc, updateDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
-import { ConfirmModal } from './ConfirmModal';
+import React, { useState, useEffect } from 'react';
+import { 
+  Package, Search, Filter, Plus, MoreHorizontal, 
+  Edit2, Trash2, AlertTriangle, CheckCircle2, 
+  TrendingUp, TrendingDown, History, ShoppingCart,
+  Users, ClipboardCheck, BarChart3, LayoutDashboard,
+  Box, Layers, ArrowRight, Download
+} from 'lucide-react';
+import { 
+  InventoryItem, InventoryTransaction, InventoryCategory, 
+  InventoryLocation, InventoryVendor, PurchaseOrder, InventoryAudit,
+  OperationType
+} from '../types';
+import { formatCurrency } from '../utils';
 import { useAuth } from '../contexts/AuthContext';
-import { InventoryItem, OperationType } from '../types';
-import { Package, Plus, Search, Filter, AlertTriangle, History, ArrowUp, ArrowDown, Trash2, Edit2, MoreHorizontal, ChevronRight, Box, ShoppingCart, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, exportToCSV } from '../utils';
-import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
-import { createNotification } from './Notifications';
-import { toast } from 'sonner';
+import { cn } from '../utils';
+import { db, handleFirestoreError } from '../firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { format } from 'date-fns';
+
+// Sub-modules
+import { InventoryDashboard } from './inventory/InventoryDashboard';
+import { ItemMaster } from './inventory/ItemMaster';
+import { Procurement } from './inventory/Procurement';
+import { StockMovements } from './inventory/StockMovements';
+import { InventoryAuditing } from './inventory/InventoryAuditing';
+import { InventoryReports } from './inventory/InventoryReports';
+
+type InventoryTab = 'dashboard' | 'items' | 'procurement' | 'movements' | 'auditing' | 'reports';
 
 export function Inventory() {
-  const { hotel, profile } = useAuth();
+  const { hotel, currency, exchangeRate, profile } = useAuth();
+  const [activeTab, setActiveTab] = useState<InventoryTab>('dashboard');
+  
+  // Data State
   const [items, setItems] = useState<InventoryItem[]>([]);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showRestockModal, setShowRestockModal] = useState<InventoryItem | null>(null);
-  const [restockData, setRestockData] = useState({
-    quantityToAdd: 0,
-    newUnitPrice: 0
-  });
-  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
+  const [categories, setCategories] = useState<InventoryCategory[]>([]);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [vendors, setVendors] = useState<InventoryVendor[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [audits, setAudits] = useState<InventoryAudit[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'food' | 'drink' | 'cleaning' | 'other'>('all');
-  const [reportFilter, setReportFilter] = useState({
-    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    endDate: format(new Date(), 'yyyy-MM-dd'),
-    category: 'all' as 'all' | 'food' | 'drink' | 'cleaning' | 'other'
-  });
-  const [newItem, setNewItem] = useState({
-    name: '',
-    category: 'food' as InventoryItem['category'],
-    quantity: 0,
-    unit: 'pcs',
-    minThreshold: 5,
-    price: 0
-  });
-
-  const [showConfirmDelete, setShowConfirmDelete] = useState<InventoryItem | null>(null);
-  const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [filterCategory, setFilterCategory] = useState('All');
+  const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
-    if (!hotel?.id || !profile) return;
-    const q = collection(db, 'hotels', hotel.id, 'inventory');
-    
-    const unsub = onSnapshot(q, (snap) => {
-      const newItems = snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem))
-        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      setItems(newItems);
-
-      // Check for low stock and notify
-      newItems.forEach(item => {
-        if (item.quantity <= item.minThreshold) {
-          createNotification(hotel.id, {
-            title: 'Low Stock Alert',
-            message: `${item.name} is low on stock (${item.quantity} ${item.unit} remaining).`,
-            type: 'warning',
-            userId: 'all'
-          });
-        }
-      });
-    }, (error: any) => {
-      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
-      if (error.code === 'permission-denied') setHasPermissionError(true);
-    });
-
-    return () => unsub();
-  }, [hotel?.id, profile?.uid]);
-
-  const handleSaveItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!hotel?.id || !profile) return;
-
-    try {
-      if (editingItem) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', editingItem.id), {
-          ...newItem,
-          lastUpdated: new Date().toISOString()
-        });
-        toast.success('Inventory item updated');
-      } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'inventory'), {
-          ...newItem,
-          lastUpdated: new Date().toISOString()
-        });
-        toast.success('Inventory item created');
-      }
-
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: editingItem ? 'INVENTORY_ITEM_UPDATED' : 'INVENTORY_ITEM_CREATED',
-        resource: `${newItem.name} (${newItem.quantity} ${newItem.unit})`,
-        hotelId: hotel.id,
-        module: 'Inventory'
-      });
-
-      setShowAddModal(false);
-      setEditingItem(null);
-      setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5, price: 0 });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/inventory`);
-      toast.error('Failed to save item');
-    }
-  };
-
-  const adjustQuantity = async (item: InventoryItem, amount: number) => {
-    if (!hotel?.id || !profile) return;
-    const newQty = Math.max(0, item.quantity + amount);
-    try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', item.id), {
-        quantity: newQty,
-        lastUpdated: new Date().toISOString()
-      });
-
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'INVENTORY_QUANTITY_ADJUSTED',
-        resource: `${item.name} adjusted by ${amount > 0 ? '+' : ''}${amount} ${item.unit}`,
-        hotelId: hotel.id,
-        module: 'Inventory'
-      });
-
-      toast.success(`Quantity adjusted for ${item.name}`);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/inventory/${item.id}`);
-      toast.error('Failed to adjust quantity');
-    }
-  };
-
-  const handleRestock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!hotel?.id || !profile || !showRestockModal) return;
-
-    try {
-      const item = showRestockModal;
-      const newQty = item.quantity + restockData.quantityToAdd;
-      
-      await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', item.id), {
-        quantity: newQty,
-        price: restockData.newUnitPrice || item.price,
-        lastUpdated: new Date().toISOString()
-      });
-
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'INVENTORY_RESTOCK',
-        resource: `Restocked ${restockData.quantityToAdd} ${item.unit} of ${item.name}`,
-        hotelId: hotel.id,
-        module: 'Inventory'
-      });
-
-      // Also create a finance record for the restock expense
-      const totalCost = restockData.quantityToAdd * (restockData.newUnitPrice || item.price || 0);
-      if (totalCost > 0) {
-        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-          type: 'expense',
-          category: 'Inventory Restock',
-          amount: totalCost,
-          description: `Restock: ${restockData.quantityToAdd} ${item.unit} of ${item.name}`,
-          date: new Date().toISOString(),
-          status: 'completed',
-          paymentMethod: 'cash',
-          createdBy: profile.uid
-        });
-      }
-
-      toast.success(`Restocked ${item.name} successfully`);
-      setShowRestockModal(null);
-      setRestockData({ quantityToAdd: 0, newUnitPrice: 0 });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/inventory/${showRestockModal.id}`);
-      toast.error('Failed to restock item');
-    }
-  };
-
-  const deleteItem = async (itemId: string) => {
-    if (!hotel?.id) return;
-    try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'inventory', itemId));
-      toast.success('Item deleted');
-      setShowConfirmDelete(null);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory/${itemId}`);
-      toast.error('Failed to delete item');
-    }
-  };
-
-  const filteredItems = items.filter(item => {
-    const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
-    const matchesSearch = (item.name?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
-
-  const lowStockItems = items.filter(i => i.quantity <= i.minThreshold);
-
-  const handleExport = () => {
-    const dataToExport = items
-      .filter(item => {
-        const matchesCategory = reportFilter.category === 'all' || item.category === reportFilter.category;
-        
-        const itemDate = item.lastUpdated ? new Date(item.lastUpdated) : null;
-        const matchesDate = !itemDate || isWithinInterval(itemDate, {
-          start: startOfDay(new Date(reportFilter.startDate)),
-          end: endOfDay(new Date(reportFilter.endDate))
-        });
-
-        return matchesCategory && matchesDate;
-      })
-      .map(item => ({
-        Name: item.name,
-        Category: item.category,
-        Quantity: item.quantity,
-        Unit: item.unit,
-        Price: item.price || 0,
-        TotalValue: (item.quantity || 0) * (item.price || 0),
-        MinThreshold: item.minThreshold,
-        LastUpdated: item.lastUpdated ? format(new Date(item.lastUpdated), 'yyyy-MM-dd HH:mm') : 'N/A'
-      }));
-
-    if (dataToExport.length === 0) {
-      toast.info('No inventory items found for the selected report filters');
+    if (!hotel?.id) {
+      setLoading(false);
       return;
     }
 
-    exportToCSV(dataToExport, `inventory_report_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`);
-    toast.success('Inventory report exported successfully');
-  };
+    const unsubscribers = [
+      onSnapshot(query(collection(db, 'hotels', hotel.id, 'inventory'), orderBy('name')), (snapshot) => {
+        setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
+        setLoading(false);
+      }),
+      onSnapshot(query(collection(db, 'hotels', hotel.id, 'inventory_transactions'), orderBy('timestamp', 'desc')), (snapshot) => {
+        setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryTransaction)));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_transactions`)),
+      onSnapshot(collection(db, 'hotels', hotel.id, 'inventory_categories'), (snapshot) => {
+        setCategories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryCategory)));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_categories`)),
+      onSnapshot(collection(db, 'hotels', hotel.id, 'inventory_locations'), (snapshot) => {
+        setLocations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryLocation)));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_locations`)),
+      onSnapshot(collection(db, 'hotels', hotel.id, 'inventory_vendors'), (snapshot) => {
+        setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryVendor)));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_vendors`)),
+      onSnapshot(query(collection(db, 'hotels', hotel.id, 'purchase_orders'), orderBy('timestamp', 'desc')), (snapshot) => {
+        setPurchaseOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PurchaseOrder)));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/purchase_orders`)),
+      onSnapshot(query(collection(db, 'hotels', hotel.id, 'inventory_audits'), orderBy('timestamp', 'desc')), (snapshot) => {
+        setAudits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryAudit)));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_audits`))
+    ];
+
+    return () => unsubscribers.forEach(unsub => unsub());
+  }, [hotel?.id]);
+
+  const stats = [
+    { label: 'Total Items', value: items.length, color: 'text-blue-500' },
+    { label: 'Low Stock', value: items.filter(i => i.quantity <= i.minThreshold).length, color: 'text-red-500' },
+    { label: 'Total Value', value: formatCurrency(items.reduce((acc, i) => acc + (i.quantity * i.price), 0), currency, exchangeRate), color: 'text-emerald-500' },
+    { label: 'Categories', value: new Set(items.map(i => i.category)).size, color: 'text-blue-500' },
+    { label: 'Total Items', value: items.length, color: 'text-blue-500' },
+    { label: 'Low Stock', value: items.filter(i => i.quantity <= i.minThreshold).length, color: 'text-red-500' },
+    { label: 'Food & Bev', value: items.filter(i => i.category.toLowerCase().includes('food') || i.category.toLowerCase().includes('bev')).length, color: 'text-blue-500' },
+    { label: 'Cleaning Supplies', value: items.filter(i => i.category.toLowerCase().includes('clean')).length, color: 'text-emerald-500' },
+  ];
+
+  const filteredItems = items.filter(item => {
+    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = filterCategory === 'All' || item.category === filterCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[60vh]">
+        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!hotel?.id) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
+        <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center text-zinc-500">
+          <Package size={32} />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-white">No Hotel Selected</h2>
+          <p className="text-zinc-500 max-w-xs mx-auto">
+            Please select a hotel from the Super Admin dashboard to manage its inventory.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8">
-      <ConfirmModal
-        isOpen={!!showConfirmDelete}
-        title="Delete Inventory Item"
-        message={`Are you sure you want to delete ${showConfirmDelete?.name}? This action cannot be undone.`}
-        onConfirm={() => showConfirmDelete && deleteItem(showConfirmDelete.id)}
-        onCancel={() => setShowConfirmDelete(null)}
-        type="danger"
-        confirmText="Delete Item"
-      />
-
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Inventory Management</h1>
-          <p className="text-zinc-400">Manage supplies, food, and beverage stock</p>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Inventory Management</h1>
+          <p className="text-zinc-500">Manage supplies, food, and beverage stock</p>
         </div>
+        
         <div className="flex items-center gap-3">
-          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
-            <input
-              type="date"
-              value={reportFilter.startDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            />
-            <span className="text-zinc-600 text-[10px]">to</span>
-            <input
-              type="date"
-              value={reportFilter.endDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            />
-            <div className="w-px h-4 bg-zinc-800" />
-            <select
-              value={reportFilter.category}
-              onChange={(e) => setReportFilter({ ...reportFilter, category: e.target.value as any })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            >
-              <option value="all">All Categories</option>
-              <option value="food">Food</option>
-              <option value="drink">Drink</option>
-              <option value="cleaning">Cleaning</option>
-              <option value="other">Other</option>
-            </select>
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400">
+            <input type="date" className="bg-transparent outline-none" defaultValue="2026-04-01" />
+            <span>to</span>
+            <input type="date" className="bg-transparent outline-none" defaultValue="2026-04-12" />
           </div>
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
-          >
-            <Download size={18} />
-            <span className="hidden sm:inline">Export Report</span>
-            <span className="sm:hidden">Export</span>
+          <select className="bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400 outline-none">
+            <option>All Categories</option>
+          </select>
+          <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all">
+            <Download size={16} />
+            Export Report
           </button>
-          <button
-            onClick={() => {
-              setEditingItem(null);
-              setNewItem({ name: '', category: 'food', quantity: 0, unit: 'pcs', minThreshold: 5, price: 0 });
-              setShowAddModal(true);
-            }}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          <button 
+            onClick={() => setActiveTab('items')}
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-lg text-sm font-bold transition-all"
           >
-            <Plus size={18} />
+            <Plus size={16} />
             Add Item
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Items</div>
-          <div className="text-2xl font-bold text-white">{items.length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Low Stock</div>
-          <div className="text-2xl font-bold text-red-500">{lowStockItems.length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Value</div>
-          <div className="text-2xl font-bold text-emerald-500">
-            {new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(
-              items.reduce((acc, item) => acc + (item.quantity * (item.price || 0)), 0)
-            )}
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {stats.map((stat, i) => (
+          <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-zinc-500 text-xs font-bold uppercase mb-2">{stat.label}</div>
+            <div className={cn("text-2xl font-bold", stat.color)}>{stat.value}</div>
           </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Categories</div>
-          <div className="text-2xl font-bold text-blue-500">{new Set(items.map(i => i.category)).size}</div>
-        </div>
+        ))}
       </div>
 
-      {lowStockItems.length > 0 && (
-        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-4">
-          <div className="w-10 h-10 bg-red-500/20 rounded-xl flex items-center justify-center text-red-500">
-            <AlertTriangle size={20} />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-red-500">Low Stock Alert</h3>
-            <p className="text-xs text-red-500/70">{lowStockItems.length} items are below their minimum threshold.</p>
-          </div>
-          <button className="ml-auto text-xs font-bold text-red-500 hover:underline">View Items</button>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Items</div>
-          <div className="text-2xl font-bold text-white">{items.length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Low Stock</div>
-          <div className="text-2xl font-bold text-red-500">{lowStockItems.length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Food & Bev</div>
-          <div className="text-2xl font-bold text-blue-500">{items.filter(i => i.category === 'food' || i.category === 'drink').length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Cleaning Supplies</div>
-          <div className="text-2xl font-bold text-emerald-500">{items.filter(i => i.category === 'cleaning').length}</div>
-        </div>
-      </div>
-
-      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
+      {/* Search & Filter */}
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
         <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
           <input
             type="text"
             placeholder="Search inventory..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
           />
         </div>
-        <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
-          {(['all', 'food', 'drink', 'cleaning', 'other'] as const).map((c) => (
+        <div className="flex items-center gap-2">
+          {['All', 'Food', 'Drink', 'Cleaning', 'Other'].map(cat => (
             <button
-              key={c}
-              onClick={() => setCategoryFilter(c)}
+              key={cat}
+              onClick={() => setFilterCategory(cat)}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
-                categoryFilter === c ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
+                "px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                filterCategory === cat ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white"
               )}
             >
-              {c}
+              {cat}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+      {/* Table */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
         <table className="w-full text-left">
           <thead>
-            <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+            <tr className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-800">
               <th className="px-6 py-4">Item Name</th>
               <th className="px-6 py-4">Category</th>
-              <th className="px-6 py-4">Quantity</th>
-              <th className="px-6 py-4">Status</th>
+              <th className="px-6 py-4 text-center">Quantity</th>
+              <th className="px-6 py-4 text-center">Status</th>
               <th className="px-6 py-4">Last Updated</th>
               <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
-            {filteredItems.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
-                  <Package size={48} className="mx-auto text-zinc-700 mb-4" />
-                  <p>No items found</p>
+            {filteredItems.map(item => (
+              <tr key={item.id} className="hover:bg-zinc-800/30 transition-colors">
+                <td className="px-6 py-4 font-bold text-white text-sm">{item.name}</td>
+                <td className="px-6 py-4 text-zinc-400 text-sm">{item.category}</td>
+                <td className="px-6 py-4 text-center text-white text-sm font-bold">{item.quantity}</td>
+                <td className="px-6 py-4 text-center">
+                  <span className={cn(
+                    "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
+                    item.quantity <= item.minThreshold ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                  )}>
+                    {item.quantity <= item.minThreshold ? 'Low Stock' : 'In Stock'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-zinc-500 text-sm">
+                  {item.lastUpdated ? format(new Date(item.lastUpdated), 'dd/MM/yyyy') : '-'}
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <button className="text-zinc-500 hover:text-white transition-colors">
+                    <MoreHorizontal size={18} />
+                  </button>
                 </td>
               </tr>
-            ) : (
-              filteredItems.map((item) => (
-                <tr key={item.id} className="hover:bg-zinc-800/50 transition-colors group">
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-bold text-zinc-50">{item.name}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                      {item.category}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <button 
-                        onClick={() => adjustQuantity(item, -1)}
-                        className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded transition-all"
-                      >
-                        <ArrowDown size={14} />
-                      </button>
-                      <div className="text-sm font-bold text-zinc-50 w-12 text-center">
-                        {item.quantity} <span className="text-[10px] text-zinc-500 font-normal">{item.unit}</span>
-                      </div>
-                      <button 
-                        onClick={() => adjustQuantity(item, 1)}
-                        className="p-1 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded transition-all"
-                      >
-                        <ArrowUp size={14} />
-                      </button>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    {item.quantity <= item.minThreshold ? (
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-red-500 uppercase tracking-wider">
-                        <AlertTriangle size={12} />
-                        Low Stock
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">
-                        In Stock
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-xs text-zinc-500">
-                    {format(new Date(item.lastUpdated), 'MMM d, HH:mm')}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => {
-                          setShowRestockModal(item);
-                          setRestockData({ quantityToAdd: 0, newUnitPrice: item.price || 0 });
-                        }}
-                        className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
-                        title="Restock"
-                      >
-                        <ShoppingCart size={16} />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setEditingItem(item);
-                          setNewItem({ 
-                            name: item.name, 
-                            category: item.category, 
-                            quantity: item.quantity, 
-                            unit: item.unit, 
-                            minThreshold: item.minThreshold, 
-                            price: item.price || 0 
-                          });
-                          setShowAddModal(true);
-                        }}
-                        className="p-2 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button 
-                        onClick={() => setShowConfirmDelete(item)}
-                        className="p-2 text-zinc-500 hover:text-red-500 rounded-lg transition-all"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+            ))}
+            {filteredItems.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-6 py-20 text-center">
+                  <div className="flex flex-col items-center gap-4 text-zinc-500">
+                    <Package size={48} className="opacity-20" />
+                    <p className="font-bold">No items found</p>
+                  </div>
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Restock Modal */}
-      {showRestockModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-zinc-50">Restock {showRestockModal.name}</h2>
-              <p className="text-xs text-zinc-400 mt-1">Current stock: {showRestockModal.quantity} {showRestockModal.unit}</p>
-            </div>
-            <form onSubmit={handleRestock}>
-              <div className="p-6 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Quantity to Add ({showRestockModal.unit})</label>
-                  <input
-                    required
-                    type="number"
-                    min="1"
-                    value={restockData.quantityToAdd}
-                    onChange={(e) => setRestockData({ ...restockData, quantityToAdd: parseInt(e.target.value) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Unit Cost (NGN)</label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={restockData.newUnitPrice}
-                    onChange={(e) => setRestockData({ ...restockData, newUnitPrice: parseFloat(e.target.value) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                  />
-                  <p className="text-[10px] text-zinc-500">Total restock cost: {new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(restockData.quantityToAdd * restockData.newUnitPrice)}</p>
-                </div>
-              </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowRestockModal(null)}
-                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
-                >
-                  Confirm Restock
-                </button>
-              </div>
-            </form>
-          </motion.div>
+      {/* Keep the tabbed view for advanced features if needed, but default to this dashboard */}
+      <div className="pt-12 border-t border-zinc-800">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-white">Advanced Inventory Modules</h2>
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+            {['dashboard', 'items', 'procurement', 'movements', 'auditing', 'reports'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab as InventoryTab)}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-xs font-bold transition-all capitalize",
+                  activeTab === tab ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-white"
+                )}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
-
-      {/* Add/Edit Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-zinc-50">{editingItem ? 'Edit Item' : 'Add Inventory Item'}</h2>
-            </div>
-            <form onSubmit={handleSaveItem}>
-              <div className="p-6 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Item Name</label>
-                  <input
-                    required
-                    type="text"
-                    value={newItem.name}
-                    onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    placeholder="e.g. Bed Sheets"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
-                    <select
-                      value={newItem.category}
-                      onChange={(e) => setNewItem({ ...newItem, category: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    >
-                      <option value="food">Food</option>
-                      <option value="drink">Drink</option>
-                      <option value="cleaning">Cleaning</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Unit</label>
-                    <input
-                      required
-                      type="text"
-                      value={newItem.unit}
-                      onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      placeholder="e.g. pcs, kg, liters"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Initial Quantity</label>
-                    <input
-                      required
-                      type="number"
-                      value={newItem.quantity}
-                      onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Unit Price (NGN)</label>
-                    <input
-                      required
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={newItem.price}
-                      onChange={(e) => setNewItem({ ...newItem, price: parseFloat(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Min Threshold</label>
-                  <input
-                    required
-                    type="number"
-                    value={newItem.minThreshold}
-                    onChange={(e) => setNewItem({ ...newItem, minThreshold: parseInt(e.target.value) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                  />
-                </div>
-              </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
-                >
-                  {editingItem ? 'Update Item' : 'Add Item'}
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
+        
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="min-h-[40vh]"
+        >
+          {activeTab === 'dashboard' && <InventoryDashboard items={items} transactions={transactions} />}
+          {activeTab === 'items' && <ItemMaster items={items} categories={categories} />}
+          {activeTab === 'procurement' && <Procurement vendors={vendors} purchaseOrders={purchaseOrders} items={items} />}
+          {activeTab === 'movements' && <StockMovements items={items} transactions={transactions} locations={locations} />}
+          {activeTab === 'auditing' && <InventoryAuditing items={items} audits={audits} locations={locations} />}
+          {activeTab === 'reports' && <InventoryReports items={items} transactions={transactions} />}
+        </motion.div>
+      </div>
     </div>
   );
 }
