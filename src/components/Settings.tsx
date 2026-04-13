@@ -1087,6 +1087,7 @@ export function Settings() {
                         percentage: 0,
                         isInclusive: false,
                         showOnReceipt: true,
+                        showOnFolio: true,
                         status: 'active',
                         category: 'all'
                       };
@@ -1184,6 +1185,16 @@ export function Settings() {
                         >
                           {tax.showOnReceipt ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
                           Show on Receipt
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateLocalTax(index, { showOnFolio: !tax.showOnFolio })}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                            tax.showOnFolio ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                          )}
+                        >
+                          {tax.showOnFolio ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                          Show on Folio
                         </button>
                         <button 
                           onClick={() => handleUpdateLocalTax(index, { status: tax.status === 'active' ? 'inactive' : 'active' })}

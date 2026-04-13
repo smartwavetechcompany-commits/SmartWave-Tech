@@ -303,6 +303,7 @@ export function CorporateManagement() {
         await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
           ...newAccount,
           currentBalance: 0,
+          totalDebits: 0,
           createdAt: new Date().toISOString()
         });
       }
@@ -501,7 +502,7 @@ export function CorporateManagement() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Accounts</div>
           <div className="text-2xl font-bold text-white">{accounts.length}</div>
@@ -513,6 +514,10 @@ export function CorporateManagement() {
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Outstanding Balance</div>
           <div className="text-2xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0), currency, exchangeRate)}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Debits</div>
+          <div className="text-2xl font-bold text-amber-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalDebits || 0), 0), currency, exchangeRate)}</div>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Reservation, Hotel, LedgerEntry } from '../types';
+import { Reservation, Hotel, LedgerEntry, CorporateAccount } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,12 +7,13 @@ import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from
 
 interface ReceiptProps {
   hotel: Hotel;
-  reservation: Reservation;
-  type: 'restaurant' | 'comprehensive';
+  reservation?: Reservation;
+  account?: CorporateAccount;
+  type: 'restaurant' | 'comprehensive' | 'corporate';
   ledgerEntries?: LedgerEntry[];
 }
 
-export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] }: ReceiptProps) {
+export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntries = [] }: ReceiptProps) {
   const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
   
@@ -26,7 +27,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
-  const subtotal = hasRoomChargeInLedger ? totalDebits : (reservation.totalAmount + totalDebits);
+  const subtotal = type === 'corporate' ? totalDebits : (hasRoomChargeInLedger ? totalDebits : ((reservation?.totalAmount || 0) + totalDebits));
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -34,8 +35,8 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
     if (type === 'restaurant') {
       return t.category === 'restaurant' || t.category === 'all';
     }
-    if (type === 'comprehensive') {
-      return true; // Show all taxes on comprehensive receipt
+    if (type === 'comprehensive' || type === 'corporate') {
+      return true; // Show all taxes on comprehensive/corporate receipt
     }
     return t.category === 'all';
   });
@@ -54,13 +55,13 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
 
   const grandTotal = subtotal + taxTotal;
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
-  const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (reservation.paidAmount || 0));
+  const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
   const balance = grandTotal - totalPaid;
 
   return (
     <div className={cn(
       "bg-white text-zinc-900 p-10 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0",
-      type === 'comprehensive' ? "w-[210mm] min-h-[297mm]" : "max-w-[500px]"
+      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] receipt-container" : "max-w-[500px]"
     )}>
       {/* Hotel Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
@@ -86,33 +87,55 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
       <div className="grid grid-cols-2 gap-y-6 mb-8 text-xs">
         <div>
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
-            <User size={10} /> Guest Details
+            <User size={10} /> {type === 'corporate' ? 'Account Details' : 'Guest Details'}
           </p>
-          <p className="font-bold text-sm">{reservation.guestName}</p>
-          <p className="text-zinc-500">{reservation.guestEmail}</p>
+          <p className="font-bold text-sm">{type === 'corporate' ? account?.name : reservation?.guestName}</p>
+          <p className="text-zinc-500">{type === 'corporate' ? account?.email : reservation?.guestEmail}</p>
+          {type === 'corporate' && account?.taxId && <p className="text-zinc-400 text-[10px]">Tax ID: {account.taxId}</p>}
         </div>
         <div className="text-right">
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
-            <Receipt size={10} /> Receipt Information
+            <Receipt size={10} /> {type === 'corporate' ? 'OFFICIAL RECEIPT' : 'Receipt Information'}
           </p>
-          <p className="font-bold text-sm">#{reservation.id.slice(-8).toUpperCase()}</p>
+          <p className="font-bold text-sm">#{type === 'corporate' ? account?.id.slice(-8).toUpperCase() : reservation?.id.slice(-8).toUpperCase()}</p>
           <p className="text-zinc-500">{format(new Date(), 'MMM dd, yyyy HH:mm')}</p>
         </div>
-        <div>
-          <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
-            <Calendar size={10} /> Stay Details
-          </p>
-          <p className="font-bold">Room {reservation.roomNumber}</p>
-          <p className="text-zinc-500">
-            {format(new Date(reservation.checkIn), 'MMM dd')} - {format(new Date(reservation.checkOut), 'MMM dd, yyyy')}
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1">Status</p>
-          <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase">
-            {reservation.status.replace('_', ' ')}
-          </span>
-        </div>
+        {type !== 'corporate' && reservation && (
+          <>
+            <div>
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
+                <Calendar size={10} /> Stay Details
+              </p>
+              <p className="font-bold">Room {reservation.roomNumber}</p>
+              <p className="text-zinc-500">
+                {format(new Date(reservation.checkIn), 'MMM dd')} - {format(new Date(reservation.checkOut), 'MMM dd, yyyy')}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1">Status</p>
+              <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase">
+                {reservation.status.replace('_', ' ')}
+              </span>
+            </div>
+          </>
+        )}
+        {type === 'corporate' && (
+          <>
+            <div>
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
+                <Building2 size={10} /> Corporate Info
+              </p>
+              <p className="font-bold">{account?.contactPerson}</p>
+              <p className="text-zinc-500">{account?.phone}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1">Billing Cycle</p>
+              <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase">
+                {account?.billingCycle}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="border-t border-zinc-100 my-6" />
@@ -137,7 +160,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
             ))
           ) : (
             <>
-              {!hasRoomChargeInLedger && (
+              {type !== 'corporate' && reservation && !hasRoomChargeInLedger && (
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <p className="text-sm font-bold">Room Charges (Base)</p>
@@ -161,7 +184,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
       </div>
 
       {/* Payments Section */}
-      {type === 'comprehensive' && (credits.length > 0 || (!hasPaymentInLedger && reservation.paidAmount > 0)) && (
+      {(type === 'comprehensive' || type === 'corporate') && (credits.length > 0 || (type !== 'corporate' && reservation && !hasPaymentInLedger && reservation.paidAmount > 0)) && (
         <div className="space-y-4 mb-8">
           <div className="flex justify-between text-[10px] font-bold text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2">
             <span>Payments / Credits</span>
@@ -169,7 +192,7 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
           </div>
           
           <div className="space-y-3">
-            {!hasPaymentInLedger && reservation.paidAmount > 0 && (
+            {type !== 'corporate' && reservation && !hasPaymentInLedger && reservation.paidAmount > 0 && (
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-emerald-600">Initial Payment</p>
@@ -212,11 +235,11 @@ export function ReceiptGenerator({ hotel, reservation, type, ledgerEntries = [] 
           <span className="text-xl font-black">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
         </div>
         
-        {type === 'comprehensive' && (
+        {type !== 'restaurant' && (
           <>
             <div className="flex justify-between items-center text-emerald-600">
               <span className="text-xs font-bold uppercase tracking-widest">Payments Received</span>
-              <span className="font-bold">{formatCurrency(hasPaymentInLedger ? totalPayments : (reservation.paidAmount || 0), currency, exchangeRate)}</span>
+              <span className="font-bold">{formatCurrency(type === 'corporate' ? totalPayments : (hasPaymentInLedger ? totalPayments : (reservation?.paidAmount || 0)), currency, exchangeRate)}</span>
             </div>
             {totalOtherCredits > 0 && (
               <div className="flex justify-between items-center text-emerald-600">

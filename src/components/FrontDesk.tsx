@@ -47,6 +47,27 @@ export function FrontDesk() {
   const [isBooking, setIsBooking] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
+
+  // Automatic Nightly Audit Check
+  useEffect(() => {
+    if (!hotel?.id || !profile || loading) return;
+    
+    const checkAndRunAudit = async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      if (hotel.lastAuditDate !== today) {
+        // Only run if user has permission
+        const canRunAudit = profile.role === 'hotelAdmin' || 
+                          (profile.role === 'staff' && (profile.permissions || []).includes('frontDesk'));
+        
+        if (canRunAudit) {
+          console.log("Running automatic nightly audit for", today);
+          await runNightlyAudit();
+        }
+      }
+    };
+
+    checkAndRunAudit();
+  }, [hotel?.id, hotel?.lastAuditDate, profile?.uid]);
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
@@ -88,22 +109,12 @@ export function FrontDesk() {
     discountAmount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage',
     discountReason: '',
+    taxAmount: 0,
+    taxDetails: [] as { name: string; percentage: number; amount: number; isInclusive: boolean }[],
     initialPayment: 0,
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer',
-    additionalStays: [] as {
-      id: string;
-      guestName: string;
-      guestEmail: string;
-      guestPhone: string;
-      idType: string;
-      idNumber: string;
-      address: string;
-      roomId: string;
-      checkIn: string;
-      checkOut: string;
-      totalAmount: number;
-      guestId?: string;
-    }[]
+    autoNightDeduction: true, // Mandatory toggle for automatic nightly charges
+    additionalStays: [] as any[]
   });
 
   const [loading, setLoading] = useState(false);
@@ -276,8 +287,23 @@ export function FrontDesk() {
     
     const primaryTotal = pricePerNight * nights;
 
+    // Calculate taxes for primary stay
+    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room');
+    let primaryTaxTotal = 0;
+    const primaryTaxDetails = activeTaxes.map(tax => {
+      let amount = 0;
+      if (tax.isInclusive) {
+        amount = primaryTotal - (primaryTotal / (1 + tax.percentage / 100));
+      } else {
+        amount = primaryTotal * (tax.percentage / 100);
+        primaryTaxTotal += amount;
+      }
+      return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
+    });
+
     // Recalculate additional stays prices
     let additionalStaysChanged = false;
+    let totalAdditionalTax = 0;
     const updatedAdditionalStays = newBooking.additionalStays.map(stay => {
       const room = rooms.find(r => r.id === stay.roomId);
       if (!room) return stay;
@@ -297,21 +323,38 @@ export function FrontDesk() {
       const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
       const sNights = Math.max(1, Math.ceil(sHours / 24));
       const newTotal = stayPrice * sNights;
+
+      // Calculate taxes for this additional stay
+      let stayTaxTotal = 0;
+      const stayTaxDetails = activeTaxes.map(tax => {
+        let amount = 0;
+        if (tax.isInclusive) {
+          amount = newTotal - (newTotal / (1 + tax.percentage / 100));
+        } else {
+          amount = newTotal * (tax.percentage / 100);
+          stayTaxTotal += amount;
+        }
+        return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
+      });
+      totalAdditionalTax += stayTaxTotal;
       
-      if (newTotal !== stay.totalAmount) {
+      if (newTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
         additionalStaysChanged = true;
-        return { ...stay, totalAmount: newTotal };
+        return { ...stay, totalAmount: newTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails };
       }
       return stay;
     });
 
     const additionalTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0), 0);
     const totalAmount = primaryTotal + additionalTotal;
+    const totalTax = primaryTaxTotal + totalAdditionalTax;
 
-    if (newBooking.totalAmount !== totalAmount || additionalStaysChanged) {
+    if (newBooking.totalAmount !== totalAmount || additionalStaysChanged || newBooking.taxAmount !== totalTax) {
       setNewBooking(prev => ({
         ...prev,
         totalAmount,
+        taxAmount: totalTax,
+        taxDetails: primaryTaxDetails,
         additionalStays: updatedAdditionalStays
       }));
     }
@@ -419,6 +462,8 @@ export function FrontDesk() {
           nights,
           status: 'pending',
           totalAmount,
+          taxAmount: stay.taxAmount || 0,
+          taxDetails: stay.taxDetails || [],
           paidAmount: 0, // Initialize to 0, settleLedger will update this
           totalDiscount: 0,
           paymentStatus: 'unpaid',
@@ -426,6 +471,7 @@ export function FrontDesk() {
           corporateReference: newBooking.corporateReference,
           ledgerEntries: [],
           nightlyRate: pricePerNight,
+          autoNightDeduction: newBooking.autoNightDeduction,
           createdAt: new Date().toISOString(),
         };
 
@@ -520,8 +566,11 @@ export function FrontDesk() {
         discountAmount: 0,
         discountType: 'fixed',
         discountReason: '',
+        taxAmount: 0,
+        taxDetails: [],
         initialPayment: 0,
         paymentMethod: 'cash',
+        autoNightDeduction: true,
         additionalStays: [] as any[]
       });
     } catch (err: any) {
@@ -751,7 +800,7 @@ export function FrontDesk() {
       
       for (const resDoc of querySnapshot.docs) {
         const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
-        if (!res.guestId) continue;
+        if (!res.guestId || !res.autoNightDeduction) continue;
 
         const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
         const now = new Date();
@@ -798,6 +847,11 @@ export function FrontDesk() {
         toast.info("Nightly audit completed. No new charges to post.");
       }
       
+      // Update hotel last audit date
+      await updateDoc(doc(db, 'hotels', hotel.id), {
+        lastAuditDate: format(new Date(), 'yyyy-MM-dd')
+      });
+
       // Log audit action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
@@ -1279,8 +1333,11 @@ export function FrontDesk() {
                 discountAmount: 0,
                 discountType: 'fixed',
                 discountReason: '',
+                taxAmount: 0,
+                taxDetails: [],
                 initialPayment: 0,
                 paymentMethod: 'cash',
+                autoNightDeduction: true,
                 additionalStays: [] as any[],
               });
               setIsBooking(true);
@@ -1315,9 +1372,12 @@ export function FrontDesk() {
                       discountAmount: 0,
                       discountType: 'fixed',
                       discountReason: '',
+                      taxAmount: 0,
+                      taxDetails: [],
                       initialPayment: 0,
                       paymentMethod: 'cash',
-                      additionalStays: [] as any[],
+                      autoNightDeduction: true,
+                      additionalStays: [] as any[]
                     });
                     setIsBooking(true);
                   }}
@@ -1351,6 +1411,74 @@ export function FrontDesk() {
           <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-1">Maintenance</div>
           <div className="text-xl font-bold text-zinc-50">{roomStats.maintenance}</div>
         </div>
+      </div>
+
+      {/* Alerts Section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {reservations.filter(r => {
+          if (r.status !== 'checked_in') return false;
+          const today = format(new Date(), 'yyyy-MM-dd');
+          return r.checkOut < today;
+        }).length > 0 && (
+          <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-center gap-4">
+            <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center text-red-500">
+              <AlertCircle size={20} />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-red-500 uppercase tracking-wider">Overstay Alert</div>
+              <div className="text-lg font-bold text-zinc-50">
+                {reservations.filter(r => r.status === 'checked_in' && r.checkOut < format(new Date(), 'yyyy-MM-dd')).length} Guests
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reservations.filter(r => {
+          if (r.status !== 'checked_in' || !r.guestId) return false;
+          const guest = guests.find(g => g.id === r.guestId);
+          return guest && guest.ledgerBalance > 0;
+        }).length > 0 && (
+          <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-4">
+            <div className="w-10 h-10 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500">
+              <DollarSign size={20} />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-amber-500 uppercase tracking-wider">Outstanding Payments</div>
+              <div className="text-lg font-bold text-zinc-50">
+                {reservations.filter(r => {
+                  if (r.status !== 'checked_in' || !r.guestId) return false;
+                  const guest = guests.find(g => g.id === r.guestId);
+                  return guest && guest.ledgerBalance > 0;
+                }).length} Guests Owing
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reservations.filter(r => {
+          if (r.status !== 'checked_in' || !r.guestId) return false;
+          const guest = guests.find(g => g.id === r.guestId);
+          const rate = r.nightlyRate || (r.totalAmount / (r.nights || 1)) || 0;
+          // Low balance = credit is less than one night's rate
+          return guest && guest.ledgerBalance < 0 && Math.abs(guest.ledgerBalance) <= rate;
+        }).length > 0 && (
+          <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl flex items-center gap-4">
+            <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-500">
+              <Clock size={20} />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-blue-500 uppercase tracking-wider">Low Balance Warning</div>
+              <div className="text-lg font-bold text-zinc-50">
+                {reservations.filter(r => {
+                  if (r.status !== 'checked_in' || !r.guestId) return false;
+                  const guest = guests.find(g => g.id === r.guestId);
+                  const rate = r.nightlyRate || (r.totalAmount / (r.nights || 1)) || 0;
+                  return guest && guest.ledgerBalance < 0 && Math.abs(guest.ledgerBalance) <= rate;
+                }).length} Guests
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Night Audit Modal */}
@@ -1591,7 +1719,7 @@ export function FrontDesk() {
                   }}
                 >
                   <option value="">Select a room</option>
-                  {rooms.filter(r => r.status === 'clean').map(room => {
+                  {rooms.filter(r => r.status === 'clean' || r.status === 'vacant').map(room => {
                     const selectedRoom = rooms.find(r => r.id === room.id);
                     let displayPrice = room.price;
                     let isNegotiated = false;
@@ -1615,6 +1743,28 @@ export function FrontDesk() {
                     );
                   })}
                 </select>
+              </div>
+
+              <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Auto Night Deduction</h4>
+                    <p className="text-[10px] text-zinc-500">Automatically charge room rate every night at midnight</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNewBooking({ ...newBooking, autoNightDeduction: !newBooking.autoNightDeduction })}
+                    className={cn(
+                      "w-12 h-6 rounded-full transition-all relative",
+                      newBooking.autoNightDeduction ? "bg-emerald-500" : "bg-zinc-700"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                      newBooking.autoNightDeduction ? "right-1" : "left-1"
+                    )} />
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1770,6 +1920,12 @@ export function FrontDesk() {
                   <span>Subtotal</span>
                   <span>{formatCurrency(newBooking.totalAmount, currency, exchangeRate)}</span>
                 </div>
+                {(newBooking.taxDetails || []).map((tax: any, idx: number) => (
+                  <div key={idx} className="flex justify-between text-[10px] text-zinc-500">
+                    <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}</span>
+                    <span>{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                  </div>
+                ))}
                 {newBooking.discountAmount > 0 && (
                   <div className="flex justify-between text-[10px] text-red-500">
                     <span>Discount ({newBooking.discountType === 'percentage' ? newBooking.discountAmount + '%' : 'Fixed'})</span>
@@ -1780,7 +1936,7 @@ export function FrontDesk() {
                   <span>Net Total</span>
                   <span className="font-bold text-emerald-500">
                     {formatCurrency(
-                      newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount), 
+                      (newBooking.totalAmount + (newBooking.taxAmount || 0)) - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount), 
                       currency, 
                       exchangeRate
                     )}
@@ -1796,7 +1952,7 @@ export function FrontDesk() {
                   <span>Balance Due</span>
                   <span className="text-red-500">
                     {formatCurrency(
-                      Math.max(0, (newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - newBooking.initialPayment),
+                      Math.max(0, ((newBooking.totalAmount + (newBooking.taxAmount || 0)) - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - newBooking.initialPayment),
                       currency,
                       exchangeRate
                     )}

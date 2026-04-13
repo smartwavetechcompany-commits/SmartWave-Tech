@@ -18,15 +18,16 @@ interface ItemMasterProps {
   items: InventoryItem[];
   categories: InventoryCategory[];
   defaultShowAddModal?: boolean;
+  defaultShowCategoryModal?: boolean;
   onModalClose?: () => void;
 }
 
-export function ItemMaster({ items, categories, defaultShowAddModal, onModalClose }: ItemMasterProps) {
+export function ItemMaster({ items, categories, defaultShowAddModal, defaultShowCategoryModal, onModalClose }: ItemMasterProps) {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(defaultShowAddModal || false);
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(defaultShowCategoryModal || false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -35,7 +36,10 @@ export function ItemMaster({ items, categories, defaultShowAddModal, onModalClos
     if (defaultShowAddModal) {
       setShowAddModal(true);
     }
-  }, [defaultShowAddModal]);
+    if (defaultShowCategoryModal) {
+      setShowCategoryModal(true);
+    }
+  }, [defaultShowAddModal, defaultShowCategoryModal]);
 
   const handleCloseModal = () => {
     setShowAddModal(false);
@@ -397,15 +401,30 @@ export function ItemMaster({ items, categories, defaultShowAddModal, onModalClos
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Category</label>
-                        <select
-                          required
-                          value={formData.category}
-                          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
-                        >
-                          <option value="">Select Category</option>
-                          {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                        </select>
+                        <div className="flex gap-2">
+                          <select
+                            required
+                            value={formData.category}
+                            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          >
+                            <option value="">Select Category</option>
+                            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setShowCategoryModal(true)}
+                            className="p-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-2xl transition-all"
+                            title="Add Category"
+                          >
+                            <Plus size={20} />
+                          </button>
+                        </div>
+                        {formData.category && categories.find(c => c.name === formData.category)?.isFB && (
+                          <p className="text-[10px] text-emerald-500 font-bold mt-1 flex items-center gap-1">
+                            <CheckCircle2 size={10} /> This item will appear in F&B module
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Subcategory</label>

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { CorporateAccount, LedgerEntry, OperationType } from '../types';
+import { CorporateAccount, LedgerEntry, OperationType, Reservation } from '../types';
+import { ReceiptGenerator } from './ReceiptGenerator';
 import { 
   Receipt, 
   Building2, 
@@ -32,7 +33,9 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   }, [account]);
 
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [individualReservations, setIndividualReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showReceipt, setShowReceipt] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id || !account.id) return;
@@ -58,9 +61,21 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
     });
 
+    // Listen to individual reservations linked to this corporate account
+    const qRes = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('corporateId', '==', account.id),
+      where('status', '==', 'checked_in')
+    );
+
+    const unsubRes = onSnapshot(qRes, (snap) => {
+      setIndividualReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    });
+
     return () => {
       unsubAccount();
       unsubLedger();
+      unsubRes();
     };
   }, [hotel?.id, account.id]);
 
@@ -88,6 +103,13 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
           </div>
           <div className="flex items-center gap-3">
             <button 
+              onClick={() => setShowReceipt(true)}
+              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
+              title="Print Receipt"
+            >
+              <Receipt size={20} />
+            </button>
+            <button 
               onClick={() => window.print()}
               className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
               title="Print Folio"
@@ -102,6 +124,25 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             </button>
           </div>
         </div>
+
+        {showReceipt && hotel && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-center justify-center p-4 overflow-y-auto">
+            <div className="relative w-full max-w-md">
+              <button 
+                onClick={() => setShowReceipt(false)}
+                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"
+              >
+                <XCircle size={32} />
+              </button>
+              <ReceiptGenerator 
+                hotel={hotel} 
+                account={currentAccount} 
+                type="corporate" 
+                ledgerEntries={ledgerEntries} 
+              />
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
           {/* Account Info */}
@@ -166,6 +207,52 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               </div>
             </div>
           </div>
+
+          {/* Individual Guest Balances */}
+          {individualReservations.length > 0 && (
+            <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
+              <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Individual Guest Balances</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800 bg-zinc-900/30">
+                      <th className="px-6 py-3">Guest Name</th>
+                      <th className="px-6 py-3">Room</th>
+                      <th className="px-6 py-3">Check In</th>
+                      <th className="px-6 py-3">Check Out</th>
+                      <th className="px-6 py-3 text-right">Ledger Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {individualReservations.map((res) => (
+                      <tr key={res.id} className="hover:bg-zinc-900/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-white font-medium">{res.guestName}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-zinc-400">
+                          Room {res.roomNumber}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-zinc-400">
+                          {format(new Date(res.checkIn), 'MMM d, yyyy')}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-zinc-400">
+                          {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                        </td>
+                        <td className={cn(
+                          "px-6 py-4 text-right text-sm font-bold",
+                          (res.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                        )}>
+                          {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Ledger Entries Table */}
           <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">

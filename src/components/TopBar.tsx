@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { CurrencyToggle } from './CurrencyToggle';
 import { Notifications } from './Notifications';
 import { User, Building2, WifiOff, XCircle, LogOut } from 'lucide-react';
+import { toast } from 'sonner';
 
 export function TopBar() {
   const navigate = useNavigate();
@@ -13,6 +14,7 @@ export function TopBar() {
 
   const handleStopManaging = () => {
     setSelectedHotelId(null);
+    toast.success('Exited management mode');
     navigate('/super-admin');
   };
 

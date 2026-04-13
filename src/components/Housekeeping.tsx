@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, setDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType, UserProfile } from '../types';
+import { Room, OperationType, UserProfile, Reservation } from '../types';
 import { 
   ClipboardList, 
   CheckCircle2, 
@@ -27,7 +27,8 @@ export function Housekeeping() {
   const { hotel, profile } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
-  const [filter, setFilter] = useState<'all' | 'dirty' | 'clean' | 'maintenance' | 'out_of_service'>('all');
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [filter, setFilter] = useState<'all' | 'dirty' | 'clean' | 'maintenance' | 'out_of_service' | 'cleaning'>('all');
   const [roomTypeFilter, setRoomTypeFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
@@ -64,6 +65,20 @@ export function Housekeeping() {
     const q = query(collection(db, 'users'), where('hotelId', '==', hotel.id));
     const unsub = onSnapshot(q, (snap) => {
       setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
+    });
+
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('status', '==', 'checked_in')
+    );
+    
+    const unsub = onSnapshot(q, (snap) => {
+      setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
     });
 
     return () => unsub();
@@ -276,6 +291,7 @@ export function Housekeeping() {
           >
             <option value="all">All Statuses</option>
             <option value="clean">Clean</option>
+            <option value="cleaning">Cleaning</option>
             <option value="dirty">Dirty</option>
             <option value="maintenance">Maintenance</option>
             <option value="out_of_service">Out of Service</option>
@@ -328,9 +344,11 @@ export function Housekeeping() {
             (room.status === 'clean' ? '#10b981' : 
              room.status === 'dirty' ? '#ef4444' : 
              room.status === 'occupied' ? '#3b82f6' : 
+             room.status === 'cleaning' ? '#8b5cf6' : 
              room.status === 'maintenance' ? '#f59e0b' : '#71717a');
 
           const isSelected = selectedRoomIds.includes(room.id);
+          const activeReservation = reservations.find(res => res.roomId === room.id);
 
           return (
             <div 
@@ -372,6 +390,17 @@ export function Housekeeping() {
                 {room.type} • Floor {room.floor}
               </div>
 
+              {activeReservation && (
+                <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-3 space-y-1">
+                  <div className="flex items-center gap-2 text-[10px] text-blue-500 font-bold uppercase tracking-wider">
+                    <UserIcon size={12} />
+                    Current Guest
+                  </div>
+                  <p className="text-sm font-bold text-zinc-50">{activeReservation.guestName}</p>
+                  <p className="text-[10px] text-zinc-500">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Assigned To</label>
                 <select
@@ -410,6 +439,14 @@ export function Housekeeping() {
                 >
                   <CheckCircle2 size={14} />
                   Mark Clean
+                </button>
+                <button 
+                  onClick={() => updateRoomStatus(room.id, 'cleaning')}
+                  disabled={room.status === 'cleaning'}
+                  className="flex items-center justify-center gap-2 bg-purple-500/10 text-purple-500 py-2 rounded-lg text-xs font-bold hover:bg-purple-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
+                >
+                  <Clock size={14} />
+                  Cleaning
                 </button>
                 <button 
                   onClick={() => updateRoomStatus(room.id, 'dirty')}

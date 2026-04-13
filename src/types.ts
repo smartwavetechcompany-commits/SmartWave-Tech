@@ -9,6 +9,7 @@ export interface Tax {
   percentage: number;
   isInclusive: boolean;
   showOnReceipt: boolean;
+  showOnFolio: boolean;
   status: 'active' | 'inactive';
   category: 'all' | 'room' | 'restaurant' | 'service';
 }
@@ -71,6 +72,7 @@ export interface Hotel {
   };
   adminUIDs?: string[];
   website?: string;
+  lastAuditDate?: string; // Tracks the last time the global nightly audit was run
   planHistory?: {
     plan: PlanType;
     previousPlan?: PlanType;
@@ -157,7 +159,7 @@ export interface Room {
   type: string;
   roomTypeId?: string; // Link to RoomType
   price: number;
-  status: 'clean' | 'dirty' | 'occupied' | 'maintenance' | 'vacant' | 'out_of_service' | 'inspected' | 'out_of_order' | 'reserved';
+  status: 'clean' | 'dirty' | 'occupied' | 'maintenance' | 'vacant' | 'out_of_service' | 'inspected' | 'out_of_order' | 'reserved' | 'cleaning';
   floor: string;
   building?: string;
   wing?: string;
@@ -202,7 +204,12 @@ export interface Reservation {
   discountReason?: string;
   nightlyRate?: number; // Added for nightly audit synchronization
   totalDiscount?: number; // Added to track total discounts separately from payments
+  taxAmount?: number;
+  taxDetails?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
+  ledgerBalance?: number; // Added to track current balance on the reservation level
   advanceDeposit?: number;
+  autoNightDeduction: boolean; // Mandatory toggle for automatic nightly charges
+  lastDeductionDate?: string; // Tracks when the last nightly charge was applied
   createdAt: string;
   ledgerEntries?: LedgerEntry[]; // Changed from string[] to LedgerEntry[]
 }
@@ -547,6 +554,7 @@ export interface CorporateAccount {
   taxId: string;
   creditLimit: number;
   currentBalance: number;
+  totalDebits?: number;
   billingCycle: 'weekly' | 'monthly' | 'quarterly';
   status: 'active' | 'suspended';
   createdAt: string;

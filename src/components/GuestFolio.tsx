@@ -196,7 +196,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment');
   
-  const grandTotal = hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits);
+  // Calculate Taxes for Folio
+  const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.showOnFolio);
+  const subtotal = hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits);
+  
+  let taxTotal = 0;
+  const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 
+    ? currentReservation.taxDetails.map(tax => {
+        taxTotal += tax.isInclusive ? 0 : tax.amount;
+        return tax;
+      })
+    : activeTaxes.map(tax => {
+        let amount = 0;
+        if (tax.isInclusive) {
+          amount = subtotal - (subtotal / (1 + tax.percentage / 100));
+        } else {
+          amount = subtotal * (tax.percentage / 100);
+          taxTotal += amount;
+        }
+        return { ...tax, amount };
+      });
+
+  const grandTotal = subtotal + taxTotal;
   const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (currentReservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
@@ -296,6 +317,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <p className="text-lg font-bold text-zinc-50">{currentReservation.guestName}</p>
                 <p className="text-sm text-zinc-400">{currentReservation.guestEmail}</p>
                 <p className="text-sm text-zinc-400">{currentReservation.guestPhone}</p>
+                {guest && (
+                  <p className={cn(
+                    "text-xs font-bold mt-1",
+                    (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                  )}>
+                    Guest Ledger Balance: {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                  </p>
+                )}
                 {currentReservation.corporateId && (
                   <div className="mt-4 pt-4 border-t border-zinc-800">
                     <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Corporate Account</p>
@@ -349,6 +378,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Subtotal</span>
+                  <span className="text-zinc-50 font-bold">{formatCurrency(subtotal, currency, exchangeRate)}</span>
+                </div>
+                {taxBreakdown.map((tax: any, idx) => (
+                  <div key={tax.id || `tax-${idx}`} className="flex justify-between text-sm">
+                    <span className="text-zinc-500">{tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}</span>
+                    <span className="text-zinc-50 font-bold">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm pt-2 border-t border-zinc-800">
                   <span className="text-zinc-500">Total Charges</span>
                   <span className="text-zinc-50 font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
                 </div>
@@ -363,14 +402,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   </div>
                 )}
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
-                  <span className="text-sm font-bold text-zinc-50 uppercase">Balance Due</span>
+                  <span className="text-sm font-bold text-zinc-50 uppercase">Balance Status</span>
                   <div className="flex flex-col items-end">
                     <span className={cn(
                       "text-xl font-bold",
                       balance > 0 ? "text-red-500" : "text-emerald-500"
                     )}>
                       {formatCurrency(Math.abs(balance), currency, exchangeRate)}
-                      {balance > 0 ? " (Due)" : balance < 0 ? " (Credit)" : ""}
+                    </span>
+                    <span className={cn(
+                      "text-[10px] font-bold uppercase",
+                      balance > 0 ? "text-red-500" : "text-emerald-500"
+                    )}>
+                      {balance > 0 ? "Guest Owing" : balance < 0 ? "Credit Balance" : "Settled"}
                     </span>
                     {balance !== 0 && (
                       <div className="flex flex-col items-end gap-2 mt-2">

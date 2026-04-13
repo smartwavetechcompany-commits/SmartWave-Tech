@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../utils';
 import { auth } from '../firebase';
+import { toast } from 'sonner';
 
 import { useTranslation } from 'react-i18next';
 
@@ -122,6 +123,7 @@ export function Sidebar() {
           <button 
             onClick={() => {
               setSelectedHotelId(null);
+              toast.success('Exited management mode');
               navigate('/super-admin');
             }}
             className="flex items-center gap-3 px-3 py-2 w-full text-left rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-all duration-200 active:scale-[0.98]"

@@ -47,6 +47,7 @@ export function Inventory() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
   const [shouldOpenAddModal, setShouldOpenAddModal] = useState(false);
+  const [shouldOpenCategoryModal, setShouldOpenCategoryModal] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id) {
@@ -89,11 +90,14 @@ export function Inventory() {
     { label: 'Total Items', value: items.length, color: 'text-blue-500' },
     { label: 'Low Stock', value: items.filter(i => i.quantity <= i.minThreshold).length, color: 'text-red-500' },
     { label: 'Total Value', value: formatCurrency(items.reduce((acc, i) => acc + (i.quantity * i.price), 0), currency, exchangeRate), color: 'text-emerald-500' },
-    { label: 'Categories', value: new Set(items.map(i => i.category)).size, color: 'text-blue-500' },
-    { label: 'Total Items', value: items.length, color: 'text-blue-500' },
-    { label: 'Low Stock', value: items.filter(i => i.quantity <= i.minThreshold).length, color: 'text-red-500' },
-    { label: 'Food & Bev', value: items.filter(i => i.category.toLowerCase().includes('food') || i.category.toLowerCase().includes('bev')).length, color: 'text-blue-500' },
+    { label: 'Categories', value: categories.length, color: 'text-amber-500' },
+    { label: 'Food & Bev', value: items.filter(i => {
+      const cat = categories.find(c => c.name === i.category);
+      return cat?.isFB;
+    }).length, color: 'text-blue-500' },
     { label: 'Cleaning Supplies', value: items.filter(i => i.category.toLowerCase().includes('clean')).length, color: 'text-emerald-500' },
+    { label: 'Locations', value: locations.length, color: 'text-zinc-400' },
+    { label: 'Vendors', value: vendors.length, color: 'text-purple-500' },
   ];
 
   const filteredItems = items.filter(item => {
@@ -166,13 +170,25 @@ export function Inventory() {
             <Plus size={16} />
             Add Item
           </button>
+          <button 
+            onClick={() => {
+              setActiveTab('items');
+              // We need a way to open the category modal in ItemMaster
+              // I'll add a prop to ItemMaster for this
+              setShouldOpenCategoryModal(true);
+            }}
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          >
+            <Layers size={16} />
+            Categories
+          </button>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="flex overflow-x-auto pb-4 lg:grid lg:grid-cols-4 gap-4 no-scrollbar">
         {stats.map((stat, i) => (
-          <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl">
+          <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl min-w-[200px] lg:min-w-0">
             <div className="text-zinc-500 text-xs font-bold uppercase mb-2">{stat.label}</div>
             <div className={cn("text-2xl font-bold", stat.color)}>{stat.value}</div>
           </div>
@@ -260,9 +276,9 @@ export function Inventory() {
 
       {/* Keep the tabbed view for advanced features if needed, but default to this dashboard */}
       <div className="pt-12 border-t border-zinc-800">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
           <h2 className="text-xl font-bold text-white">Advanced Inventory Modules</h2>
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl overflow-x-auto max-w-full no-scrollbar">
             {['dashboard', 'items', 'procurement', 'movements', 'auditing', 'reports'].map(tab => (
               <button
                 key={tab}
@@ -290,7 +306,11 @@ export function Inventory() {
               items={items} 
               categories={categories} 
               defaultShowAddModal={shouldOpenAddModal}
-              onModalClose={() => setShouldOpenAddModal(false)}
+              defaultShowCategoryModal={shouldOpenCategoryModal}
+              onModalClose={() => {
+                setShouldOpenAddModal(false);
+                setShouldOpenCategoryModal(false);
+              }}
             />
           )}
           {activeTab === 'procurement' && <Procurement vendors={vendors} purchaseOrders={purchaseOrders} items={items} />}

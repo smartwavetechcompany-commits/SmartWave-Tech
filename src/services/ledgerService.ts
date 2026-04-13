@@ -42,7 +42,8 @@ export const postToLedger = async (
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
     accountUpdatePromise = updateDoc(corpRef, {
-      currentBalance: increment(balanceAdjustment)
+      currentBalance: increment(balanceAdjustment),
+      totalDebits: increment(entry.type === 'debit' ? entry.amount : 0)
     });
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
@@ -185,7 +186,8 @@ export const deleteLedgerEntry = async (
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
     await updateDoc(corpRef, {
-      currentBalance: increment(reverseAmount)
+      currentBalance: increment(reverseAmount),
+      totalDebits: increment(type === 'debit' ? -amount : 0)
     });
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
