@@ -2618,8 +2618,11 @@ export function FrontDesk() {
       )}
 
       {showReceipt && hotel && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="relative w-full max-w-lg my-8">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto print:p-0 print:bg-white print:backdrop-blur-none">
+          <div className={cn(
+            "relative w-full my-8 print:my-0 print:w-auto",
+            showReceipt.type === 'restaurant' ? "max-w-[80mm]" : "max-w-[210mm]"
+          )}>
             <div className="absolute -top-12 right-0 flex gap-4 print:hidden">
               <button 
                 onClick={() => window.print()}

@@ -60,9 +60,28 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
   return (
     <div className={cn(
-      "bg-white text-zinc-900 p-10 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0",
-      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] receipt-container" : "max-w-[500px]"
+      "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
+      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] p-10 receipt-container" : "w-[80mm] p-4 docket-container"
     )}>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page { 
+            size: ${type === 'restaurant' ? '80mm auto' : 'A4'}; 
+            margin: 0; 
+          }
+          body * { visibility: hidden; }
+          .receipt-container, .receipt-container *, .docket-container, .docket-container * { visibility: visible; }
+          .receipt-container, .docket-container { 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: ${type === 'restaurant' ? '80mm' : '210mm'} !important;
+            margin: 0 !important;
+            padding: ${type === 'restaurant' ? '5mm' : '15mm'} !important;
+          }
+          .print-hidden { display: none !important; }
+        }
+      `}} />
       {/* Hotel Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         {branding.logoUrl ? (
@@ -296,7 +315,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
           className="bg-zinc-900 text-white px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-zinc-200 flex items-center gap-2"
         >
           <Printer size={18} />
-          Print Official Receipt
+          Print {type === 'restaurant' ? 'Docket' : 'Official Receipt'}
         </button>
       </div>
     </div>
