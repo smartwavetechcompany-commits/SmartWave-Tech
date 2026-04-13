@@ -55,6 +55,47 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showSettlePayment, setShowSettlePayment] = useState(false);
   const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer', notes: '' });
   const [isSaving, setIsSaving] = useState(false);
+  const [isAuditing, setIsAuditing] = useState(false);
+
+  const handleManualNightlyCharge = async () => {
+    if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
+    
+    try {
+      setIsAuditing(true);
+      const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
+      const now = new Date();
+      const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+      const targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+      
+      const existingCharges = ledgerEntries.filter(e => e.category === 'room' && e.type === 'debit').length;
+      
+      if (existingCharges < targetCharges) {
+        const nightsToCharge = targetCharges - existingCharges;
+        const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
+        
+        for (let i = 0; i < nightsToCharge; i++) {
+          const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+          
+          await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
+            amount: rate,
+            type: 'debit',
+            category: 'room',
+            description: `Manual Nightly Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+            referenceId: currentReservation.id,
+            postedBy: profile.uid
+          }, profile.uid, currentReservation.corporateId);
+        }
+        toast.success(`Posted ${nightsToCharge} nightly charge(s)`);
+      } else {
+        toast.info('All nights are already charged up to date.');
+      }
+    } catch (err: any) {
+      console.error("Manual audit error:", err.message || safeStringify(err));
+      toast.error('Failed to post nightly charge');
+    } finally {
+      setIsAuditing(false);
+    }
+  };
 
   const handleSettlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,13 +233,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalPayments = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments;
   
-  // If room charges are already in ledger, don't add currentReservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment');
-  
-  // Calculate Taxes for Folio
   const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.showOnFolio);
-  const subtotal = hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits);
+
+  // Calculate Totals based strictly on Ledger for checked-in/out guests
+  // For pending guests, we show the estimated total
+  const isStated = ['checked_in', 'checked_out'].includes(currentReservation.status);
+  const subtotal = isStated ? totalDebits : (hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits));
   
   let taxTotal = 0;
   const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 
@@ -218,7 +260,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       });
 
   const grandTotal = subtotal + taxTotal;
-  const totalPaid = totalCredits + (hasPaymentInLedger ? 0 : (currentReservation.paidAmount || 0));
+  const totalPaid = isStated ? totalCredits : (hasPaymentInLedger ? totalCredits : (currentReservation.paidAmount || 0));
   const balance = grandTotal - totalPaid;
 
   const handleDeleteEntry = async () => {
@@ -648,15 +690,27 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Transaction History</h3>
-              {onPostCharge && currentReservation.status === 'checked_in' && (
-                <button 
-                  onClick={onPostCharge}
-                  className="flex items-center gap-2 text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
-                >
-                  <Plus size={14} />
-                  Post Charge
-                </button>
-              )}
+              <div className="flex items-center gap-4">
+                {currentReservation.status === 'checked_in' && (
+                  <button 
+                    onClick={handleManualNightlyCharge}
+                    disabled={isAuditing}
+                    className="flex items-center gap-2 text-xs font-bold text-blue-500 hover:text-blue-400 transition-colors disabled:opacity-50"
+                  >
+                    <Clock size={14} />
+                    {isAuditing ? 'Posting...' : 'Post Nightly Charge'}
+                  </button>
+                )}
+                {onPostCharge && currentReservation.status === 'checked_in' && (
+                  <button 
+                    onClick={onPostCharge}
+                    className="flex items-center gap-2 text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
+                  >
+                    <Plus size={14} />
+                    Post Extra Charge
+                  </button>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left">

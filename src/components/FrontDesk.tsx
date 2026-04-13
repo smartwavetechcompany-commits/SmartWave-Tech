@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, g
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
-import { postToLedger, settleLedger, postFullStayCharge, transferToCityLedger } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferToCityLedger } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -888,16 +888,16 @@ export function FrontDesk() {
         await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
-          // Post full stay charge to ledger so it shows the total booking rate money
-          await postFullStayCharge(
-            hotel.id,
-            res.guestId,
-            res.id,
-            res.totalAmount,
-            res.roomNumber,
-            profile.uid,
-            res.corporateId
-          );
+          // Post FIRST NIGHT charge to ledger
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          await postToLedger(hotel.id, res.guestId, res.id, {
+            amount: rate,
+            type: 'debit',
+            category: 'room',
+            description: `Initial Room Charge: Room ${res.roomNumber} (Night of ${format(new Date(res.checkIn), 'MMM dd, yyyy')})`,
+            referenceId: res.id,
+            postedBy: profile.uid
+          }, profile.uid, res.corporateId);
 
           // Fetch fresh data to avoid stale state issues with auto-deduction
           const [guestSnap, freshResSnap] = await Promise.all([

@@ -106,35 +106,6 @@ export const postToLedger = async (
   return { ...ledgerEntry, firestoreId: ledgerDoc?.id };
 };
 
-export const postFullStayCharge = async (
-  hotelId: string,
-  guestId: string,
-  reservationId: string,
-  totalAmount: number,
-  roomNumber: string,
-  postedBy: string,
-  corporateId?: string
-) => {
-  // Check if any room charges already exist to avoid double posting
-  const ledgerQ = query(
-    collection(db, 'hotels', hotelId, 'ledger'),
-    where('reservationId', '==', reservationId),
-    where('category', '==', 'room'),
-    where('type', '==', 'debit')
-  );
-  const ledgerSnap = await getDocs(ledgerQ);
-  if (ledgerSnap.docs.length > 0) return; // Already has room charges
-
-  return postToLedger(hotelId, guestId, reservationId, {
-    amount: totalAmount,
-    type: 'debit',
-    category: 'room',
-    description: `Total Room Charge: Room ${roomNumber} (Full Stay)`,
-    referenceId: reservationId,
-    postedBy
-  }, postedBy, corporateId);
-};
-
 export const deleteLedgerEntry = async (
   hotelId: string,
   ledgerEntry: LedgerEntry & { firestoreId?: string }
