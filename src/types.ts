@@ -267,6 +267,7 @@ export interface KitchenOrder {
   category: 'food' | 'drink' | 'other';
   notes?: string;
   price: number;
+  paidAmount?: number;
   paymentMethod: 'cash' | 'card' | 'transfer' | 'room';
   preparedAt?: string;
   readyAt?: string;
@@ -504,6 +505,7 @@ export interface MaintenanceRequest {
   assignedTo?: string;
   timestamp: string;
   completedAt?: string;
+  dueDate?: string;
   notes?: string;
 }
 
@@ -542,6 +544,7 @@ export interface LedgerEntry {
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
   category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry';
   postedBy: string;
+  paymentMethod?: 'cash' | 'card' | 'transfer';
 }
 
 export interface CorporateAccount {

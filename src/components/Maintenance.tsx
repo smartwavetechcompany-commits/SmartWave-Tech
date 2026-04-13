@@ -17,7 +17,8 @@ import {
   ChevronRight,
   AlertCircle,
   Download,
-  UserPlus
+  UserPlus,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
@@ -44,7 +45,8 @@ export function Maintenance() {
     issue: '',
     priority: 'medium' as MaintenanceRequest['priority'],
     notes: '',
-    assignedTo: ''
+    assignedTo: '',
+    dueDate: format(new Date(), 'yyyy-MM-dd')
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -103,7 +105,7 @@ export function Maintenance() {
 
       toast.success('Maintenance request created');
       setShowAddModal(false);
-      setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '' });
+      setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '', dueDate: format(new Date(), 'yyyy-MM-dd') });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/maintenance`);
       toast.error('Failed to create request');
@@ -137,11 +139,49 @@ export function Maintenance() {
     }
   };
 
+  const handleDeleteRequest = async (requestId: string) => {
+    if (!hotel?.id || !profile) return;
+    
+    if (!window.confirm('Are you sure you want to delete this maintenance request? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const { deleteDoc } = await import('firebase/firestore');
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'maintenance', requestId));
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'MAINTENANCE_REQUEST_DELETED',
+        resource: `Request ${requestId}`,
+        hotelId: hotel.id,
+        module: 'Maintenance'
+      });
+      toast.success('Maintenance request deleted');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/maintenance/${requestId}`);
+      toast.error('Failed to delete request');
+    }
+  };
+
   const filteredRequests = requests.filter(r => {
     const matchesStatus = filter === 'all' || r.status === filter;
     const matchesPriority = priorityFilter === 'all' || r.priority === priorityFilter;
     const matchesSearch = (r.roomNumber || '').includes(searchQuery) || (r.issue?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesPriority && matchesSearch;
+    
+    // Date filter (if applicable)
+    let matchesDate = true;
+    if (reportFilter.startDate) {
+      const targetDate = startOfDay(new Date(reportFilter.startDate));
+      const taskDate = r.dueDate ? startOfDay(new Date(r.dueDate)) : startOfDay(new Date(r.timestamp));
+      matchesDate = taskDate >= targetDate;
+    }
+
+    return matchesStatus && matchesPriority && matchesSearch && matchesDate;
   });
 
   const stats = [
@@ -269,6 +309,29 @@ export function Maintenance() {
               {f.replace('_', ' ')}
             </button>
           ))}
+          <div className="w-px h-4 bg-zinc-800 mx-1" />
+          {(['all', 'low', 'medium', 'high', 'urgent'] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPriorityFilter(p)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all whitespace-nowrap",
+                priorityFilter === p ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
+              )}
+            >
+              {p}
+            </button>
+          ))}
+          <div className="w-px h-4 bg-zinc-800 mx-1" />
+          <div className="flex items-center gap-2 px-2">
+            <Calendar size={14} className="text-zinc-500" />
+            <input
+              type="date"
+              value={reportFilter.startDate}
+              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold focus:outline-none"
+            />
+          </div>
         </div>
       </div>
 
@@ -285,37 +348,69 @@ export function Maintenance() {
                 key={request.id}
                 layout
                 initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
+                animate={{ 
+                  opacity: request.status === 'completed' ? 0.7 : 1, 
+                  scale: 1,
+                  backgroundColor: request.status === 'completed' ? 'rgba(24, 24, 27, 0.5)' : 'rgba(24, 24, 27, 1)'
+                }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col"
+                className={cn(
+                  "bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col transition-all duration-500",
+                  request.status === 'completed' ? "border-emerald-500/20 grayscale-[0.5]" : ""
+                )}
               >
                 <div className="p-5 flex-1">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-50 font-bold">
-                        {request.roomNumber}
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center text-zinc-50 font-bold transition-colors",
+                        request.status === 'completed' ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-800"
+                      )}>
+                        {request.status === 'completed' ? <CheckCircle2 size={20} /> : request.roomNumber}
                       </div>
                       <div>
-                        <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Room</div>
+                        <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Room {request.roomNumber}</div>
                         <div className="text-xs text-zinc-400 flex items-center gap-1">
                           <Calendar size={10} />
                           {format(new Date(request.timestamp), 'MMM d, HH:mm')}
                         </div>
                       </div>
                     </div>
-                    <div className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                      request.priority === 'urgent' ? "bg-red-500 text-zinc-50" :
-                      request.priority === 'high' ? "bg-orange-500/10 text-orange-500" :
-                      request.priority === 'medium' ? "bg-blue-500/10 text-blue-500" :
-                      "bg-zinc-800 text-zinc-500"
-                    )}>
-                      {request.priority}
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                        request.priority === 'urgent' ? "bg-red-500 text-zinc-50" :
+                        request.priority === 'high' ? "bg-orange-500/10 text-orange-500" :
+                        request.priority === 'medium' ? "bg-blue-500/10 text-blue-500" :
+                        "bg-zinc-800 text-zinc-500"
+                      )}>
+                        {request.priority}
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteRequest(request.id)}
+                        className="p-1.5 hover:bg-red-500/10 text-zinc-600 hover:text-red-500 rounded-lg transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className="text-sm font-bold text-zinc-50 leading-tight">{request.issue}</h3>
+                    <h3 className={cn(
+                      "text-sm font-bold leading-tight transition-all",
+                      request.status === 'completed' ? "text-zinc-500 line-through" : "text-zinc-50"
+                    )}>{request.issue}</h3>
+                    
+                    {request.dueDate && (
+                      <div className={cn(
+                        "flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider",
+                        new Date(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
+                      )}>
+                        <Clock size={10} />
+                        Due: {format(new Date(request.dueDate), 'MMM d, yyyy')}
+                      </div>
+                    )}
+
                     {request.notes && (
                       <p className="text-xs text-zinc-400 italic bg-zinc-950 p-2 rounded-lg border border-zinc-800">
                         {request.notes}
@@ -417,6 +512,31 @@ export function Maintenance() {
                     </select>
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Due Date</label>
+                    <input
+                      type="date"
+                      required
+                      value={newRequest.dueDate}
+                      onChange={(e) => setNewRequest({ ...newRequest, dueDate: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500 uppercase">Assign To (Optional)</label>
+                    <select
+                      value={newRequest.assignedTo}
+                      onChange={(e) => setNewRequest({ ...newRequest, assignedTo: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="">Select Staff Member</option>
+                      {staff.map(s => (
+                        <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Issue Description</label>
                   <textarea
@@ -426,19 +546,6 @@ export function Maintenance() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
                     placeholder="Describe the problem..."
                   />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Assign To (Optional)</label>
-                  <select
-                    value={newRequest.assignedTo}
-                    onChange={(e) => setNewRequest({ ...newRequest, assignedTo: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                  >
-                    <option value="">Select Staff Member</option>
-                    {staff.map(s => (
-                      <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
-                    ))}
-                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Additional Notes</label>
