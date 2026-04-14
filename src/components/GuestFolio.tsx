@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, safeStringify } from '../utils';
-import { format, addDays, startOfDay } from 'date-fns';
+import { format, addDays, startOfDay, isAfter } from 'date-fns';
 import { toast } from 'sonner';
 
 interface GuestFolioProps {
@@ -67,7 +67,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
       const now = new Date();
       const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-      const targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+      let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+
+      // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
+      if (hotel.autoChargeOverstays !== false) {
+        const overstayTime = hotel.overstayChargeTime || '14:00';
+        const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
+        if (isAfter(now, checkOutDateTime)) {
+          // Calculate how many days past checkout they are
+          const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
+          const expectedTotalNights = (currentReservation.nights || 1) + daysPastCheckout;
+          targetCharges = Math.max(targetCharges, expectedTotalNights);
+        }
+      }
       
       const existingCharges = ledgerEntries.filter(e => e.category === 'room' && e.type === 'debit').length;
       
@@ -77,12 +89,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         
         for (let i = 0; i < nightsToCharge; i++) {
           const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+          const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
           
           await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
             amount: rate,
             type: 'debit',
             category: 'room',
-            description: `Manual Nightly Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+            description: `${isOverstay ? 'Overstay' : 'Manual Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
             referenceId: currentReservation.id,
             postedBy: profile.uid
           }, profile.uid, currentReservation.corporateId);
@@ -112,6 +125,52 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       toast.error('Failed to post nightly charge');
     } finally {
       setIsAuditing(false);
+    }
+  };
+
+  const [isSyncingTaxes, setIsSyncingTaxes] = useState(false);
+
+  const handleSyncTaxes = async () => {
+    if (!hotel?.id || !profile) return;
+    try {
+      setIsSyncingTaxes(true);
+      const missingTaxes = activeTaxes.filter(tax => {
+        if (tax.isInclusive) return false;
+        const postedAmount = ledgerEntries
+          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+          .reduce((acc, e) => acc + e.amount, 0);
+        const expectedAmount = subtotal * (tax.percentage / 100);
+        return expectedAmount > postedAmount + 0.01; // Use small epsilon for float comparison
+      });
+
+      if (missingTaxes.length === 0) {
+        toast.info('Taxes are already in sync with the ledger.');
+        return;
+      }
+
+      for (const tax of missingTaxes) {
+        const postedAmount = ledgerEntries
+          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+          .reduce((acc, e) => acc + e.amount, 0);
+        const expectedAmount = subtotal * (tax.percentage / 100);
+        const amountToPost = expectedAmount - postedAmount;
+
+        await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
+          amount: amountToPost,
+          type: 'debit',
+          category: 'tax',
+          description: `Tax Sync: ${tax.name} (${tax.percentage}%)`,
+          referenceId: currentReservation.id,
+          postedBy: profile.uid
+        }, profile.uid, currentReservation.corporateId);
+      }
+
+      toast.success('Taxes synced to ledger successfully');
+    } catch (err: any) {
+      console.error("Sync taxes error:", err);
+      toast.error('Failed to sync taxes');
+    } finally {
+      setIsSyncingTaxes(false);
     }
   };
 
@@ -448,7 +507,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     "text-xs font-bold mt-1",
                     (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                   )}>
-                    Guest Ledger Balance: {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                    Guest Ledger Balance: {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                    {(guest.ledgerBalance || 0) > 0 ? " (Debt)" : (guest.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                   </p>
                 )}
                 {currentReservation.corporateId && (
@@ -498,9 +558,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
 
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
-              <div className="flex items-center gap-3 mb-4">
-                <Banknote size={18} className="text-amber-500" />
-                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <Banknote size={18} className="text-amber-500" />
+                  <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
+                </div>
+                {isStated && activeTaxes.some(tax => {
+                  if (tax.isInclusive) return false;
+                  const postedAmount = ledgerEntries
+                    .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+                    .reduce((acc, e) => acc + e.amount, 0);
+                  const expectedAmount = subtotal * (tax.percentage / 100);
+                  return expectedAmount > postedAmount + 0.01;
+                }) && (
+                  <button
+                    onClick={handleSyncTaxes}
+                    disabled={isSyncingTaxes}
+                    className="text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-1 rounded hover:bg-amber-500 hover:text-black transition-all flex items-center gap-1"
+                  >
+                    <RefreshCw size={10} className={isSyncingTaxes ? "animate-spin" : ""} />
+                    Sync Taxes
+                  </button>
+                )}
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">

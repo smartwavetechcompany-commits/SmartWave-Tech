@@ -807,7 +807,19 @@ export function FrontDesk() {
         
         // Calculate how many nights have passed since check-in based on 24-hour rolling
         const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-        const targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+        let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+
+        // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
+        if (hotel.autoChargeOverstays !== false) {
+          const overstayTime = hotel.overstayChargeTime || '14:00';
+          const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+          if (isAfter(now, checkOutDateTime)) {
+            // Calculate how many days past checkout they are
+            const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
+            const expectedTotalNights = (res.nights || 1) + daysPastCheckout;
+            targetCharges = Math.max(targetCharges, expectedTotalNights);
+          }
+        }
         
         // Fetch ledger entries for this reservation to see what's already charged
         const ledgerQ = query(
@@ -943,10 +955,11 @@ export function FrontDesk() {
             const guestData = guestSnap.data() as Guest;
             const freshResData = freshResSnap.data() as Reservation;
             
-            // AUTO DEDUCTION: If guest has credit balance, apply it
-            if (guestData.ledgerBalance > 0) {
+            // AUTO DEDUCTION: If guest has credit balance (negative ledgerBalance), apply it
+            if (guestData.ledgerBalance < 0) {
+              const creditBalance = Math.abs(guestData.ledgerBalance);
               const remainingBalance = freshResData.totalAmount - (freshResData.paidAmount || 0) - (freshResData.totalDiscount || 0);
-              const creditToApply = Math.min(guestData.ledgerBalance, Math.max(0, remainingBalance));
+              const creditToApply = Math.min(creditBalance, Math.max(0, remainingBalance));
               
               if (creditToApply > 0) {
                 await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);

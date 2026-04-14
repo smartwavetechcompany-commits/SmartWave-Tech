@@ -55,6 +55,8 @@ export function Settings() {
     exchangeRate: hotel?.exchangeRate || 1500,
     defaultCheckInTime: hotel?.defaultCheckInTime || '14:00',
     defaultCheckOutTime: hotel?.defaultCheckOutTime || '12:00',
+    overstayChargeTime: hotel?.overstayChargeTime || '14:00',
+    autoChargeOverstays: hotel?.autoChargeOverstays ?? true,
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -90,6 +92,8 @@ export function Settings() {
         exchangeRate: hotel.exchangeRate || prev.exchangeRate,
         defaultCheckInTime: hotel.defaultCheckInTime || prev.defaultCheckInTime,
         defaultCheckOutTime: hotel.defaultCheckOutTime || prev.defaultCheckOutTime,
+        overstayChargeTime: hotel.overstayChargeTime || prev.overstayChargeTime,
+        autoChargeOverstays: hotel.autoChargeOverstays ?? prev.autoChargeOverstays,
         branding: {
           ...prev.branding,
           logoUrl: hotel.branding?.logoUrl || prev.branding.logoUrl,
@@ -235,6 +239,8 @@ export function Settings() {
         exchangeRate: formData.exchangeRate,
         defaultCheckInTime: formData.defaultCheckInTime,
         defaultCheckOutTime: formData.defaultCheckOutTime,
+        overstayChargeTime: formData.overstayChargeTime,
+        autoChargeOverstays: formData.autoChargeOverstays,
       }, { merge: true });
 
       // Log action
@@ -665,6 +671,28 @@ export function Settings() {
                         value={formData.defaultCheckOutTime}
                         onChange={(e) => setFormData({ ...formData, defaultCheckOutTime: e.target.value })}
                       />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Overstay Charge Trigger Time</label>
+                      <input 
+                        type="time" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                        value={formData.overstayChargeTime}
+                        onChange={(e) => setFormData({ ...formData, overstayChargeTime: e.target.value })}
+                      />
+                      <p className="text-[10px] text-zinc-500 mt-1 italic">Guests still checked in after this time on their check-out date will be charged for an extra night.</p>
+                    </div>
+                    <div className="flex items-center gap-3 pt-2">
+                      <input 
+                        type="checkbox"
+                        id="autoChargeOverstays"
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                        checked={formData.autoChargeOverstays}
+                        onChange={(e) => setFormData({ ...formData, autoChargeOverstays: e.target.checked })}
+                      />
+                      <label htmlFor="autoChargeOverstays" className="text-sm text-zinc-400 font-medium cursor-pointer">
+                        Auto-charge extra night for overstays
+                      </label>
                     </div>
                   </div>
                 </div>

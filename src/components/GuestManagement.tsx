@@ -377,7 +377,7 @@ export function GuestManagement() {
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
           <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Debt</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(Math.abs(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0)), currency, exchangeRate)}</div>
+          <div className="text-2xl font-bold text-red-500">{formatCurrency(guests.filter(g => (g.ledgerBalance || 0) > 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}</div>
         </div>
       </div>
 
@@ -532,10 +532,10 @@ export function GuestManagement() {
                         <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Ledger Balance</div>
                         <div className={cn(
                           "text-lg font-bold",
-                          (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
+                          (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                         )}>
                           {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                          {(guest.ledgerBalance || 0) < 0 ? " (Debt)" : (guest.ledgerBalance || 0) > 0 ? " (Credit)" : ""}
+                          {(guest.ledgerBalance || 0) > 0 ? " (Debt)" : (guest.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                         </div>
                       </div>
                     </div>
@@ -601,10 +601,10 @@ export function GuestManagement() {
                   <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Ledger Balance</div>
                   <div className={cn(
                     "text-2xl font-bold",
-                    (viewingHistory.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500"
+                    (viewingHistory.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                   )}>
                     {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
-                    {(viewingHistory.ledgerBalance || 0) < 0 ? " (Debt)" : (viewingHistory.ledgerBalance || 0) > 0 ? " (Credit)" : ""}
+                    {(viewingHistory.ledgerBalance || 0) > 0 ? " (Debt)" : (viewingHistory.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                   </div>
                 </div>
               </div>

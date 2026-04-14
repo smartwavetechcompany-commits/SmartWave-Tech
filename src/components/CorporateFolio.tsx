@@ -442,7 +442,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                           "px-6 py-4 text-right text-sm font-bold",
                           (res.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                         )}>
-                          {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
+                          {formatCurrency(Math.abs(res.ledgerBalance || 0), currency, exchangeRate)}
+                          {(res.ledgerBalance || 0) > 0 ? " (Debt)" : (res.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                         </td>
                       </tr>
                     ))}

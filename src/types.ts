@@ -74,6 +74,8 @@ export interface Hotel {
   website?: string;
   defaultCheckInTime?: string;
   defaultCheckOutTime?: string;
+  overstayChargeTime?: string; // Time after which an extra night is charged
+  autoChargeOverstays?: boolean;
   lastAuditDate?: string; // Tracks the last time the global nightly audit was run
   planHistory?: {
     plan: PlanType;
