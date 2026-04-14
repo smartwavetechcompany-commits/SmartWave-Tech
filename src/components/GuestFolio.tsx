@@ -86,6 +86,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             referenceId: currentReservation.id,
             postedBy: profile.uid
           }, profile.uid, currentReservation.corporateId);
+
+          // Post Exclusive Taxes
+          const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+          for (const tax of activeTaxes) {
+            if (!tax.isInclusive) {
+              const taxAmount = rate * (tax.percentage / 100);
+              await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
+                amount: taxAmount,
+                type: 'debit',
+                category: 'tax',
+                description: `${tax.name} (${tax.percentage}%) for Night of ${format(chargeDate, 'MMM dd, yyyy')}`,
+                referenceId: currentReservation.id,
+                postedBy: profile.uid
+              }, profile.uid, currentReservation.corporateId);
+            }
+          }
         }
         toast.success(`Posted ${nightsToCharge} nightly charge(s)`);
       } else {
@@ -235,6 +251,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalPayments = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments;
   
+  const totalTaxDebits = ledgerEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalNonTaxDebits = totalDebits - totalTaxDebits;
+
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment');
   const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active');
@@ -242,7 +261,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   // Calculate Totals based strictly on Ledger for checked-in/out guests
   // For pending guests, we show the estimated total
   const isStated = ['checked_in', 'checked_out'].includes(currentReservation.status);
-  const subtotal = isStated ? totalDebits : (hasRoomChargeInLedger ? totalDebits : (currentReservation.totalAmount + totalDebits));
+  const subtotal = isStated ? totalNonTaxDebits : (hasRoomChargeInLedger ? totalNonTaxDebits : (currentReservation.totalAmount - (currentReservation.taxAmount || 0) + totalNonTaxDebits));
   
   let taxTotal = 0;
   const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 
@@ -255,8 +274,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         if (tax.isInclusive) {
           amount = subtotal - (subtotal / (1 + tax.percentage / 100));
         } else {
-          amount = subtotal * (tax.percentage / 100);
-          taxTotal += amount;
+          // If already checked in and we have tax entries, use the actual posted tax amount
+          if (isStated && totalTaxDebits > 0) {
+            amount = ledgerEntries
+              .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+              .reduce((acc, e) => acc + e.amount, 0);
+            taxTotal += amount;
+          } else {
+            amount = subtotal * (tax.percentage / 100);
+            taxTotal += amount;
+          }
         }
         return { ...tax, amount };
       });

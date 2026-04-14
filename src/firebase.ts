@@ -17,6 +17,18 @@ export const db = initializeFirestore(app, {
 });
 export const storage = getStorage(app);
 
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    console.log("Firestore connection successful");
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('Could not reach Cloud Firestore backend'))) {
+      console.error("Please check your Firebase configuration. The client is offline.");
+    }
+  }
+}
+testConnection();
+
 export function handleFirestoreError(error: any, operationType: OperationType, path: string | null) {
   // Extract a clean error message
   const errorMessage = error?.message || (typeof error === 'string' ? error : 'Unknown Firestore error');

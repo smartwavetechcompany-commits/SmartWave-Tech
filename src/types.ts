@@ -544,7 +544,7 @@ export interface LedgerEntry {
   timestamp: string;
   reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax';
   postedBy: string;
   paymentMethod?: 'cash' | 'card' | 'transfer';
 }

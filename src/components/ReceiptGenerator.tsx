@@ -25,9 +25,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const totalPayments = credits.filter(e => e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments;
   
+  const totalTaxDebits = ledgerEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalNonTaxDebits = totalDebits - totalTaxDebits;
+  
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
-  const subtotal = type === 'corporate' ? totalDebits : (hasRoomChargeInLedger ? totalDebits : ((reservation?.totalAmount || 0) + totalDebits));
+  const subtotal = type === 'corporate' ? totalNonTaxDebits : (hasRoomChargeInLedger ? totalNonTaxDebits : ((reservation?.totalAmount || 0) - (reservation?.taxAmount || 0) + totalNonTaxDebits));
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -47,8 +50,16 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     if (tax.isInclusive) {
       amount = subtotal - (subtotal / (1 + tax.percentage / 100));
     } else {
-      amount = subtotal * (tax.percentage / 100);
-      taxTotal += amount;
+      // If we have taxes in ledger, use them for accurate reporting
+      if (totalTaxDebits > 0) {
+        amount = ledgerEntries
+          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+          .reduce((acc, e) => acc + e.amount, 0);
+        taxTotal += amount;
+      } else {
+        amount = subtotal * (tax.percentage / 100);
+        taxTotal += amount;
+      }
     }
     return { ...tax, amount };
   });

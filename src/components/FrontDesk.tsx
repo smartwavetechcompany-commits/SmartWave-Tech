@@ -345,8 +345,8 @@ export function FrontDesk() {
       return stay;
     });
 
-    const additionalTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0), 0);
-    const totalAmount = primaryTotal + additionalTotal;
+    const additionalTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0) + (stay.taxAmount || 0), 0);
+    const totalAmount = primaryTotal + primaryTaxTotal + additionalTotal;
     const totalTax = primaryTaxTotal + totalAdditionalTax;
 
     if (newBooking.totalAmount !== totalAmount || additionalStaysChanged || newBooking.taxAmount !== totalTax) {
@@ -835,6 +835,23 @@ export function FrontDesk() {
               referenceId: res.id,
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
+
+            // Post Exclusive Taxes
+            const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+            for (const tax of activeTaxes) {
+              if (!tax.isInclusive) {
+                const taxAmount = rate * (tax.percentage / 100);
+                await postToLedger(hotel.id, res.guestId, res.id, {
+                  amount: taxAmount,
+                  type: 'debit',
+                  category: 'tax',
+                  description: `${tax.name} (${tax.percentage}%) for Night of ${format(chargeDate, 'MMM dd, yyyy')}`,
+                  referenceId: res.id,
+                  postedBy: profile.uid
+                }, profile.uid, res.corporateId);
+                totalCharged += taxAmount;
+              }
+            }
             
             auditCount++;
             totalCharged += rate;
@@ -900,6 +917,22 @@ export function FrontDesk() {
             postedBy: profile.uid
           }, profile.uid, res.corporateId);
 
+          // Post Exclusive Taxes for initial night
+          const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+          for (const tax of activeTaxes) {
+            if (!tax.isInclusive) {
+              const taxAmount = rate * (tax.percentage / 100);
+              await postToLedger(hotel.id, res.guestId, res.id, {
+                amount: taxAmount,
+                type: 'debit',
+                category: 'tax',
+                description: `${tax.name} (${tax.percentage}%) for Night of ${format(new Date(res.checkIn), 'MMM dd, yyyy')}`,
+                referenceId: res.id,
+                postedBy: profile.uid
+              }, profile.uid, res.corporateId);
+            }
+          }
+
           // Fetch fresh data to avoid stale state issues with auto-deduction
           const [guestSnap, freshResSnap] = await Promise.all([
             getDoc(doc(db, 'hotels', hotel.id, 'guests', res.guestId)),
@@ -961,6 +994,23 @@ export function FrontDesk() {
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
             finalTotalDebits += rate;
+
+            // Post Exclusive Taxes
+            const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+            for (const tax of activeTaxes) {
+              if (!tax.isInclusive) {
+                const taxAmount = rate * (tax.percentage / 100);
+                await postToLedger(hotel.id, res.guestId!, res.id, {
+                  amount: taxAmount,
+                  type: 'debit',
+                  category: 'tax',
+                  description: `${tax.name} (${tax.percentage}%) for Night of ${format(chargeDate, 'MMM dd, yyyy')}`,
+                  referenceId: res.id,
+                  postedBy: profile.uid
+                }, profile.uid, res.corporateId);
+                finalTotalDebits += taxAmount;
+              }
+            }
           }
         } else if (existingCharges > nightsStayed) {
           const nightsToRefund = existingCharges - nightsStayed;
@@ -976,6 +1026,23 @@ export function FrontDesk() {
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
             finalTotalDebits -= rate;
+
+            // Refund Exclusive Taxes
+            const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+            for (const tax of activeTaxes) {
+              if (!tax.isInclusive) {
+                const taxAmount = rate * (tax.percentage / 100);
+                await postToLedger(hotel.id, res.guestId!, res.id, {
+                  amount: taxAmount,
+                  type: 'credit',
+                  category: 'refund',
+                  description: `${tax.name} Refund (Early Checkout)`,
+                  referenceId: res.id,
+                  postedBy: profile.uid
+                }, profile.uid, res.corporateId);
+                finalTotalDebits -= taxAmount;
+              }
+            }
           }
         }
 
