@@ -263,8 +263,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         </div>
 
         {showReceipt && hotel && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-center justify-center p-4 overflow-y-auto">
-            <div className="relative w-full max-w-md">
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-start justify-center p-4 overflow-y-auto">
+            <div className="relative w-full max-w-md my-8">
               <button 
                 onClick={() => setShowReceipt(false)}
                 className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"

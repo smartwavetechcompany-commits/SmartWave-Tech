@@ -69,7 +69,9 @@ export function FandB() {
     category: 'all' as string,
     price: 0,
     paidAmount: 0,
-    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer' | 'room'
+    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer' | 'room',
+    discount: 0,
+    discountType: 'fixed' as 'fixed' | 'percentage'
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -250,22 +252,52 @@ export function FandB() {
 
       const guestId = newOrder.guestId || (res?.guestId);
 
+      // Calculate discount
+      let discountAmount = 0;
+      if (newOrder.discount > 0) {
+        if (newOrder.discountType === 'percentage') {
+          discountAmount = (newOrder.price * newOrder.discount) / 100;
+        } else {
+          discountAmount = newOrder.discount;
+        }
+      }
+      const finalPrice = newOrder.price - discountAmount;
+
       // NEW LOGIC: If a room is selected, always post the charge to the room folio
       // This ensures it appears on the guest's final receipt.
       if (newOrder.roomNumber !== 'Walk-in' && res && guestId) {
         console.log('Posting charge to room ledger for reservation:', res.id);
         
-        // 1. Post the FULL charge (Debit)
+        // 1. Post the main charge (Debit)
         await postToLedger(hotel.id, guestId, res.id, {
-          amount: newOrder.price,
+          amount: finalPrice,
           type: 'debit',
           category: 'F & B',
-          description: `F & B Order (Room Service): ${newOrder.items}`,
+          description: `F & B Order (Room Service): ${newOrder.items}${discountAmount > 0 ? ` (Discounted)` : ''}`,
           referenceId: orderRef.id,
           postedBy: profile.uid
         }, profile.uid, res.corporateId);
 
-        // 2. If any payment was made at the outlet, post it as a Credit to the folio
+        // 2. Automatically post taxes if applicable
+        const activeTaxes = (hotel.taxes || []).filter(t => 
+          t.status === 'active' && 
+          !t.isInclusive && 
+          (t.category === 'all' || t.category === 'restaurant')
+        );
+
+        for (const tax of activeTaxes) {
+          const taxAmount = finalPrice * (tax.percentage / 100);
+          await postToLedger(hotel.id, guestId, res.id, {
+            amount: taxAmount,
+            type: 'debit',
+            category: 'tax',
+            description: `${tax.name} (${tax.percentage}%) for F & B Order`,
+            referenceId: orderRef.id,
+            postedBy: profile.uid
+          }, profile.uid, res.corporateId);
+        }
+
+        // 3. If any payment was made at the outlet, post it as a Credit to the folio
         if (newOrder.paidAmount > 0) {
           console.log('Posting payment to room ledger for reservation:', res.id);
           await postToLedger(hotel.id, guestId, res.id, {
@@ -322,7 +354,20 @@ export function FandB() {
       toast.success('F & B order created');
       setShowAddModal(false);
       setCart([]);
-      setNewOrder({ roomNumber: '', tableId: '', tableNumber: '', guestId: '', items: '', notes: '', category: 'all', price: 0, paidAmount: 0, paymentMethod: 'cash' });
+      setNewOrder({ 
+        roomNumber: '', 
+        tableId: '', 
+        tableNumber: '', 
+        guestId: '', 
+        items: '', 
+        notes: '', 
+        category: 'all', 
+        price: 0, 
+        paidAmount: 0, 
+        paymentMethod: 'cash',
+        discount: 0,
+        discountType: 'fixed'
+      });
     } catch (err: any) {
       console.error('Error in handleAddOrder:', err.message || safeStringify(err));
       if (err.message === 'No active reservation or guest found for this room') {
@@ -1251,6 +1296,30 @@ export function FandB() {
                       )}
                     </div>
                   )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Discount</label>
+                      <input
+                        type="number"
+                        value={newOrder.discount || ''}
+                        onChange={(e) => setNewOrder({ ...newOrder, discount: Number(e.target.value) })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Type</label>
+                      <select
+                        value={newOrder.discountType}
+                        onChange={(e) => setNewOrder({ ...newOrder, discountType: e.target.value as any })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                      >
+                        <option value="fixed">Fixed</option>
+                        <option value="percentage">%</option>
+                      </select>
+                    </div>
+                  </div>
 
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Special Notes</label>

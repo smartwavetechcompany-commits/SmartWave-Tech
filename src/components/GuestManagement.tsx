@@ -737,8 +737,8 @@ export function GuestManagement() {
 
       {/* Receipt Modal */}
       {showReceipt && hotel && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="relative w-full max-w-lg">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-start justify-center p-4 overflow-y-auto">
+          <div className="relative w-full max-w-lg my-8">
             <button 
               onClick={() => setShowReceipt(null)}
               className="absolute -top-12 right-0 text-zinc-50 hover:text-emerald-500 transition-colors flex items-center gap-2 font-bold uppercase text-xs print:hidden"

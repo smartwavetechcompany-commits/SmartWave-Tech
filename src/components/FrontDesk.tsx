@@ -85,6 +85,8 @@ export function FrontDesk() {
     amount: 0,
     category: 'restaurant' as const,
     description: '',
+    discount: 0,
+    discountType: 'fixed' as 'fixed' | 'percentage'
   });
   const [newBooking, setNewBooking] = useState({
     guestType: 'individual' as 'individual' | 'corporate',
@@ -1249,14 +1251,47 @@ export function FrontDesk() {
 
     try {
       setLoading(true);
+      
+      // Calculate final amount after discount
+      let discountAmount = 0;
+      if (chargeDetails.discount > 0) {
+        if (chargeDetails.discountType === 'percentage') {
+          discountAmount = (chargeDetails.amount * chargeDetails.discount) / 100;
+        } else {
+          discountAmount = chargeDetails.discount;
+        }
+      }
+      
+      const finalAmount = chargeDetails.amount - discountAmount;
+
+      // 1. Post the main charge
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
-        amount: chargeDetails.amount,
+        amount: finalAmount,
         type: 'debit',
         category: chargeDetails.category,
-        description: chargeDetails.description,
+        description: `${chargeDetails.description}${discountAmount > 0 ? ` (Discounted from ${formatCurrency(chargeDetails.amount, currency, exchangeRate)})` : ''}`,
         referenceId: res.id,
         postedBy: profile.uid
       }, profile.uid, res.corporateId);
+
+      // 2. Automatically post taxes if applicable
+      const activeTaxes = (hotel.taxes || []).filter(t => 
+        t.status === 'active' && 
+        !t.isInclusive && 
+        (t.category === 'all' || t.category === chargeDetails.category)
+      );
+
+      for (const tax of activeTaxes) {
+        const taxAmount = finalAmount * (tax.percentage / 100);
+        await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
+          amount: taxAmount,
+          type: 'debit',
+          category: 'tax',
+          description: `${tax.name} (${tax.percentage}%) for ${chargeDetails.description}`,
+          referenceId: res.id,
+          postedBy: profile.uid
+        }, profile.uid, res.corporateId);
+      }
 
       // Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
@@ -1265,13 +1300,19 @@ export function FrontDesk() {
         userEmail: profile.email,
         userRole: profile.role,
         action: 'POST_CHARGE',
-        resource: `Posted ${chargeDetails.category} charge of ${formatCurrency(chargeDetails.amount, currency, exchangeRate)} to ${res.guestName}`,
+        resource: `Posted ${chargeDetails.category} charge of ${formatCurrency(finalAmount, currency, exchangeRate)} to ${res.guestName}`,
         hotelId: hotel.id,
         module: 'Front Desk'
       });
 
       setShowChargeModal(null);
-      setChargeDetails({ amount: 0, category: 'restaurant', description: '' });
+      setChargeDetails({ 
+        amount: 0, 
+        category: 'restaurant', 
+        description: '',
+        discount: 0,
+        discountType: 'fixed'
+      });
       toast.success('Charge posted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/ledger`);
@@ -2678,6 +2719,29 @@ export function FrontDesk() {
                   onChange={(e) => setChargeDetails({ ...chargeDetails, description: e.target.value })}
                 />
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Discount</label>
+                  <input 
+                    type="number" 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={chargeDetails.discount || ''}
+                    onChange={(e) => setChargeDetails({ ...chargeDetails, discount: Number(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Type</label>
+                  <select 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={chargeDetails.discountType}
+                    onChange={(e) => setChargeDetails({ ...chargeDetails, discountType: e.target.value as any })}
+                  >
+                    <option value="fixed">Fixed ({currency})</option>
+                    <option value="percentage">% Percentage</option>
+                  </select>
+                </div>
+              </div>
             </div>
             <div className="flex gap-4 mt-8">
               <button 
@@ -2699,7 +2763,7 @@ export function FrontDesk() {
       )}
 
       {showReceipt && hotel && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-center justify-center p-4 overflow-y-auto print:p-0 print:bg-white print:backdrop-blur-none">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-white print:backdrop-blur-none">
           <div className={cn(
             "relative w-full my-8 print:my-0 print:w-auto",
             showReceipt.type === 'restaurant' ? "max-w-[80mm]" : "max-w-[210mm]"

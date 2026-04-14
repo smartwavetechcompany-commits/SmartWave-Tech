@@ -658,6 +658,34 @@ export function Rooms() {
         </div>
       </header>
 
+      {/* Room Status Legend */}
+      <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Clean / Vacant</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Occupied</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maintenance</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Dirty</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vacant (Unready)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-zinc-800" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Out of Service</span>
+        </div>
+      </div>
+
       {/* Bulk Actions Bar */}
       {selectedRooms.length > 0 && (
         <motion.div 

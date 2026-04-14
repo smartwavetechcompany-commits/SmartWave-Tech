@@ -137,7 +137,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       const missingTaxes = activeTaxes.filter(tax => {
         if (tax.isInclusive) return false;
         const postedAmount = ledgerEntries
-          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
           .reduce((acc, e) => acc + e.amount, 0);
         const expectedAmount = subtotal * (tax.percentage / 100);
         return expectedAmount > postedAmount + 0.01; // Use small epsilon for float comparison
@@ -328,16 +328,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         taxTotal += tax.isInclusive ? 0 : tax.amount;
         return tax;
       })
-    : activeTaxes.map(tax => {
+    : activeTaxes.map((tax, index) => {
         let amount = 0;
         if (tax.isInclusive) {
           amount = subtotal - (subtotal / (1 + tax.percentage / 100));
         } else {
           // If already checked in and we have tax entries, use the actual posted tax amount
           if (isStated && totalTaxDebits > 0) {
-            amount = ledgerEntries
-              .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+            // Try to match by name
+            const matchedAmount = ledgerEntries
+              .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
               .reduce((acc, e) => acc + e.amount, 0);
+            
+            amount = matchedAmount;
             taxTotal += amount;
           } else {
             amount = subtotal * (tax.percentage / 100);
@@ -346,6 +349,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         }
         return { ...tax, amount };
       });
+
+  // Add "Other Taxes" if there are unmatched tax debits in the ledger
+  const matchedTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
+  const otherTaxAmount = isStated ? Math.max(0, totalTaxDebits - matchedTaxTotal) : 0;
+  if (otherTaxAmount > 0.01) {
+    taxTotal += otherTaxAmount;
+    // We'll handle rendering this below
+  }
 
   const grandTotal = subtotal + taxTotal;
   const totalPaid = isStated ? totalCredits : (hasPaymentInLedger ? totalCredits : (currentReservation.paidAmount || 0));
@@ -417,8 +428,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         </div>
 
         {showReceipt && hotel && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-center justify-center p-4 overflow-y-auto">
-            <div className="relative w-full max-w-5xl">
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-start justify-center p-4 overflow-y-auto">
+            <div className="relative w-full max-w-5xl my-8">
               <button 
                 onClick={() => setShowReceipt(false)}
                 className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"
@@ -592,6 +603,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <span className="text-zinc-50 font-bold">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
                   </div>
                 ))}
+                {otherTaxAmount > 0.01 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Other Posted Taxes</span>
+                    <span className="text-zinc-50 font-bold">{formatCurrency(otherTaxAmount, currency, exchangeRate)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm pt-2 border-t border-zinc-800">
                   <span className="text-zinc-500">Total Charges</span>
                   <span className="text-zinc-50 font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
@@ -941,15 +958,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </tbody>
                 <tfoot className="bg-zinc-900/30 border-t border-zinc-800">
                   <tr>
-                    <td colSpan={3} className="px-6 py-4 text-right text-[10px] font-bold text-zinc-500 uppercase">Totals</td>
+                    <td colSpan={3} className="px-6 py-4 text-right text-[10px] font-bold text-zinc-500 uppercase">Ledger Totals</td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-red-500">
-                      {formatCurrency(grandTotal, currency, exchangeRate)}
+                      {formatCurrency(totalDebits, currency, exchangeRate)}
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
-                      {formatCurrency(totalPaid, currency, exchangeRate)}
+                      {formatCurrency(totalCredits, currency, exchangeRate)}
                     </td>
                     {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                       <td className="px-6 py-4"></td>
+                    )}
+                  </tr>
+                  <tr className="border-t border-zinc-800/50">
+                    <td colSpan={3} className="px-6 py-2 text-right text-[10px] font-bold text-zinc-500 uppercase">Net Balance</td>
+                    <td colSpan={2} className={cn(
+                      "px-6 py-2 text-right text-sm font-black",
+                      (totalDebits - totalCredits) > 0 ? "text-red-500" : "text-emerald-500"
+                    )}>
+                      {formatCurrency(Math.abs(totalDebits - totalCredits), currency, exchangeRate)}
+                      {(totalDebits - totalCredits) > 0 ? " (Owing)" : (totalDebits - totalCredits) < 0 ? " (Credit)" : " (Settled)"}
+                    </td>
+                    {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                      <td className="px-6 py-2"></td>
                     )}
                   </tr>
                 </tfoot>

@@ -53,7 +53,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       // If we have taxes in ledger, use them for accurate reporting
       if (totalTaxDebits > 0) {
         amount = ledgerEntries
-          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
+          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
           .reduce((acc, e) => acc + e.amount, 0);
         taxTotal += amount;
       } else {
@@ -64,6 +64,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     return { ...tax, amount };
   });
 
+  // Add "Other Taxes" if there are unmatched tax debits in the ledger
+  const matchedTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
+  const otherTaxAmount = totalTaxDebits > matchedTaxTotal ? totalTaxDebits - matchedTaxTotal : 0;
+  if (otherTaxAmount > 0.01) {
+    taxTotal += otherTaxAmount;
+  }
+
   const grandTotal = subtotal + taxTotal;
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
@@ -72,7 +79,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   return (
     <div className={cn(
       "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
-      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] p-12 receipt-container" : "w-[80mm] p-4 docket-container"
+      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] print:min-h-0 pt-8 px-12 pb-12 receipt-container" : "w-[80mm] p-4 docket-container"
     )}>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
@@ -93,15 +100,18 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             visibility: visible !important; 
           }
           .receipt-container, .docket-container { 
-            position: absolute !important; 
+            position: fixed !important; 
             left: 0 !important; 
             top: 0 !important; 
             width: ${type === 'restaurant' ? '80mm' : '210mm'} !important;
+            height: auto !important;
+            min-height: 0 !important;
             margin: 0 !important;
-            padding: ${type === 'restaurant' ? '5mm' : '15mm'} !important;
+            padding: ${type === 'restaurant' ? '5mm' : '10mm 15mm'} !important;
             background: white !important;
             box-shadow: none !important;
             border: none !important;
+            z-index: 99999 !important;
           }
           .print-hidden { display: none !important; }
         }
@@ -272,6 +282,15 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             <span className="font-bold">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
           </div>
         ))}
+
+        {otherTaxAmount > 0.01 && (
+          <div className="flex justify-between items-center text-[10px]">
+            <span className="text-zinc-500 uppercase tracking-widest font-bold">
+              Other Posted Taxes
+            </span>
+            <span className="font-bold">{formatCurrency(otherTaxAmount, currency, exchangeRate)}</span>
+          </div>
+        )}
         
         <div className="border-t border-zinc-200 pt-2 flex justify-between items-center">
           <span className="text-xs font-black uppercase tracking-tighter">Grand Total</span>
