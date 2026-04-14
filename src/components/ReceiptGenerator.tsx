@@ -61,7 +61,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   return (
     <div className={cn(
       "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
-      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] p-10 receipt-container" : "w-[80mm] p-4 docket-container"
+      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] p-16 receipt-container" : "w-[80mm] p-4 docket-container"
     )}>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
@@ -77,79 +77,79 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             top: 0; 
             width: ${type === 'restaurant' ? '80mm' : '210mm'} !important;
             margin: 0 !important;
-            padding: ${type === 'restaurant' ? '5mm' : '15mm'} !important;
+            padding: ${type === 'restaurant' ? '5mm' : '20mm'} !important;
           }
           .print-hidden { display: none !important; }
         }
       `}} />
       {/* Hotel Header */}
-      <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
+      <div className="text-center border-b-2 border-zinc-900 pb-8 mb-8">
         {branding.logoUrl ? (
-          <img src={branding.logoUrl} alt={hotel.name} className="h-16 mx-auto mb-3 object-contain" referrerPolicy="no-referrer" />
+          <img src={branding.logoUrl} alt={hotel.name} className="h-24 mx-auto mb-4 object-contain" referrerPolicy="no-referrer" />
         ) : (
-          <div className="w-16 h-16 bg-zinc-900 text-white rounded-2xl flex items-center justify-center mx-auto mb-3 font-bold text-2xl">
+          <div className="w-20 h-20 bg-zinc-900 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 font-bold text-3xl">
             {hotel.name.charAt(0)}
           </div>
         )}
-        <h1 className="text-2xl font-black uppercase tracking-tighter">{branding.organizationName || hotel.name}</h1>
-        <div className="text-[11px] text-zinc-500 font-medium mt-1 space-y-0.5">
-          <p className="flex items-center justify-center gap-1"><MapPin size={10} /> {branding.address || 'Hotel Address'}</p>
+        <h1 className="text-3xl font-black uppercase tracking-tighter">{branding.organizationName || hotel.name}</h1>
+        <div className="text-xs text-zinc-500 font-medium mt-2 space-y-1">
+          <p className="flex items-center justify-center gap-1"><MapPin size={12} /> {branding.address || 'Hotel Address'}</p>
           <p className="flex items-center justify-center gap-1">
-            <Phone size={10} /> {branding.phone || '+123456789'} 
-            {branding.email && <><span className="mx-1">|</span> <Mail size={10} /> {branding.email}</>}
+            <Phone size={12} /> {branding.phone || '+123456789'} 
+            {branding.email && <><span className="mx-2">|</span> <Mail size={12} /> {branding.email}</>}
           </p>
-          {hotel.website && <p className="text-emerald-600 font-bold">{hotel.website}</p>}
+          {hotel.website && <p className="text-emerald-600 font-bold text-sm">{hotel.website}</p>}
         </div>
       </div>
 
       {/* Receipt Info Grid */}
-      <div className="grid grid-cols-2 gap-y-6 mb-8 text-xs">
+      <div className="grid grid-cols-2 gap-x-12 gap-y-8 mb-10 text-sm">
         <div>
-          <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
-            <User size={10} /> {type === 'corporate' ? 'Account Details' : 'Guest Details'}
+          <p className="text-zinc-400 font-bold uppercase tracking-widest text-[10px] mb-2 flex items-center gap-1">
+            <User size={12} /> {type === 'corporate' ? 'Account Details' : 'Guest Details'}
           </p>
-          <p className="font-bold text-sm">{type === 'corporate' ? account?.name : reservation?.guestName}</p>
+          <p className="font-bold text-lg">{type === 'corporate' ? account?.name : reservation?.guestName}</p>
           <p className="text-zinc-500">{type === 'corporate' ? account?.email : reservation?.guestEmail}</p>
-          {type === 'corporate' && account?.taxId && <p className="text-zinc-400 text-[10px]">Tax ID: {account.taxId}</p>}
+          {type === 'corporate' && account?.taxId && <p className="text-zinc-400 text-xs mt-1">Tax ID: {account.taxId}</p>}
         </div>
         <div className="text-right">
-          <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
-            <Receipt size={10} /> {type === 'corporate' ? 'OFFICIAL RECEIPT' : 'Receipt Information'}
+          <p className="text-zinc-400 font-bold uppercase tracking-widest text-[10px] mb-2 flex items-center justify-end gap-1">
+            <Receipt size={12} /> {type === 'corporate' ? 'OFFICIAL RECEIPT' : 'Receipt Information'}
           </p>
-          <p className="font-bold text-sm">#{type === 'corporate' ? account?.id.slice(-8).toUpperCase() : reservation?.id.slice(-8).toUpperCase()}</p>
-          <p className="text-zinc-500">{format(new Date(), 'MMM dd, yyyy HH:mm')}</p>
+          <p className="font-bold text-lg">#{type === 'corporate' ? account?.id.slice(-8).toUpperCase() : reservation?.id.slice(-8).toUpperCase()}</p>
+          <p className="text-zinc-500">{format(new Date(), 'MMMM dd, yyyy HH:mm')}</p>
         </div>
-        {type !== 'corporate' && reservation && (
+        {reservation && (
           <>
             <div>
-              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
-                <Calendar size={10} /> Stay Details
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[10px] mb-2 flex items-center gap-1">
+                <Calendar size={12} /> Stay Details
               </p>
-              <p className="font-bold">Room {reservation.roomNumber}</p>
+              <p className="font-bold text-base">Room {reservation.roomNumber}</p>
               <p className="text-zinc-500">
                 {format(new Date(reservation.checkIn), 'MMM dd')} - {format(new Date(reservation.checkOut), 'MMM dd, yyyy')}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1">Status</p>
-              <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase">
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[10px] mb-2">Status</p>
+              <span className="px-3 py-1 bg-zinc-100 rounded text-xs font-bold uppercase">
                 {reservation.status.replace('_', ' ')}
               </span>
             </div>
           </>
         )}
-        {type === 'corporate' && (
+        {type === 'corporate' && !reservation && (
           <>
             <div>
-              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
-                <Building2 size={10} /> Corporate Info
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[10px] mb-2 flex items-center gap-1">
+                <Building2 size={12} /> Corporate Info
               </p>
               <p className="font-bold">{account?.contactPerson}</p>
               <p className="text-zinc-500">{account?.phone}</p>
             </div>
             <div className="text-right">
-              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1">Billing Cycle</p>
-              <span className="px-2 py-0.5 bg-zinc-100 rounded text-[10px] font-bold uppercase">
+              <p className="text-zinc-400 font-bold uppercase tracking-widest text-[10px] mb-2">Billing Cycle</p>
+              <span className="px-3 py-1 bg-zinc-100 rounded text-xs font-bold uppercase">
                 {account?.billingCycle}
               </span>
             </div>
@@ -179,7 +179,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             ))
           ) : (
             <>
-              {type !== 'corporate' && reservation && !hasRoomChargeInLedger && (
+              {reservation && !hasRoomChargeInLedger && (
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <p className="text-sm font-bold">Room Charges (Base)</p>

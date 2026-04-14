@@ -72,6 +72,8 @@ export function Rooms() {
     capacity: 'all'
   });
   const [view, setView] = useState<'grid' | 'list' | 'calendar'>('grid');
+  const [sortBy, setSortBy] = useState<'roomNumber' | 'type' | 'status' | 'price' | 'floor'>('roomNumber');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [calendarStartDate, setCalendarStartDate] = useState(startOfDay(new Date()));
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -389,6 +391,17 @@ export function Rooms() {
     const matchesCapacity = capacityFilter === 'all' || room.capacity === Number(capacityFilter);
     
     return matchesSearch && matchesStatus && matchesType && matchesCapacity;
+  }).sort((a, b) => {
+    const factor = sortOrder === 'asc' ? 1 : -1;
+    if (sortBy === 'roomNumber') {
+      // Natural sort for room numbers
+      return factor * a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    if (sortBy === 'type') return factor * (a.type || '').localeCompare(b.type || '');
+    if (sortBy === 'status') return factor * (a.status || '').localeCompare(b.status || '');
+    if (sortBy === 'price') return factor * (a.price - b.price);
+    if (sortBy === 'floor') return factor * (a.floor || '').localeCompare(b.floor || '');
+    return 0;
   });
 
   const handleExport = () => {
@@ -576,6 +589,29 @@ export function Rooms() {
               <Calendar size={18} className="mx-auto" />
             </button>
           </div>
+
+          {view !== 'calendar' && (
+            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase whitespace-nowrap">Sort:</span>
+              <select 
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
+              >
+                <option value="roomNumber">Room #</option>
+                <option value="type">Type</option>
+                <option value="status">Status</option>
+                <option value="price">Price</option>
+                <option value="floor">Floor</option>
+              </select>
+              <button 
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                className="p-1 text-zinc-500 hover:text-emerald-500 transition-colors"
+              >
+                <TrendingUp size={14} className={cn("transition-transform", sortOrder === 'desc' && "rotate-180")} />
+              </button>
+            </div>
+          )}
           <button 
             onClick={handleExport}
             className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
@@ -1401,6 +1437,7 @@ export function Rooms() {
                 <th className="px-6 py-4">Type</th>
                 <th className="px-6 py-4 text-right">Price</th>
                 <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4">Assigned Staff</th>
                 <th className="px-6 py-4">Floor</th>
                 <th className="px-6 py-4">Capacity</th>
                 <th className="px-6 py-4">Amenities</th>
@@ -1429,6 +1466,20 @@ export function Rooms() {
                     )}>
                       {room.status.replace('_', ' ')}
                     </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {room.assignedTo ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-zinc-800 rounded-full flex items-center justify-center text-[10px] text-zinc-400 font-bold">
+                          {(staff.find(s => s.uid === room.assignedTo)?.displayName || staff.find(s => s.uid === room.assignedTo)?.email || '?')[0].toUpperCase()}
+                        </div>
+                        <span className="text-xs text-zinc-400">
+                          {staff.find(s => s.uid === room.assignedTo)?.displayName || staff.find(s => s.uid === room.assignedTo)?.email}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-zinc-600 italic">Unassigned</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-zinc-400 text-sm">{room.floor}</td>
                   <td className="px-6 py-4 text-zinc-400 text-sm">{room.capacity} Pax</td>

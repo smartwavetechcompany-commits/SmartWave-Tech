@@ -13,11 +13,16 @@ import {
   XCircle,
   Printer,
   Download,
-  FileText
+  FileText,
+  Plus,
+  ArrowRightLeft
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
+import { increment, updateDoc, addDoc } from 'firebase/firestore';
+import { toast } from 'sonner';
+import { transferCorporateBalance } from '../services/ledgerService';
 
 interface CorporateFolioProps {
   account: CorporateAccount;
@@ -25,7 +30,7 @@ interface CorporateFolioProps {
 }
 
 export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
-  const { hotel, currency, exchangeRate } = useAuth();
+  const { hotel, currency, exchangeRate, profile } = useAuth();
   const [currentAccount, setCurrentAccount] = useState<CorporateAccount>(account);
 
   useEffect(() => {
@@ -36,6 +41,14 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   const [individualReservations, setIndividualReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [showSettlePayment, setShowSettlePayment] = useState(false);
+  const [showPostCharge, setShowPostPostCharge] = useState(false);
+  const [showTransferBalance, setShowTransferBalance] = useState(false);
+  const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
+  const [transferData, setTransferData] = useState({ targetId: '', amount: 0, notes: '' });
+  const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer', notes: '' });
+  const [chargeData, setChargeData] = useState({ amount: 0, category: 'other', description: '' });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!hotel?.id || !account.id) return;
@@ -78,6 +91,130 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       unsubRes();
     };
   }, [hotel?.id, account.id]);
+
+  useEffect(() => {
+    if (!hotel?.id) return;
+    const q = query(collection(db, 'hotels', hotel.id, 'corporate_accounts'));
+    const unsub = onSnapshot(q, (snap) => {
+      setCorporateAccounts(snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount))
+        .filter(acc => acc.id !== account.id)
+      );
+    });
+    return () => unsub();
+  }, [hotel?.id, account.id]);
+
+  const handleSettlePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !currentAccount) return;
+
+    try {
+      setIsSaving(true);
+      const timestamp = new Date().toISOString();
+
+      // 1. Update account balance
+      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+        currentBalance: increment(-settleData.amount)
+      });
+
+      // 2. Add to Ledger
+      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+        hotelId: hotel.id,
+        corporateId: currentAccount.id,
+        reservationId: 'CORPORATE_SETTLEMENT',
+        timestamp,
+        amount: settleData.amount,
+        type: 'credit',
+        category: 'payment',
+        description: settleData.notes || `Corporate Settlement: ${currentAccount.name}`,
+        paymentMethod: settleData.method,
+        postedBy: profile.uid
+      });
+
+      // 3. Log to finance
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+        type: 'income',
+        amount: settleData.amount,
+        category: 'Corporate Payment',
+        description: `Corporate Settlement: ${currentAccount.name}`,
+        timestamp,
+        paymentMethod: settleData.method,
+        referenceId: currentAccount.id
+      });
+
+      toast.success('Payment settled successfully');
+      setShowSettlePayment(false);
+      setSettleData({ amount: 0, method: 'cash', notes: '' });
+    } catch (err) {
+      console.error("Settlement error:", err);
+      toast.error('Failed to settle payment');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePostCharge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !currentAccount) return;
+
+    try {
+      setIsSaving(true);
+      const timestamp = new Date().toISOString();
+
+      // 1. Update account balance
+      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+        currentBalance: increment(chargeData.amount)
+      });
+
+      // 2. Add to Ledger
+      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+        hotelId: hotel.id,
+        corporateId: currentAccount.id,
+        reservationId: 'CORPORATE_CHARGE',
+        timestamp,
+        amount: chargeData.amount,
+        type: 'debit',
+        category: chargeData.category,
+        description: chargeData.description,
+        postedBy: profile.uid
+      });
+
+      toast.success('Charge posted successfully');
+      setShowPostPostCharge(false);
+      setChargeData({ amount: 0, category: 'other', description: '' });
+    } catch (err) {
+      console.error("Charge error:", err);
+      toast.error('Failed to post charge');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTransferBalance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !currentAccount || !transferData.targetId) return;
+
+    try {
+      setIsSaving(true);
+      await transferCorporateBalance(
+        hotel.id,
+        currentAccount.id,
+        transferData.targetId,
+        transferData.amount,
+        profile.uid,
+        transferData.notes
+      );
+
+      toast.success('Balance transferred successfully');
+      setShowTransferBalance(false);
+      setTransferData({ targetId: '', amount: 0, notes: '' });
+    } catch (err: any) {
+      console.error("Transfer error:", err);
+      toast.error('Failed to transfer balance');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
@@ -145,6 +282,67 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          {/* Quick Actions Bar */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <button
+              onClick={() => {
+                setSettleData(prev => ({ ...prev, amount: balance > 0 ? balance : 0 }));
+                setShowSettlePayment(true);
+              }}
+              className="flex items-center justify-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <DollarSign size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Settle</p>
+                <p className="text-sm font-bold">Payment</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                setTransferData(prev => ({ ...prev, amount: balance > 0 ? balance : 0 }));
+                setShowTransferBalance(true);
+              }}
+              className="flex items-center justify-center gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-500 hover:bg-blue-500 hover:text-white transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <ArrowRightLeft size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Transfer</p>
+                <p className="text-sm font-bold">Balance</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowPostPostCharge(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Plus size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Post</p>
+                <p className="text-sm font-bold">Charge</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowReceipt(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Printer size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Print</p>
+                <p className="text-sm font-bold">Receipt</p>
+              </div>
+            </button>
+          </div>
+
           {/* Account Info */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
@@ -358,6 +556,224 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             Close Folio
           </button>
         </div>
+
+        {/* Transfer Balance Modal */}
+        {showTransferBalance && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-zinc-50">Transfer Balance</h3>
+                <button onClick={() => setShowTransferBalance(false)} className="text-zinc-500 hover:text-zinc-50">
+                  <XCircle size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleTransferBalance} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Target Corporate Account</label>
+                  <select 
+                    required
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={transferData.targetId}
+                    onChange={(e) => setTransferData({ ...transferData, targetId: e.target.value })}
+                  >
+                    <option value="">Select Account</option>
+                    {corporateAccounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>{acc.name} (Bal: {formatCurrency(acc.currentBalance || 0, currency, exchangeRate)})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Amount to Transfer</label>
+                  <input 
+                    required
+                    type="number" 
+                    step="0.01"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={transferData.amount || ''}
+                    onChange={(e) => setTransferData({ ...transferData, amount: Number(e.target.value) })}
+                  />
+                  <p className="text-[10px] text-zinc-500 mt-1">Current Balance: {formatCurrency(balance, currency, exchangeRate)}</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
+                  <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
+                    placeholder="Reason for transfer..."
+                    value={transferData.notes}
+                    onChange={(e) => setTransferData({ ...transferData, notes: e.target.value })}
+                  />
+                </div>
+
+                <div className="pt-4 flex gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => setShowTransferBalance(false)}
+                    className="flex-1 py-3 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={isSaving || !transferData.targetId || transferData.amount <= 0}
+                    className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-400 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isSaving ? 'Processing...' : 'Transfer Now'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Settle Payment Modal */}
+        <AnimatePresence>
+          {showSettlePayment && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+              >
+                <div className="p-6 border-b border-zinc-800">
+                  <h2 className="text-xl font-bold text-white">Settle Corporate Payment</h2>
+                  <p className="text-sm text-zinc-500">Post a credit to settle the outstanding balance</p>
+                </div>
+                <form onSubmit={handleSettlePayment}>
+                  <div className="p-6 space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                      <input
+                        required
+                        type="number"
+                        min="1"
+                        value={settleData.amount}
+                        onChange={(e) => setSettleData({ ...settleData, amount: Number(e.target.value) })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
+                      <select
+                        value={settleData.method}
+                        onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="transfer">Bank Transfer</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
+                      <textarea
+                        value={settleData.notes}
+                        onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                        placeholder="e.g. Monthly settlement, Check #1234..."
+                      />
+                    </div>
+                  </div>
+                  <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowSettlePayment(false)}
+                      className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="flex-1 px-4 py-2 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isSaving ? 'Processing...' : 'Settle Payment'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+
+          {showPostCharge && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+              >
+                <div className="p-6 border-b border-zinc-800">
+                  <h2 className="text-xl font-bold text-white">Post Corporate Charge</h2>
+                  <p className="text-sm text-zinc-500">Add a debit entry to the corporate account</p>
+                </div>
+                <form onSubmit={handlePostCharge}>
+                  <div className="p-6 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
+                        <select
+                          value={chargeData.category}
+                          onChange={(e) => setChargeData({ ...chargeData, category: e.target.value })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        >
+                          <option value="room">Room</option>
+                          <option value="f&b">F&B</option>
+                          <option value="laundry">Laundry</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          value={chargeData.amount}
+                          onChange={(e) => setChargeData({ ...chargeData, amount: Number(e.target.value) })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Description</label>
+                      <textarea
+                        required
+                        value={chargeData.description}
+                        onChange={(e) => setChargeData({ ...chargeData, description: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                        placeholder="e.g. Conference room rental, Extra service fee..."
+                      />
+                    </div>
+                  </div>
+                  <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowPostPostCharge(false)}
+                      className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="flex-1 px-4 py-2 bg-amber-500 text-black rounded-xl font-bold hover:bg-amber-400 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isSaving ? 'Posting...' : 'Post Charge'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );

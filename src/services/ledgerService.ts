@@ -45,6 +45,28 @@ export const postToLedger = async (
       currentBalance: increment(balanceAdjustment),
       totalDebits: increment(entry.type === 'debit' ? entry.amount : 0)
     });
+
+    // If it's a debit (charge) for a corporate guest, we automatically "pay" the guest folio
+    // from the corporate account so the guest sees a 0 balance.
+    if (entry.type === 'debit') {
+      const coverageEntry: LedgerEntry = {
+        id: Math.random().toString(36).substr(2, 9) + '_cov',
+        timestamp,
+        hotelId,
+        guestId,
+        reservationId,
+        corporateId,
+        type: 'credit',
+        amount: entry.amount,
+        description: `Corporate Coverage: ${entry.description}`,
+        category: 'corporate',
+        postedBy
+      };
+      resUpdates.ledgerEntries = arrayUnion(ledgerEntry, coverageEntry);
+      resUpdates.paidAmount = increment(entry.amount);
+      // We don't update paymentStatus here as it's handled below if needed, 
+      // but actually we should update it to 'paid' if it's fully covered.
+    }
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
     accountUpdatePromise = updateDoc(guestRef, {
@@ -55,12 +77,12 @@ export const postToLedger = async (
 
   // 4. Handle Payment Synchronization and Finance Record
   let financeUpdatePromise;
-  if (entry.category === 'payment' || entry.category === 'refund') {
+  if (entry.category === 'payment' || entry.category === 'refund' || (corporateId && entry.type === 'debit')) {
     // We still need the current paidAmount to calculate the new status correctly
     const resSnap = await getDoc(resRef);
     if (resSnap.exists()) {
       const resData = resSnap.data() as Reservation;
-      const paymentAdjustment = entry.type === 'credit' ? entry.amount : -entry.amount;
+      const paymentAdjustment = entry.type === 'credit' ? entry.amount : (corporateId ? entry.amount : -entry.amount);
       const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + paymentAdjustment);
       
       // Correct payment status logic
@@ -81,18 +103,20 @@ export const postToLedger = async (
       resUpdates.paymentStatus = newPaymentStatus;
     }
 
-    const financeRef = collection(db, 'hotels', hotelId, 'finance');
-    const financeRecord: Omit<FinanceRecord, 'id'> = {
-      type: entry.type === 'credit' ? 'income' : 'expense',
-      amount: entry.amount,
-      category: entry.category === 'payment' ? 'Room Revenue' : 'Other',
-      description: entry.description,
-      timestamp,
-      paymentMethod,
-      guestId,
-      referenceId: ledgerEntry.id // Use the generated ID for consistency
-    };
-    financeUpdatePromise = addDoc(financeRef, financeRecord);
+    if (entry.category === 'payment' || entry.category === 'refund') {
+      const financeRef = collection(db, 'hotels', hotelId, 'finance');
+      const financeRecord: Omit<FinanceRecord, 'id'> = {
+        type: entry.type === 'credit' ? 'income' : 'expense',
+        amount: entry.amount,
+        category: entry.category === 'payment' ? 'Room Revenue' : 'Other',
+        description: entry.description,
+        timestamp,
+        paymentMethod,
+        guestId,
+        referenceId: ledgerEntry.id // Use the generated ID for consistency
+      };
+      financeUpdatePromise = addDoc(financeRef, financeRecord);
+    }
   }
 
   // 5. Execute all updates in parallel
@@ -306,4 +330,51 @@ export const transferToCityLedger = async (
     referenceId: reservationId,
     postedBy
   });
+};
+
+export const transferCorporateBalance = async (
+  hotelId: string,
+  fromCorporateId: string,
+  toCorporateId: string,
+  amount: number,
+  postedBy: string,
+  notes?: string
+) => {
+  const timestamp = new Date().toISOString();
+  const batch = [
+    // 1. Debit from source corporate account (increases balance if it's a debt transfer, or decreases if it's a credit transfer)
+    // Actually, usually we transfer debt. So source balance decreases, target balance increases.
+    updateDoc(doc(db, 'hotels', hotelId, 'corporate_accounts', fromCorporateId), {
+      currentBalance: increment(-amount)
+    }),
+    // 2. Credit to target corporate account
+    updateDoc(doc(db, 'hotels', hotelId, 'corporate_accounts', toCorporateId), {
+      currentBalance: increment(amount)
+    }),
+    // 3. Log entries in ledger
+    addDoc(collection(db, 'hotels', hotelId, 'ledger'), {
+      hotelId,
+      corporateId: fromCorporateId,
+      reservationId: 'CORP_TRANSFER',
+      timestamp,
+      amount,
+      type: 'credit',
+      category: 'transfer',
+      description: `Transfer to Corporate Account: ${toCorporateId} ${notes ? `(${notes})` : ''}`,
+      postedBy
+    }),
+    addDoc(collection(db, 'hotels', hotelId, 'ledger'), {
+      hotelId,
+      corporateId: toCorporateId,
+      reservationId: 'CORP_TRANSFER',
+      timestamp,
+      amount,
+      type: 'debit',
+      category: 'transfer',
+      description: `Transfer from Corporate Account: ${fromCorporateId} ${notes ? `(${notes})` : ''}`,
+      postedBy
+    })
+  ];
+
+  await Promise.all(batch);
 };

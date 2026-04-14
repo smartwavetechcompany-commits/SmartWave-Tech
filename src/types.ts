@@ -72,6 +72,8 @@ export interface Hotel {
   };
   adminUIDs?: string[];
   website?: string;
+  defaultCheckInTime?: string;
+  defaultCheckOutTime?: string;
   lastAuditDate?: string; // Tracks the last time the global nightly audit was run
   planHistory?: {
     plan: PlanType;

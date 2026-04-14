@@ -20,11 +20,13 @@ import {
   XCircle,
   Printer,
   Download,
-  Trash2
+  Trash2,
+  DollarSign,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, safeStringify } from '../utils';
-import { format } from 'date-fns';
+import { format, addDays, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 
 interface GuestFolioProps {
@@ -235,7 +237,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   
   const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment');
-  const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.showOnFolio);
+  const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active');
 
   // Calculate Totals based strictly on Ledger for checked-in/out guests
   // For pending guests, we show the estimated total
@@ -330,7 +332,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
         {showReceipt && hotel && (
           <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-center justify-center p-4 overflow-y-auto">
-            <div className="relative w-full max-w-md">
+            <div className="relative w-full max-w-5xl">
               <button 
                 onClick={() => setShowReceipt(false)}
                 className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"
@@ -348,6 +350,61 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          {/* Quick Actions Bar */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <button
+              onClick={() => setShowSettlePayment(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <DollarSign size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Settle</p>
+                <p className="text-sm font-bold">Payment</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowTransferBalanceModal(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-500 hover:bg-blue-500 hover:text-white transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <RefreshCw size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Transfer</p>
+                <p className="text-sm font-bold">Balance</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onPostCharge?.()}
+              className="flex items-center justify-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Plus size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Post</p>
+                <p className="text-sm font-bold">Charge</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowReceipt(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Printer size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Print</p>
+                <p className="text-sm font-bold">Receipt</p>
+              </div>
+            </button>
+          </div>
+
           {/* Guest & Stay Info */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">

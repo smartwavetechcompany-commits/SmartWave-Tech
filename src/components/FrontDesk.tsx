@@ -98,9 +98,9 @@ export function FrontDesk() {
     address: '',
     roomId: '',
     checkIn: format(new Date(), 'yyyy-MM-dd'),
-    checkInTime: '14:00',
+    checkInTime: hotel?.defaultCheckInTime || '14:00',
     checkOut: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd'),
-    checkOutTime: '12:00',
+    checkOutTime: hotel?.defaultCheckOutTime || '12:00',
     totalAmount: 0,
     paidAmount: 0,
     paymentStatus: 'unpaid' as const,
@@ -825,12 +825,13 @@ export function FrontDesk() {
           
           for (let i = 0; i < nightsToCharge; i++) {
             const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+            const isOverstay = isAfter(chargeDate, startOfDay(new Date(res.checkOut)));
             
             await postToLedger(hotel.id, res.guestId, res.id, {
               amount: rate,
               type: 'debit',
               category: 'room',
-              description: `Nightly Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+              description: `${isOverstay ? 'Overstay' : 'Nightly'} Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
               referenceId: res.id,
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
@@ -1319,9 +1320,9 @@ export function FrontDesk() {
                 address: '',
                 roomId: '',
                 checkIn: format(new Date(), 'yyyy-MM-dd'),
-                checkInTime: '14:00',
+                checkInTime: hotel?.defaultCheckInTime || '14:00',
                 checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                checkOutTime: '12:00',
+                checkOutTime: hotel?.defaultCheckOutTime || '12:00',
                 guestType: 'corporate',
                 corporateId: '',
                 guestId: '',
@@ -1358,9 +1359,9 @@ export function FrontDesk() {
                       address: '',
                       roomId: '',
                       checkIn: format(new Date(), 'yyyy-MM-dd'),
-                      checkInTime: '14:00',
+                      checkInTime: hotel?.defaultCheckInTime || '14:00',
                       checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                      checkOutTime: '12:00',
+                      checkOutTime: hotel?.defaultCheckOutTime || '12:00',
                       guestType: 'individual',
                       corporateId: '',
                       guestId: '',

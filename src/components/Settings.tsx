@@ -30,7 +30,8 @@ import {
   Sun,
   Coins,
   Globe,
-  RefreshCw
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
@@ -52,6 +53,8 @@ export function Settings() {
     hotelName: hotel?.name || '',
     defaultCurrency: hotel?.defaultCurrency || 'NGN',
     exchangeRate: hotel?.exchangeRate || 1500,
+    defaultCheckInTime: hotel?.defaultCheckInTime || '14:00',
+    defaultCheckOutTime: hotel?.defaultCheckOutTime || '12:00',
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -85,6 +88,8 @@ export function Settings() {
         hotelName: hotel.name || prev.hotelName,
         defaultCurrency: hotel.defaultCurrency || prev.defaultCurrency,
         exchangeRate: hotel.exchangeRate || prev.exchangeRate,
+        defaultCheckInTime: hotel.defaultCheckInTime || prev.defaultCheckInTime,
+        defaultCheckOutTime: hotel.defaultCheckOutTime || prev.defaultCheckOutTime,
         branding: {
           ...prev.branding,
           logoUrl: hotel.branding?.logoUrl || prev.branding.logoUrl,
@@ -228,6 +233,8 @@ export function Settings() {
         name: formData.hotelName,
         defaultCurrency: formData.defaultCurrency,
         exchangeRate: formData.exchangeRate,
+        defaultCheckInTime: formData.defaultCheckInTime,
+        defaultCheckOutTime: formData.defaultCheckOutTime,
       }, { merge: true });
 
       // Log action
@@ -631,6 +638,33 @@ export function Settings() {
                           Fetch Rate
                         </button>
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-zinc-800 md:col-span-2">
+                  <h4 className="text-sm font-bold text-zinc-50 mb-4 flex items-center gap-2">
+                    <Clock size={18} className="text-blue-500" />
+                    Default Stay Times
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Default Check-In Time</label>
+                      <input 
+                        type="time" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                        value={formData.defaultCheckInTime}
+                        onChange={(e) => setFormData({ ...formData, defaultCheckInTime: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Default Check-Out Time</label>
+                      <input 
+                        type="time" 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                        value={formData.defaultCheckOutTime}
+                        onChange={(e) => setFormData({ ...formData, defaultCheckOutTime: e.target.value })}
+                      />
                     </div>
                   </div>
                 </div>
