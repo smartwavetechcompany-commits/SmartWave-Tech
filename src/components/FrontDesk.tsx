@@ -27,7 +27,8 @@ import {
   UserX,
   Download,
   Edit2,
-  DollarSign
+  DollarSign,
+  Loader2
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -122,6 +123,8 @@ export function FrontDesk() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures'>('all');
+  const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [editForm, setEditForm] = useState({
     checkIn: '',
@@ -181,10 +184,50 @@ export function FrontDesk() {
     }
   }, [searchParams, setSearchParams]);
 
-  const filteredReservations = reservations.filter(res => 
-    fuzzySearch(res.guestName || '', searchTerm) ||
-    fuzzySearch(res.roomNumber || '', searchTerm)
-  );
+  const filteredReservations = reservations.filter(res => {
+    const matchesSearch = fuzzySearch(res.guestName || '', searchTerm) ||
+      fuzzySearch(res.roomNumber || '', searchTerm);
+    
+    if (!matchesSearch) return false;
+
+    const today = new Date().toISOString().split('T')[0];
+    if (activeTab === 'arrivals') {
+      return res.checkIn === today && res.status === 'pending';
+    }
+    if (activeTab === 'departures') {
+      return res.checkOut === today && res.status === 'checked_in';
+    }
+    return true;
+  });
+
+  const handleBulkCheckIn = async () => {
+    if (selectedReservations.length === 0) return;
+    setLoading(true);
+    try {
+      for (const resId of selectedReservations) {
+        const res = reservations.find(r => r.id === resId);
+        if (res && res.status === 'pending') {
+          await updateDoc(doc(db, 'hotels', hotel!.id, 'reservations', resId), {
+            status: 'checked_in',
+            updatedAt: new Date().toISOString()
+          });
+          if (res.roomId) {
+            await updateDoc(doc(db, 'hotels', hotel!.id, 'rooms', res.roomId), {
+              status: 'occupied',
+              updatedAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+      toast.success(`Successfully checked in ${selectedReservations.length} guests`);
+      setSelectedReservations([]);
+    } catch (error) {
+      console.error('Bulk check-in error:', error);
+      toast.error('Failed to complete bulk check-in');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const roomStats = {
     total: rooms.length,
@@ -2342,22 +2385,69 @@ export function FrontDesk() {
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="font-bold text-zinc-50">Active Reservations</h3>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search guests or rooms..."
-              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="flex items-center gap-6">
+            <h3 className="font-bold text-zinc-50">Reservations</h3>
+            <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+              {(['all', 'arrivals', 'departures'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    setActiveTab(tab);
+                    setSelectedReservations([]);
+                  }}
+                  className={cn(
+                    "px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                    activeTab === tab 
+                      ? "bg-emerald-500 text-black" 
+                      : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            {selectedReservations.length > 0 && (
+              <button
+                onClick={handleBulkCheckIn}
+                disabled={loading}
+                className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all flex items-center gap-2"
+              >
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                Check In Selected ({selectedReservations.length})
+              </button>
+            )}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+              <input 
+                type="text" 
+                placeholder="Search guests or rooms..."
+                className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
+                <th className="px-6 py-4 w-10">
+                  <input 
+                    type="checkbox"
+                    className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                    checked={selectedReservations.length === filteredReservations.length && filteredReservations.length > 0}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedReservations(filteredReservations.map(r => r.id));
+                      } else {
+                        setSelectedReservations([]);
+                      }
+                    }}
+                  />
+                </th>
                 <th className="px-6 py-4">Guest</th>
                 <th className="px-6 py-4">Room</th>
                 <th className="px-6 py-4">Dates</th>
@@ -2368,7 +2458,24 @@ export function FrontDesk() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {filteredReservations.map(res => (
-                <tr key={res.id} className="hover:bg-zinc-800/50 transition-colors">
+                <tr key={res.id} className={cn(
+                  "hover:bg-zinc-800/50 transition-colors",
+                  selectedReservations.includes(res.id) && "bg-emerald-500/5"
+                )}>
+                  <td className="px-6 py-4">
+                    <input 
+                      type="checkbox"
+                      className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      checked={selectedReservations.includes(res.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedReservations([...selectedReservations, res.id]);
+                        } else {
+                          setSelectedReservations(selectedReservations.filter(id => id !== res.id));
+                        }
+                      }}
+                    />
+                  </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-500">

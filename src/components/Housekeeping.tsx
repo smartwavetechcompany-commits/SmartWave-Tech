@@ -30,6 +30,7 @@ export function Housekeeping() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [filter, setFilter] = useState<'all' | 'dirty' | 'clean' | 'maintenance' | 'out_of_service' | 'cleaning'>('all');
   const [roomTypeFilter, setRoomTypeFilter] = useState<string>('all');
+  const [staffFilter, setStaffFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [roomNotes, setRoomNotes] = useState<Record<string, string>>({});
@@ -209,6 +210,9 @@ export function Housekeeping() {
     // Room Type Filter
     if (roomTypeFilter !== 'all' && r.type !== roomTypeFilter) return false;
 
+    // Staff Filter
+    if (staffFilter !== 'all' && r.assignedTo !== staffFilter) return false;
+
     // Search Query (Number, Status, Notes)
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -305,6 +309,18 @@ export function Housekeeping() {
             <option value="all">All Room Types</option>
             {roomTypes.map(type => (
               <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+
+          <select 
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+            value={staffFilter}
+            onChange={(e) => setStaffFilter(e.target.value)}
+          >
+            <option value="all">All Staff</option>
+            <option value="">Unassigned</option>
+            {staff.map(s => (
+              <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
             ))}
           </select>
 
