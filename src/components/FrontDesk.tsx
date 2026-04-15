@@ -123,7 +123,13 @@ export function FrontDesk() {
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures'>('all');
+  const [statusFilter, setStatusFilter] = useState<Reservation['status'] | 'all'>('all');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all');
+  const [roomTypeFilter, setRoomTypeFilter] = useState<string>('all');
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [staffFilter, setStaffFilter] = useState('all');
+  const [staffMembers, setStaffMembers] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures' | 'checked_in' | 'overstay'>('all');
   const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [editForm, setEditForm] = useState({
@@ -186,9 +192,29 @@ export function FrontDesk() {
 
   const filteredReservations = reservations.filter(res => {
     const matchesSearch = fuzzySearch(res.guestName || '', searchTerm) ||
-      fuzzySearch(res.roomNumber || '', searchTerm);
+      fuzzySearch(res.roomNumber || '', searchTerm) ||
+      fuzzySearch(res.id || '', searchTerm);
     
     if (!matchesSearch) return false;
+
+    const matchesStatus = statusFilter === 'all' || res.status === statusFilter;
+    if (!matchesStatus) return false;
+
+    const matchesPaymentStatus = paymentStatusFilter === 'all' || res.paymentStatus === paymentStatusFilter;
+    if (!matchesPaymentStatus) return false;
+
+    const matchesRoomType = roomTypeFilter === 'all' || rooms.find(r => r.id === res.roomId)?.type === roomTypeFilter;
+    if (!matchesRoomType) return false;
+
+    const matchesStaff = staffFilter === 'all' || res.bookedBy === staffFilter;
+    if (!matchesStaff) return false;
+
+    if (dateRange.start) {
+      if (new Date(res.checkIn) < new Date(dateRange.start)) return false;
+    }
+    if (dateRange.end) {
+      if (new Date(res.checkIn) > new Date(dateRange.end)) return false;
+    }
 
     const today = new Date().toISOString().split('T')[0];
     if (activeTab === 'arrivals') {
@@ -197,37 +223,14 @@ export function FrontDesk() {
     if (activeTab === 'departures') {
       return res.checkOut === today && res.status === 'checked_in';
     }
+    if (activeTab === 'checked_in') {
+      return res.status === 'checked_in';
+    }
+    if (activeTab === 'overstay') {
+      return res.status === 'checked_in' && res.checkOut < today;
+    }
     return true;
   });
-
-  const handleBulkCheckIn = async () => {
-    if (selectedReservations.length === 0) return;
-    setLoading(true);
-    try {
-      for (const resId of selectedReservations) {
-        const res = reservations.find(r => r.id === resId);
-        if (res && res.status === 'pending') {
-          await updateDoc(doc(db, 'hotels', hotel!.id, 'reservations', resId), {
-            status: 'checked_in',
-            updatedAt: new Date().toISOString()
-          });
-          if (res.roomId) {
-            await updateDoc(doc(db, 'hotels', hotel!.id, 'rooms', res.roomId), {
-              status: 'occupied',
-              updatedAt: new Date().toISOString()
-            });
-          }
-        }
-      }
-      toast.success(`Successfully checked in ${selectedReservations.length} guests`);
-      setSelectedReservations([]);
-    } catch (error) {
-      console.error('Bulk check-in error:', error);
-      toast.error('Failed to complete bulk check-in');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const roomStats = {
     total: rooms.length,
@@ -274,12 +277,17 @@ export function FrontDesk() {
       setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
     });
 
+    const unsubStaff = onSnapshot(collection(db, 'hotels', hotel.id, 'staff'), (snap) => {
+      setStaffMembers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubRes();
       unsubRooms();
       unsubTypes();
       unsubGuests();
       unsubCorp();
+      unsubStaff();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -410,7 +418,7 @@ export function FrontDesk() {
   }, [profile?.uid, hotel?.id]);
 
   const handleBooking = async () => {
-    if (!hotel?.id || loading) return;
+    if (!hotel?.id || !profile || loading) return;
     
     const allStays = [
       {
@@ -517,6 +525,7 @@ export function FrontDesk() {
           ledgerEntries: [],
           nightlyRate: pricePerNight,
           autoNightDeduction: newBooking.autoNightDeduction,
+          bookedBy: profile.uid,
           createdAt: new Date().toISOString(),
         };
 
@@ -704,6 +713,56 @@ export function FrontDesk() {
     }
   };
 
+  const handleBulkCheckIn = async () => {
+    if (!hotel?.id || !profile || selectedReservations.length === 0) return;
+    
+    const confirm = window.confirm(`Are you sure you want to check in ${selectedReservations.length} guests?`);
+    if (!confirm) return;
+
+    try {
+      setLoading(true);
+      const batch = writeBatch(db);
+      
+      for (const resId of selectedReservations) {
+        const res = reservations.find(r => r.id === resId);
+        if (res && (res.status === 'pending' || res.status === 'confirmed')) {
+          batch.update(doc(db, 'hotels', hotel.id, 'reservations', resId), {
+            status: 'checked_in',
+            checkInTime: new Date().toISOString()
+          });
+
+          // Update room status
+          if (res.roomId) {
+            batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
+              status: 'occupied'
+            });
+          }
+
+          // Log action
+          batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
+            timestamp: new Date().toISOString(),
+            userId: profile.uid,
+            userEmail: profile.email,
+            userRole: profile.role,
+            action: 'BULK_CHECK_IN',
+            resource: `Reservation: ${res.guestName}`,
+            hotelId: hotel.id,
+            module: 'Front Desk'
+          });
+        }
+      }
+
+      await batch.commit();
+      toast.success(`Successfully checked in ${selectedReservations.length} guests`);
+      setSelectedReservations([]);
+    } catch (err: any) {
+      console.error("Bulk check-in error:", err.message || safeStringify(err));
+      toast.error('Failed to perform bulk check-in');
+    } finally {
+      setLoading(true); // Wait, should be false
+      setLoading(false);
+    }
+  };
   const handleConfirmAction = async () => {
     if (!showConfirmAction || !hotel?.id) return;
     const { res, action } = showConfirmAction;
@@ -2383,12 +2442,40 @@ export function FrontDesk() {
         })}
       </div>
 
+      {/* Room Status Legend */}
+      <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-zinc-900 border border-zinc-800 rounded-2xl mb-8">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Clean / Vacant</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Occupied</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maintenance</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Dirty</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.3)]" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vacant (Unready)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-zinc-800" />
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Out of Service</span>
+        </div>
+      </div>
+
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <h3 className="font-bold text-zinc-50">Reservations</h3>
             <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-              {(['all', 'arrivals', 'departures'] as const).map((tab) => (
+              {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => {
@@ -2402,7 +2489,7 @@ export function FrontDesk() {
                       : "text-zinc-500 hover:text-zinc-300"
                   )}
                 >
-                  {tab}
+                  {tab === 'checked_in' ? 'In-House' : tab}
                 </button>
               ))}
             </div>
@@ -2418,15 +2505,91 @@ export function FrontDesk() {
                 Check In Selected ({selectedReservations.length})
               </button>
             )}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search guests or rooms..."
-                className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                <input 
+                  type="text" 
+                  placeholder="Search guests or rooms..."
+                  className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="checked_in">Checked In</option>
+                <option value="checked_out">Checked Out</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="no_show">No Show</option>
+              </select>
+
+              <select
+                value={paymentStatusFilter}
+                onChange={(e) => setPaymentStatusFilter(e.target.value)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">All Payments</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="partial">Partial</option>
+                <option value="paid">Paid</option>
+              </select>
+
+              <select
+                value={roomTypeFilter}
+                onChange={(e) => setRoomTypeFilter(e.target.value)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">All Room Types</option>
+                {roomTypes.map(t => (
+                  <option key={t.id} value={t.name}>{t.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={staffFilter}
+                onChange={(e) => setStaffFilter(e.target.value)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">All Staff</option>
+                {staffMembers.map(staff => (
+                  <option key={staff.id} value={staff.id}>{staff.name}</option>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
+                <Calendar size={14} className="text-zinc-500" />
+                <input 
+                  type="date"
+                  className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+                  value={dateRange.start}
+                  onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                />
+                <span className="text-zinc-500 text-[10px]">-</span>
+                <input 
+                  type="date"
+                  className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+                  value={dateRange.end}
+                  onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                />
+              </div>
+
+              {selectedReservations.length > 0 && activeTab === 'arrivals' && (
+                <button
+                  onClick={handleBulkCheckIn}
+                  disabled={loading}
+                  className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={14} />
+                  Check In ({selectedReservations.length})
+                </button>
+              )}
             </div>
           </div>
         </div>

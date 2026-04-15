@@ -23,111 +23,178 @@ export const postToLedger = async (
     postedBy
   };
 
-  // 1. Prepare Reservation updates
+  // 1. Prepare entries list
+  const entries: LedgerEntry[] = [ledgerEntry];
+
+  // 2. Automatically post taxes if it's a room charge
+  if (entry.category === 'room' && entry.type === 'debit') {
+    const hotelSnap = await getDoc(doc(db, 'hotels', hotelId));
+    if (hotelSnap.exists()) {
+      const hotelData = hotelSnap.data();
+      const activeTaxes = (hotelData.taxes || []).filter((t: any) => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+      
+      for (const tax of activeTaxes) {
+        if (!tax.isInclusive) {
+          const taxAmount = entry.amount * (tax.percentage / 100);
+          const taxEntry: LedgerEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp,
+            hotelId,
+            guestId,
+            reservationId,
+            corporateId,
+            type: 'debit',
+            amount: taxAmount,
+            description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
+            category: 'tax',
+            postedBy
+          };
+          entries.push(taxEntry);
+          
+          if (corporateId) {
+            const taxCoverageEntry: LedgerEntry = {
+              id: Math.random().toString(36).substr(2, 9) + '_tax_cov',
+              timestamp,
+              hotelId,
+              guestId,
+              reservationId,
+              corporateId,
+              type: 'credit',
+              amount: taxAmount,
+              description: `Corporate Coverage: ${tax.name}`,
+              category: 'corporate',
+              postedBy
+            };
+            entries.push(taxCoverageEntry);
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Handle Corporate Coverage for the main entry
+  if (corporateId && entry.type === 'debit') {
+    const coverageEntry: LedgerEntry = {
+      id: Math.random().toString(36).substr(2, 9) + '_cov',
+      timestamp,
+      hotelId,
+      guestId,
+      reservationId,
+      corporateId,
+      type: 'credit',
+      amount: entry.amount,
+      description: `Corporate Coverage: ${entry.description}`,
+      category: 'corporate',
+      postedBy
+    };
+    entries.push(coverageEntry);
+  }
+
+  // 4. Prepare Reservation updates
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
   const resUpdates: any = {
-    ledgerEntries: arrayUnion(ledgerEntry)
+    ledgerEntries: arrayUnion(...entries)
   };
 
-  // 2. Add to Ledger Collection
+  // 5. Add all entries to Ledger Collection
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-  const ledgerDocPromise = addDoc(ledgerRef, ledgerEntry);
+  const ledgerDocPromises = entries.map(e => addDoc(ledgerRef, e));
 
-  // 3. Prepare Guest or Corporate Account updates
+  // 6. Prepare Guest or Corporate Account updates
   let accountUpdatePromise;
-  // Debit (charge) increases what the guest owes. Credit (payment) decreases it.
-  // We'll treat ledgerBalance as "Amount Owed" (positive = owes money, negative = credit).
-  const balanceAdjustment = entry.type === 'debit' ? entry.amount : -entry.amount;
+  // Calculate total balance adjustment for this operation
+  const totalBalanceAdjustment = entries.reduce((acc, e) => {
+    return acc + (e.type === 'debit' ? e.amount : -e.amount);
+  }, 0);
 
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
+    // For corporate accounts, we track the net balance of charges and payments
     accountUpdatePromise = updateDoc(corpRef, {
-      currentBalance: increment(balanceAdjustment),
-      totalDebits: increment(entry.type === 'debit' ? entry.amount : 0)
+      currentBalance: increment(totalBalanceAdjustment),
+      totalDebits: increment(entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
+      totalCredits: increment(entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
     });
-
-    // If it's a debit (charge) for a corporate guest, we automatically "pay" the guest folio
-    // from the corporate account so the guest sees a 0 balance.
-    if (entry.type === 'debit') {
-      const coverageEntry: LedgerEntry = {
-        id: Math.random().toString(36).substr(2, 9) + '_cov',
-        timestamp,
-        hotelId,
-        guestId,
-        reservationId,
-        corporateId,
-        type: 'credit',
-        amount: entry.amount,
-        description: `Corporate Coverage: ${entry.description}`,
-        category: 'corporate',
-        postedBy
-      };
-      resUpdates.ledgerEntries = arrayUnion(ledgerEntry, coverageEntry);
-      resUpdates.paidAmount = increment(entry.amount);
-      // We don't update paymentStatus here as it's handled below if needed, 
-      // but actually we should update it to 'paid' if it's fully covered.
-    }
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
     accountUpdatePromise = updateDoc(guestRef, {
-      ledgerBalance: increment(balanceAdjustment),
-      totalSpent: increment(entry.type === 'debit' ? entry.amount : 0)
+      ledgerBalance: increment(totalBalanceAdjustment),
+      // Total spent should ONLY reflect actual guest payments (category 'payment')
+      totalSpent: increment(entries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0))
     });
   }
 
-  // 4. Handle Payment Synchronization and Finance Record
+  // 7. Handle Payment Synchronization and Finance Record
   let financeUpdatePromise;
-  if (entry.category === 'payment' || entry.category === 'refund' || (corporateId && entry.type === 'debit')) {
-    // We still need the current paidAmount to calculate the new status correctly
+  const isPaymentOrRefund = entries.some(e => e.category === 'payment' || e.category === 'refund');
+  const hasCorporateDebit = corporateId && entry.type === 'debit';
+
+  if (isPaymentOrRefund || hasCorporateDebit) {
     const resSnap = await getDoc(resRef);
     if (resSnap.exists()) {
       const resData = resSnap.data() as Reservation;
-      const paymentAdjustment = entry.type === 'credit' ? entry.amount : (corporateId ? entry.amount : -entry.amount);
-      const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + paymentAdjustment);
       
+      // paidAmount should ONLY reflect actual guest payments (category 'payment')
+      const guestPaymentAmount = entries
+        .filter(e => e.category === 'payment' && e.type === 'credit')
+        .reduce((acc, e) => acc + e.amount, 0);
+      
+      const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + guestPaymentAmount);
+      
+      // totalCoverage includes Guest Payments AND Corporate Coverage
+      const totalCoverage = (resData.ledgerEntries || [])
+        .filter(e => e.type === 'credit')
+        .reduce((acc, e) => acc + e.amount, 0) + 
+        entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+
       // Correct payment status logic
       let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
       const totalToPay = resData.totalAmount || 0;
       
       if (totalToPay > 0) {
-        if (newPaidAmount >= totalToPay) {
+        if (totalCoverage >= totalToPay) {
           newPaymentStatus = 'paid';
-        } else if (newPaidAmount > 0) {
+        } else if (totalCoverage > 0) {
           newPaymentStatus = 'partial';
         }
-      } else if (newPaidAmount > 0) {
-        newPaymentStatus = 'paid'; // If total is 0 but they paid something, it's paid
+      } else if (totalCoverage > 0) {
+        newPaymentStatus = 'paid';
       }
       
       resUpdates.paidAmount = newPaidAmount;
       resUpdates.paymentStatus = newPaymentStatus;
     }
 
-    if (entry.category === 'payment' || entry.category === 'refund') {
+    // Finance records for actual payments/refunds
+    const payments = entries.filter(e => e.category === 'payment' || e.category === 'refund');
+    if (payments.length > 0) {
       const financeRef = collection(db, 'hotels', hotelId, 'finance');
-      const financeRecord: Omit<FinanceRecord, 'id'> = {
-        type: entry.type === 'credit' ? 'income' : 'expense',
-        amount: entry.amount,
-        category: entry.category === 'payment' ? 'Room Revenue' : 'Other',
-        description: entry.description,
-        timestamp,
-        paymentMethod,
-        guestId,
-        referenceId: ledgerEntry.id // Use the generated ID for consistency
-      };
-      financeUpdatePromise = addDoc(financeRef, financeRecord);
+      const financePromises = payments.map(p => {
+        const financeRecord: Omit<FinanceRecord, 'id'> = {
+          type: p.type === 'credit' ? 'income' : 'expense',
+          amount: p.amount,
+          category: p.category === 'payment' ? 'Room Revenue' : 'Other',
+          description: p.description,
+          timestamp,
+          paymentMethod,
+          guestId,
+          referenceId: p.id
+        };
+        return addDoc(financeRef, financeRecord);
+      });
+      financeUpdatePromise = Promise.all(financePromises);
     }
   }
 
-  // 5. Execute all updates in parallel
-  const [ledgerDoc] = await Promise.all([
-    ledgerDocPromise,
+  // 8. Execute all updates in parallel
+  const results = await Promise.all([
+    ...ledgerDocPromises,
     updateDoc(resRef, resUpdates),
     accountUpdatePromise,
     financeUpdatePromise
   ].filter(p => p !== undefined));
 
-  return { ...ledgerEntry, firestoreId: ledgerDoc?.id };
+  return { ...ledgerEntry, firestoreId: results[0]?.id };
 };
 
 export const deleteLedgerEntry = async (
@@ -345,11 +412,13 @@ export const transferCorporateBalance = async (
     // 1. Debit from source corporate account (increases balance if it's a debt transfer, or decreases if it's a credit transfer)
     // Actually, usually we transfer debt. So source balance decreases, target balance increases.
     updateDoc(doc(db, 'hotels', hotelId, 'corporate_accounts', fromCorporateId), {
-      currentBalance: increment(-amount)
+      currentBalance: increment(-amount),
+      totalCredits: increment(amount)
     }),
     // 2. Credit to target corporate account
     updateDoc(doc(db, 'hotels', hotelId, 'corporate_accounts', toCorporateId), {
-      currentBalance: increment(amount)
+      currentBalance: increment(amount),
+      totalDebits: increment(amount)
     }),
     // 3. Log entries in ledger
     addDoc(collection(db, 'hotels', hotelId, 'ledger'), {

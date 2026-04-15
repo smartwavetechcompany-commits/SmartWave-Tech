@@ -114,7 +114,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
 
       // 1. Update account balance
       await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
-        currentBalance: increment(-settleData.amount)
+        currentBalance: increment(-settleData.amount),
+        totalCredits: increment(settleData.amount)
       });
 
       // 2. Add to Ledger
@@ -163,7 +164,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
 
       // 1. Update account balance
       await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
-        currentBalance: increment(chargeData.amount)
+        currentBalance: increment(chargeData.amount),
+        totalDebits: increment(chargeData.amount)
       });
 
       // 2. Add to Ledger

@@ -55,6 +55,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [isDeleting, setIsDeleting] = useState(false);
   const [showSettleOverpayment, setShowSettleOverpayment] = useState(false);
   const [showSettlePayment, setShowSettlePayment] = useState(false);
+  const [showPostChargeModal, setShowPostChargeModal] = useState(false);
+  const [chargeDetails, setChargeDetails] = useState({
+    amount: 0,
+    category: 'restaurant' as 'restaurant' | 'service' | 'other',
+    description: '',
+    discount: 0,
+    discountType: 'fixed' as 'fixed' | 'percentage'
+  });
   const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer', notes: '' });
   const [isSaving, setIsSaving] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -216,6 +224,36 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   };
 
+  const handlePostCharge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !currentReservation.guestId) return;
+
+    try {
+      setIsSaving(true);
+      const amountAfterDiscount = chargeDetails.discountType === 'fixed' 
+        ? chargeDetails.amount - chargeDetails.discount
+        : chargeDetails.amount * (1 - chargeDetails.discount / 100);
+
+      await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
+        amount: amountAfterDiscount,
+        type: 'debit',
+        category: chargeDetails.category,
+        description: chargeDetails.description || `Charge: ${chargeDetails.category}`,
+        referenceId: currentReservation.id,
+        postedBy: profile.uid
+      }, profile.uid, currentReservation.corporateId);
+
+      toast.success('Charge posted successfully');
+      setShowPostChargeModal(false);
+      setChargeDetails({ amount: 0, category: 'restaurant', description: '', discount: 0, discountType: 'fixed' });
+    } catch (err: any) {
+      console.error("Post charge error:", err.message || safeStringify(err));
+      toast.error('Failed to post charge');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!hotel?.id || !reservation.id || !reservation.guestId) return;
 
@@ -308,7 +346,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
   const totalPayments = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
-  const totalOtherCredits = totalCredits - totalPayments;
+  const totalCorporateCoverage = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'corporate').reduce((acc, e) => acc + e.amount, 0);
+  const totalOtherCredits = totalCredits - totalPayments - totalCorporateCoverage;
   
   const totalTaxDebits = ledgerEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalNonTaxDebits = totalDebits - totalTaxDebits;
@@ -355,11 +394,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const otherTaxAmount = isStated ? Math.max(0, totalTaxDebits - matchedTaxTotal) : 0;
   if (otherTaxAmount > 0.01) {
     taxTotal += otherTaxAmount;
-    // We'll handle rendering this below
   }
 
   const grandTotal = subtotal + taxTotal;
-  const totalPaid = isStated ? totalCredits : (hasPaymentInLedger ? totalCredits : (currentReservation.paidAmount || 0));
+  // Total Paid should be ALL credits in the ledger
+  const totalPaid = totalCredits;
   const balance = grandTotal - totalPaid;
 
   const handleDeleteEntry = async () => {
@@ -476,7 +515,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
 
             <button
-              onClick={() => onPostCharge?.()}
+              onClick={() => setShowPostChargeModal(true)}
               className="flex items-center justify-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
             >
               <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
@@ -614,9 +653,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <span className="text-zinc-50 font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Payments Received</span>
-                  <span className="text-emerald-500 font-bold">{formatCurrency(hasPaymentInLedger ? totalPayments : (currentReservation.paidAmount || 0), currency, exchangeRate)}</span>
+                  <span className="text-zinc-500">Guest Payments</span>
+                  <span className="text-emerald-500 font-bold">{formatCurrency(totalPayments, currency, exchangeRate)}</span>
                 </div>
+                {totalCorporateCoverage > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-500">Corporate Coverage</span>
+                    <span className="text-emerald-500 font-bold">{formatCurrency(totalCorporateCoverage, currency, exchangeRate)}</span>
+                  </div>
+                )}
                 {totalOtherCredits > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-zinc-500">Discounts & Transfers</span>
@@ -793,6 +838,106 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
           )}
 
+          {showPostChargeModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+              >
+                <div className="p-6 border-b border-zinc-800">
+                  <h2 className="text-xl font-bold text-zinc-50">Post Charge</h2>
+                  <p className="text-sm text-zinc-500 mt-1">Post a new charge for {currentReservation.guestName}</p>
+                </div>
+                <form onSubmit={handlePostCharge}>
+                  <div className="p-6 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
+                        <select
+                          value={chargeDetails.category}
+                          onChange={(e) => setChargeDetails({ ...chargeDetails, category: e.target.value as any })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                        >
+                          <option value="restaurant">Restaurant</option>
+                          <option value="service">Room Service</option>
+                          <option value="laundry">Laundry</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                        <input
+                          required
+                          type="number"
+                          value={currency === 'USD' ? (chargeDetails.amount / exchangeRate) || '' : chargeDetails.amount || ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setChargeDetails({ ...chargeDetails, amount: currency === 'USD' ? val * exchangeRate : val });
+                          }}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                          step="0.01"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Description</label>
+                      <input
+                        required
+                        type="text"
+                        value={chargeDetails.description}
+                        onChange={(e) => setChargeDetails({ ...chargeDetails, description: e.target.value })}
+                        placeholder="e.g. Dinner at Rooftop, Laundry service..."
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Discount Type</label>
+                        <select
+                          value={chargeDetails.discountType}
+                          onChange={(e) => setChargeDetails({ ...chargeDetails, discountType: e.target.value as any })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                        >
+                          <option value="fixed">Fixed Amount</option>
+                          <option value="percentage">Percentage (%)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Discount</label>
+                        <input
+                          type="number"
+                          value={chargeDetails.discount || ''}
+                          onChange={(e) => setChargeDetails({ ...chargeDetails, discount: parseFloat(e.target.value) || 0 })}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                          step="0.01"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowPostChargeModal(false)}
+                      className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!chargeDetails.amount || isSaving}
+                      className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isSaving ? 'Posting...' : 'Post Charge'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+
           {showSettlePayment && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
               <motion.div
@@ -883,7 +1028,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 )}
                 {onPostCharge && currentReservation.status === 'checked_in' && (
                   <button 
-                    onClick={onPostCharge}
+                    onClick={() => setShowPostChargeModal(true)}
                     className="flex items-center gap-2 text-xs font-bold text-emerald-500 hover:text-emerald-400 transition-colors"
                   >
                     <Plus size={14} />

@@ -54,7 +54,10 @@ export function Finance() {
   const [showAddPOModal, setShowAddPOModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
-  const [timeRange, setTimeRange] = useState<'today' | 'month' | 'all'>('month');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [methodFilter, setMethodFilter] = useState('all');
+  const [timeRange, setTimeRange] = useState<'today' | 'month' | 'all' | 'custom'>('month');
+  const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [newRecord, setNewRecord] = useState({
     description: '',
     amount: 0,
@@ -110,6 +113,12 @@ export function Finance() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const categories = {
+    income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
+    expense: ['Salaries', 'Maintenance', 'Utilities', 'Supplies', 'Marketing', 'Taxes', 'Other']
+  };
+
   const [showSettleModal, setShowSettleModal] = useState<Guest | CorporateAccount | null>(null);
   const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as const, notes: '' });
   const [showFolio, setShowFolio] = useState(false);
@@ -645,6 +654,8 @@ export function Finance() {
     const matchesSearch = fuzzySearch(r.description || '', searchQuery) || 
                          fuzzySearch(r.category || '', searchQuery);
     const matchesType = filterType === 'all' || r.type === filterType;
+    const matchesCategory = categoryFilter === 'all' || r.category === categoryFilter;
+    const matchesMethod = methodFilter === 'all' || r.paymentMethod === methodFilter;
     
     let matchesTime = true;
     if (timeRange === 'today') matchesTime = isToday(new Date(r.timestamp));
@@ -653,8 +664,13 @@ export function Finance() {
       const end = endOfMonth(new Date());
       matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
     }
+    if (timeRange === 'custom' && customDateRange.start && customDateRange.end) {
+      const start = startOfDay(new Date(customDateRange.start));
+      const end = endOfDay(new Date(customDateRange.end));
+      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
+    }
 
-    return matchesSearch && matchesType && matchesTime;
+    return matchesSearch && matchesType && matchesCategory && matchesMethod && matchesTime;
   });
 
   const totalIncome = filteredRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
@@ -667,11 +683,6 @@ export function Finance() {
     { label: 'Total Expenses', value: formatCurrency(totalExpense, currency, exchangeRate), icon: TrendingDown, color: 'text-red-500', bg: 'bg-red-500/5' },
     { label: "Transactions", value: filteredRecords.length, icon: BarChart3, color: 'text-amber-500', bg: 'bg-amber-500/5' },
   ];
-
-  const categories = {
-    income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
-    expense: ['Salaries', 'Maintenance', 'Utilities', 'Supplies', 'Marketing', 'Taxes', 'Other']
-  };
 
   const chartData = [
     { name: 'Income', value: totalIncome, color: '#10b981' },
@@ -849,33 +860,97 @@ export function Finance() {
 
           {activeTab === 'transactions' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-              <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <h3 className="font-bold text-zinc-50">Transaction History</h3>
-                  <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-                    {(['all', 'income', 'expense'] as const).map((type) => (
-                      <button
-                        key={type}
-                        onClick={() => setFilterType(type)}
-                        className={cn(
-                          "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
-                          filterType === type ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
-                        )}
-                      >
-                        {type}
-                      </button>
-                    ))}
+              <div className="p-6 border-b border-zinc-800 flex flex-col gap-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <h3 className="font-bold text-zinc-50">Transaction History</h3>
+                    <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                      {(['all', 'income', 'expense'] as const).map((type) => (
+                        <button
+                          key={type}
+                          onClick={() => setFilterType(type)}
+                          className={cn(
+                            "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
+                            filterType === type ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="relative w-full md:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                    <input
+                      type="text"
+                      placeholder="Search transactions..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    />
                   </div>
                 </div>
-                <div className="relative w-full md:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-                  <input
-                    type="text"
-                    placeholder="Search transactions..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                  />
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+                    <Filter size={14} className="text-zinc-500" />
+                    <select
+                      value={categoryFilter}
+                      onChange={(e) => setCategoryFilter(e.target.value)}
+                      className="bg-transparent text-xs text-zinc-400 focus:outline-none"
+                    >
+                      <option value="all">All Categories</option>
+                      {[...categories.income, ...categories.expense].map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+                    <CreditCard size={14} className="text-zinc-500" />
+                    <select
+                      value={methodFilter}
+                      onChange={(e) => setMethodFilter(e.target.value)}
+                      className="bg-transparent text-xs text-zinc-400 focus:outline-none"
+                    >
+                      <option value="all">All Methods</option>
+                      <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="transfer">Bank Transfer</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+                    <Calendar size={14} className="text-zinc-500" />
+                    <select
+                      value={timeRange}
+                      onChange={(e) => setTimeRange(e.target.value as any)}
+                      className="bg-transparent text-xs text-zinc-400 focus:outline-none"
+                    >
+                      <option value="today">Today</option>
+                      <option value="month">This Month</option>
+                      <option value="all">All Time</option>
+                      <option value="custom">Custom Range</option>
+                    </select>
+                  </div>
+
+                  {timeRange === 'custom' && (
+                    <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
+                      <input 
+                        type="date"
+                        className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+                        value={customDateRange.start}
+                        onChange={(e) => setCustomDateRange({ ...customDateRange, start: e.target.value })}
+                      />
+                      <span className="text-zinc-500 text-[10px]">-</span>
+                      <input 
+                        type="date"
+                        className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+                        value={customDateRange.end}
+                        onChange={(e) => setCustomDateRange({ ...customDateRange, end: e.target.value })}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="overflow-x-auto">

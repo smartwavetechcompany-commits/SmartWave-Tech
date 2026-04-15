@@ -51,6 +51,8 @@ export function GuestManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [guestTypeFilter, setGuestTypeFilter] = useState<'all' | 'individual' | 'corporate'>('all');
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'yes' | 'no'>('all');
+  const [vipFilter, setVipFilter] = useState<'all' | 'vip' | 'regular'>('all');
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [reportFilter, setReportFilter] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd'),
@@ -291,9 +293,22 @@ export function GuestManagement() {
       const matchesBalance = balanceFilter === 'all' || 
         (balanceFilter === 'yes' ? (guest.ledgerBalance || 0) > 0 : (guest.ledgerBalance || 0) <= 0);
 
-      return matchesType && matchesBalance;
+      // VIP filter
+      const matchesVip = vipFilter === 'all' || 
+        (vipFilter === 'vip' ? (guest.tags || []).includes('VIP') : !(guest.tags || []).includes('VIP'));
+
+      // Date range filter
+      let matchesDate = true;
+      if (dateRange.start && dateRange.end) {
+        const guestDate = new Date(guest.createdAt || guest.lastStay || Date.now());
+        const start = startOfDay(new Date(dateRange.start));
+        const end = endOfDay(new Date(dateRange.end));
+        matchesDate = isWithinInterval(guestDate, { start, end });
+      }
+
+      return matchesType && matchesBalance && matchesVip && matchesDate;
     });
-  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter]);
+  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange]);
 
   return (
     <div className="p-8 space-y-8">
@@ -417,6 +432,35 @@ export function GuestManagement() {
               <option value="no">No Balance</option>
             </select>
           </div>
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+            <Star size={16} className="text-zinc-500" />
+            <select
+              value={vipFilter}
+              onChange={(e) => setVipFilter(e.target.value as any)}
+              className="bg-transparent text-sm text-zinc-400 focus:outline-none"
+            >
+              <option value="all">All Status</option>
+              <option value="vip">VIP Only</option>
+              <option value="regular">Regular Only</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1">
+            <Calendar size={14} className="text-zinc-500" />
+            <input 
+              type="date"
+              className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+            />
+            <span className="text-zinc-500 text-[10px]">-</span>
+            <input 
+              type="date"
+              className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+            />
+          </div>
         </div>
       </div>
 
@@ -523,19 +567,22 @@ export function GuestManagement() {
                         {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate Guest'}
                       </div>
                     )}
-                    <div className="grid grid-cols-2 gap-3 pt-4">
+                    <div className="grid grid-cols-3 gap-3 pt-4">
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Total Stays</div>
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stays</div>
                         <div className="text-lg font-bold text-zinc-50">{guest.totalStays}</div>
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Ledger Balance</div>
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Spent</div>
+                        <div className="text-lg font-bold text-emerald-500">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
+                      </div>
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Balance</div>
                         <div className={cn(
                           "text-lg font-bold",
                           (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                         )}>
                           {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                          {(guest.ledgerBalance || 0) > 0 ? " (Debt)" : (guest.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                         </div>
                       </div>
                     </div>

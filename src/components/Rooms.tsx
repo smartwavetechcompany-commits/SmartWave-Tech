@@ -388,7 +388,9 @@ export function Rooms() {
     
     const matchesStatus = statusFilter === 'all' || room.status === statusFilter;
     const matchesType = typeFilter === 'all' || room.type === typeFilter;
-    const matchesCapacity = capacityFilter === 'all' || room.capacity === Number(capacityFilter);
+    const matchesCapacity = capacityFilter === 'all' || (
+      capacityFilter === '5' ? room.capacity >= 5 : room.capacity === Number(capacityFilter)
+    );
     
     return matchesSearch && matchesStatus && matchesType && matchesCapacity;
   }).sort((a, b) => {

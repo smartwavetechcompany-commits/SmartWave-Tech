@@ -197,7 +197,7 @@ export interface Reservation {
   checkOut: string;
   checkOutTime?: string; // e.g. "12:00"
   nights?: number;
-  status: 'pending' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
+  status: 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
   totalAmount: number;
   paidAmount: number;
   paymentStatus: 'unpaid' | 'partial' | 'paid';
@@ -214,6 +214,7 @@ export interface Reservation {
   advanceDeposit?: number;
   autoNightDeduction: boolean; // Mandatory toggle for automatic nightly charges
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
+  bookedBy?: string; // Added for tracking who made the reservation
   createdAt: string;
   ledgerEntries?: LedgerEntry[]; // Changed from string[] to LedgerEntry[]
 }
@@ -546,7 +547,7 @@ export interface LedgerEntry {
   timestamp: string;
   reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax' | 'other';
   postedBy: string;
   paymentMethod?: 'cash' | 'card' | 'transfer';
 }
@@ -562,6 +563,7 @@ export interface CorporateAccount {
   creditLimit: number;
   currentBalance: number;
   totalDebits?: number;
+  totalCredits?: number;
   billingCycle: 'weekly' | 'monthly' | 'quarterly';
   status: 'active' | 'suspended';
   createdAt: string;

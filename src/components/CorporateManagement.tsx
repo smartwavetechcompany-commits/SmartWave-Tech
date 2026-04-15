@@ -74,6 +74,7 @@ export function CorporateManagement() {
   });
 
   const [confirmDeleteRate, setConfirmDeleteRate] = useState<string | null>(null);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState<string | null>(null);
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
   const hasPermission = () => {
@@ -393,6 +394,32 @@ export function CorporateManagement() {
     }
   };
 
+  const deleteAccount = async (accountId: string) => {
+    if (!hotel?.id || !profile) return;
+    
+    try {
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', accountId));
+      
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'CORPORATE_ACCOUNT_DELETED',
+        resource: `Account ID: ${accountId}`,
+        hotelId: hotel.id,
+        module: 'Corporate'
+      });
+      
+      toast.success('Corporate account deleted');
+      setConfirmDeleteAccount(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/corporate_accounts/${accountId}`);
+      toast.error('Failed to delete corporate account');
+    }
+  };
+
   const deleteRate = async (rateId: string) => {
     if (!hotel?.id || !showRatesModal) return;
     
@@ -512,12 +539,16 @@ export function CorporateManagement() {
           <div className="text-2xl font-bold text-blue-500">{formatCurrency(accounts.reduce((acc, a) => acc + a.creditLimit, 0), currency, exchangeRate)}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Outstanding Balance</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0), currency, exchangeRate)}</div>
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Charges</div>
+          <div className="text-2xl font-bold text-amber-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalDebits || 0), 0), currency, exchangeRate)}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Debits</div>
-          <div className="text-2xl font-bold text-amber-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalDebits || 0), 0), currency, exchangeRate)}</div>
+          <div className="text-zinc-400 text-sm font-medium mb-1">Total Payments</div>
+          <div className="text-2xl font-bold text-emerald-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalCredits || 0), 0), currency, exchangeRate)}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1">Outstanding Balance</div>
+          <div className="text-2xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0), currency, exchangeRate)}</div>
         </div>
       </div>
 
@@ -583,12 +614,13 @@ export function CorporateManagement() {
                     <div className="text-xs text-zinc-500">{account.email}</div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm text-white">Limit: {formatCurrency(account.creditLimit, currency, exchangeRate)}</div>
-                    <div className={cn(
-                      "text-xs font-bold",
-                      Math.abs(account.currentBalance || 0) > account.creditLimit * 0.8 ? "text-red-500" : "text-emerald-500"
-                    )}>
-                      Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}
+                    <div className="text-sm text-white font-bold">Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}</div>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider mt-1">
+                      Charges: {formatCurrency(account.totalDebits || 0, currency, exchangeRate)} | 
+                      Payments: {formatCurrency(account.totalCredits || 0, currency, exchangeRate)}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                      Limit: {formatCurrency(account.creditLimit, currency, exchangeRate)}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -630,26 +662,35 @@ export function CorporateManagement() {
                         <Tag size={18} />
                       </button>
                       {hasPermission() && (
-                        <button 
-                          onClick={() => {
-                            setEditingAccount(account);
-                            setNewAccount({
-                              name: account.name,
-                              email: account.email,
-                              phone: account.phone,
-                              address: account.address,
-                              contactPerson: account.contactPerson,
-                              taxId: account.taxId,
-                              creditLimit: account.creditLimit,
-                              currentBalance: account.currentBalance,
-                              billingCycle: account.billingCycle
-                            });
-                            setShowAddModal(true);
-                          }}
-                          className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
-                        >
-                          <Edit2 size={18} />
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => {
+                              setEditingAccount(account);
+                              setNewAccount({
+                                name: account.name,
+                                email: account.email,
+                                phone: account.phone,
+                                address: account.address,
+                                contactPerson: account.contactPerson,
+                                taxId: account.taxId,
+                                creditLimit: account.creditLimit,
+                                currentBalance: account.currentBalance,
+                                billingCycle: account.billingCycle
+                              });
+                              setShowAddModal(true);
+                            }}
+                            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setConfirmDeleteAccount(account.id)}
+                            className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                            title="Delete Account"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -1175,6 +1216,16 @@ export function CorporateManagement() {
         message="Are you sure you want to delete this negotiated rate?"
         onConfirm={() => confirmDeleteRate && deleteRate(confirmDeleteRate)}
         onCancel={() => setConfirmDeleteRate(null)}
+        confirmText="Delete"
+        type="danger"
+      />
+
+      <ConfirmModal
+        isOpen={!!confirmDeleteAccount}
+        title="Delete Corporate Account"
+        message="Are you sure you want to delete this corporate account? This action cannot be undone."
+        onConfirm={() => confirmDeleteAccount && deleteAccount(confirmDeleteAccount)}
+        onCancel={() => setConfirmDeleteAccount(null)}
         confirmText="Delete"
         type="danger"
       />
