@@ -79,7 +79,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
       if (hotel.autoChargeOverstays !== false) {
-        const overstayTime = hotel.overstayChargeTime || '14:00';
+        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
         const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
         if (isAfter(now, checkOutDateTime)) {
           // Calculate how many days past checkout they are
@@ -359,7 +359,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   // Calculate Totals based strictly on Ledger for checked-in/out guests
   // For pending guests, we show the estimated total
   const isStated = ['checked_in', 'checked_out'].includes(currentReservation.status);
-  const subtotal = isStated ? totalNonTaxDebits : (hasRoomChargeInLedger ? totalNonTaxDebits : (currentReservation.totalAmount - (currentReservation.taxAmount || 0) + totalNonTaxDebits));
+  
+  // Robust subtotal calculation:
+  // 1. If we have ledger entries, use them as the primary source of truth
+  // 2. If no ledger entries yet (e.g. just checked in), use the reservation's totalAmount
+  const subtotal = totalNonTaxDebits > 0 
+    ? totalNonTaxDebits 
+    : (currentReservation.totalAmount - (currentReservation.taxAmount || 0));
   
   let taxTotal = 0;
   const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 

@@ -152,9 +152,9 @@ export function GuestManagement() {
 
     try {
       if (editingGuest) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), {
-          ...newGuest
-        });
+        // Exclude read-only financial fields from update to prevent clearing them
+        const { ledgerBalance, totalStays, totalSpent, stayHistory, createdAt, ...updateData } = newGuest as any;
+        await updateDoc(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), updateData);
       } else {
         await addDoc(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,

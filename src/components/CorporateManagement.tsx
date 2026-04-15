@@ -176,8 +176,17 @@ export function CorporateManagement() {
       }
 
       let chargedCount = 0;
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
+      const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
       
       for (const res of activeReservations) {
+        // If it's checkout day, only charge if past overstay time
+        if (res.checkOut === todayStr) {
+          const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+          if (now <= checkOutDateTime) continue;
+        }
+
         // 2. Check if already charged for today
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
@@ -297,9 +306,9 @@ export function CorporateManagement() {
 
     try {
       if (editingAccount) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', editingAccount.id), {
-          ...newAccount
-        });
+        // Exclude read-only financial fields from update to prevent clearing them
+        const { currentBalance, totalDebits, createdAt, ...updateData } = newAccount as any;
+        await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', editingAccount.id), updateData);
       } else {
         await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
           ...newAccount,

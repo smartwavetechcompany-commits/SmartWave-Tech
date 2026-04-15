@@ -227,7 +227,10 @@ export function FrontDesk() {
       return res.status === 'checked_in';
     }
     if (activeTab === 'overstay') {
-      return res.status === 'checked_in' && res.checkOut < today;
+      const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
+      const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+      const now = new Date();
+      return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
     }
     return true;
   });
@@ -915,7 +918,7 @@ export function FrontDesk() {
 
         // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
         if (hotel.autoChargeOverstays !== false) {
-          const overstayTime = hotel.overstayChargeTime || '14:00';
+          const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
           const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
           if (isAfter(now, checkOutDateTime)) {
             // Calculate how many days past checkout they are
