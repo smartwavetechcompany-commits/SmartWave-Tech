@@ -53,6 +53,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   });
 
   let taxTotal = 0;
+  let exclusiveTaxTotal = 0;
   const taxBreakdown = activeTaxes.map(tax => {
     let amount = 0;
     
@@ -62,23 +63,34 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
         .reduce((acc, e) => acc + e.amount, 0);
       
+      // If amount is 0 in ledger, it might be an inclusive tax that was only added to description
+      if (amount === 0 && tax.isInclusive) {
+        amount = subtotal * (tax.percentage / 100);
+      }
+      
       taxTotal += amount;
+      if (!tax.isInclusive) {
+        exclusiveTaxTotal += amount;
+      }
     } else {
       // Fallback to calculation if ledger is empty (e.g. preview before posting)
       amount = subtotal * (tax.percentage / 100);
       taxTotal += amount;
+      if (!tax.isInclusive) {
+        exclusiveTaxTotal += amount;
+      }
     }
     return { ...tax, amount };
   });
 
   // Add "Other Taxes" if there are unmatched tax debits in the ledger
-  const matchedTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
-  const otherTaxAmount = totalTaxDebits > matchedTaxTotal ? totalTaxDebits - matchedTaxTotal : 0;
+  const matchedExclusiveTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
+  const otherTaxAmount = totalTaxDebits > matchedExclusiveTaxTotal ? totalTaxDebits - matchedExclusiveTaxTotal : 0;
   if (otherTaxAmount > 0.01) {
-    taxTotal += otherTaxAmount;
+    exclusiveTaxTotal += otherTaxAmount;
   }
 
-  const grandTotal = subtotal + taxTotal;
+  const grandTotal = subtotal + exclusiveTaxTotal;
   const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
   const balance = grandTotal - totalPaid;

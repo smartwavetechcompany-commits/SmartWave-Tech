@@ -40,23 +40,36 @@ export const postToLedger = async (
       });
       
       const baseAmount = entry.amount;
+      let inclusiveTaxText = '';
 
       for (const tax of activeTaxes) {
         const taxAmount = baseAmount * (tax.percentage / 100);
-        const taxEntry: LedgerEntry = {
-          id: Math.random().toString(36).substr(2, 9),
-          timestamp,
-          hotelId,
-          guestId,
-          reservationId,
-          corporateId,
-          type: 'debit',
-          amount: taxAmount,
-          description: `${tax.name} (${tax.percentage}%)${tax.isInclusive ? ' [Inclusive]' : ''} for ${entry.description}`,
-          category: 'tax',
-          postedBy
-        };
-        entries.push(taxEntry);
+        
+        if (tax.isInclusive) {
+          // For inclusive taxes, we don't increase the guest's balance.
+          // We just append info to the description of the main charge.
+          inclusiveTaxText += (inclusiveTaxText ? ', ' : ' (incl. ') + `${tax.name}: ${taxAmount.toFixed(2)}`;
+        } else {
+          // For exclusive taxes, we create a new debit line.
+          const taxEntry: LedgerEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp,
+            hotelId,
+            guestId,
+            reservationId,
+            corporateId,
+            type: 'debit',
+            amount: taxAmount,
+            description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
+            category: 'tax',
+            postedBy
+          };
+          entries.push(taxEntry);
+        }
+      }
+
+      if (inclusiveTaxText) {
+        entries[0].description += inclusiveTaxText + ')';
       }
     }
   }

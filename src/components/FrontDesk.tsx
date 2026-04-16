@@ -352,15 +352,20 @@ export function FrontDesk() {
     const primaryBaseAmount = primaryTotal;
     
     let primaryTaxTotal = 0;
+    let primaryExclusiveTaxTotal = 0;
     const primaryTaxDetails = activeTaxes.map(tax => {
       const amount = primaryBaseAmount * (tax.percentage / 100);
       primaryTaxTotal += amount;
+      if (!tax.isInclusive) {
+        primaryExclusiveTaxTotal += amount;
+      }
       return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
     });
 
     // Recalculate additional stays prices
     let additionalStaysChanged = false;
     let totalAdditionalTax = 0;
+    let totalAdditionalExclusiveTax = 0;
     const updatedAdditionalStays = newBooking.additionalStays.map(stay => {
       const room = rooms.find(r => r.id === stay.roomId);
       if (!room) return stay;
@@ -384,22 +389,27 @@ export function FrontDesk() {
       // Calculate taxes for this additional stay
       const stayBaseAmount = stayTotal;
       let stayTaxTotal = 0;
+      let stayExclusiveTaxTotal = 0;
       const stayTaxDetails = activeTaxes.map(tax => {
         const amount = stayBaseAmount * (tax.percentage / 100);
         stayTaxTotal += amount;
+        if (!tax.isInclusive) {
+          stayExclusiveTaxTotal += amount;
+        }
         return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
       });
       totalAdditionalTax += stayTaxTotal;
+      totalAdditionalExclusiveTax += stayExclusiveTaxTotal;
       
       if (stayTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
         additionalStaysChanged = true;
-        return { ...stay, totalAmount: stayTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails };
+        return { ...stay, totalAmount: stayTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails, exclusiveTaxAmount: stayExclusiveTaxTotal };
       }
       return stay;
     });
 
-    const additionalTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0) + (stay.taxAmount || 0), 0);
-    const totalAmount = primaryTotal + primaryTaxTotal + additionalTotal;
+    const additionalRoomTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0), 0);
+    const totalAmount = primaryTotal + primaryExclusiveTaxTotal + additionalRoomTotal + totalAdditionalExclusiveTax;
     const totalTax = primaryTaxTotal + totalAdditionalTax;
 
     if (newBooking.totalAmount !== totalAmount || additionalStaysChanged || newBooking.taxAmount !== totalTax) {
@@ -1942,30 +1952,31 @@ export function FrontDesk() {
                     const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
                     
                     const totalInclusivePercentage = inclusiveTaxes.reduce((acc, t) => acc + t.percentage, 0);
-                    const baseAmount = displayPrice / (1 + totalInclusivePercentage / 100);
+                    const baseAmount = displayPrice;
+                    const totalInclusiveTax = inclusiveTaxes.reduce((acc, t) => acc + (baseAmount * (t.percentage / 100)), 0);
                     const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (baseAmount * (t.percentage / 100)), 0);
 
                     return (
                       <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
                         <div className="flex justify-between text-[10px] font-bold">
-                          <span className="text-zinc-500 uppercase">Base Rate {inclusiveTaxes.length > 0 ? '(Net)' : ''}</span>
+                          <span className="text-zinc-500 uppercase">Base Rate</span>
                           <span className="text-zinc-50">{formatCurrency(baseAmount, currency, exchangeRate)}</span>
                         </div>
                         {inclusiveTaxes.map(tax => (
                           <div key={tax.id} className="flex justify-between text-[10px] font-bold">
-                            <span className="text-zinc-500 uppercase">{tax.name} ({tax.percentage}%) [Incl.]</span>
+                            <span className="text-blue-400/80 uppercase">{tax.name} ({tax.percentage}%) [Incl.]</span>
                             <span className="text-blue-500">{formatCurrency(baseAmount * (tax.percentage / 100), currency, exchangeRate)}</span>
                           </div>
                         ))}
                         {exclusiveTaxes.map(tax => (
                           <div key={tax.id} className="flex justify-between text-[10px] font-bold">
-                            <span className="text-zinc-500 uppercase">{tax.name} ({tax.percentage}%)</span>
+                            <span className="text-emerald-400/80 uppercase">{tax.name} ({tax.percentage}%)</span>
                             <span className="text-emerald-500">+{formatCurrency(baseAmount * (tax.percentage / 100), currency, exchangeRate)}</span>
                           </div>
                         ))}
                         <div className="pt-1 border-t border-zinc-800 flex justify-between text-xs font-bold">
                           <span className="text-zinc-500 uppercase">Total/Night</span>
-                          <span className="text-zinc-50">{formatCurrency(baseAmount + (baseAmount * totalInclusivePercentage / 100) + totalExclusiveTax, currency, exchangeRate)}</span>
+                          <span className="text-zinc-50">{formatCurrency(baseAmount + totalExclusiveTax, currency, exchangeRate)}</span>
                         </div>
                       </div>
                     );
@@ -2166,20 +2177,29 @@ export function FrontDesk() {
                     });
                   });
 
-                  const subtotalNet = newBooking.totalAmount - newBooking.taxAmount;
+                  const checkInDateTime = new Date(`${newBooking.checkIn}T${newBooking.checkInTime || '14:00'}`);
+                  const checkOutDateTime = new Date(`${newBooking.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+                  const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+                  const nightsCount = Math.max(1, Math.ceil(hours / 24));
+
+                  const primaryBaseAmount = newBooking.roomId ? (rooms.find(r => r.id === newBooking.roomId)?.price || 0) * nightsCount : 0;
+                  const additionalBaseAmount = (newBooking.additionalStays || []).reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+                  const subtotalBase = primaryBaseAmount + additionalBaseAmount;
 
                   return (
                     <>
                       <div className="flex justify-between text-[10px] text-zinc-400">
-                        <span>Subtotal (Net)</span>
-                        <span>{formatCurrency(subtotalNet, currency, exchangeRate)}</span>
+                        <span>Base Rate (Subtotal)</span>
+                        <span>{formatCurrency(subtotalBase, currency, exchangeRate)}</span>
                       </div>
                       {Object.entries(allTaxDetails).map(([name, details], idx) => (
                         <div key={idx} className="flex justify-between text-[10px] text-zinc-500">
                           <span className={details.isInclusive ? 'text-blue-400/80' : 'text-emerald-400/80'}>
                             {name} ({details.percentage}%) {details.isInclusive ? '(Incl.)' : ''}
                           </span>
-                          <span>{formatCurrency(details.amount, currency, exchangeRate)}</span>
+                          <span className={details.isInclusive ? '' : 'text-emerald-500'}>
+                            {details.isInclusive ? '' : '+'}{formatCurrency(details.amount, currency, exchangeRate)}
+                          </span>
                         </div>
                       ))}
                     </>
