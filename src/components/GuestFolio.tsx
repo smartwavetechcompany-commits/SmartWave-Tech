@@ -343,17 +343,34 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
-  const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const totalPayments = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
-  const totalCorporateCoverage = ledgerEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'corporate').reduce((acc, e) => acc + e.amount, 0);
+  const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>('guest');
+
+  const companyEntries = ledgerEntries.filter(e => 
+    currentReservation.corporateId && (
+      ((e.category === 'room' || e.category === 'tax') && e.type === 'debit') ||
+      (e.category === 'corporate' && e.type === 'credit')
+    )
+  );
+  
+  const guestEntries = ledgerEntries.filter(e => 
+    !companyEntries.includes(e) || (e.type === 'credit' && e.category === 'payment')
+  );
+
+  const displayedEntries = currentReservation.corporateId && activeFolio === 'company' 
+    ? companyEntries 
+    : guestEntries;
+
+  const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const totalPayments = displayedEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
+  const totalCorporateCoverage = displayedEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'corporate').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments - totalCorporateCoverage;
   
-  const totalTaxDebits = ledgerEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalTaxDebits = displayedEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalNonTaxDebits = totalDebits - totalTaxDebits;
 
-  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
-  const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment');
+  const hasRoomChargeInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  const hasPaymentInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'payment');
   const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active');
 
   // Calculate Totals based strictly on Ledger for checked-in/out guests
@@ -361,14 +378,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const isStated = ['checked_in', 'checked_out'].includes(currentReservation.status);
   
   // Robust subtotal calculation:
-  // 1. If we have ledger entries, use them as the primary source of truth
-  // 2. If no ledger entries yet (e.g. just checked in), use the reservation's totalAmount
+  // 1. If we have ledger entries for the active folio, use them
+  // 2. If no ledger entries yet (e.g. just checked in), use the reservation's totalAmount ONLY for the company folio if it's corporate
   const subtotal = totalNonTaxDebits > 0 
     ? totalNonTaxDebits 
-    : (currentReservation.totalAmount - (currentReservation.taxAmount || 0));
+    : (currentReservation.corporateId 
+        ? (activeFolio === 'company' ? (currentReservation.totalAmount - (currentReservation.taxAmount || 0)) : 0)
+        : (currentReservation.totalAmount - (currentReservation.taxAmount || 0)));
   
   let taxTotal = 0;
-  const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 
+  const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 && (!currentReservation.corporateId || activeFolio === 'company')
     ? currentReservation.taxDetails.map(tax => {
         taxTotal += tax.isInclusive ? 0 : tax.amount;
         return tax;
@@ -381,15 +400,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           // If already checked in and we have tax entries, use the actual posted tax amount
           if (isStated && totalTaxDebits > 0) {
             // Try to match by name
-            const matchedAmount = ledgerEntries
+            const matchedAmount = displayedEntries
               .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
               .reduce((acc, e) => acc + e.amount, 0);
             
             amount = matchedAmount;
             taxTotal += amount;
           } else {
-            amount = subtotal * (tax.percentage / 100);
-            taxTotal += amount;
+            // Only show estimated taxes for company folio if corporate, or for any folio if individual
+            if (!currentReservation.corporateId || activeFolio === 'company') {
+              amount = subtotal * (tax.percentage / 100);
+              taxTotal += amount;
+            }
           }
         }
         return { ...tax, amount };
@@ -492,6 +514,30 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          {/* Folio Tabs for Corporate Stays */}
+          {currentReservation.corporateId && (
+            <div className="flex items-center bg-zinc-950 p-1 rounded-2xl border border-zinc-800 w-fit mx-auto">
+              <button
+                onClick={() => setActiveFolio('guest')}
+                className={cn(
+                  "px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                  activeFolio === 'guest' ? "bg-emerald-500 text-black shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                Folio 2 (Guest)
+              </button>
+              <button
+                onClick={() => setActiveFolio('company')}
+                className={cn(
+                  "px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                  activeFolio === 'company' ? "bg-blue-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                Folio 1 (Company)
+              </button>
+            </div>
+          )}
+
           {/* Quick Actions Bar */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <button
@@ -1065,14 +1111,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         Loading transactions...
                       </td>
                     </tr>
-                  ) : ledgerEntries.length === 0 ? (
+                  ) : displayedEntries.length === 0 ? (
                     <tr>
                       <td colSpan={(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
-                        No transactions recorded for this stay.
+                        No transactions recorded for this folio.
                       </td>
                     </tr>
                   ) : (
-                    ledgerEntries.map((entry) => (
+                    displayedEntries.map((entry) => (
                       <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4 text-xs text-zinc-400">
                           {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
@@ -1147,7 +1193,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const headers = ['Date', 'Description', 'Category', 'Debit', 'Credit'];
               const csvContent = [
                 headers.join(','),
-                ...ledgerEntries.map(e => [
+                ...displayedEntries.map(e => [
                   format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,

@@ -232,7 +232,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isSubscriptionActive = profile?.role === 'superAdmin' 
     ? true 
-    : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry).getTime() > Date.now()) : false);
+    : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry + 'T23:59:59').getTime() > Date.now()) : false);
 
   const exchangeRate = hotel?.exchangeRate || systemSettings?.exchangeRate || 1500;
   const baseCurrency = hotel?.defaultCurrency || 'NGN';

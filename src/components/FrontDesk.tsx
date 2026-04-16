@@ -1025,31 +1025,23 @@ export function FrontDesk() {
         await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
-          // Post FIRST NIGHT charge to ledger
+          // Post ALL scheduled room charges and taxes to ledger immediately
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          await postToLedger(hotel.id, res.guestId, res.id, {
-            amount: rate,
-            type: 'debit',
-            category: 'room',
-            description: `Initial Room Charge: Room ${res.roomNumber} (Night of ${format(new Date(res.checkIn), 'MMM dd, yyyy')})`,
-            referenceId: res.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId);
+          const nights = res.nights || 1;
+          const checkInDate = new Date(res.checkIn);
+          
+          for (let i = 0; i < nights; i++) {
+            const chargeDate = addDays(startOfDay(checkInDate), i);
+            await postToLedger(hotel.id, res.guestId, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Room Charge: Room ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
 
-          // Post Exclusive Taxes for initial night
-          const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
-          for (const tax of activeTaxes) {
-            if (!tax.isInclusive) {
-              const taxAmount = rate * (tax.percentage / 100);
-              await postToLedger(hotel.id, res.guestId, res.id, {
-                amount: taxAmount,
-                type: 'debit',
-                category: 'tax',
-                description: `${tax.name} (${tax.percentage}%) for Night of ${format(new Date(res.checkIn), 'MMM dd, yyyy')}`,
-                referenceId: res.id,
-                postedBy: profile.uid
-              }, profile.uid, res.corporateId);
-            }
+            // Taxes are automatically posted by postToLedger if it's a room charge
           }
 
           // Fetch fresh data to avoid stale state issues with auto-deduction
@@ -1936,40 +1928,61 @@ export function FrontDesk() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
-                <select 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={newBooking.roomId}
-                  onChange={(e) => {
-                    setNewBooking({ ...newBooking, roomId: e.target.value });
-                  }}
-                >
-                  <option value="">Select a room</option>
-                  {rooms.filter(r => r.status === 'clean' || r.status === 'vacant').map(room => {
-                    const selectedRoom = rooms.find(r => r.id === room.id);
-                    let displayPrice = room.price;
-                    let isNegotiated = false;
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
+                  <select 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={newBooking.roomId}
+                    onChange={(e) => {
+                      setNewBooking({ ...newBooking, roomId: e.target.value });
+                    }}
+                  >
+                    <option value="">Select a room</option>
+                    {rooms.filter(r => r.status === 'clean' || r.status === 'vacant').map(room => {
+                      let displayPrice = room.price;
+                      let isNegotiated = false;
 
-                    if (newBooking.corporateId) {
-                      const activeRate = activeCorporateRates.find(r => 
-                        (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-                        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
-                        new Date(newBooking.checkIn) <= new Date(r.endDate)
-                      );
-                      if (activeRate) {
-                        displayPrice = activeRate.rate;
-                        isNegotiated = true;
+                      if (newBooking.corporateId) {
+                        const activeRate = activeCorporateRates.find(r => 
+                          (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
+                          new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+                          new Date(newBooking.checkIn) <= new Date(r.endDate)
+                        );
+                        if (activeRate) {
+                          displayPrice = activeRate.rate;
+                          isNegotiated = true;
+                        }
                       }
-                    }
 
-                    return (
-                      <option key={room.id} value={room.id}>
-                        Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
-                      </option>
-                    );
-                  })}
-                </select>
+                      return (
+                        <option key={room.id} value={room.id}>
+                          Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div className="flex flex-col justify-end">
+                  {newBooking.roomId && (
+                    <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
+                      <div className="flex justify-between text-[10px] font-bold">
+                        <span className="text-zinc-500 uppercase">Base Rate</span>
+                        <span className="text-zinc-50">{formatCurrency(rooms.find(r => r.id === newBooking.roomId)?.price || 0, currency, exchangeRate)}</span>
+                      </div>
+                      {(hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room').map(tax => (
+                        <div key={tax.id} className="flex justify-between text-[10px] font-bold">
+                          <span className="text-zinc-500 uppercase">{tax.name} ({tax.percentage}%)</span>
+                          <span className="text-emerald-500">+{formatCurrency((rooms.find(r => r.id === newBooking.roomId)?.price || 0) * (tax.percentage / 100), currency, exchangeRate)}</span>
+                        </div>
+                      ))}
+                      <div className="pt-1 border-t border-zinc-800 flex justify-between text-xs font-bold">
+                        <span className="text-zinc-500 uppercase">Total/Night</span>
+                        <span className="text-zinc-50">{formatCurrency((rooms.find(r => r.id === newBooking.roomId)?.price || 0) * (1 + (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room' && !t.isInclusive).reduce((acc, t) => acc + t.percentage, 0) / 100), currency, exchangeRate)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl space-y-4">
