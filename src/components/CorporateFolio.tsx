@@ -15,7 +15,10 @@ import {
   Download,
   FileText,
   Plus,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Banknote,
+  PlusCircle,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -46,7 +49,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   const [showTransferBalance, setShowTransferBalance] = useState(false);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [transferData, setTransferData] = useState({ targetId: '', amount: 0, notes: '' });
-  const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer', notes: '' });
+  const [settleData, setSettleData] = useState({ 
+    splits: [{ amount: 0, method: 'cash' }] as { amount: number; method: 'cash' | 'card' | 'transfer' }[], 
+    notes: '' 
+  });
   const [chargeData, setChargeData] = useState({ amount: 0, category: 'other', description: '' });
   const [isSaving, setIsSaving] = useState(false);
 
@@ -111,41 +117,52 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     try {
       setIsSaving(true);
       const timestamp = new Date().toISOString();
+      const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
 
-      // 1. Update account balance
+      if (totalAmount <= 0) {
+        toast.error('Payment amount must be greater than zero');
+        return;
+      }
+
+      // 1. Update account balance (total amount)
       await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
-        currentBalance: increment(-settleData.amount),
-        totalCredits: increment(settleData.amount)
+        currentBalance: increment(-totalAmount),
+        totalCredits: increment(totalAmount)
       });
 
-      // 2. Add to Ledger
-      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
-        hotelId: hotel.id,
-        corporateId: currentAccount.id,
-        reservationId: 'CORPORATE_SETTLEMENT',
-        timestamp,
-        amount: settleData.amount,
-        type: 'credit',
-        category: 'payment',
-        description: settleData.notes || `Corporate Settlement: ${currentAccount.name}`,
-        paymentMethod: settleData.method,
-        postedBy: profile.uid
-      });
+      // 2. Process each split
+      for (const split of settleData.splits) {
+        if (split.amount > 0) {
+          // Add to Ledger
+          await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+            hotelId: hotel.id,
+            corporateId: currentAccount.id,
+            reservationId: 'CORPORATE_SETTLEMENT',
+            timestamp,
+            amount: split.amount,
+            type: 'credit',
+            category: 'payment',
+            description: settleData.notes || `Corporate Settlement: ${currentAccount.name} (${split.method})`,
+            paymentMethod: split.method,
+            postedBy: profile.uid
+          });
 
-      // 3. Log to finance
-      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-        type: 'income',
-        amount: settleData.amount,
-        category: 'Corporate Payment',
-        description: `Corporate Settlement: ${currentAccount.name}`,
-        timestamp,
-        paymentMethod: settleData.method,
-        referenceId: currentAccount.id
-      });
+          // Log to finance
+          await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+            type: 'income',
+            amount: split.amount,
+            category: 'Corporate Payment',
+            description: `Corporate Settlement: ${currentAccount.name}`,
+            timestamp,
+            paymentMethod: split.method,
+            referenceId: currentAccount.id
+          });
+        }
+      }
 
       toast.success('Payment settled successfully');
       setShowSettlePayment(false);
-      setSettleData({ amount: 0, method: 'cash', notes: '' });
+      setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
     } catch (err) {
       console.error("Settlement error:", err);
       toast.error('Failed to settle payment');
@@ -650,30 +667,94 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                   <p className="text-sm text-zinc-500">Post a credit to settle the outstanding balance</p>
                 </div>
                 <form onSubmit={handleSettlePayment}>
-                  <div className="p-6 space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
-                      <input
-                        required
-                        type="number"
-                        min="1"
-                        value={settleData.amount}
-                        onChange={(e) => setSettleData({ ...settleData, amount: Number(e.target.value) })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      />
+                  <div className="p-6 space-y-6">
+                    <div className="flex items-center gap-4 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                        <Banknote size={20} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
+                        <p className="text-lg font-bold text-red-500">{formatCurrency(currentAccount.currentBalance, currency, exchangeRate)}</p>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
-                      <select
-                        value={settleData.method}
-                        onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
-                      >
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="transfer">Bank Transfer</option>
-                      </select>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Payment Splits</label>
+                        <button
+                          type="button"
+                          onClick={() => setSettleData({
+                            ...settleData,
+                            splits: [...settleData.splits, { amount: 0, method: 'cash' }]
+                          })}
+                          className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                        >
+                          <PlusCircle size={12} /> Add Split
+                        </button>
+                      </div>
+
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {settleData.splits.map((split, index) => (
+                          <div key={index} className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-2xl space-y-3 relative group">
+                            {settleData.splits.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newSplits = [...settleData.splits];
+                                  newSplits.splice(index, 1);
+                                  setSettleData({ ...settleData, splits: newSplits });
+                                }}
+                                className="absolute top-2 right-2 p-1.5 text-zinc-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                                <input
+                                  required
+                                  type="number"
+                                  value={currency === 'USD' ? (split.amount / exchangeRate) || '' : split.amount || ''}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    const newSplits = [...settleData.splits];
+                                    newSplits[index].amount = currency === 'USD' ? val * exchangeRate : val;
+                                    setSettleData({ ...settleData, splits: newSplits });
+                                  }}
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                  step="0.01"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-zinc-500 uppercase">Method</label>
+                                <select
+                                  value={split.method}
+                                  onChange={(e) => {
+                                    const newSplits = [...settleData.splits];
+                                    newSplits[index].method = e.target.value as any;
+                                    setSettleData({ ...settleData, splits: newSplits });
+                                  }}
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                >
+                                  <option value="cash">Cash</option>
+                                  <option value="card">Card</option>
+                                  <option value="transfer">Bank Transfer</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="p-3 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-800 flex justify-between items-center text-xs">
+                        <span className="text-zinc-500 font-bold uppercase">Total Settlement</span>
+                        <span className="text-zinc-50 font-black">
+                          {formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}
+                        </span>
+                      </div>
                     </div>
+
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
                       <textarea
@@ -694,7 +775,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     </button>
                     <button
                       type="submit"
-                      disabled={isSaving}
+                      disabled={settleData.splits.reduce((acc, s) => acc + s.amount, 0) <= 0 || isSaving}
                       className="flex-1 px-4 py-2 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
                     >
                       {isSaving ? 'Processing...' : 'Settle Payment'}

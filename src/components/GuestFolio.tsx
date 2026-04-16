@@ -22,7 +22,9 @@ import {
   Download,
   Trash2,
   DollarSign,
-  RefreshCw
+  PlusCircle,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, safeStringify } from '../utils';
@@ -63,7 +65,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
-  const [settleData, setSettleData] = useState({ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer', notes: '' });
+  const [settleData, setSettleData] = useState({ 
+    splits: [{ amount: 0, method: 'cash' }] as { amount: number; method: 'cash' | 'card' | 'transfer' }[], 
+    notes: '' 
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
 
@@ -125,19 +130,30 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile) return;
     try {
       setIsSaving(true);
-      await settleLedger(
-        hotel.id, 
-        currentReservation.guestId || 'unknown', 
-        currentReservation.id, 
-        settleData.amount, 
-        settleData.method, 
-        profile.uid, 
-        currentReservation.corporateId
-      );
+      
+      const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
+      if (totalAmount <= 0) {
+        toast.error('Payment amount must be greater than zero');
+        return;
+      }
+
+      for (const split of settleData.splits) {
+        if (split.amount > 0) {
+          await settleLedger(
+            hotel.id, 
+            currentReservation.guestId || 'unknown', 
+            currentReservation.id, 
+            split.amount, 
+            split.method, 
+            profile.uid, 
+            currentReservation.corporateId
+          );
+        }
+      }
 
       toast.success('Payment recorded successfully');
       setShowSettlePayment(false);
-      setSettleData({ amount: 0, method: 'cash', notes: '' });
+      setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
     } catch (err: any) {
       console.error("Settle payment error:", err.message || safeStringify(err));
       toast.error('Failed to record payment');
@@ -151,7 +167,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile) return;
     try {
       setIsSaving(true);
-      await settleOverpayment(hotel.id, currentReservation.guestId || 'unknown', currentReservation.id, settleData.amount, settleData.method, profile.uid, currentReservation.corporateId);
+      const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
+      await settleOverpayment(hotel.id, currentReservation.guestId || 'unknown', currentReservation.id, totalAmount, settleData.splits[0]?.method || 'cash', profile.uid, currentReservation.corporateId);
       toast.success('Overpayment settled successfully');
       setShowSettleOverpayment(false);
     } catch (err: any) {
@@ -639,10 +656,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <input
                         required
                         type="number"
-                        value={currency === 'USD' ? (settleData.amount / exchangeRate) || '' : settleData.amount || ''}
+                        value={currency === 'USD' ? ((settleData.splits[0]?.amount || 0) / exchangeRate) || '' : (settleData.splits[0]?.amount || '')}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          setSettleData({ ...settleData, amount: currency === 'USD' ? val * exchangeRate : val });
+                          const newAmount = currency === 'USD' ? val * exchangeRate : val;
+                          const newSplits = [...settleData.splits];
+                          if (newSplits.length === 0) {
+                            newSplits.push({ amount: newAmount, method: 'cash' });
+                          } else {
+                            newSplits[0].amount = newAmount;
+                          }
+                          setSettleData({ ...settleData, splits: newSplits });
                         }}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         max={currency === 'USD' ? Math.abs(balance) / exchangeRate : Math.abs(balance)}
@@ -652,8 +676,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-zinc-500 uppercase">Refund Method</label>
                       <select
-                        value={settleData.method}
-                        onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
+                        value={settleData.splits[0]?.method || 'cash'}
+                        onChange={(e) => {
+                          const newSplits = [...settleData.splits];
+                          if (newSplits.length === 0) {
+                            newSplits.push({ amount: 0, method: e.target.value as any });
+                          } else {
+                            newSplits[0].method = e.target.value as any;
+                          }
+                          setSettleData({ ...settleData, splits: newSplits });
+                        }}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="cash">Cash</option>
@@ -672,7 +704,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </button>
                     <button
                       type="submit"
-                      disabled={!settleData.amount || isSaving}
+                      disabled={settleData.splits.reduce((acc, s) => acc + s.amount, 0) <= 0 || isSaving}
                       className="flex-1 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
                     >
                       {isSaving ? 'Processing...' : 'Confirm Refund'}
@@ -795,9 +827,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <p className="text-sm text-zinc-500 mt-1">Record payment for {currentReservation.guestName}</p>
                 </div>
                 <form onSubmit={handleSettlePayment}>
-                  <div className="p-6 space-y-4">
-                    <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-2xl flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center">
+                  <div className="p-6 space-y-6">
+                    <div className="flex items-center gap-4 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
                         <Banknote size={20} />
                       </div>
                       <div>
@@ -806,33 +838,81 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Payment Amount ({currency})</label>
-                      <input
-                        required
-                        type="number"
-                        value={currency === 'USD' ? (settleData.amount / exchangeRate) || '' : settleData.amount || ''}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setSettleData({ ...settleData, amount: currency === 'USD' ? val * exchangeRate : val });
-                        }}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                        max={currency === 'USD' ? balance / exchangeRate : balance}
-                        step="0.01"
-                      />
-                    </div>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Payment Splits</label>
+                        <button
+                          type="button"
+                          onClick={() => setSettleData({
+                            ...settleData,
+                            splits: [...settleData.splits, { amount: 0, method: 'cash' }]
+                          })}
+                          className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                        >
+                          <PlusCircle size={12} /> Add Split
+                        </button>
+                      </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Payment Method</label>
-                      <select
-                        value={settleData.method}
-                        onChange={(e) => setSettleData({ ...settleData, method: e.target.value as any })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                      >
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="transfer">Bank Transfer</option>
-                      </select>
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {settleData.splits.map((split, index) => (
+                          <div key={index} className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-2xl space-y-3 relative group">
+                            {settleData.splits.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newSplits = [...settleData.splits];
+                                  newSplits.splice(index, 1);
+                                  setSettleData({ ...settleData, splits: newSplits });
+                                }}
+                                className="absolute top-2 right-2 p-1.5 text-zinc-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                                <input
+                                  required
+                                  type="number"
+                                  value={currency === 'USD' ? (split.amount / exchangeRate) || '' : split.amount || ''}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    const newSplits = [...settleData.splits];
+                                    newSplits[index].amount = currency === 'USD' ? val * exchangeRate : val;
+                                    setSettleData({ ...settleData, splits: newSplits });
+                                  }}
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                  step="0.01"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-zinc-500 uppercase">Method</label>
+                                <select
+                                  value={split.method}
+                                  onChange={(e) => {
+                                    const newSplits = [...settleData.splits];
+                                    newSplits[index].method = e.target.value as any;
+                                    setSettleData({ ...settleData, splits: newSplits });
+                                  }}
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                >
+                                  <option value="cash">Cash</option>
+                                  <option value="card">Card</option>
+                                  <option value="transfer">Bank Transfer</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="p-3 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-800 flex justify-between items-center text-xs">
+                        <span className="text-zinc-500 font-bold uppercase">Total Settlement</span>
+                        <span className="text-zinc-50 font-black">
+                          {formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
@@ -845,7 +925,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </button>
                     <button
                       type="submit"
-                      disabled={!settleData.amount || isSaving}
+                      disabled={settleData.splits.reduce((acc, s) => acc + s.amount, 0) <= 0 || isSaving}
                       className="flex-1 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
                     >
                       {isSaving ? 'Processing...' : 'Confirm Payment'}

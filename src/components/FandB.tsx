@@ -26,9 +26,12 @@ import {
   Printer,
   XCircle,
   ShoppingCart,
+  PlusCircle,
   Trash2,
   Minus,
-  Edit2
+  Edit2,
+  DollarSign,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV, safeStringify } from '../utils';
@@ -68,8 +71,7 @@ export function FandB() {
     notes: '',
     category: 'all' as string,
     price: 0,
-    paidAmount: 0,
-    paymentMethod: 'cash' as 'cash' | 'card' | 'transfer' | 'room',
+    payments: [{ amount: 0, method: 'cash' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room' }[],
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
@@ -273,69 +275,52 @@ export function FandB() {
           amount: finalPrice,
           type: 'debit',
           category: 'F & B',
-          description: `F & B Order (Room Service): ${newOrder.items}${discountAmount > 0 ? ` (Discounted)` : ''}`,
+          description: `F & B Order (Room ${newOrder.roomNumber || 'Service'}): ${newOrder.items}${discountAmount > 0 ? ` (Discounted)` : ''}`,
           referenceId: orderRef.id,
           postedBy: profile.uid
         }, profile.uid, res.corporateId);
+      }
 
-        // 2. Automatically post taxes if applicable
-        const activeTaxes = (hotel.taxes || []).filter(t => 
-          t.status === 'active' && 
-          !t.isInclusive && 
-          (t.category === 'all' || t.category === 'restaurant')
-        );
+      // 3. If any payments were made, post them to the ledger and finance
+      for (const pay of newOrder.payments) {
+        if (pay.amount > 0) {
+          if (newOrder.roomNumber !== 'Walk-in' && res && guestId && pay.method !== 'room') {
+            console.log('Posting payment to room ledger for reservation:', res.id);
+            await postToLedger(hotel.id, guestId, res.id, {
+              amount: pay.amount,
+              type: 'credit',
+              category: 'payment',
+              description: `F & B Payment (${pay.method.toUpperCase()}): ${newOrder.items}`,
+              referenceId: orderRef.id,
+              postedBy: profile.uid,
+              paymentMethod: pay.method as any
+            }, profile.uid, res.corporateId);
 
-        for (const tax of activeTaxes) {
-          const taxAmount = finalPrice * (tax.percentage / 100);
-          await postToLedger(hotel.id, guestId, res.id, {
-            amount: taxAmount,
-            type: 'debit',
-            category: 'tax',
-            description: `${tax.name} (${tax.percentage}%) for F & B Order`,
-            referenceId: orderRef.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId);
-        }
-
-        // 3. If any payment was made at the outlet, post it as a Credit to the folio
-        if (newOrder.paidAmount > 0) {
-          console.log('Posting payment to room ledger for reservation:', res.id);
-          await postToLedger(hotel.id, guestId, res.id, {
-            amount: newOrder.paidAmount,
-            type: 'credit',
-            category: 'payment',
-            description: `F & B Payment (${newOrder.paymentMethod.toUpperCase()}): ${newOrder.items}`,
-            referenceId: orderRef.id,
-            postedBy: profile.uid,
-            paymentMethod: newOrder.paymentMethod as any
-          }, profile.uid, res.corporateId);
-
-          // Also record the payment in finance
-          await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-            type: 'income',
-            amount: newOrder.paidAmount,
-            category: 'F & B Revenue',
-            description: `F & B Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${newOrder.paymentMethod.toUpperCase()}`,
-            timestamp: new Date().toISOString(),
-            paymentMethod: newOrder.paymentMethod,
-            referenceId: orderRef.id,
-            postedBy: profile.uid
-          });
-        }
-      } else {
-        // Walk-in or no reservation found
-        if (newOrder.paidAmount > 0) {
-          console.log('Recording walk-in payment in finance...');
-          await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
-            type: 'income',
-            amount: newOrder.paidAmount,
-            category: 'F & B Revenue',
-            description: `F & B Order ${orderRef.id} (Walk-in) - ${newOrder.paymentMethod.toUpperCase()}`,
-            timestamp: new Date().toISOString(),
-            paymentMethod: newOrder.paymentMethod,
-            referenceId: orderRef.id,
-            postedBy: profile.uid
-          });
+            // Also record the payment in finance
+            await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+              type: 'income',
+              amount: pay.amount,
+              category: 'F & B Revenue',
+              description: `F & B Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
+              timestamp: new Date().toISOString(),
+              paymentMethod: pay.method,
+              referenceId: orderRef.id,
+              postedBy: profile.uid
+            });
+          } else if (pay.method !== 'room') {
+            // Walk-in or direct payment without room charge
+            console.log('Recording walk-in payment in finance...');
+            await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+              type: 'income',
+              amount: pay.amount,
+              category: 'F & B Revenue',
+              description: `F & B Order ${orderRef.id} (Walk-in) - ${pay.method.toUpperCase()}`,
+              timestamp: new Date().toISOString(),
+              paymentMethod: pay.method,
+              referenceId: orderRef.id,
+              postedBy: profile.uid
+            });
+          }
         }
       }
 
@@ -346,7 +331,7 @@ export function FandB() {
         userEmail: profile?.email,
         userRole: profile?.role,
         action: 'F&B_ORDER_CREATED',
-        resource: `Room ${newOrder.roomNumber}: ${newOrder.items} (${newOrder.paymentMethod})`,
+        resource: `Room ${newOrder.roomNumber}: ${newOrder.items}`,
         hotelId: hotel.id,
         module: 'F & B'
       });
@@ -363,8 +348,7 @@ export function FandB() {
         notes: '', 
         category: 'all', 
         price: 0, 
-        paidAmount: 0, 
-        paymentMethod: 'cash',
+        payments: [{ amount: 0, method: 'cash' }],
         discount: 0,
         discountType: 'fixed'
       });
@@ -1234,66 +1218,85 @@ export function FandB() {
                   </div>
 
                   {newOrder.roomNumber && (
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payment Method</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {(['cash', 'card', 'transfer', 'room'] as const).map(method => (
-                            <button
-                              key={method}
-                              type="button"
-                              disabled={method === 'room' && newOrder.roomNumber === 'Walk-in'}
-                              onClick={() => {
-                                const updates: any = { paymentMethod: method };
-                                if (method === 'room') {
-                                  updates.paidAmount = 0;
-                                } else if (newOrder.paidAmount === 0) {
-                                  updates.paidAmount = newOrder.price;
-                                }
-                                setNewOrder({ ...newOrder, ...updates });
-                              }}
-                              className={cn(
-                                "py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all",
-                                newOrder.paymentMethod === method 
-                                  ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" 
-                                  : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700",
-                                method === 'room' && newOrder.roomNumber === 'Walk-in' && "opacity-50 cursor-not-allowed"
-                              )}
-                            >
-                              {method === 'room' ? 'Post to Room' : method}
-                            </button>
-                          ))}
+                    <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-800 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs uppercase tracking-wider">
+                          <DollarSign size={14} />
+                          Payments
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewOrder({
+                            ...newOrder,
+                            payments: [...newOrder.payments, { amount: 0, method: 'cash' }]
+                          })}
+                          className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                        >
+                          <Plus size={12} /> Add Split
+                        </button>
                       </div>
 
-                      {newOrder.paymentMethod !== 'room' && (
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Paid Amount</label>
-                          <input
-                            type="number"
-                            value={newOrder.paidAmount || ''}
-                            onChange={(e) => setNewOrder({ ...newOrder, paidAmount: Number(e.target.value) })}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
-                            placeholder="Enter amount paid..."
-                          />
-                          <div className="flex gap-2">
-                            <button 
-                              type="button"
-                              onClick={() => setNewOrder({ ...newOrder, paidAmount: newOrder.price })}
-                              className="text-[10px] text-emerald-500 hover:underline"
-                            >
-                              Full Payment
-                            </button>
-                            <button 
-                              type="button"
-                              onClick={() => setNewOrder({ ...newOrder, paidAmount: newOrder.price / 2 })}
-                              className="text-[10px] text-zinc-500 hover:underline"
-                            >
-                              Half Payment
-                            </button>
+                      <div className="space-y-3">
+                        {newOrder.payments.map((pay, index) => (
+                          <div key={index} className="grid grid-cols-2 gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-xl relative group">
+                            {newOrder.payments.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...newOrder.payments];
+                                  updated.splice(index, 1);
+                                  setNewOrder({ ...newOrder, payments: updated });
+                                }}
+                                className="absolute -top-1 -right-1 w-5 h-5 bg-zinc-800 text-zinc-500 hover:text-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-zinc-700"
+                              >
+                                <X size={10} />
+                              </button>
+                            )}
+                            <div>
+                              <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
+                              <input 
+                                type="number" 
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                                value={pay.amount || ''}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  const updated = [...newOrder.payments];
+                                  updated[index].amount = val;
+                                  setNewOrder({ ...newOrder, payments: updated });
+                                }}
+                                placeholder="0.00"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Method</label>
+                              <select 
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                                value={pay.method}
+                                onChange={(e) => {
+                                  const updated = [...newOrder.payments];
+                                  updated[index].method = e.target.value as any;
+                                  setNewOrder({ ...newOrder, payments: updated });
+                                }}
+                              >
+                                <option value="cash">Cash</option>
+                                <option value="card">Card</option>
+                                <option value="transfer">Transfer</option>
+                                <option value="room">Charge to Room</option>
+                              </select>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-zinc-900">
+                        <span className="text-[10px] text-zinc-500 uppercase font-bold">Total Collection</span>
+                        <span className={cn(
+                          "text-xs font-bold",
+                          newOrder.payments.reduce((acc, p) => acc + p.amount, 0) >= newOrder.price ? "text-emerald-500" : "text-yellow-500"
+                        )}>
+                          {newOrder.payments.reduce((acc, p) => acc + p.amount, 0).toLocaleString()} / {newOrder.price.toLocaleString()}
+                        </span>
+                      </div>
                     </div>
                   )}
 

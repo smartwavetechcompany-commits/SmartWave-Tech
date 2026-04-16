@@ -28,7 +28,10 @@ import {
   Download,
   Edit2,
   DollarSign,
-  Loader2
+  Loader2,
+  PlusCircle,
+  Banknote,
+  X
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -116,6 +119,7 @@ export function FrontDesk() {
     taxDetails: [] as { name: string; percentage: number; amount: number; isInclusive: boolean }[],
     initialPayment: 0,
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer',
+    payments: [{ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer' }],
     autoNightDeduction: true, // Mandatory toggle for automatic nightly charges
     additionalStays: [] as any[]
   });
@@ -354,7 +358,10 @@ export function FrontDesk() {
     let primaryTaxTotal = 0;
     let primaryExclusiveTaxTotal = 0;
     const primaryTaxDetails = activeTaxes.map(tax => {
-      const amount = primaryBaseAmount * (tax.percentage / 100);
+      const amount = tax.isInclusive 
+        ? primaryBaseAmount - (primaryBaseAmount / (1 + (tax.percentage / 100)))
+        : primaryBaseAmount * (tax.percentage / 100);
+      
       primaryTaxTotal += amount;
       if (!tax.isInclusive) {
         primaryExclusiveTaxTotal += amount;
@@ -391,7 +398,10 @@ export function FrontDesk() {
       let stayTaxTotal = 0;
       let stayExclusiveTaxTotal = 0;
       const stayTaxDetails = activeTaxes.map(tax => {
-        const amount = stayBaseAmount * (tax.percentage / 100);
+        const amount = tax.isInclusive 
+          ? stayBaseAmount - (stayBaseAmount / (1 + (tax.percentage / 100)))
+          : stayBaseAmount * (tax.percentage / 100);
+        
         stayTaxTotal += amount;
         if (!tax.isInclusive) {
           stayExclusiveTaxTotal += amount;
@@ -601,8 +611,13 @@ export function FrontDesk() {
           }, profile.uid, stay.corporateId);
         }
 
-        if (createdStays.indexOf(stay) === 0 && newBooking.initialPayment > 0) {
-          await settleLedger(hotel.id, stay.guestId, stay.resId, newBooking.initialPayment, newBooking.paymentMethod, profile.uid, stay.corporateId);
+        const totalPayment = newBooking.payments.reduce((acc: number, p: any) => acc + (p.amount || 0), 0);
+        if (createdStays.indexOf(stay) === 0 && totalPayment > 0) {
+          for (const pay of newBooking.payments) {
+            if (pay.amount > 0) {
+              await settleLedger(hotel.id, stay.guestId, stay.resId, pay.amount, pay.method, profile.uid, stay.corporateId);
+            }
+          }
         }
       }
 
@@ -634,6 +649,7 @@ export function FrontDesk() {
         taxDetails: [],
         initialPayment: 0,
         paymentMethod: 'cash',
+        payments: [{ amount: 0, method: 'cash' }],
         autoNightDeduction: true,
         additionalStays: [] as any[]
       });
@@ -1521,6 +1537,7 @@ export function FrontDesk() {
                 taxDetails: [],
                 initialPayment: 0,
                 paymentMethod: 'cash',
+                payments: [{ amount: 0, method: 'cash' }],
                 autoNightDeduction: true,
                 additionalStays: [] as any[],
               });
@@ -1560,6 +1577,7 @@ export function FrontDesk() {
                       taxDetails: [],
                       initialPayment: 0,
                       paymentMethod: 'cash',
+                      payments: [{ amount: 0, method: 'cash' }],
                       autoNightDeduction: true,
                       additionalStays: [] as any[]
                     });
@@ -2107,35 +2125,73 @@ export function FrontDesk() {
               </div>
 
               <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-4">
-                <div className="flex items-center gap-2 text-blue-500 font-bold text-xs uppercase tracking-wider">
-                  <DollarSign size={14} />
-                  Initial Payment (Optional)
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-blue-500 font-bold text-xs uppercase tracking-wider">
+                    <DollarSign size={14} />
+                    Initial Payment (Optional)
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewBooking({
+                        ...newBooking,
+                        payments: [...newBooking.payments, { amount: 0, method: 'cash' }]
+                      });
+                    }}
+                    className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                  >
+                    <Plus size={12} /> Add Split
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
-                    <input 
-                      type="number" 
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                      value={currency === 'USD' ? (newBooking.initialPayment / exchangeRate) || '' : newBooking.initialPayment || ''}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setNewBooking({ ...newBooking, initialPayment: currency === 'USD' ? val * exchangeRate : val });
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Method</label>
-                    <select 
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                      value={newBooking.paymentMethod}
-                      onChange={(e) => setNewBooking({ ...newBooking, paymentMethod: e.target.value as any })}
-                    >
-                      <option value="cash">Cash</option>
-                      <option value="card">Card</option>
-                      <option value="transfer">Transfer</option>
-                    </select>
-                  </div>
+
+                <div className="space-y-3">
+                  {newBooking.payments.map((pay: any, index: number) => (
+                    <div key={index} className="grid grid-cols-2 gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-xl relative group">
+                      {newBooking.payments.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...newBooking.payments];
+                            updated.splice(index, 1);
+                            setNewBooking({ ...newBooking, payments: updated });
+                          }}
+                          className="absolute -top-1 -right-1 w-5 h-5 bg-zinc-800 text-zinc-500 hover:text-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-zinc-700"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                      <div>
+                        <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
+                        <input 
+                          type="number" 
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={currency === 'USD' ? (pay.amount / exchangeRate) || '' : pay.amount || ''}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            const updated = [...newBooking.payments];
+                            updated[index].amount = currency === 'USD' ? val * exchangeRate : val;
+                            setNewBooking({ ...newBooking, payments: updated });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Method</label>
+                        <select 
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={pay.method}
+                          onChange={(e) => {
+                            const updated = [...newBooking.payments];
+                            updated[index].method = e.target.value as any;
+                            setNewBooking({ ...newBooking, payments: updated });
+                          }}
+                        >
+                          <option value="cash">Cash</option>
+                          <option value="card">Card</option>
+                          <option value="transfer">Transfer</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -2221,17 +2277,20 @@ export function FrontDesk() {
                     )}
                   </span>
                 </div>
-                {newBooking.initialPayment > 0 && (
-                  <div className="flex justify-between text-[10px] text-blue-400">
-                    <span>Initial Payment</span>
-                    <span>-{formatCurrency(newBooking.initialPayment, currency, exchangeRate)}</span>
-                  </div>
-                )}
+                {(() => {
+                  const totalPaid = newBooking.payments?.reduce((acc: number, p: any) => acc + (p.amount || 0), 0) || 0;
+                  return totalPaid > 0 ? (
+                    <div className="flex justify-between text-[10px] text-blue-400">
+                      <span>Initial Payment</span>
+                      <span>-{formatCurrency(totalPaid, currency, exchangeRate)}</span>
+                    </div>
+                  ) : null;
+                })()}
                 <div className="flex justify-between text-xs font-bold text-zinc-50 pt-1">
                   <span>Balance Due</span>
                   <span className="text-red-500">
                     {formatCurrency(
-                      Math.max(0, (newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - newBooking.initialPayment),
+                      Math.max(0, (newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - (newBooking.payments?.reduce((acc: number, p: any) => acc + (p.amount || 0), 0) || 0)),
                       currency,
                       exchangeRate
                     )}

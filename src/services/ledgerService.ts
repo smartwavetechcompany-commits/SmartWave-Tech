@@ -36,14 +36,20 @@ export const postToLedger = async (
         const category = (t.category || '').toLowerCase().trim();
         const entryCategory = (entry.category || '').toLowerCase().trim();
         return status === 'active' && 
-          (category === 'all' || category === entryCategory || (entryCategory === 'room' && category === 'service'));
+          (category === 'all' || 
+           category === entryCategory || 
+           (entryCategory === 'room' && category === 'service') ||
+           ((entryCategory === 'f & b' || entryCategory === 'restaurant') && (category === 'f & b' || category === 'restaurant'))
+          );
       });
       
       const baseAmount = entry.amount;
       let inclusiveTaxText = '';
 
       for (const tax of activeTaxes) {
-        const taxAmount = baseAmount * (tax.percentage / 100);
+        const taxAmount = tax.isInclusive 
+          ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
+          : baseAmount * (tax.percentage / 100);
         
         if (tax.isInclusive) {
           // For inclusive taxes, we don't increase the guest's balance.
