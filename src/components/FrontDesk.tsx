@@ -954,23 +954,6 @@ export function FrontDesk() {
               referenceId: res.id,
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
-
-            // Post Exclusive Taxes
-            const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
-            for (const tax of activeTaxes) {
-              if (!tax.isInclusive) {
-                const taxAmount = rate * (tax.percentage / 100);
-                await postToLedger(hotel.id, res.guestId, res.id, {
-                  amount: taxAmount,
-                  type: 'debit',
-                  category: 'tax',
-                  description: `${tax.name} (${tax.percentage}%) for Night of ${format(chargeDate, 'MMM dd, yyyy')}`,
-                  referenceId: res.id,
-                  postedBy: profile.uid
-                }, profile.uid, res.corporateId);
-                totalCharged += taxAmount;
-              }
-            }
             
             auditCount++;
             totalCharged += rate;
@@ -1025,24 +1008,21 @@ export function FrontDesk() {
         await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
-          // Post ALL scheduled room charges and taxes to ledger immediately
+          // Post ONLY the first night's charge at check-in
+          // Subsequent nights will be posted by the Night Audit
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          const nights = res.nights || 1;
           const checkInDate = new Date(res.checkIn);
           
-          for (let i = 0; i < nights; i++) {
-            const chargeDate = addDays(startOfDay(checkInDate), i);
-            await postToLedger(hotel.id, res.guestId, res.id, {
-              amount: rate,
-              type: 'debit',
-              category: 'room',
-              description: `Room Charge: Room ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
-              referenceId: res.id,
-              postedBy: profile.uid
-            }, profile.uid, res.corporateId);
+          await postToLedger(hotel.id, res.guestId, res.id, {
+            amount: rate,
+            type: 'debit',
+            category: 'room',
+            description: `Room Charge: Room ${res.roomNumber} (Night of ${format(checkInDate, 'MMM dd, yyyy')})`,
+            referenceId: res.id,
+            postedBy: profile.uid
+          }, profile.uid, res.corporateId);
 
-            // Taxes are automatically posted by postToLedger if it's a room charge
-          }
+          // Taxes are automatically posted by postToLedger if it's a room charge
 
           // Fetch fresh data to avoid stale state issues with auto-deduction
           const [guestSnap, freshResSnap] = await Promise.all([
@@ -1106,23 +1086,6 @@ export function FrontDesk() {
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
             finalTotalDebits += rate;
-
-            // Post Exclusive Taxes
-            const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
-            for (const tax of activeTaxes) {
-              if (!tax.isInclusive) {
-                const taxAmount = rate * (tax.percentage / 100);
-                await postToLedger(hotel.id, res.guestId!, res.id, {
-                  amount: taxAmount,
-                  type: 'debit',
-                  category: 'tax',
-                  description: `${tax.name} (${tax.percentage}%) for Night of ${format(chargeDate, 'MMM dd, yyyy')}`,
-                  referenceId: res.id,
-                  postedBy: profile.uid
-                }, profile.uid, res.corporateId);
-                finalTotalDebits += taxAmount;
-              }
-            }
           }
         } else if (existingCharges > nightsStayed) {
           const nightsToRefund = existingCharges - nightsStayed;
@@ -1138,53 +1101,48 @@ export function FrontDesk() {
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
             finalTotalDebits -= rate;
-
-            // Refund Exclusive Taxes
-            const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
-            for (const tax of activeTaxes) {
-              if (!tax.isInclusive) {
-                const taxAmount = rate * (tax.percentage / 100);
-                await postToLedger(hotel.id, res.guestId!, res.id, {
-                  amount: taxAmount,
-                  type: 'credit',
-                  category: 'refund',
-                  description: `${tax.name} Refund (Early Checkout)`,
-                  referenceId: res.id,
-                  postedBy: profile.uid
-                }, profile.uid, res.corporateId);
-                finalTotalDebits -= taxAmount;
-              }
-            }
           }
         }
 
-        // 2. Update reservation total to reflect actual stay
+        // 2. Check if ledger is settled (for individual guests)
+        const freshResSnap = await getDoc(resRef);
+        const freshResData = freshResSnap.data() as Reservation;
+        
+        // Calculate current ledger balance
+        const allEntries = freshResData.ledgerEntries || [];
+        const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+        const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+        const outstandingBalance = totalDebits - totalCredits;
+
+        if (!res.corporateId && outstandingBalance > 0.01) {
+          toast.error(`Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`);
+          setLoading(false);
+          // Revert status to checked_in
+          await updateDoc(resRef, { status: 'checked_in' });
+          return;
+        }
+
+        // 3. Update reservation total and checkout details
         await updateDoc(resRef, { 
-          totalAmount: finalTotalDebits,
+          totalAmount: totalDebits,
           checkOut: format(now, 'yyyy-MM-dd'),
-          checkOutTime: format(now, 'HH:mm')
+          checkOutTime: format(now, 'HH:mm'),
+          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
         });
 
-        const balance = finalTotalDebits - (res.paidAmount || 0);
-        if (balance > 0) {
-          // Transfer to City Ledger
-          await transferToCityLedger(hotel.id, res.guestId!, res.id, balance, profile.uid, res.corporateId);
-          
-          toast.info(`Outstanding balance of ${formatCurrency(balance, currency, exchangeRate)} transferred to City Ledger.`);
-          
-          // Log debt movement
-          await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-            timestamp: new Date().toISOString(),
-            userId: profile.uid,
-            userEmail: profile.email,
-            userRole: profile.role,
-            action: 'CITY_LEDGER_TRANSFER',
-            resource: `Guest ${res.guestName} balance of ${formatCurrency(balance, currency, exchangeRate)} moved to City Ledger at checkout.`,
-            hotelId: hotel.id,
-            module: 'Front Desk'
-          });
+        // 4. Mark room as dirty
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+          status: 'dirty',
+          housekeepingStatus: 'dirty',
+          currentGuestId: null,
+          currentReservationId: null
+        });
+
+        // 5. If corporate, transfer to City Ledger
+        if (res.corporateId && outstandingBalance > 0) {
+          await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid, res.corporateId);
+          toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} transferred to City Ledger.`);
         }
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
         await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });

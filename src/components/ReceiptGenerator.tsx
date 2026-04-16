@@ -11,26 +11,32 @@ interface ReceiptProps {
   account?: CorporateAccount;
   type: 'restaurant' | 'comprehensive' | 'corporate';
   ledgerEntries?: LedgerEntry[];
+  folioType?: 'guest' | 'company' | 'all';
 }
 
-export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntries = [] }: ReceiptProps) {
+export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntries = [], folioType = 'all' }: ReceiptProps) {
   const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
+
+  // Filter entries based on folioType if reservation is corporate
+  const filteredEntries = (reservation?.corporateId && folioType !== 'all')
+    ? ledgerEntries.filter(e => folioType === 'company' ? !!e.corporateId : !e.corporateId)
+    : ledgerEntries;
   
-  const debits = ledgerEntries.filter(e => e.type === 'debit');
-  const credits = ledgerEntries.filter(e => e.type === 'credit');
+  const debits = filteredEntries.filter(e => e.type === 'debit');
+  const credits = filteredEntries.filter(e => e.type === 'credit');
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
   const totalPayments = credits.filter(e => e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments;
   
-  const totalTaxDebits = ledgerEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalTaxDebits = filteredEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalNonTaxDebits = totalDebits - totalTaxDebits;
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
-  const hasRoomChargeInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
-  const subtotal = type === 'corporate' ? totalNonTaxDebits : (hasRoomChargeInLedger ? totalNonTaxDebits : ((reservation?.totalAmount || 0) - (reservation?.taxAmount || 0) + totalNonTaxDebits));
+  const hasRoomChargeInLedger = filteredEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  const subtotal = totalNonTaxDebits;
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -52,7 +58,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     } else {
       // If we have taxes in ledger, use them for accurate reporting
       if (totalTaxDebits > 0) {
-        amount = ledgerEntries
+        amount = filteredEntries
           .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
           .reduce((acc, e) => acc + e.amount, 0);
         taxTotal += amount;
@@ -148,7 +154,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         </div>
         <div className="text-right">
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
-            <Receipt size={10} /> {type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : 'OFFICIAL GUEST RECEIPT'}
+            <Receipt size={10} /> {type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : (folioType === 'company' ? 'CORPORATE FOLIO STATEMENT' : 'OFFICIAL GUEST RECEIPT')}
           </p>
           <p className="font-bold text-base">#{type === 'corporate' ? account?.id.slice(-8).toUpperCase() : reservation?.id.slice(-8).toUpperCase()}</p>
           <p className="text-zinc-500 text-xs">{format(new Date(), 'MMMM dd, yyyy HH:mm')}</p>
@@ -301,7 +307,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
           <>
             <div className="flex justify-between items-center text-emerald-600 text-[10px]">
               <span className="font-bold uppercase tracking-widest">Payments Received</span>
-              <span className="font-bold">{formatCurrency(type === 'corporate' ? totalPayments : (hasPaymentInLedger ? totalPayments : (reservation?.paidAmount || 0)), currency, exchangeRate)}</span>
+              <span className="font-bold">{formatCurrency(totalPayments, currency, exchangeRate)}</span>
             </div>
             {totalOtherCredits > 0 && (
               <div className="flex justify-between items-center text-emerald-600 text-[10px]">

@@ -27,6 +27,7 @@ export const postToLedger = async (
   const entries: LedgerEntry[] = [ledgerEntry];
 
   // 2. Automatically post taxes if it's a room charge
+  // The user expects 7.5% (or whatever is configured) to be added as separate entries
   if (entry.category === 'room' && entry.type === 'debit') {
     const hotelSnap = await getDoc(doc(db, 'hotels', hotelId));
     if (hotelSnap.exists()) {
@@ -42,7 +43,7 @@ export const postToLedger = async (
             hotelId,
             guestId,
             reservationId,
-            corporateId,
+            corporateId, // Tax follows the charge (if room is corporate, tax is corporate)
             type: 'debit',
             amount: taxAmount,
             description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
@@ -50,151 +51,104 @@ export const postToLedger = async (
             postedBy
           };
           entries.push(taxEntry);
-          
-          if (corporateId) {
-            const taxCoverageEntry: LedgerEntry = {
-              id: Math.random().toString(36).substr(2, 9) + '_tax_cov',
-              timestamp,
-              hotelId,
-              guestId,
-              reservationId,
-              corporateId,
-              type: 'credit',
-              amount: taxAmount,
-              description: `Corporate Coverage: ${tax.name}`,
-              category: 'corporate',
-              postedBy
-            };
-            entries.push(taxCoverageEntry);
-          }
         }
       }
     }
   }
 
-  // 3. Handle Corporate Coverage for the main entry
-  if (corporateId && entry.type === 'debit') {
-    const coverageEntry: LedgerEntry = {
-      id: Math.random().toString(36).substr(2, 9) + '_cov',
-      timestamp,
-      hotelId,
-      guestId,
-      reservationId,
-      corporateId,
-      type: 'credit',
-      amount: entry.amount,
-      description: `Corporate Coverage: ${entry.description}`,
-      category: 'corporate',
-      postedBy
-    };
-    entries.push(coverageEntry);
-  }
-
-  // 4. Prepare Reservation updates
+  // 3. Prepare Reservation updates
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
   const resUpdates: any = {
     ledgerEntries: arrayUnion(...entries)
   };
 
-  // 5. Add all entries to Ledger Collection
+  // 4. Add all entries to Ledger Collection
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
   const ledgerDocPromises = entries.map(e => addDoc(ledgerRef, e));
 
-  // 6. Prepare Guest or Corporate Account updates
-  let accountUpdatePromise;
-  // Calculate total balance adjustment for this operation
-  const totalBalanceAdjustment = entries.reduce((acc, e) => {
-    return acc + (e.type === 'debit' ? e.amount : -e.amount);
-  }, 0);
+  // 5. Update Guest and/or Corporate Account balances
+  // Ledger Balance = Total Charges (Debits) - Total Payments (Credits)
+  const guestEntries = entries.filter(e => !e.corporateId);
+  const corpEntries = entries.filter(e => !!e.corporateId);
 
-  if (corporateId) {
-    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
-    // For corporate accounts, we track the net balance of charges and payments
-    accountUpdatePromise = updateDoc(corpRef, {
-      currentBalance: increment(totalBalanceAdjustment),
-      totalDebits: increment(entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
-      totalCredits: increment(entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
-    });
-  } else {
+  const guestBalanceAdj = guestEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+  const corpBalanceAdj = corpEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+
+  const updatePromises: Promise<any>[] = [...ledgerDocPromises];
+
+  if (guestBalanceAdj !== 0) {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
-    accountUpdatePromise = updateDoc(guestRef, {
-      ledgerBalance: increment(totalBalanceAdjustment),
-      // Total spent should ONLY reflect actual guest payments (category 'payment')
-      totalSpent: increment(entries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0))
-    });
+    updatePromises.push(updateDoc(guestRef, {
+      ledgerBalance: increment(guestBalanceAdj),
+      // totalSpent only increments on actual guest payments (credit + payment)
+      totalSpent: increment(guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0))
+    }));
   }
 
-  // 7. Handle Payment Synchronization and Finance Record
-  let financeUpdatePromise;
-  const isPaymentOrRefund = entries.some(e => e.category === 'payment' || e.category === 'refund');
-  const hasCorporateDebit = corporateId && entry.type === 'debit';
+  if (corporateId && corpBalanceAdj !== 0) {
+    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
+    updatePromises.push(updateDoc(corpRef, {
+      currentBalance: increment(corpBalanceAdj),
+      totalDebits: increment(corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
+      totalCredits: increment(corpEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
+    }));
+  }
 
-  if (isPaymentOrRefund || hasCorporateDebit) {
-    const resSnap = await getDoc(resRef);
-    if (resSnap.exists()) {
-      const resData = resSnap.data() as Reservation;
-      
-      // paidAmount should ONLY reflect actual guest payments (category 'payment')
-      const guestPaymentAmount = entries
-        .filter(e => e.category === 'payment' && e.type === 'credit')
-        .reduce((acc, e) => acc + e.amount, 0);
-      
-      const newPaidAmount = Math.max(0, (resData.paidAmount || 0) + guestPaymentAmount);
-      
-      // totalCoverage includes Guest Payments AND Corporate Coverage
-      const totalCoverage = (resData.ledgerEntries || [])
-        .filter(e => e.type === 'credit')
-        .reduce((acc, e) => acc + e.amount, 0) + 
-        entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-
-      // Correct payment status logic
-      let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
-      const totalToPay = resData.totalAmount || 0;
-      
-      if (totalToPay > 0) {
-        if (totalCoverage >= totalToPay) {
-          newPaymentStatus = 'paid';
-        } else if (totalCoverage > 0) {
-          newPaymentStatus = 'partial';
-        }
-      } else if (totalCoverage > 0) {
+  // 6. Handle Reservation Payment Status Synchronization
+  const resSnap = await getDoc(resRef);
+  if (resSnap.exists()) {
+    const resData = resSnap.data() as Reservation;
+    
+    // Calculate new totals based on all entries (existing + new)
+    const allEntries = [...(resData.ledgerEntries || []), ...entries];
+    
+    const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+    const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+    
+    // paidAmount reflects actual guest payments
+    const guestPayments = allEntries.filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId).reduce((acc, e) => acc + e.amount, 0);
+    
+    let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
+    if (totalDebits > 0) {
+      if (totalCredits >= totalDebits) {
         newPaymentStatus = 'paid';
+      } else if (totalCredits > 0) {
+        newPaymentStatus = 'partial';
       }
-      
-      resUpdates.paidAmount = newPaidAmount;
-      resUpdates.paymentStatus = newPaymentStatus;
+    } else if (totalCredits > 0) {
+      newPaymentStatus = 'paid';
     }
 
-    // Finance records for actual payments/refunds
-    const payments = entries.filter(e => e.category === 'payment' || e.category === 'refund');
-    if (payments.length > 0) {
-      const financeRef = collection(db, 'hotels', hotelId, 'finance');
-      const financePromises = payments.map(p => {
-        const financeRecord: Omit<FinanceRecord, 'id'> = {
-          type: p.type === 'credit' ? 'income' : 'expense',
-          amount: p.amount,
-          category: p.category === 'payment' ? 'Room Revenue' : 'Other',
-          description: p.description,
-          timestamp,
-          paymentMethod,
-          guestId,
-          referenceId: p.id
-        };
-        return addDoc(financeRef, financeRecord);
-      });
-      financeUpdatePromise = Promise.all(financePromises);
-    }
+    resUpdates.paidAmount = guestPayments;
+    resUpdates.paymentStatus = newPaymentStatus;
+    resUpdates.totalAmount = totalDebits; // Reservation total should reflect all posted charges
   }
 
-  // 8. Execute all updates in parallel
-  const results = await Promise.all([
-    ...ledgerDocPromises,
-    updateDoc(resRef, resUpdates),
-    accountUpdatePromise,
-    financeUpdatePromise
-  ].filter(p => p !== undefined));
+  updatePromises.push(updateDoc(resRef, resUpdates));
 
-  return { ...ledgerEntry, firestoreId: results[0]?.id };
+  // 7. Finance records for actual payments/refunds
+  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId);
+  if (payments.length > 0) {
+    const financeRef = collection(db, 'hotels', hotelId, 'finance');
+    const financePromises = payments.map(p => {
+      const financeRecord: Omit<FinanceRecord, 'id'> = {
+        type: p.type === 'credit' ? 'income' : 'expense',
+        amount: p.amount,
+        category: p.category === 'payment' ? 'Room Revenue' : 'Other',
+        description: p.description,
+        timestamp,
+        paymentMethod,
+        guestId,
+        referenceId: p.id
+      };
+      return addDoc(financeRef, financeRecord);
+    });
+    updatePromises.push(Promise.all(financePromises));
+  }
+
+  await Promise.all(updatePromises);
+
+  return { ...ledgerEntry, firestoreId: entries[0].id };
 };
 
 export const deleteLedgerEntry = async (

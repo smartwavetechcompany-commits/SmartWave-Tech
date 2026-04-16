@@ -107,22 +107,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             referenceId: currentReservation.id,
             postedBy: profile.uid
           }, profile.uid, currentReservation.corporateId);
-
-          // Post Exclusive Taxes
-          const activeTaxes = (hotel.taxes || []).filter(t => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
-          for (const tax of activeTaxes) {
-            if (!tax.isInclusive) {
-              const taxAmount = rate * (tax.percentage / 100);
-              await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
-                amount: taxAmount,
-                type: 'debit',
-                category: 'tax',
-                description: `${tax.name} (${tax.percentage}%) for Night of ${format(chargeDate, 'MMM dd, yyyy')}`,
-                referenceId: currentReservation.id,
-                postedBy: profile.uid
-              }, profile.uid, currentReservation.corporateId);
-            }
-          }
         }
         toast.success(`Posted ${nightsToCharge} nightly charge(s)`);
       } else {
@@ -133,52 +117,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       toast.error('Failed to post nightly charge');
     } finally {
       setIsAuditing(false);
-    }
-  };
-
-  const [isSyncingTaxes, setIsSyncingTaxes] = useState(false);
-
-  const handleSyncTaxes = async () => {
-    if (!hotel?.id || !profile) return;
-    try {
-      setIsSyncingTaxes(true);
-      const missingTaxes = activeTaxes.filter(tax => {
-        if (tax.isInclusive) return false;
-        const postedAmount = ledgerEntries
-          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
-          .reduce((acc, e) => acc + e.amount, 0);
-        const expectedAmount = subtotal * (tax.percentage / 100);
-        return expectedAmount > postedAmount + 0.01; // Use small epsilon for float comparison
-      });
-
-      if (missingTaxes.length === 0) {
-        toast.info('Taxes are already in sync with the ledger.');
-        return;
-      }
-
-      for (const tax of missingTaxes) {
-        const postedAmount = ledgerEntries
-          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
-          .reduce((acc, e) => acc + e.amount, 0);
-        const expectedAmount = subtotal * (tax.percentage / 100);
-        const amountToPost = expectedAmount - postedAmount;
-
-        await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
-          amount: amountToPost,
-          type: 'debit',
-          category: 'tax',
-          description: `Tax Sync: ${tax.name} (${tax.percentage}%)`,
-          referenceId: currentReservation.id,
-          postedBy: profile.uid
-        }, profile.uid, currentReservation.corporateId);
-      }
-
-      toast.success('Taxes synced to ledger successfully');
-    } catch (err: any) {
-      console.error("Sync taxes error:", err);
-      toast.error('Failed to sync taxes');
-    } finally {
-      setIsSyncingTaxes(false);
     }
   };
 
@@ -346,14 +284,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>('guest');
 
   const companyEntries = ledgerEntries.filter(e => 
-    currentReservation.corporateId && (
-      ((e.category === 'room' || e.category === 'tax') && e.type === 'debit') ||
-      (e.category === 'corporate' && e.type === 'credit')
-    )
+    currentReservation.corporateId && e.corporateId
   );
   
   const guestEntries = ledgerEntries.filter(e => 
-    !companyEntries.includes(e) || (e.type === 'credit' && e.category === 'payment')
+    !e.corporateId
   );
 
   const displayedEntries = currentReservation.corporateId && activeFolio === 'company' 
@@ -362,72 +297,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const totalPayments = displayedEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
-  const totalCorporateCoverage = displayedEntries.filter(e => e.type === 'credit' && e.category?.toLowerCase() === 'corporate').reduce((acc, e) => acc + e.amount, 0);
-  const totalOtherCredits = totalCredits - totalPayments - totalCorporateCoverage;
-  
-  const totalTaxDebits = displayedEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalNonTaxDebits = totalDebits - totalTaxDebits;
-
-  const hasRoomChargeInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
-  const hasPaymentInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'payment');
-  const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active');
-
-  // Calculate Totals based strictly on Ledger for checked-in/out guests
-  // For pending guests, we show the estimated total
-  const isStated = ['checked_in', 'checked_out'].includes(currentReservation.status);
-  
-  // Robust subtotal calculation:
-  // 1. If we have ledger entries for the active folio, use them
-  // 2. If no ledger entries yet (e.g. just checked in), use the reservation's totalAmount ONLY for the company folio if it's corporate
-  const subtotal = totalNonTaxDebits > 0 
-    ? totalNonTaxDebits 
-    : (currentReservation.corporateId 
-        ? (activeFolio === 'company' ? (currentReservation.totalAmount - (currentReservation.taxAmount || 0)) : 0)
-        : (currentReservation.totalAmount - (currentReservation.taxAmount || 0)));
-  
-  let taxTotal = 0;
-  const taxBreakdown = currentReservation.taxDetails && currentReservation.taxDetails.length > 0 && (!currentReservation.corporateId || activeFolio === 'company')
-    ? currentReservation.taxDetails.map(tax => {
-        taxTotal += tax.isInclusive ? 0 : tax.amount;
-        return tax;
-      })
-    : activeTaxes.map((tax, index) => {
-        let amount = 0;
-        if (tax.isInclusive) {
-          amount = subtotal - (subtotal / (1 + tax.percentage / 100));
-        } else {
-          // If already checked in and we have tax entries, use the actual posted tax amount
-          if (isStated && totalTaxDebits > 0) {
-            // Try to match by name
-            const matchedAmount = displayedEntries
-              .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
-              .reduce((acc, e) => acc + e.amount, 0);
-            
-            amount = matchedAmount;
-            taxTotal += amount;
-          } else {
-            // Only show estimated taxes for company folio if corporate, or for any folio if individual
-            if (!currentReservation.corporateId || activeFolio === 'company') {
-              amount = subtotal * (tax.percentage / 100);
-              taxTotal += amount;
-            }
-          }
-        }
-        return { ...tax, amount };
-      });
-
-  // Add "Other Taxes" if there are unmatched tax debits in the ledger
-  const matchedTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
-  const otherTaxAmount = isStated ? Math.max(0, totalTaxDebits - matchedTaxTotal) : 0;
-  if (otherTaxAmount > 0.01) {
-    taxTotal += otherTaxAmount;
-  }
-
-  const grandTotal = subtotal + taxTotal;
-  // Total Paid should be ALL credits in the ledger
-  const totalPaid = totalCredits;
-  const balance = grandTotal - totalPaid;
+  const balance = totalDebits - totalCredits;
 
   const handleDeleteEntry = async () => {
     if (!hotel?.id || !confirmDelete || !profile) return;
@@ -508,6 +378,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 reservation={currentReservation} 
                 type="comprehensive" 
                 ledgerEntries={ledgerEntries} 
+                folioType={activeFolio}
               />
             </div>
           </div>
@@ -663,65 +534,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <Banknote size={18} className="text-amber-500" />
-                  <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
+                  <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Folio Summary</h3>
                 </div>
-                {isStated && activeTaxes.some(tax => {
-                  if (tax.isInclusive) return false;
-                  const postedAmount = ledgerEntries
-                    .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.includes(tax.name))
-                    .reduce((acc, e) => acc + e.amount, 0);
-                  const expectedAmount = subtotal * (tax.percentage / 100);
-                  return expectedAmount > postedAmount + 0.01;
-                }) && (
-                  <button
-                    onClick={handleSyncTaxes}
-                    disabled={isSyncingTaxes}
-                    className="text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-1 rounded hover:bg-amber-500 hover:text-black transition-all flex items-center gap-1"
-                  >
-                    <RefreshCw size={10} className={isSyncingTaxes ? "animate-spin" : ""} />
-                    Sync Taxes
-                  </button>
-                )}
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Subtotal</span>
-                  <span className="text-zinc-50 font-bold">{formatCurrency(subtotal, currency, exchangeRate)}</span>
-                </div>
-                {taxBreakdown.map((tax: any, idx) => (
-                  <div key={tax.id || `tax-${idx}`} className="flex justify-between text-sm">
-                    <span className="text-zinc-500">{tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}</span>
-                    <span className="text-zinc-50 font-bold">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
-                  </div>
-                ))}
-                {otherTaxAmount > 0.01 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Other Posted Taxes</span>
-                    <span className="text-zinc-50 font-bold">{formatCurrency(otherTaxAmount, currency, exchangeRate)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-sm pt-2 border-t border-zinc-800">
-                  <span className="text-zinc-500">Total Charges</span>
-                  <span className="text-zinc-50 font-bold">{formatCurrency(grandTotal, currency, exchangeRate)}</span>
+                  <span className="text-zinc-500">Total Charges (Debits)</span>
+                  <span className="text-zinc-50 font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Guest Payments</span>
-                  <span className="text-emerald-500 font-bold">{formatCurrency(totalPayments, currency, exchangeRate)}</span>
+                  <span className="text-zinc-500">Total Payments (Credits)</span>
+                  <span className="text-emerald-500 font-bold">{formatCurrency(totalCredits, currency, exchangeRate)}</span>
                 </div>
-                {totalCorporateCoverage > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Corporate Coverage</span>
-                    <span className="text-emerald-500 font-bold">{formatCurrency(totalCorporateCoverage, currency, exchangeRate)}</span>
-                  </div>
-                )}
-                {totalOtherCredits > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-zinc-500">Discounts & Transfers</span>
-                    <span className="text-emerald-500 font-bold">{formatCurrency(totalOtherCredits, currency, exchangeRate)}</span>
-                  </div>
-                )}
+                
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
-                  <span className="text-sm font-bold text-zinc-50 uppercase">Balance Status</span>
+                  <span className="text-sm font-bold text-zinc-50 uppercase">Ledger Balance</span>
                   <div className="flex flex-col items-end">
                     <span className={cn(
                       "text-xl font-bold",
@@ -733,42 +560,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       "text-[10px] font-bold uppercase",
                       balance > 0 ? "text-red-500" : "text-emerald-500"
                     )}>
-                      {balance > 0 ? "Guest Owing" : balance < 0 ? "Credit Balance" : "Settled"}
+                      {balance > 0 ? (activeFolio === 'company' ? "Company Owing" : "Guest Owing") : balance < 0 ? "Credit Balance" : "Settled"}
                     </span>
-                    {balance !== 0 && (
-                      <div className="flex flex-col items-end gap-2 mt-2">
-                        {otherReservations.length > 0 && (
-                          <button 
-                            onClick={() => setShowTransferBalanceModal(true)}
-                            className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1"
-                          >
-                            <ArrowRight size={10} /> Transfer to another stay
-                          </button>
-                        )}
-                        {balance > 0 && (
-                          <button 
-                            onClick={() => {
-                              setSettleData({ ...settleData, amount: balance });
-                              setShowSettlePayment(true);
-                            }}
-                            className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 font-bold"
-                          >
-                            <Banknote size={10} /> Settle Full Balance
-                          </button>
-                        )}
-                        {balance < 0 && (
-                          <button 
-                            onClick={() => {
-                              setSettleData({ ...settleData, amount: Math.abs(balance) });
-                              setShowSettleOverpayment(true);
-                            }}
-                            className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 font-bold"
-                          >
-                            <Banknote size={10} /> Settle Overpayment
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
