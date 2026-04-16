@@ -53,15 +53,20 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   let taxTotal = 0;
   const taxBreakdown = activeTaxes.map(tax => {
     let amount = 0;
-    if (tax.isInclusive) {
-      amount = subtotal - (subtotal / (1 + tax.percentage / 100));
-    } else {
-      // If we have taxes in ledger, use them for accurate reporting
-      if (totalTaxDebits > 0) {
-        amount = filteredEntries
-          .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
-          .reduce((acc, e) => acc + e.amount, 0);
+    
+    // If we have taxes in ledger, use them for accurate reporting
+    if (totalTaxDebits > 0) {
+      amount = filteredEntries
+        .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
+        .reduce((acc, e) => acc + e.amount, 0);
+      
+      if (!tax.isInclusive) {
         taxTotal += amount;
+      }
+    } else {
+      // Fallback to calculation if ledger is empty (e.g. preview before posting)
+      if (tax.isInclusive) {
+        amount = subtotal - (subtotal / (1 + tax.percentage / 100));
       } else {
         amount = subtotal * (tax.percentage / 100);
         taxTotal += amount;

@@ -343,7 +343,7 @@ export function FrontDesk() {
     
     const primaryTotal = pricePerNight * nights;
 
-    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room');
+    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all'));
     const totalInclusivePercentage = activeTaxes.filter(t => t.isInclusive).reduce((acc, t) => acc + t.percentage, 0);
     const primaryBaseAmount = primaryTotal / (1 + totalInclusivePercentage / 100);
     
@@ -1933,7 +1933,7 @@ export function FrontDesk() {
                       if (activeRate) displayPrice = activeRate.rate;
                     }
 
-                    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room');
+                    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all'));
                     const inclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
                     const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
                     
@@ -2140,12 +2140,9 @@ export function FrontDesk() {
                     <span className="flex items-center gap-1"><Tag size={10} /> Negotiated</span>
                   </div>
                 )}
-                <div className="flex justify-between text-[10px] text-zinc-400">
-                  <span>Subtotal</span>
-                  <span>{formatCurrency(newBooking.totalAmount, currency, exchangeRate)}</span>
-                </div>
                 {(() => {
                   const allTaxDetails: { [name: string]: { amount: number; percentage: number; isInclusive: boolean } } = {};
+                  let totalInclusiveAmount = 0;
                   
                   // Primary stay taxes
                   (newBooking.taxDetails || []).forEach(tax => {
@@ -2153,6 +2150,7 @@ export function FrontDesk() {
                       allTaxDetails[tax.name] = { amount: 0, percentage: tax.percentage, isInclusive: tax.isInclusive };
                     }
                     allTaxDetails[tax.name].amount += tax.amount;
+                    if (tax.isInclusive) totalInclusiveAmount += tax.amount;
                   });
 
                   // Additional stays taxes
@@ -2162,15 +2160,28 @@ export function FrontDesk() {
                         allTaxDetails[tax.name] = { amount: 0, percentage: tax.percentage, isInclusive: tax.isInclusive };
                       }
                       allTaxDetails[tax.name].amount += tax.amount;
+                      if (tax.isInclusive) totalInclusiveAmount += tax.amount;
                     });
                   });
 
-                  return Object.entries(allTaxDetails).map(([name, details], idx) => (
-                    <div key={idx} className="flex justify-between text-[10px] text-zinc-500">
-                      <span>{name} ({details.percentage}%) {details.isInclusive ? '(Incl.)' : ''}</span>
-                      <span>{formatCurrency(details.amount, currency, exchangeRate)}</span>
-                    </div>
-                  ));
+                  const subtotalNet = newBooking.totalAmount - newBooking.taxAmount - totalInclusiveAmount;
+
+                  return (
+                    <>
+                      <div className="flex justify-between text-[10px] text-zinc-400">
+                        <span>Subtotal (Net)</span>
+                        <span>{formatCurrency(subtotalNet, currency, exchangeRate)}</span>
+                      </div>
+                      {Object.entries(allTaxDetails).map(([name, details], idx) => (
+                        <div key={idx} className="flex justify-between text-[10px] text-zinc-500">
+                          <span className={details.isInclusive ? 'text-blue-400/80' : 'text-emerald-400/80'}>
+                            {name} ({details.percentage}%) {details.isInclusive ? '(Incl.)' : ''}
+                          </span>
+                          <span>{formatCurrency(details.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
+                    </>
+                  );
                 })()}
                 {newBooking.discountAmount > 0 && (
                   <div className="flex justify-between text-[10px] text-red-500">
