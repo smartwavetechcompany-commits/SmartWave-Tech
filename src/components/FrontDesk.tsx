@@ -344,9 +344,9 @@ export function FrontDesk() {
     const primaryTotal = pricePerNight * nights;
 
     const activeTaxes = (hotel?.taxes || []).filter(t => {
-      const status = (t.status || '').toLowerCase();
-      const category = (t.category || '').toLowerCase();
-      return status === 'active' && (category === 'room' || category === 'all' || category === 'service');
+      const status = (t.status || '').toLowerCase().trim();
+      const category = (t.category || '').toLowerCase().trim();
+      return status === 'active' && category !== 'restaurant';
     });
     const totalInclusivePercentage = activeTaxes.filter(t => t.isInclusive).reduce((acc, t) => acc + t.percentage, 0);
     const primaryBaseAmount = primaryTotal / (1 + totalInclusivePercentage / 100);
@@ -1938,9 +1938,9 @@ export function FrontDesk() {
                     }
 
                     const activeTaxes = (hotel?.taxes || []).filter(t => {
-                      const status = (t.status || '').toLowerCase();
-                      const category = (t.category || '').toLowerCase();
-                      return status === 'active' && (category === 'room' || category === 'all' || category === 'service');
+                      const status = (t.status || '').toLowerCase().trim();
+                      const category = (t.category || '').toLowerCase().trim();
+                      return status === 'active' && category !== 'restaurant';
                     });
                     const inclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
                     const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
@@ -2217,7 +2217,7 @@ export function FrontDesk() {
                   <span>Balance Due</span>
                   <span className="text-red-500">
                     {formatCurrency(
-                      Math.max(0, ((newBooking.totalAmount + (newBooking.taxAmount || 0)) - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - newBooking.initialPayment),
+                      Math.max(0, (newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - newBooking.initialPayment),
                       currency,
                       exchangeRate
                     )}
