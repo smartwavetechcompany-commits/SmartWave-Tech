@@ -32,81 +32,31 @@ export const postToLedger = async (
     if (hotelSnap.exists()) {
       const hotelData = hotelSnap.data();
       const activeTaxes = (hotelData.taxes || []).filter((t: any) => {
-        const status = (t.status || '').toLowerCase();
-        const category = (t.category || '').toLowerCase();
-        const entryCategory = (entry.category || '').toLowerCase();
+        const status = (t.status || '').toLowerCase().trim();
+        const category = (t.category || '').toLowerCase().trim();
+        const entryCategory = (entry.category || '').toLowerCase().trim();
         return status === 'active' && 
           (category === 'all' || category === entryCategory || (entryCategory === 'room' && category === 'service'));
       });
       
-      const inclusiveTaxes = activeTaxes.filter((t: any) => t.isInclusive);
-      const exclusiveTaxes = activeTaxes.filter((t: any) => !t.isInclusive);
+      const baseAmount = entry.amount;
 
-      if (inclusiveTaxes.length > 0) {
-        // Calculate base amount if there are inclusive taxes
-        const totalInclusivePercentage = inclusiveTaxes.reduce((acc: number, t: any) => acc + t.percentage, 0);
-        const baseAmount = entry.amount / (1 + totalInclusivePercentage / 100);
-        
-        // Update the original entry (the room charge) to be the net amount
-        ledgerEntry.amount = baseAmount;
-        ledgerEntry.description = `${entry.description} (Net)`;
-
-        // Add inclusive tax entries
-        for (const tax of inclusiveTaxes) {
-          const taxAmount = baseAmount * (tax.percentage / 100);
-          const taxEntry: LedgerEntry = {
-            id: Math.random().toString(36).substr(2, 9),
-            timestamp,
-            hotelId,
-            guestId,
-            reservationId,
-            corporateId,
-            type: 'debit',
-            amount: taxAmount,
-            description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${entry.description}`,
-            category: 'tax',
-            postedBy
-          };
-          entries.push(taxEntry);
-        }
-
-        // Add exclusive tax entries based on the base amount
-        for (const tax of exclusiveTaxes) {
-          const taxAmount = baseAmount * (tax.percentage / 100);
-          const taxEntry: LedgerEntry = {
-            id: Math.random().toString(36).substr(2, 9),
-            timestamp,
-            hotelId,
-            guestId,
-            reservationId,
-            corporateId,
-            type: 'debit',
-            amount: taxAmount,
-            description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
-            category: 'tax',
-            postedBy
-          };
-          entries.push(taxEntry);
-        }
-      } else {
-        // Only exclusive taxes
-        for (const tax of exclusiveTaxes) {
-          const taxAmount = entry.amount * (tax.percentage / 100);
-          const taxEntry: LedgerEntry = {
-            id: Math.random().toString(36).substr(2, 9),
-            timestamp,
-            hotelId,
-            guestId,
-            reservationId,
-            corporateId,
-            type: 'debit',
-            amount: taxAmount,
-            description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
-            category: 'tax',
-            postedBy
-          };
-          entries.push(taxEntry);
-        }
+      for (const tax of activeTaxes) {
+        const taxAmount = baseAmount * (tax.percentage / 100);
+        const taxEntry: LedgerEntry = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp,
+          hotelId,
+          guestId,
+          reservationId,
+          corporateId,
+          type: 'debit',
+          amount: taxAmount,
+          description: `${tax.name} (${tax.percentage}%)${tax.isInclusive ? ' [Inclusive]' : ''} for ${entry.description}`,
+          category: 'tax',
+          postedBy
+        };
+        entries.push(taxEntry);
       }
     }
   }

@@ -348,15 +348,13 @@ export function FrontDesk() {
       const category = (t.category || '').toLowerCase().trim();
       return status === 'active' && category !== 'restaurant';
     });
-    const totalInclusivePercentage = activeTaxes.filter(t => t.isInclusive).reduce((acc, t) => acc + t.percentage, 0);
-    const primaryBaseAmount = primaryTotal / (1 + totalInclusivePercentage / 100);
+    
+    const primaryBaseAmount = primaryTotal;
     
     let primaryTaxTotal = 0;
     const primaryTaxDetails = activeTaxes.map(tax => {
       const amount = primaryBaseAmount * (tax.percentage / 100);
-      if (!tax.isInclusive) {
-        primaryTaxTotal += amount;
-      }
+      primaryTaxTotal += amount;
       return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
     });
 
@@ -384,13 +382,11 @@ export function FrontDesk() {
       const stayTotal = stayPrice * sNights;
 
       // Calculate taxes for this additional stay
-      const stayBaseAmount = stayTotal / (1 + totalInclusivePercentage / 100);
+      const stayBaseAmount = stayTotal;
       let stayTaxTotal = 0;
       const stayTaxDetails = activeTaxes.map(tax => {
         const amount = stayBaseAmount * (tax.percentage / 100);
-        if (!tax.isInclusive) {
-          stayTaxTotal += amount;
-        }
+        stayTaxTotal += amount;
         return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
       });
       totalAdditionalTax += stayTaxTotal;
@@ -2158,7 +2154,6 @@ export function FrontDesk() {
                       allTaxDetails[tax.name] = { amount: 0, percentage: tax.percentage, isInclusive: tax.isInclusive };
                     }
                     allTaxDetails[tax.name].amount += tax.amount;
-                    if (tax.isInclusive) totalInclusiveAmount += tax.amount;
                   });
 
                   // Additional stays taxes
@@ -2168,11 +2163,10 @@ export function FrontDesk() {
                         allTaxDetails[tax.name] = { amount: 0, percentage: tax.percentage, isInclusive: tax.isInclusive };
                       }
                       allTaxDetails[tax.name].amount += tax.amount;
-                      if (tax.isInclusive) totalInclusiveAmount += tax.amount;
                     });
                   });
 
-                  const subtotalNet = newBooking.totalAmount - newBooking.taxAmount - totalInclusiveAmount;
+                  const subtotalNet = newBooking.totalAmount - newBooking.taxAmount;
 
                   return (
                     <>
@@ -2198,7 +2192,7 @@ export function FrontDesk() {
                   </div>
                 )}
                 <div className="flex justify-between text-sm text-zinc-50 border-t border-zinc-800 pt-2 mt-2">
-                  <span>Net Total</span>
+                  <span>Grand Total</span>
                   <span className="font-bold text-emerald-500">
                     {formatCurrency(
                       newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount), 
