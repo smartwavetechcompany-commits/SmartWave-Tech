@@ -33,7 +33,7 @@ export const postToLedger = async (
       const hotelData = hotelSnap.data();
       const activeTaxes = (hotelData.taxes || []).filter((t: any) => 
         t.status === 'active' && 
-        (t.category === 'all' || t.category === entry.category)
+        (t.category === 'all' || t.category === entry.category || (entry.category === 'room' && t.category === 'service'))
       );
       
       const inclusiveTaxes = activeTaxes.filter((t: any) => t.isInclusive);

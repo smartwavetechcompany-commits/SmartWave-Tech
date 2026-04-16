@@ -343,7 +343,7 @@ export function FrontDesk() {
     
     const primaryTotal = pricePerNight * nights;
 
-    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all'));
+    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all' || t.category === 'service'));
     const totalInclusivePercentage = activeTaxes.filter(t => t.isInclusive).reduce((acc, t) => acc + t.percentage, 0);
     const primaryBaseAmount = primaryTotal / (1 + totalInclusivePercentage / 100);
     
@@ -411,7 +411,7 @@ export function FrontDesk() {
         additionalStays: updatedAdditionalStays
       }));
     }
-  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, newBooking.additionalStays]);
+  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, newBooking.additionalStays, hotel, currency, exchangeRate]);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -1933,7 +1933,7 @@ export function FrontDesk() {
                       if (activeRate) displayPrice = activeRate.rate;
                     }
 
-                    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all'));
+                    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all' || t.category === 'service'));
                     const inclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
                     const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
                     
@@ -2193,7 +2193,7 @@ export function FrontDesk() {
                   <span>Net Total</span>
                   <span className="font-bold text-emerald-500">
                     {formatCurrency(
-                      (newBooking.totalAmount + (newBooking.taxAmount || 0)) - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount), 
+                      newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount), 
                       currency, 
                       exchangeRate
                     )}
