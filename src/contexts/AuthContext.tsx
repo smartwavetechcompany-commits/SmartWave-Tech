@@ -230,9 +230,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [hotel?.branding]);
 
-  const isSubscriptionActive = profile?.role === 'superAdmin' 
+  const isSubscriptionActive = (profile?.role === 'superAdmin' || auth.currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase())
     ? true 
-    : (hotel ? (hotel.subscriptionStatus === 'active' && new Date(hotel.subscriptionExpiry + 'T23:59:59').getTime() > Date.now()) : false);
+    : (hotel ? (
+        hotel.subscriptionStatus === 'active' && 
+        (() => {
+          const expiryStr = hotel.subscriptionExpiry || '';
+          const expiryDate = expiryStr.includes('T') 
+            ? new Date(expiryStr) 
+            : new Date(expiryStr + 'T23:59:59');
+          return !isNaN(expiryDate.getTime()) && expiryDate.getTime() > Date.now();
+        })()
+      ) : false);
 
   const exchangeRate = hotel?.exchangeRate || systemSettings?.exchangeRate || 1500;
   const baseCurrency = hotel?.defaultCurrency || 'NGN';
