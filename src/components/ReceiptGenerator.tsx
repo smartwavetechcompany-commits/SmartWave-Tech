@@ -40,14 +40,16 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
-    if (t.status !== 'active') return false;
+    const status = (t.status || '').toLowerCase();
+    const category = (t.category || '').toLowerCase();
+    if (status !== 'active') return false;
     if (type === 'restaurant') {
-      return t.category === 'restaurant' || t.category === 'all';
+      return category === 'restaurant' || category === 'all';
     }
     if (type === 'comprehensive' || type === 'corporate') {
       return true; // Show all taxes on comprehensive/corporate receipt
     }
-    return t.category === 'all';
+    return category === 'all';
   });
 
   let taxTotal = 0;

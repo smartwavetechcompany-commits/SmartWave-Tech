@@ -31,10 +31,13 @@ export const postToLedger = async (
     const hotelSnap = await getDoc(doc(db, 'hotels', hotelId));
     if (hotelSnap.exists()) {
       const hotelData = hotelSnap.data();
-      const activeTaxes = (hotelData.taxes || []).filter((t: any) => 
-        t.status === 'active' && 
-        (t.category === 'all' || t.category === entry.category || (entry.category === 'room' && t.category === 'service'))
-      );
+      const activeTaxes = (hotelData.taxes || []).filter((t: any) => {
+        const status = (t.status || '').toLowerCase();
+        const category = (t.category || '').toLowerCase();
+        const entryCategory = (entry.category || '').toLowerCase();
+        return status === 'active' && 
+          (category === 'all' || category === entryCategory || (entryCategory === 'room' && category === 'service'));
+      });
       
       const inclusiveTaxes = activeTaxes.filter((t: any) => t.isInclusive);
       const exclusiveTaxes = activeTaxes.filter((t: any) => !t.isInclusive);

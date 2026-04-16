@@ -343,7 +343,11 @@ export function FrontDesk() {
     
     const primaryTotal = pricePerNight * nights;
 
-    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all' || t.category === 'service'));
+    const activeTaxes = (hotel?.taxes || []).filter(t => {
+      const status = (t.status || '').toLowerCase();
+      const category = (t.category || '').toLowerCase();
+      return status === 'active' && (category === 'room' || category === 'all' || category === 'service');
+    });
     const totalInclusivePercentage = activeTaxes.filter(t => t.isInclusive).reduce((acc, t) => acc + t.percentage, 0);
     const primaryBaseAmount = primaryTotal / (1 + totalInclusivePercentage / 100);
     
@@ -1933,7 +1937,11 @@ export function FrontDesk() {
                       if (activeRate) displayPrice = activeRate.rate;
                     }
 
-                    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'room' || t.category === 'all' || t.category === 'service'));
+                    const activeTaxes = (hotel?.taxes || []).filter(t => {
+                      const status = (t.status || '').toLowerCase();
+                      const category = (t.category || '').toLowerCase();
+                      return status === 'active' && (category === 'room' || category === 'all' || category === 'service');
+                    });
                     const inclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
                     const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
                     
