@@ -343,15 +343,14 @@ export function FrontDesk() {
     
     const primaryTotal = pricePerNight * nights;
 
-    // Calculate taxes for primary stay
     const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room');
+    const totalInclusivePercentage = activeTaxes.filter(t => t.isInclusive).reduce((acc, t) => acc + t.percentage, 0);
+    const primaryBaseAmount = primaryTotal / (1 + totalInclusivePercentage / 100);
+    
     let primaryTaxTotal = 0;
     const primaryTaxDetails = activeTaxes.map(tax => {
-      let amount = 0;
-      if (tax.isInclusive) {
-        amount = primaryTotal - (primaryTotal / (1 + tax.percentage / 100));
-      } else {
-        amount = primaryTotal * (tax.percentage / 100);
+      const amount = primaryBaseAmount * (tax.percentage / 100);
+      if (!tax.isInclusive) {
         primaryTaxTotal += amount;
       }
       return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
@@ -378,25 +377,23 @@ export function FrontDesk() {
       const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
       const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
       const sNights = Math.max(1, Math.ceil(sHours / 24));
-      const newTotal = stayPrice * sNights;
+      const stayTotal = stayPrice * sNights;
 
       // Calculate taxes for this additional stay
+      const stayBaseAmount = stayTotal / (1 + totalInclusivePercentage / 100);
       let stayTaxTotal = 0;
       const stayTaxDetails = activeTaxes.map(tax => {
-        let amount = 0;
-        if (tax.isInclusive) {
-          amount = newTotal - (newTotal / (1 + tax.percentage / 100));
-        } else {
-          amount = newTotal * (tax.percentage / 100);
+        const amount = stayBaseAmount * (tax.percentage / 100);
+        if (!tax.isInclusive) {
           stayTaxTotal += amount;
         }
         return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
       });
       totalAdditionalTax += stayTaxTotal;
       
-      if (newTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
+      if (stayTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
         additionalStaysChanged = true;
-        return { ...stay, totalAmount: newTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails };
+        return { ...stay, totalAmount: stayTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails };
       }
       return stay;
     });
@@ -1922,24 +1919,53 @@ export function FrontDesk() {
                   </select>
                 </div>
                 <div className="flex flex-col justify-end">
-                  {newBooking.roomId && (
-                    <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                      <div className="flex justify-between text-[10px] font-bold">
-                        <span className="text-zinc-500 uppercase">Base Rate</span>
-                        <span className="text-zinc-50">{formatCurrency(rooms.find(r => r.id === newBooking.roomId)?.price || 0, currency, exchangeRate)}</span>
-                      </div>
-                      {(hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room').map(tax => (
-                        <div key={tax.id} className="flex justify-between text-[10px] font-bold">
-                          <span className="text-zinc-500 uppercase">{tax.name} ({tax.percentage}%)</span>
-                          <span className="text-emerald-500">+{formatCurrency((rooms.find(r => r.id === newBooking.roomId)?.price || 0) * (tax.percentage / 100), currency, exchangeRate)}</span>
+                  {newBooking.roomId && (() => {
+                    const room = rooms.find(r => r.id === newBooking.roomId);
+                    if (!room) return null;
+                    
+                    let displayPrice = room.price;
+                    if (newBooking.corporateId) {
+                      const activeRate = activeCorporateRates.find(r => 
+                        (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
+                        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+                        new Date(newBooking.checkIn) <= new Date(r.endDate)
+                      );
+                      if (activeRate) displayPrice = activeRate.rate;
+                    }
+
+                    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room');
+                    const inclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
+                    const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
+                    
+                    const totalInclusivePercentage = inclusiveTaxes.reduce((acc, t) => acc + t.percentage, 0);
+                    const baseAmount = displayPrice / (1 + totalInclusivePercentage / 100);
+                    const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (baseAmount * (t.percentage / 100)), 0);
+
+                    return (
+                      <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
+                        <div className="flex justify-between text-[10px] font-bold">
+                          <span className="text-zinc-500 uppercase">Base Rate {inclusiveTaxes.length > 0 ? '(Net)' : ''}</span>
+                          <span className="text-zinc-50">{formatCurrency(baseAmount, currency, exchangeRate)}</span>
                         </div>
-                      ))}
-                      <div className="pt-1 border-t border-zinc-800 flex justify-between text-xs font-bold">
-                        <span className="text-zinc-500 uppercase">Total/Night</span>
-                        <span className="text-zinc-50">{formatCurrency((rooms.find(r => r.id === newBooking.roomId)?.price || 0) * (1 + (hotel?.taxes || []).filter(t => t.status === 'active' && t.category === 'room' && !t.isInclusive).reduce((acc, t) => acc + t.percentage, 0) / 100), currency, exchangeRate)}</span>
+                        {inclusiveTaxes.map(tax => (
+                          <div key={tax.id} className="flex justify-between text-[10px] font-bold">
+                            <span className="text-zinc-500 uppercase">{tax.name} ({tax.percentage}%) [Incl.]</span>
+                            <span className="text-blue-500">{formatCurrency(baseAmount * (tax.percentage / 100), currency, exchangeRate)}</span>
+                          </div>
+                        ))}
+                        {exclusiveTaxes.map(tax => (
+                          <div key={tax.id} className="flex justify-between text-[10px] font-bold">
+                            <span className="text-zinc-500 uppercase">{tax.name} ({tax.percentage}%)</span>
+                            <span className="text-emerald-500">+{formatCurrency(baseAmount * (tax.percentage / 100), currency, exchangeRate)}</span>
+                          </div>
+                        ))}
+                        <div className="pt-1 border-t border-zinc-800 flex justify-between text-xs font-bold">
+                          <span className="text-zinc-500 uppercase">Total/Night</span>
+                          <span className="text-zinc-50">{formatCurrency(baseAmount + (baseAmount * totalInclusivePercentage / 100) + totalExclusiveTax, currency, exchangeRate)}</span>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -2118,12 +2144,34 @@ export function FrontDesk() {
                   <span>Subtotal</span>
                   <span>{formatCurrency(newBooking.totalAmount, currency, exchangeRate)}</span>
                 </div>
-                {(newBooking.taxDetails || []).map((tax: any, idx: number) => (
-                  <div key={idx} className="flex justify-between text-[10px] text-zinc-500">
-                    <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}</span>
-                    <span>{formatCurrency(tax.amount, currency, exchangeRate)}</span>
-                  </div>
-                ))}
+                {(() => {
+                  const allTaxDetails: { [name: string]: { amount: number; percentage: number; isInclusive: boolean } } = {};
+                  
+                  // Primary stay taxes
+                  (newBooking.taxDetails || []).forEach(tax => {
+                    if (!allTaxDetails[tax.name]) {
+                      allTaxDetails[tax.name] = { amount: 0, percentage: tax.percentage, isInclusive: tax.isInclusive };
+                    }
+                    allTaxDetails[tax.name].amount += tax.amount;
+                  });
+
+                  // Additional stays taxes
+                  (newBooking.additionalStays || []).forEach(stay => {
+                    (stay.taxDetails || []).forEach((tax: any) => {
+                      if (!allTaxDetails[tax.name]) {
+                        allTaxDetails[tax.name] = { amount: 0, percentage: tax.percentage, isInclusive: tax.isInclusive };
+                      }
+                      allTaxDetails[tax.name].amount += tax.amount;
+                    });
+                  });
+
+                  return Object.entries(allTaxDetails).map(([name, details], idx) => (
+                    <div key={idx} className="flex justify-between text-[10px] text-zinc-500">
+                      <span>{name} ({details.percentage}%) {details.isInclusive ? '(Incl.)' : ''}</span>
+                      <span>{formatCurrency(details.amount, currency, exchangeRate)}</span>
+                    </div>
+                  ));
+                })()}
                 {newBooking.discountAmount > 0 && (
                   <div className="flex justify-between text-[10px] text-red-500">
                     <span>Discount ({newBooking.discountType === 'percentage' ? newBooking.discountAmount + '%' : 'Fixed'})</span>

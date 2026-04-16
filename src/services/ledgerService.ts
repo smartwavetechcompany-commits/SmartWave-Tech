@@ -26,16 +26,68 @@ export const postToLedger = async (
   // 1. Prepare entries list
   const entries: LedgerEntry[] = [ledgerEntry];
 
-  // 2. Automatically post taxes if it's a room charge
-  // The user expects 7.5% (or whatever is configured) to be added as separate entries
-  if (entry.category === 'room' && entry.type === 'debit') {
+  // 2. Automatically post taxes if it's a debit charge (Room, Restaurant, etc.)
+  if (entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment') {
     const hotelSnap = await getDoc(doc(db, 'hotels', hotelId));
     if (hotelSnap.exists()) {
       const hotelData = hotelSnap.data();
-      const activeTaxes = (hotelData.taxes || []).filter((t: any) => t.status === 'active' && (t.category === 'all' || t.category === 'room'));
+      const activeTaxes = (hotelData.taxes || []).filter((t: any) => 
+        t.status === 'active' && 
+        (t.category === 'all' || t.category === entry.category)
+      );
       
-      for (const tax of activeTaxes) {
-        if (!tax.isInclusive) {
+      const inclusiveTaxes = activeTaxes.filter((t: any) => t.isInclusive);
+      const exclusiveTaxes = activeTaxes.filter((t: any) => !t.isInclusive);
+
+      if (inclusiveTaxes.length > 0) {
+        // Calculate base amount if there are inclusive taxes
+        const totalInclusivePercentage = inclusiveTaxes.reduce((acc: number, t: any) => acc + t.percentage, 0);
+        const baseAmount = entry.amount / (1 + totalInclusivePercentage / 100);
+        
+        // Update the original entry (the room charge) to be the net amount
+        ledgerEntry.amount = baseAmount;
+        ledgerEntry.description = `${entry.description} (Net)`;
+
+        // Add inclusive tax entries
+        for (const tax of inclusiveTaxes) {
+          const taxAmount = baseAmount * (tax.percentage / 100);
+          const taxEntry: LedgerEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp,
+            hotelId,
+            guestId,
+            reservationId,
+            corporateId,
+            type: 'debit',
+            amount: taxAmount,
+            description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${entry.description}`,
+            category: 'tax',
+            postedBy
+          };
+          entries.push(taxEntry);
+        }
+
+        // Add exclusive tax entries based on the base amount
+        for (const tax of exclusiveTaxes) {
+          const taxAmount = baseAmount * (tax.percentage / 100);
+          const taxEntry: LedgerEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp,
+            hotelId,
+            guestId,
+            reservationId,
+            corporateId,
+            type: 'debit',
+            amount: taxAmount,
+            description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
+            category: 'tax',
+            postedBy
+          };
+          entries.push(taxEntry);
+        }
+      } else {
+        // Only exclusive taxes
+        for (const tax of exclusiveTaxes) {
           const taxAmount = entry.amount * (tax.percentage / 100);
           const taxEntry: LedgerEntry = {
             id: Math.random().toString(36).substr(2, 9),
@@ -43,7 +95,7 @@ export const postToLedger = async (
             hotelId,
             guestId,
             reservationId,
-            corporateId, // Tax follows the charge (if room is corporate, tax is corporate)
+            corporateId,
             type: 'debit',
             amount: taxAmount,
             description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
