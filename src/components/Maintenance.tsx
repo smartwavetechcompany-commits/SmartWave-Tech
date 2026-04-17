@@ -40,6 +40,9 @@ export function Maintenance() {
     priority: 'all'
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'dueDate' | 'priority' | 'timestamp'>('timestamp');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [isLoading, setIsLoading] = useState(true);
   const [newRequest, setNewRequest] = useState({
     roomNumber: '',
     issue: '',
@@ -50,16 +53,29 @@ export function Maintenance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+    if (!newRequest.roomNumber) errors.roomNumber = 'Select a room';
+    if (!newRequest.issue || newRequest.issue.trim().length < 5) errors.issue = 'Minimum 5 characters required';
+    if (!newRequest.dueDate) errors.dueDate = 'Due date is required';
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
     
+    setIsLoading(true);
     const q = query(collection(db, 'hotels', hotel.id, 'maintenance'), orderBy('timestamp', 'desc'));
     const unsub = onSnapshot(q, (snap) => {
       setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MaintenanceRequest)));
+      setIsLoading(false);
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/maintenance`);
       if (error.code === 'permission-denied') setHasPermissionError(true);
+      setIsLoading(false);
     });
 
     const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
@@ -82,6 +98,7 @@ export function Maintenance() {
   const handleAddRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
+    if (!validateForm()) return;
 
     try {
       await addDoc(collection(db, 'hotels', hotel.id, 'maintenance'), {
@@ -105,6 +122,7 @@ export function Maintenance() {
 
       toast.success('Maintenance request created');
       setShowAddModal(false);
+      setFormErrors({});
       setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '', dueDate: format(new Date(), 'yyyy-MM-dd') });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/maintenance`);
@@ -182,6 +200,22 @@ export function Maintenance() {
     }
 
     return matchesStatus && matchesPriority && matchesSearch && matchesDate;
+  });
+
+  const priorityWeights = { urgent: 4, high: 3, medium: 2, low: 1 };
+
+  const sortedRequests = [...filteredRequests].sort((a, b) => {
+    let result = 0;
+    if (sortBy === 'priority') {
+      result = (priorityWeights[a.priority] || 0) - (priorityWeights[b.priority] || 0);
+    } else if (sortBy === 'dueDate') {
+      const dateA = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+      const dateB = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+      result = dateA - dateB;
+    } else {
+      result = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    }
+    return sortOrder === 'desc' ? -result : result;
   });
 
   const stats = [
@@ -297,6 +331,25 @@ export function Maintenance() {
           />
         </div>
         <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl overflow-x-auto w-full md:w-auto">
+          <div className="flex items-center gap-1 px-2 border-r border-zinc-800 mr-1">
+            <Filter size={14} className="text-zinc-500" />
+            <select 
+              value={`${sortBy}-${sortOrder}`}
+              onChange={(e) => {
+                const [newSort, newOrder] = e.target.value.split('-') as [any, any];
+                setSortBy(newSort);
+                setSortOrder(newOrder);
+              }}
+              className="bg-transparent text-[10px] text-zinc-400 font-bold focus:outline-none cursor-pointer"
+            >
+              <option value="timestamp-desc">Newest First</option>
+              <option value="timestamp-asc">Oldest First</option>
+              <option value="dueDate-asc">Due Soonest</option>
+              <option value="dueDate-desc">Due Latest</option>
+              <option value="priority-desc">Highest Priority</option>
+              <option value="priority-asc">Lowest Priority</option>
+            </select>
+          </div>
           {(['all', 'pending', 'in_progress', 'completed'] as const).map((f) => (
             <button
               key={f}
@@ -337,13 +390,30 @@ export function Maintenance() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <AnimatePresence mode="popLayout">
-          {filteredRequests.length === 0 ? (
+          {isLoading ? (
+            Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-5 h-48 animate-pulse space-y-4">
+                <div className="flex justify-between">
+                  <div className="flex gap-2">
+                    <div className="w-10 h-10 bg-zinc-800 rounded-xl" />
+                    <div className="space-y-2">
+                      <div className="w-20 h-3 bg-zinc-800 rounded" />
+                      <div className="w-32 h-2 bg-zinc-800 rounded" />
+                    </div>
+                  </div>
+                  <div className="w-16 h-5 bg-zinc-800 rounded" />
+                </div>
+                <div className="w-full h-4 bg-zinc-800 rounded" />
+                <div className="w-3/4 h-4 bg-zinc-800 rounded" />
+              </div>
+            ))
+          ) : sortedRequests.length === 0 ? (
             <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
               <Wrench size={48} className="mx-auto text-zinc-700 mb-4" />
               <p>No maintenance requests found</p>
             </div>
           ) : (
-            filteredRequests.map((request) => (
+            sortedRequests.map((request) => (
               <motion.div
                 key={request.id}
                 layout
@@ -487,8 +557,14 @@ export function Maintenance() {
                     <select
                       required
                       value={newRequest.roomNumber}
-                      onChange={(e) => setNewRequest({ ...newRequest, roomNumber: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      onChange={(e) => {
+                        setNewRequest({ ...newRequest, roomNumber: e.target.value });
+                        if (formErrors.roomNumber) setFormErrors({ ...formErrors, roomNumber: '' });
+                      }}
+                      className={cn(
+                        "w-full bg-zinc-950 border rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 transition-all",
+                        formErrors.roomNumber ? "border-red-500/50" : "border-zinc-800"
+                      )}
                     >
                       <option value="">Select Room</option>
                       {rooms.sort((a, b) => a.roomNumber.localeCompare(b.roomNumber)).map(room => (
@@ -497,6 +573,7 @@ export function Maintenance() {
                         </option>
                       ))}
                     </select>
+                    {formErrors.roomNumber && <p className="text-[10px] text-red-500 font-bold uppercase">{formErrors.roomNumber}</p>}
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Priority</label>
@@ -519,9 +596,16 @@ export function Maintenance() {
                       type="date"
                       required
                       value={newRequest.dueDate}
-                      onChange={(e) => setNewRequest({ ...newRequest, dueDate: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      onChange={(e) => {
+                        setNewRequest({ ...newRequest, dueDate: e.target.value });
+                        if (formErrors.dueDate) setFormErrors({ ...formErrors, dueDate: '' });
+                      }}
+                      className={cn(
+                        "w-full bg-zinc-950 border rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 transition-all",
+                        formErrors.dueDate ? "border-red-500/50" : "border-zinc-800"
+                      )}
                     />
+                    {formErrors.dueDate && <p className="text-[10px] text-red-500 font-bold uppercase">{formErrors.dueDate}</p>}
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Assign To (Optional)</label>
@@ -542,10 +626,17 @@ export function Maintenance() {
                   <textarea
                     required
                     value={newRequest.issue}
-                    onChange={(e) => setNewRequest({ ...newRequest, issue: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-24 resize-none"
+                    onChange={(e) => {
+                      setNewRequest({ ...newRequest, issue: e.target.value });
+                      if (formErrors.issue && e.target.value.trim().length >= 5) setFormErrors({ ...formErrors, issue: '' });
+                    }}
+                    className={cn(
+                      "w-full bg-zinc-950 border rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-24 resize-none transition-all",
+                      formErrors.issue ? "border-red-500/50" : "border-zinc-800"
+                    )}
                     placeholder="Describe the problem..."
                   />
+                  {formErrors.issue && <p className="text-[10px] text-red-500 font-bold uppercase">{formErrors.issue}</p>}
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Additional Notes</label>

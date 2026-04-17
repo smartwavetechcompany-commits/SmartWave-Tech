@@ -31,7 +31,10 @@ import {
   Loader2,
   PlusCircle,
   Banknote,
-  X
+  X,
+  Filter,
+  TrendingUp,
+  ArrowDownRight
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -125,6 +128,7 @@ export function FrontDesk() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<Reservation['status'] | 'all'>('all');
@@ -134,6 +138,8 @@ export function FrontDesk() {
   const [staffFilter, setStaffFilter] = useState('all');
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures' | 'checked_in' | 'overstay'>('all');
+  const [sortBy, setSortBy] = useState<'checkIn' | 'guestName' | 'roomNumber' | 'status'>('checkIn');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [editForm, setEditForm] = useState({
@@ -237,6 +243,13 @@ export function FrontDesk() {
       return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
     }
     return true;
+  }).sort((a, b) => {
+    let result = 0;
+    if (sortBy === 'guestName') result = a.guestName.localeCompare(b.guestName);
+    else if (sortBy === 'roomNumber') result = a.roomNumber.localeCompare(b.roomNumber);
+    else if (sortBy === 'status') result = a.status.localeCompare(b.status);
+    else result = new Date(a.checkIn).getTime() - new Date(b.checkIn).getTime();
+    return sortOrder === 'desc' ? -result : result;
   });
 
   const roomStats = {
@@ -250,8 +263,7 @@ export function FrontDesk() {
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
-
-    setLoading(true);
+    setIsFetching(true);
     const resRef = collection(db, 'hotels', hotel.id, 'reservations');
     const roomsRef = collection(db, 'hotels', hotel.id, 'rooms');
     const typesRef = collection(db, 'hotels', hotel.id, 'room_types');
@@ -263,9 +275,10 @@ export function FrontDesk() {
       // Client-side sorting
       const sortedRes = allRes.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
       setReservations(sortedRes);
-      setLoading(false);
+      setIsFetching(false);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+      setIsFetching(false);
     });
 
     const unsubRooms = onSnapshot(roomsRef, (snap) => {
@@ -1721,10 +1734,12 @@ export function FrontDesk() {
 
       {isBooking && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-2xl">
-            <h3 className="text-xl font-bold text-zinc-50 mb-6">New Reservation</h3>
-            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
-              <div className="grid grid-cols-2 gap-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-zinc-800">
+              <h3 className="text-xl font-bold text-zinc-50">New Reservation</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+              <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Booking Type</label>
                   <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-1">
@@ -2017,10 +2032,10 @@ export function FrontDesk() {
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <div className="relative flex-1 min-w-0">
                       <input 
                         type="date" 
@@ -2034,7 +2049,7 @@ export function FrontDesk() {
                     </div>
                     <input 
                       type="time"
-                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none shrink-0"
+                      className="w-full sm:w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       style={{ colorScheme: 'dark' }}
                       value={newBooking.checkInTime}
                       onChange={(e) => setNewBooking({ ...newBooking, checkInTime: e.target.value })}
@@ -2043,20 +2058,21 @@ export function FrontDesk() {
                 </div>
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <div className="relative flex-1 min-w-0">
                       <input 
                         type="date" 
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
                         style={{ colorScheme: 'dark' }}
                         value={newBooking.checkOut}
+                        min={newBooking.checkIn}
                         onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
                       />
                       <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                     </div>
                     <input 
                       type="time"
-                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none shrink-0"
+                      className="w-full sm:w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       style={{ colorScheme: 'dark' }}
                       value={newBooking.checkOutTime}
                       onChange={(e) => setNewBooking({ ...newBooking, checkOutTime: e.target.value })}
@@ -2505,10 +2521,10 @@ export function FrontDesk() {
                 </div>
               )}
             </div>
-            <div className="flex gap-4 mt-8">
+            <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-4 mt-auto">
               <button 
                 onClick={() => setIsBooking(false)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95"
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95 font-bold"
               >
                 Cancel
               </button>
@@ -2688,6 +2704,26 @@ export function FrontDesk() {
                 />
               </div>
 
+              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 h-full">
+                <Filter size={14} className="text-zinc-500" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="bg-transparent text-xs text-zinc-50 focus:outline-none cursor-pointer"
+                >
+                  <option value="checkIn">Sort: Check In</option>
+                  <option value="guestName">Sort: Name</option>
+                  <option value="roomNumber">Sort: Room</option>
+                  <option value="status">Sort: Status</option>
+                </select>
+                <button
+                  onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                  className="text-zinc-500 hover:text-emerald-500 transition-colors"
+                >
+                  {sortOrder === 'asc' ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
+                </button>
+              </div>
+
               {selectedReservations.length > 0 && activeTab === 'arrivals' && (
                 <button
                   onClick={handleBulkCheckIn}
@@ -2728,8 +2764,35 @@ export function FrontDesk() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredReservations.map(res => (
-                <tr key={res.id} className={cn(
+              {isFetching ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td className="px-6 py-4"><div className="w-4 h-4 bg-zinc-800 rounded" /></td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-zinc-800 rounded-full" />
+                        <div className="space-y-2">
+                          <div className="w-24 h-3 bg-zinc-800 rounded" />
+                          <div className="w-16 h-2 bg-zinc-800 rounded opacity-50" />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4"><div className="w-20 h-3 bg-zinc-800 rounded" /></td>
+                    <td className="px-6 py-4"><div className="w-24 h-3 bg-zinc-800 rounded" /></td>
+                    <td className="px-6 py-4"><div className="w-24 h-4 bg-zinc-800 rounded" /></td>
+                    <td className="px-6 py-4"><div className="w-16 h-4 bg-zinc-800 rounded" /></td>
+                    <td className="px-6 py-4"><div className="w-20 h-8 bg-zinc-800 rounded ml-auto" /></td>
+                  </tr>
+                ))
+              ) : filteredReservations.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-zinc-500">
+                    No reservations found matching your criteria.
+                  </td>
+                </tr>
+              ) : (
+                filteredReservations.map(res => (
+                  <tr key={res.id} className={cn(
                   "hover:bg-zinc-800/50 transition-colors",
                   selectedReservations.includes(res.id) && "bg-emerald-500/5"
                 )}>
@@ -2934,7 +2997,7 @@ export function FrontDesk() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>

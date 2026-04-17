@@ -25,7 +25,9 @@ import {
   DollarSign,
   XCircle,
   Receipt,
-  Building2
+  Building2,
+  TrendingUp,
+  ArrowDownRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -52,6 +54,9 @@ export function GuestManagement() {
   const [guestTypeFilter, setGuestTypeFilter] = useState<'all' | 'individual' | 'corporate'>('all');
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [vipFilter, setVipFilter] = useState<'all' | 'vip' | 'regular'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'ledgerBalance' | 'totalSpent' | 'totalStays'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [isLoading, setIsLoading] = useState(true);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [reportFilter, setReportFilter] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
@@ -96,12 +101,15 @@ export function GuestManagement() {
   useEffect(() => {
     if (!hotel?.id || !profile) return;
     
+    setIsLoading(true);
     const q = query(collection(db, 'hotels', hotel.id, 'guests'), orderBy('name', 'asc'));
     const unsub = onSnapshot(q, (snap) => {
       setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+      setIsLoading(false);
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
       if (error.code === 'permission-denied') setHasPermissionError(true);
+      setIsLoading(false);
     });
 
     return () => unsub();
@@ -307,8 +315,15 @@ export function GuestManagement() {
       }
 
       return matchesType && matchesBalance && matchesVip && matchesDate;
+    }).sort((a, b) => {
+      let result = 0;
+      if (sortBy === 'name') result = a.name.localeCompare(b.name);
+      else if (sortBy === 'ledgerBalance') result = (a.ledgerBalance || 0) - (b.ledgerBalance || 0);
+      else if (sortBy === 'totalSpent') result = (a.totalSpent || 0) - (b.totalSpent || 0);
+      else if (sortBy === 'totalStays') result = (a.totalStays || 0) - (b.totalStays || 0);
+      return sortOrder === 'desc' ? -result : result;
     });
-  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange]);
+  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder]);
 
   return (
     <div className="p-8 space-y-8">
@@ -444,6 +459,26 @@ export function GuestManagement() {
               <option value="regular">Regular Only</option>
             </select>
           </div>
+          
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase px-2 border-r border-zinc-800">Sort</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="bg-transparent text-xs text-zinc-400 focus:outline-none cursor-pointer"
+            >
+              <option value="name">Name</option>
+              <option value="ledgerBalance">Balance</option>
+              <option value="totalSpent">Total Spent</option>
+              <option value="totalStays">Stays</option>
+            </select>
+            <button
+              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="text-zinc-500 hover:text-emerald-500 transition-colors"
+            >
+              {sortOrder === 'asc' ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
+            </button>
+          </div>
 
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1">
             <Calendar size={14} className="text-zinc-500" />
@@ -466,10 +501,30 @@ export function GuestManagement() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <AnimatePresence mode="popLayout">
-          {filteredGuests.length === 0 ? (
+          {isLoading ? (
+            Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 h-64 animate-pulse space-y-4">
+                <div className="flex justify-between items-start">
+                  <div className="flex gap-3">
+                    <div className="w-12 h-12 bg-zinc-800 rounded-full" />
+                    <div className="space-y-2">
+                      <div className="w-24 h-4 bg-zinc-800 rounded" />
+                      <div className="w-16 h-2 bg-zinc-800 rounded opacity-50" />
+                    </div>
+                  </div>
+                  <div className="w-12 h-6 bg-zinc-800 rounded-lg" />
+                </div>
+                <div className="space-y-3 mt-8">
+                  <div className="w-full h-4 bg-zinc-800 rounded" />
+                  <div className="w-3/4 h-4 bg-zinc-800 rounded" />
+                  <div className="w-1/2 h-4 bg-zinc-800 rounded" />
+                </div>
+              </div>
+            ))
+          ) : filteredGuests.length === 0 ? (
             <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
               <Users size={48} className="mx-auto text-zinc-700 mb-4" />
-              <p>No guest profiles found</p>
+              <p>No guest profiles found matching your criteria</p>
             </div>
           ) : (
             filteredGuests.map((guest) => (

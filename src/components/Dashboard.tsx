@@ -191,23 +191,33 @@ export function Dashboard() {
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, i) => (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            key={stat.label}
-            className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className={cn("p-2 rounded-lg bg-zinc-950", stat.color)}>
-                <stat.icon size={20} />
-              </div>
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl animate-pulse">
+              <div className="w-10 h-10 bg-zinc-800 rounded-lg mb-4" />
+              <div className="w-24 h-6 bg-zinc-800 rounded mb-2" />
+              <div className="w-16 h-3 bg-zinc-800 rounded opacity-50" />
             </div>
-            <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.value}</div>
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
-          </motion.div>
-        ))}
+          ))
+        ) : (
+          stats.map((stat, i) => (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.1 }}
+              key={stat.label}
+              className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className={cn("p-2 rounded-lg bg-zinc-950", stat.color)}>
+                  <stat.icon size={20} />
+                </div>
+              </div>
+              <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.value}</div>
+              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
+            </motion.div>
+          ))
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -255,7 +265,20 @@ export function Dashboard() {
               <Link to="/front-desk" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
             </div>
             <div className="divide-y divide-zinc-800">
-              {reservations.length === 0 ? (
+              {loading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="p-4 flex items-center justify-between animate-pulse">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-full" />
+                      <div className="space-y-2">
+                        <div className="w-24 h-3 bg-zinc-800 rounded" />
+                        <div className="w-32 h-2 bg-zinc-800 rounded opacity-50" />
+                      </div>
+                    </div>
+                    <div className="w-16 h-4 bg-zinc-800 rounded" />
+                  </div>
+                ))
+              ) : reservations.length === 0 ? (
                 <div className="p-8 text-center text-zinc-500 text-sm">No recent reservations</div>
               ) : (
                 reservations.map(res => (
@@ -302,7 +325,20 @@ export function Dashboard() {
                 </div>
               </div>
               <div className="divide-y divide-zinc-800">
-                {finance.length === 0 ? (
+                {loading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="p-4 flex items-center justify-between animate-pulse">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-zinc-800 rounded-full" />
+                        <div className="space-y-2">
+                          <div className="w-24 h-3 bg-zinc-800 rounded" />
+                          <div className="w-32 h-2 bg-zinc-800 rounded opacity-50" />
+                        </div>
+                      </div>
+                      <div className="w-16 h-4 bg-zinc-800 rounded" />
+                    </div>
+                  ))
+                ) : finance.length === 0 ? (
                   <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
                 ) : (
                   finance.slice(0, 5).map(record => (

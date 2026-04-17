@@ -32,6 +32,9 @@ export function Housekeeping() {
   const [roomTypeFilter, setRoomTypeFilter] = useState<string>('all');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'roomNumber' | 'status' | 'floor'>('roomNumber');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [isLoading, setIsLoading] = useState(true);
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [roomNotes, setRoomNotes] = useState<Record<string, string>>({});
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
@@ -46,15 +49,18 @@ export function Housekeeping() {
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
+    setIsLoading(true);
     const q = query(collection(db, 'hotels', hotel.id, 'rooms'));
     
     const unsub = onSnapshot(q, (snap) => {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      setIsLoading(false);
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
       if (error.code === 'permission-denied') {
         setHasPermissionError(true);
       }
+      setIsLoading(false);
     });
 
     return () => unsub();
@@ -240,6 +246,18 @@ export function Housekeeping() {
     return true;
   });
 
+  const sortedRooms = [...filteredRooms].sort((a, b) => {
+    let result = 0;
+    if (sortBy === 'status') {
+      result = a.status.localeCompare(b.status);
+    } else if (sortBy === 'floor') {
+      result = Number(a.floor || 0) - Number(b.floor || 0);
+    } else {
+      result = a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
+    }
+    return sortOrder === 'desc' ? -result : result;
+  });
+
   const roomTypes = Array.from(new Set(rooms.map(r => r.type)));
 
   const handleExport = () => {
@@ -288,6 +306,23 @@ export function Housekeeping() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <select 
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+            value={`${sortBy}-${sortOrder}`}
+            onChange={(e) => {
+              const [newSort, newOrder] = e.target.value.split('-') as [any, any];
+              setSortBy(newSort);
+              setSortOrder(newOrder);
+            }}
+          >
+            <option value="roomNumber-asc">Room Number (Asc)</option>
+            <option value="roomNumber-desc">Room Number (Desc)</option>
+            <option value="status-asc">Status (A-Z)</option>
+            <option value="status-desc">Status (Z-A)</option>
+            <option value="floor-asc">Floor (Low-High)</option>
+            <option value="floor-desc">Floor (High-Low)</option>
+          </select>
+
           <select 
             className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
             value={filter}
@@ -355,7 +390,28 @@ export function Housekeeping() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 relative">
-        {filteredRooms.map(room => {
+        <AnimatePresence mode="popLayout">
+          {isLoading ? (
+            Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 h-64 animate-pulse space-y-4">
+                <div className="flex justify-between items-center">
+                  <div className="w-24 h-6 bg-zinc-800 rounded" />
+                  <div className="w-16 h-4 bg-zinc-800 rounded" />
+                </div>
+                <div className="w-32 h-4 bg-zinc-800 rounded" />
+                <div className="w-full h-20 bg-zinc-800 rounded-xl" />
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="h-8 bg-zinc-800 rounded" />
+                  <div className="h-8 bg-zinc-800 rounded" />
+                </div>
+              </div>
+            ))
+          ) : sortedRooms.length === 0 ? (
+            <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
+              <p>No rooms found matching your filters</p>
+            </div>
+          ) : (
+            sortedRooms.map(room => {
           const statusColor = hotel?.branding?.statusColors?.[room.status] || 
             (room.status === 'clean' ? '#10b981' : 
              room.status === 'dirty' ? '#ef4444' : 
@@ -491,7 +547,9 @@ export function Housekeeping() {
               </div>
             </div>
           );
-        })}
+            })
+          )}
+        </AnimatePresence>
       </div>
 
       <AnimatePresence>

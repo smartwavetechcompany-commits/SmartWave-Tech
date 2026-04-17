@@ -217,14 +217,44 @@ export function FandB() {
 
     setIsSaving(true);
     try {
-      const res = reservations.find(r => r.roomNumber === newOrder.roomNumber);
+      const res = reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in');
+      
+      // Calculate Taxes
+      const activeTaxes = (hotel?.taxes || []).filter(t => {
+        const status = (t.status || '').toLowerCase().trim();
+        const category = (t.category || '').toLowerCase().trim();
+        return status === 'active' && (category === 'restaurant' || category === 'f & b' || category === 'all');
+      });
+      const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
+      const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (newOrder.price * (t.percentage / 100)), 0);
+      const taxDetails = activeTaxes.map(t => ({
+        name: t.name,
+        percentage: t.percentage,
+        amount: t.isInclusive ? (newOrder.price - (newOrder.price / (1 + (t.percentage / 100)))) : (newOrder.price * (t.percentage / 100)),
+        isInclusive: t.isInclusive
+      }));
+
+      // Calculate discount
+      let discountAmount = 0;
+      if (newOrder.discount > 0) {
+        if (newOrder.discountType === 'percentage') {
+          discountAmount = ((newOrder.price + totalExclusiveTax) * newOrder.discount) / 100;
+        } else {
+          discountAmount = newOrder.discount;
+        }
+      }
+      const finalPrice = newOrder.price + totalExclusiveTax - discountAmount;
+
       const orderData = {
         ...newOrder,
         itemsList: cart,
         guestName: res?.guestName || guests.find(g => g.id === newOrder.guestId)?.name || 'Walk-in',
         hotelId: hotel.id,
         status: 'pending',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        taxAmount: totalExclusiveTax,
+        taxDetails: taxDetails,
+        totalAmount: finalPrice
       };
 
       const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
@@ -253,17 +283,6 @@ export function FandB() {
       });
 
       const guestId = newOrder.guestId || (res?.guestId);
-
-      // Calculate discount
-      let discountAmount = 0;
-      if (newOrder.discount > 0) {
-        if (newOrder.discountType === 'percentage') {
-          discountAmount = (newOrder.price * newOrder.discount) / 100;
-        } else {
-          discountAmount = newOrder.discount;
-        }
-      }
-      const finalPrice = newOrder.price - discountAmount;
 
       // NEW LOGIC: If a room is selected, always post the charge to the room folio
       // This ensures it appears on the guest's final receipt.

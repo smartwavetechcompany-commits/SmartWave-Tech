@@ -793,6 +793,57 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         />
                       </div>
                     </div>
+
+                    {/* Tax Summary in Post Charge */}
+                    <div className="pt-4 border-t border-zinc-800 space-y-2">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-500">Subtotal</span>
+                        <span className="text-zinc-50">{formatCurrency(chargeDetails.amount, currency, exchangeRate)}</span>
+                      </div>
+                      {(() => {
+                        const amountAfterDiscount = chargeDetails.discountType === 'fixed' 
+                          ? chargeDetails.amount - chargeDetails.discount
+                          : chargeDetails.amount * (1 - chargeDetails.discount / 100);
+
+                        const activeTaxes = (hotel?.taxes || []).filter(t => {
+                          const status = (t.status || '').toLowerCase().trim();
+                          const category = (t.category || '').toLowerCase().trim();
+                          const entryCategory = (chargeDetails.category || '').toLowerCase().trim();
+                          return status === 'active' && 
+                            (category === 'all' || 
+                             category === entryCategory || 
+                             ((entryCategory === 'f & b' || entryCategory === 'restaurant') && (category === 'f & b' || category === 'restaurant'))
+                            );
+                        });
+                        
+                        const totalExclusiveTax = activeTaxes
+                          .filter(t => !t.isInclusive)
+                          .reduce((acc, t) => acc + (amountAfterDiscount * (t.percentage / 100)), 0);
+
+                        return (
+                          <>
+                            {activeTaxes.map(tax => (
+                              <div key={tax.id} className="flex justify-between text-[10px]">
+                                <span className={cn(tax.isInclusive ? "text-blue-400" : "text-emerald-400")}>
+                                  {tax.name} ({tax.percentage}%){tax.isInclusive ? " [Incl.]" : ""}
+                                </span>
+                                <span className="text-zinc-400">
+                                  {formatCurrency(tax.isInclusive 
+                                    ? amountAfterDiscount - (amountAfterDiscount / (1 + (tax.percentage / 100)))
+                                    : (amountAfterDiscount * (tax.percentage / 100)), currency, exchangeRate)}
+                                </span>
+                              </div>
+                            ))}
+                            <div className="flex justify-between items-center pt-2 border-t border-zinc-800 mt-2">
+                              <span className="text-sm font-bold text-zinc-50">Total Charge</span>
+                              <span className="text-lg font-black text-emerald-500">
+                                {formatCurrency(amountAfterDiscount + totalExclusiveTax, currency, exchangeRate)}
+                              </span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
                   </div>
                   <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
                     <button
