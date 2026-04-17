@@ -1065,12 +1065,6 @@ export function FrontDesk() {
               
               if (creditToApply > 0) {
                 await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
-                // Update reservation paidAmount (postToLedger already does this, but we might need to sync paymentStatus if not fully handled)
-                const finalPaidAmount = (freshResData.paidAmount || 0) + creditToApply;
-                await updateDoc(resRef, { 
-                  paidAmount: finalPaidAmount,
-                  paymentStatus: finalPaidAmount >= freshResData.totalAmount ? 'paid' : 'partial'
-                });
                 toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
               }
             }
@@ -1727,7 +1721,7 @@ export function FrontDesk() {
 
       {isBooking && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-2xl">
             <h3 className="text-xl font-bold text-zinc-50 mb-6">New Reservation</h3>
             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4">
@@ -2023,14 +2017,14 @@ export function FrontDesk() {
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check In</label>
                   <div className="flex gap-2">
-                    <div className="relative flex-1">
+                    <div className="relative flex-1 min-w-0">
                       <input 
                         type="date" 
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
                         style={{ colorScheme: 'dark' }}
                         value={newBooking.checkIn}
                         min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
@@ -2040,20 +2034,20 @@ export function FrontDesk() {
                     </div>
                     <input 
                       type="time"
-                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none shrink-0"
                       style={{ colorScheme: 'dark' }}
                       value={newBooking.checkInTime}
                       onChange={(e) => setNewBooking({ ...newBooking, checkInTime: e.target.value })}
                     />
                   </div>
                 </div>
-                <div>
+                <div className="space-y-1">
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Check Out</label>
                   <div className="flex gap-2">
-                    <div className="relative flex-1">
+                    <div className="relative flex-1 min-w-0">
                       <input 
                         type="date" 
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
                         style={{ colorScheme: 'dark' }}
                         value={newBooking.checkOut}
                         onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
@@ -2062,7 +2056,7 @@ export function FrontDesk() {
                     </div>
                     <input 
                       type="time"
-                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                      className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none shrink-0"
                       style={{ colorScheme: 'dark' }}
                       value={newBooking.checkOutTime}
                       onChange={(e) => setNewBooking({ ...newBooking, checkOutTime: e.target.value })}

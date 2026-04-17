@@ -34,12 +34,12 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, exportToCSV, safeStringify } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 
 export function FandB() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, currency, exchangeRate } = useAuth();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -1335,15 +1335,52 @@ export function FandB() {
                   </div>
                 </div>
 
-                <div className="p-4 bg-zinc-900 border-t border-zinc-800 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold text-zinc-400">Total Amount</span>
-                    <span className="text-xl font-black text-emerald-500">{newOrder.price.toLocaleString()}</span>
+                <div className="p-4 bg-zinc-900 border-t border-zinc-800 space-y-2">
+                  <div className="flex justify-between text-xs text-zinc-500 uppercase font-bold mb-2">
+                    <span>Order Summary</span>
                   </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-500">Subtotal</span>
+                    <span className="text-zinc-50">{formatCurrency(newOrder.price, currency, exchangeRate)}</span>
+                  </div>
+                  {(() => {
+                    const activeTaxes = (hotel?.taxes || []).filter(t => {
+                      const status = (t.status || '').toLowerCase().trim();
+                      const category = (t.category || '').toLowerCase().trim();
+                      return status === 'active' && (category === 'restaurant' || category === 'f & b' || category === 'all');
+                    });
+                    
+                    const inclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
+                    const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
+                    
+                    const baseAmount = newOrder.price;
+                    const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (baseAmount * (t.percentage / 100)), 0);
+
+                    return (
+                      <>
+                        {inclusiveTaxes.map(tax => (
+                          <div key={tax.id} className="flex justify-between text-[10px] text-blue-400/80">
+                            <span>{tax.name} ({tax.percentage}%) [Incl.]</span>
+                            <span>{formatCurrency(baseAmount - (baseAmount / (1 + (tax.percentage / 100))), currency, exchangeRate)}</span>
+                          </div>
+                        ))}
+                        {exclusiveTaxes.map(tax => (
+                          <div key={tax.id} className="flex justify-between text-[10px] text-emerald-400/80">
+                            <span>{tax.name} ({tax.percentage}%)</span>
+                            <span>+{formatCurrency(baseAmount * (tax.percentage / 100), currency, exchangeRate)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between items-center pt-2 border-t border-zinc-800 mt-2">
+                          <span className="text-sm font-bold text-zinc-50">Grand Total</span>
+                          <span className="text-xl font-black text-emerald-500">{formatCurrency(baseAmount + totalExclusiveTax, currency, exchangeRate)}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                   <button
                     onClick={handleAddOrder}
                     disabled={!newOrder.roomNumber || cart.length === 0 || isSaving}
-                    className="w-full py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
                   >
                     {isSaving ? (
                       <RefreshCw size={18} className="animate-spin" />

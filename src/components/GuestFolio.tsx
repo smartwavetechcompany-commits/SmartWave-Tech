@@ -146,7 +146,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             split.amount, 
             split.method, 
             profile.uid, 
-            currentReservation.corporateId
+            activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined
           );
         }
       }
@@ -828,13 +828,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </div>
                 <form onSubmit={handleSettlePayment}>
                   <div className="p-6 space-y-6">
-                    <div className="flex items-center gap-4 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
-                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                        <Banknote size={20} />
+                    <div className="flex flex-col gap-2 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                          <Banknote size={20} />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-bold text-zinc-500 uppercase">Balance Due</p>
+                          <p className="text-lg font-bold text-red-500">{formatCurrency(balance, currency, exchangeRate)}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-bold text-zinc-500 uppercase">Balance Due</p>
-                        <p className="text-lg font-bold text-red-500">{formatCurrency(balance, currency, exchangeRate)}</p>
+                      
+                      {/* Detailed Balance Breakdown */}
+                      <div className="pt-3 border-t border-zinc-800 space-y-1">
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-zinc-500 uppercase">Principal Charges</span>
+                          <span className="text-zinc-300">{formatCurrency(displayedEntries.filter(e => e.type === 'debit' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-zinc-500 uppercase">Taxes & Fees</span>
+                          <span className="text-zinc-300">{formatCurrency(displayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                        </div>
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-zinc-500 uppercase">Total Payments</span>
+                          <span className="text-emerald-500">-{formatCurrency(displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                        </div>
                       </div>
                     </div>
 
