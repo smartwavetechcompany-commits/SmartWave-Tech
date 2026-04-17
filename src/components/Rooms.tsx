@@ -89,6 +89,7 @@ export function Rooms() {
     capacity: 0,
     amenities: [] as string[],
     description: '',
+    notes: '',
   });
 
   useEffect(() => {
@@ -854,13 +855,25 @@ export function Rooms() {
                   ))}
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Description</label>
-                <textarea 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
-                  value={newRoom.description}
-                  onChange={(e) => setNewRoom({ ...newRoom, description: e.target.value })}
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Description</label>
+                  <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
+                    placeholder="General description of the room..."
+                    value={newRoom.description}
+                    onChange={(e) => setNewRoom({ ...newRoom, description: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room Notes (Staff Only)</label>
+                  <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
+                    placeholder="Maintenance issues, guest preferences, etc..."
+                    value={newRoom.notes}
+                    onChange={(e) => setNewRoom({ ...newRoom, notes: e.target.value })}
+                  />
+                </div>
               </div>
               <div className="flex gap-4 mt-8">
                 <button 
@@ -1435,6 +1448,15 @@ export function Rooms() {
                   <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
                 </div>
 
+                {room.amenities && room.amenities.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {room.amenities.slice(0, 3).map(a => (
+                      <span key={a} className="text-[7px] px-1 bg-white/5 rounded border border-white/10 opacity-60">{a}</span>
+                    ))}
+                    {room.amenities.length > 3 && <span className="text-[7px] opacity-40">+{room.amenities.length - 3}</span>}
+                  </div>
+                )}
+
                 {room.notes && (
                   <div className="bg-black/20 p-2 rounded-lg border border-white/5">
                     <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider opacity-50 mb-0.5">
@@ -1862,7 +1884,34 @@ export function Rooms() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room Notes</label>
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Amenities</label>
+                  <div className="grid grid-cols-3 gap-2 mt-1">
+                    {amenitiesOptions.map(amenity => (
+                      <button
+                        key={amenity}
+                        type="button"
+                        onClick={() => {
+                          const currentAmenities = editingRoom.amenities || [];
+                          const newAmenities = currentAmenities.includes(amenity)
+                            ? currentAmenities.filter(a => a !== amenity)
+                            : [...currentAmenities, amenity];
+                          setEditingRoom({ ...editingRoom, amenities: newAmenities });
+                        }}
+                        className={cn(
+                          "px-2 py-1 rounded text-[10px] font-bold border transition-all",
+                          (editingRoom.amenities || []).includes(amenity)
+                            ? "bg-emerald-500/10 border-emerald-500 text-emerald-500"
+                            : "bg-zinc-950 border-zinc-800 text-zinc-500"
+                        )}
+                      >
+                        {amenity}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room Notes (Staff Only)</label>
                   <textarea
                     value={editingRoom.notes || ''}
                     onChange={(e) => setEditingRoom({ ...editingRoom, notes: e.target.value })}

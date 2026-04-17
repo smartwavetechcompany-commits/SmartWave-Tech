@@ -9,6 +9,9 @@ import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
+  Info,
+  FileText,
+  Zap,
   Plus, 
   Search, 
   Calendar,
@@ -1984,8 +1987,36 @@ export function FrontDesk() {
                     const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (baseAmount * (t.percentage / 100)), 0);
 
                     return (
-                      <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                        <div className="flex justify-between text-[10px] font-bold">
+                      <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2">
+                        {/* Room Specific Info */}
+                        {(room.notes || (room.amenities && room.amenities.length > 0)) && (
+                          <div className="pb-2 border-b border-zinc-800 space-y-2">
+                            {room.notes && (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1 text-[8px] font-bold text-amber-500 uppercase tracking-widest">
+                                  <FileText size={10} /> Room Notes
+                                </div>
+                                <p className="text-[10px] text-zinc-400 italic font-medium leading-tight">
+                                  {room.notes}
+                                </p>
+                              </div>
+                            )}
+                            {room.amenities && room.amenities.length > 0 && (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1 text-[8px] font-bold text-zinc-500 uppercase tracking-widest">
+                                  <Zap size={10} /> Amenities
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {room.amenities.map(a => (
+                                    <span key={a} className="text-[8px] px-1 bg-zinc-900 border border-zinc-800 rounded text-zinc-500">{a}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="flex justify-between text-[10px] font-bold pt-1">
                           <span className="text-zinc-500 uppercase">Base Rate</span>
                           <span className="text-zinc-50">{formatCurrency(baseAmount, currency, exchangeRate)}</span>
                         </div>
@@ -2831,7 +2862,40 @@ export function FrontDesk() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">Room {res.roomNumber}</td>
+                  <td className="px-6 py-4">
+                    <div className="font-bold text-zinc-50 flex items-center gap-2 group/roomrelative text-sm">
+                      Room {res.roomNumber}
+                      {(() => {
+                        const room = rooms.find(r => r.id === res.roomId);
+                        if (!room) return null;
+                        if (!room.notes && (!room.amenities || room.amenities.length === 0)) return null;
+                        return (
+                          <div className="group relative">
+                            <Info size={12} className="text-zinc-500 cursor-help" />
+                            <div className="absolute left-0 bottom-full mb-2 w-48 p-3 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl opacity-0 scale-95 group-hover/roomrelative:opacity-100 group-hover/roomrelative:scale-100 pointer-events-none transition-all z-50 origin-bottom-left">
+                              {room.notes && (
+                                <div className="mb-2">
+                                  <div className="text-[8px] font-bold text-amber-500 uppercase mb-0.5">Room Notes</div>
+                                  <p className="text-[10px] text-zinc-400 italic leading-tight">{room.notes}</p>
+                                </div>
+                              )}
+                              {room.amenities && room.amenities.length > 0 && (
+                                <div>
+                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Amenities</div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {room.amenities.slice(0, 5).map(a => (
+                                      <span key={a} className="text-[8px] px-1 bg-zinc-900 text-zinc-500 rounded border border-zinc-700">{a}</span>
+                                    ))}
+                                    {room.amenities.length > 5 && <span className="text-[8px] text-zinc-600">+{room.amenities.length - 5} more</span>}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 text-xs text-zinc-400">
                     <div className="flex items-center gap-1"><Clock size={12} /> {res.checkIn}</div>
                     <div className="flex items-center gap-1 opacity-50"><Clock size={12} /> {res.checkOut}</div>
