@@ -42,6 +42,17 @@ export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
+
+  const isRoomBlocked = (roomId: string) => {
+    const today = startOfDay(new Date());
+    return blockings.some(b => 
+      b.roomId === roomId && 
+      isWithinInterval(today, { 
+        start: parseISO(b.startDate), 
+        end: parseISO(b.endDate) 
+      })
+    );
+  };
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [isManagingTypes, setIsManagingTypes] = useState(false);
@@ -77,6 +88,7 @@ export function Rooms() {
   const [calendarStartDate, setCalendarStartDate] = useState(startOfDay(new Date()));
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [selectedRoomForBlocking, setSelectedRoomForBlocking] = useState<string | null>(null);
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
     roomNumber: '',
@@ -935,7 +947,13 @@ export function Rooms() {
                 }} className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
-                    <select name="roomId" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                    <select 
+                      name="roomId" 
+                      required 
+                      defaultValue={selectedRoomForBlocking || ""}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    >
+                      <option value="" disabled>Select a room</option>
                       {rooms.map(r => <option key={r.id} value={r.id}>{r.roomNumber} - {r.type}</option>)}
                     </select>
                   </div>
@@ -1420,30 +1438,66 @@ export function Rooms() {
                   <span className="text-lg font-bold">{room.roomNumber}</span>
                   <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">{room.type}</span>
                 </div>
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
-                    className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                    title="Edit Room Details"
-                  >
-                    <Edit2 size={14} />
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'clean'); }} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors" title="Mark Clean"><CheckCircle2 size={14} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); updateStatus(room.id, 'dirty'); }} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors" title="Mark Dirty"><AlertCircle size={14} /></button>
-                </div>
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
+                      className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                      title="Edit Room Details"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setSelectedRoomForBlocking(room.id);
+                        setIsManagingBlockings(true);
+                      }} 
+                      className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400"
+                      title="Block Room"
+                    >
+                      <XCircle size={14} />
+                    </button>
+                    
+                    <div className="relative group/status" onClick={(e) => e.stopPropagation()}>
+                      <button className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
+                        <MoreVertical size={14} />
+                      </button>
+                      <div className="absolute right-full mr-2 top-0 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl py-1 hidden group-hover/status:block z-50 min-w-[120px]">
+                        {(['clean', 'dirty', 'occupied', 'maintenance', 'out_of_service'] as const).map(s => (
+                          <button
+                            key={s}
+                            onClick={() => updateStatus(room.id, s)}
+                            className={cn(
+                              "w-full text-left px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-zinc-800 transition-colors",
+                              room.status === s ? "text-emerald-500" : "text-zinc-400"
+                            )}
+                          >
+                            {s.replace('_', ' ')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
               </div>
               
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className={cn(
-                    "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border",
-                    room.status === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
-                    room.status === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
-                    room.status === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
-                    room.status === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
-                    "bg-zinc-800 border-zinc-700 text-zinc-400"
-                  )}>
-                    {room.status.replace('_', ' ')}
+                  <div className="flex items-center gap-1.5">
+                    <div className={cn(
+                      "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border",
+                      room.status === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
+                      room.status === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
+                      room.status === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
+                      room.status === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
+                      "bg-zinc-800 border-zinc-700 text-zinc-400"
+                    )}>
+                      {room.status.replace('_', ' ')}
+                    </div>
+                    {isRoomBlocked(room.id) && (
+                      <div className="bg-red-500 text-white rounded-full p-0.5 shadow-lg" title="Room IS BLOCKED">
+                        <XCircle size={10} strokeWidth={3} />
+                      </div>
+                    )}
                   </div>
                   <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
                 </div>
@@ -1512,12 +1566,27 @@ export function Rooms() {
                   <td className="px-6 py-4 text-zinc-400 text-sm">{room.type}</td>
                   <td className="px-6 py-4 text-right text-zinc-50 font-medium">{formatCurrency(room.price, currency, exchangeRate)}</td>
                   <td className="px-6 py-4">
-                    <span className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border",
-                      statusColors[room.status]
-                    )}>
-                      {room.status.replace('_', ' ')}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <select 
+                        value={room.status}
+                        onChange={(e) => updateStatus(room.id, e.target.value as any)}
+                        className={cn(
+                          "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border bg-transparent focus:outline-none cursor-pointer",
+                          statusColors[room.status]
+                        )}
+                      >
+                        <option value="clean" className="bg-zinc-900">Clean</option>
+                        <option value="dirty" className="bg-zinc-900">Dirty</option>
+                        <option value="occupied" className="bg-zinc-900">Occupied</option>
+                        <option value="maintenance" className="bg-zinc-900">Maintenance</option>
+                        <option value="out_of_service" className="bg-zinc-900">Out of Service</option>
+                      </select>
+                      {isRoomBlocked(room.id) && (
+                        <div className="bg-red-500/10 text-red-500 border border-red-500/30 rounded px-1.5 py-0.5 text-[8px] font-bold flex items-center gap-1">
+                          <XCircle size={8} /> BLOCKED
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     {room.assignedTo ? (
@@ -1550,9 +1619,16 @@ export function Rooms() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => setEditingRoom(room)} className="p-1 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded" title="Edit Room"><Edit2 size={16} /></button>
-                      <button onClick={() => updateStatus(room.id, 'clean')} className="p-1 text-emerald-500 hover:bg-emerald-500/10 rounded" title="Mark Clean"><CheckCircle2 size={16} /></button>
-                      <button onClick={() => updateStatus(room.id, 'dirty')} className="p-1 text-red-500 hover:bg-red-500/10 rounded" title="Mark Dirty"><AlertCircle size={16} /></button>
-                      <button onClick={() => updateStatus(room.id, 'maintenance')} className="p-1 text-amber-500 hover:bg-amber-500/10 rounded" title="Maintenance"><Wrench size={16} /></button>
+                      <button 
+                        onClick={() => {
+                          setSelectedRoomForBlocking(room.id);
+                          setIsManagingBlockings(true);
+                        }} 
+                        className="p-1 text-amber-500 hover:bg-amber-500/10 rounded" 
+                        title="Block Room"
+                      >
+                        <XCircle size={16} />
+                      </button>
                       <button onClick={() => setShowConfirmDeleteRoom(room.id)} className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded" title="Delete Room"><Trash2 size={16} /></button>
                     </div>
                   </td>
@@ -1941,7 +2017,7 @@ export function Rooms() {
                   </div>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex gap-3 pt-6">
                   <button
                     type="button"
                     onClick={() => setEditingRoom(null)}
@@ -1950,7 +2026,24 @@ export function Rooms() {
                     Cancel
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={async () => {
+                      if (!hotel?.id || !editingRoom) return;
+                      try {
+                        setLoading(true);
+                        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
+                          ...editingRoom,
+                          updatedAt: new Date().toISOString()
+                        }, { merge: true });
+                        toast.success('Room updated successfully');
+                        setEditingRoom(null);
+                      } catch (err) {
+                        handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${editingRoom.id}`);
+                        toast.error('Failed to update room');
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
                     className="flex-1 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95"
                   >
                     Save Changes

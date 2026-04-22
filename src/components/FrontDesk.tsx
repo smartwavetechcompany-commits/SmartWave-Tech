@@ -427,15 +427,15 @@ export function FrontDesk() {
       totalAdditionalTax += stayTaxTotal;
       totalAdditionalExclusiveTax += stayExclusiveTaxTotal;
       
-      if (stayTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
+      if (stayTotal + stayExclusiveTaxTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
         additionalStaysChanged = true;
-        return { ...stay, totalAmount: stayTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails, exclusiveTaxAmount: stayExclusiveTaxTotal };
+        return { ...stay, totalAmount: stayTotal + stayExclusiveTaxTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails, exclusiveTaxAmount: stayExclusiveTaxTotal };
       }
       return stay;
     });
 
     const additionalRoomTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0), 0);
-    const totalAmount = primaryTotal + primaryExclusiveTaxTotal + additionalRoomTotal + totalAdditionalExclusiveTax;
+    const totalAmount = primaryTotal + primaryExclusiveTaxTotal + additionalRoomTotal;
     const totalTax = primaryTaxTotal + totalAdditionalTax;
 
     if (newBooking.totalAmount !== totalAmount || additionalStaysChanged || newBooking.taxAmount !== totalTax) {
@@ -511,7 +511,30 @@ export function FrontDesk() {
         const checkOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
         const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
         const nights = Math.max(1, Math.ceil(hours / 24));
-        const totalAmount = pricePerNight * nights;
+        const baseAmount = pricePerNight * nights;
+
+        // Calculate taxes for this specific stay
+        const activeTaxes = (hotel?.taxes || []).filter(t => {
+          const status = (t.status || '').toLowerCase().trim();
+          const category = (t.category || '').toLowerCase().trim();
+          return status === 'active' && category !== 'restaurant';
+        });
+
+        let stayTaxTotal = 0;
+        let stayExclusiveTaxTotal = 0;
+        const stayTaxDetails = activeTaxes.map(tax => {
+          const amount = tax.isInclusive 
+            ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
+            : baseAmount * (tax.percentage / 100);
+          
+          stayTaxTotal += amount;
+          if (!tax.isInclusive) {
+            stayExclusiveTaxTotal += amount;
+          }
+          return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
+        });
+
+        const totalAmount = baseAmount + stayExclusiveTaxTotal;
 
         let guestId = stay.guestId;
         if (!guestId) {
@@ -551,8 +574,8 @@ export function FrontDesk() {
           nights,
           status: 'pending',
           totalAmount,
-          taxAmount: stay.taxAmount || 0,
-          taxDetails: stay.taxDetails || [],
+          taxAmount: stayTaxTotal,
+          taxDetails: stayTaxDetails,
           paidAmount: 0, // Initialize to 0, settleLedger will update this
           totalDiscount: 0,
           paymentStatus: 'unpaid',
@@ -842,8 +865,23 @@ export function FrontDesk() {
 
       const room = rooms.find(r => r.id === res.roomId);
       const nightlyRate = room?.price || 0;
-      const extraAmount = extraNights * nightlyRate;
-      const newTotalAmount = res.totalAmount + extraAmount;
+      const baseExtraAmount = extraNights * nightlyRate;
+
+      // Calculate exclusive taxes for the extension to update totalAmount correctly
+      const activeTaxes = (hotel?.taxes || []).filter(t => {
+        const status = (t.status || '').toLowerCase().trim();
+        const category = (t.category || '').toLowerCase().trim();
+        return status === 'active' && category !== 'restaurant';
+      });
+
+      let extraExclusiveTaxTotal = 0;
+      activeTaxes.forEach(tax => {
+        if (!tax.isInclusive) {
+          extraExclusiveTaxTotal += baseExtraAmount * (tax.percentage / 100);
+        }
+      });
+
+      const newTotalAmount = res.totalAmount + baseExtraAmount + extraExclusiveTaxTotal;
 
       await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
         checkOut: newCheckOutDate,
@@ -853,7 +891,7 @@ export function FrontDesk() {
       // Post the extra charge to the ledger if guest is checked in
       if (res.status === 'checked_in') {
         await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
-          amount: extraAmount,
+          amount: baseExtraAmount,
           type: 'debit',
           category: 'room',
           description: `Stay Extension: ${extraNights} additional nights until ${newCheckOutDate}`,
