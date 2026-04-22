@@ -1934,7 +1934,7 @@ export function FrontDesk() {
                     }}
                   >
                     <option value="">Select a room</option>
-                    {rooms.filter(r => r.status === 'clean' || r.status === 'vacant').map(room => {
+                    {rooms.filter(r => r.status === 'clean').map(room => {
                       let displayPrice = room.price;
                       let isNegotiated = false;
 

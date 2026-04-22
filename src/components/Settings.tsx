@@ -359,8 +359,8 @@ export function Settings() {
       let rCount = 0;
       for (const rSnap of roomsSnap.docs) {
         roomBatch.update(rSnap.ref, {
-          status: 'vacant',
-          housekeepingStatus: 'clean',
+          status: 'dirty',
+          housekeepingStatus: 'dirty',
           currentGuestId: null,
           currentReservationId: null,
           assignedTo: null

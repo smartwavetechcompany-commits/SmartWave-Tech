@@ -46,9 +46,9 @@ export const roomService = {
     const blockingRef = doc(db, 'hotels', hotelId, 'room_blockings', blockingId);
     await updateDoc(blockingRef, { endDate: new Date().toISOString() });
     
-    // Reset room status to vacant/clean or similar
+    // Reset room status to dirty so it needs cleaning before booking
     const roomRef = doc(db, 'hotels', hotelId, 'rooms', roomId);
-    await updateDoc(roomRef, { status: 'vacant' });
+    await updateDoc(roomRef, { status: 'dirty' });
   },
 
   // Inventory Integration

@@ -217,7 +217,7 @@ export function Rooms() {
         capacity: selectedType?.capacity || newRoom.capacity,
         price: selectedType?.basePrice || newRoom.price,
         amenities: selectedType?.amenities || newRoom.amenities,
-        status: 'vacant',
+        status: 'dirty',
         createdAt: new Date().toISOString()
       });
       setIsAddingRoom(false);
