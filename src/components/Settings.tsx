@@ -134,7 +134,63 @@ export function Settings() {
       await setDoc(doc(db, 'hotels', hotel.id), {
         taxes: localTaxes
       }, { merge: true });
-      toast.success('Taxes updated successfully');
+
+      // After saving taxes, update existing active reservations to reflect new tax policy
+      const activeTaxes = localTaxes.filter(t => t.status === 'active' && t.category !== 'restaurant');
+      const q = query(
+        collection(db, 'hotels', hotel.id, 'reservations'),
+        where('status', 'in', ['pending', 'confirmed', 'checked_in'])
+      );
+      
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        let updateCount = 0;
+
+        for (const resDoc of snap.docs) {
+          const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
+          // We need the base price to recalculate. If nightlyRate is missing, we use totalAmount / nights
+          // but that's risky if we don't know the previous context.
+          // However, for recent reservations, nightlyRate is present.
+          const basePrice = res.nightlyRate || (res.totalAmount / (res.nights || 1));
+          const nights = res.nights || 1;
+          const stayBaseAmount = basePrice * nights;
+
+          let stayTaxTotal = 0;
+          let stayExclusiveTaxTotal = 0;
+          const stayTaxDetails = activeTaxes.map(tax => {
+            const amount = tax.isInclusive 
+              ? stayBaseAmount - (stayBaseAmount / (1 + (tax.percentage / 100)))
+              : stayBaseAmount * (tax.percentage / 100);
+            
+            stayTaxTotal += amount;
+            if (!tax.isInclusive) {
+              stayExclusiveTaxTotal += amount;
+            }
+            return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
+          });
+
+          const newTotalAmount = stayBaseAmount + stayExclusiveTaxTotal;
+          
+          if (newTotalAmount !== res.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(res.taxDetails)) {
+            batch.update(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+              totalAmount: newTotalAmount,
+              taxAmount: stayTaxTotal,
+              taxDetails: stayTaxDetails
+            });
+            updateCount++;
+          }
+        }
+
+        if (updateCount > 0) {
+          await batch.commit();
+          toast.success(`Taxes updated and ${updateCount} active reservations recalculated.`);
+        } else {
+          toast.success('Taxes updated successfully');
+        }
+      } else {
+        toast.success('Taxes updated successfully');
+      }
     } catch (err: any) {
       console.error("Save taxes error:", err.message || safeStringify(err));
       toast.error('Failed to update taxes');

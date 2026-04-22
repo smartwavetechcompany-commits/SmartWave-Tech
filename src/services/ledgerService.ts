@@ -44,7 +44,9 @@ export const postToLedger = async (
       });
       
       const baseAmount = entry.amount;
-      let inclusiveTaxText = '';
+      const initialDescription = entry.description;
+      let totalInclusiveTax = 0;
+      const inclusiveTaxEntries: LedgerEntry[] = [];
 
       for (const tax of activeTaxes) {
         const taxAmount = tax.isInclusive 
@@ -52,9 +54,21 @@ export const postToLedger = async (
           : baseAmount * (tax.percentage / 100);
         
         if (tax.isInclusive) {
-          // For inclusive taxes, we don't increase the guest's balance.
-          // We just append info to the description of the main charge.
-          inclusiveTaxText += (inclusiveTaxText ? ', ' : ' (incl. ') + `${tax.name}: ${taxAmount.toFixed(2)}`;
+          totalInclusiveTax += taxAmount;
+          const taxEntry: LedgerEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            timestamp,
+            hotelId,
+            guestId,
+            reservationId,
+            corporateId,
+            type: 'debit',
+            amount: taxAmount,
+            description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
+            category: 'tax',
+            postedBy
+          };
+          inclusiveTaxEntries.push(taxEntry);
         } else {
           // For exclusive taxes, we create a new debit line.
           const taxEntry: LedgerEntry = {
@@ -66,7 +80,7 @@ export const postToLedger = async (
             corporateId,
             type: 'debit',
             amount: taxAmount,
-            description: `${tax.name} (${tax.percentage}%) for ${entry.description}`,
+            description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
             category: 'tax',
             postedBy
           };
@@ -74,9 +88,10 @@ export const postToLedger = async (
         }
       }
 
-      if (inclusiveTaxText) {
-        entries[0].description += inclusiveTaxText + ')';
-      }
+      // Adjust the primary entry amount for inclusive taxes
+      entries[0].amount = baseAmount - totalInclusiveTax;
+      // Also add the inclusive tax entries to the main entries list
+      entries.push(...inclusiveTaxEntries);
     }
   }
 
