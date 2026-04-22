@@ -104,7 +104,11 @@ export function Sidebar() {
           return (
             <Link
               key={item.path}
-              to={isDisabled ? '#' : item.path}
+              to={isDisabled ? item.path : item.path}
+              onClick={(e) => {
+                if (isDisabled) e.preventDefault();
+              }}
+              target="_self"
               className={cn(
                 "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 active:scale-[0.98]",
                 isActive ? "bg-emerald-500/10 text-emerald-500" : "hover:bg-zinc-900 hover:text-zinc-50",

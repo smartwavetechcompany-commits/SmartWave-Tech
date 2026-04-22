@@ -375,6 +375,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </div>
           <div className="flex items-center gap-3">
             <button 
+              type="button"
               onClick={() => setShowSettlePayment(true)}
               className="px-4 py-2 bg-emerald-500 text-black rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-400 transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95"
             >
@@ -382,6 +383,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               Settle / Pay
             </button>
             <button 
+              type="button"
               onClick={() => setShowReceipt(true)}
               className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-2"
               title="Print Receipt"
@@ -390,6 +392,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <span className="text-xs font-bold">Print Receipt</span>
             </button>
             <button 
+              type="button"
               onClick={onClose}
               className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
             >
@@ -446,6 +449,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           {/* Quick Actions Bar */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <button
+              type="button"
               onClick={() => setShowSettlePayment(true)}
               className="flex items-center justify-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
             >
@@ -459,6 +463,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
 
             <button
+              type="button"
               onClick={() => setShowTransferBalanceModal(true)}
               className="flex items-center justify-center gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-500 hover:bg-blue-500 hover:text-white transition-all group active:scale-95"
             >
@@ -472,6 +477,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
 
             <button
+              type="button"
               onClick={() => setShowPostChargeModal(true)}
               className="flex items-center justify-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
             >
@@ -485,6 +491,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
 
             <button
+              type="button"
               onClick={() => setShowReceipt(true)}
               className="flex items-center justify-center gap-3 p-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
             >
@@ -586,38 +593,50 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </div>
                 
                 <div className="pt-3 border-t border-zinc-800 flex flex-col gap-4">
-                  <div className="flex justify-between items-center">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Unpaid Stay Total</span>
-                      <span className="text-[8px] font-medium text-amber-500/50 uppercase leading-none mt-0.5">Expected total minus payments</span>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      <span className="text-lg font-bold text-zinc-50">
-                        {formatCurrency(Math.max(0, currentReservation.totalAmount - (currentReservation.paidAmount || 0)), currency, exchangeRate)}
-                      </span>
-                    </div>
-                  </div>
+          <div className="flex justify-between items-center">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider underline decoration-zinc-800 underline-offset-4">Contractual Stay Booking Total</span>
+              <span className="text-[8px] font-medium text-amber-500/50 uppercase leading-none mt-0.5">Full stay amount set at booking</span>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-sm font-bold text-zinc-400 line-through decoration-zinc-700">
+                {formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}
+              </span>
+            </div>
+          </div>
 
-                  <div className="flex justify-between items-center">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Posted Ledger Balance</span>
-                      <span className="text-[8px] font-medium text-emerald-500/50 uppercase leading-none mt-0.5">Currently accrued amount</span>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      <span className={cn(
-                        "text-xl font-bold",
-                        balance > 0 ? "text-red-500" : "text-emerald-500"
-                      )}>
-                        {formatCurrency(Math.abs(balance), currency, exchangeRate)}
-                      </span>
-                      <span className={cn(
-                        "text-[10px] font-bold uppercase",
-                        balance > 0 ? "text-red-500" : "text-emerald-500"
-                      )}>
-                        {balance > 0 ? (activeFolio === 'company' ? "Due to Property (Debt)" : "Guest Debt / Owing") : balance < 0 ? "Credit Balance" : "Posted Items Settled"}
-                      </span>
-                    </div>
-                  </div>
+          <div className="flex justify-between items-center pt-2">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payments Made (Credits)</span>
+              <span className="text-[8px] font-medium text-emerald-500/50 uppercase leading-none mt-0.5">Total cash/transfer received</span>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-lg font-bold text-emerald-500">
+                {formatCurrency(currentReservation.paidAmount || 0, currency, exchangeRate)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center border-t border-zinc-800 pt-3">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Final Bill (Outstanding Balance)</span>
+              <span className="text-[8px] font-medium text-red-500/50 uppercase leading-none mt-0.5">Actual debt currently in ledger</span>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className={cn(
+                "text-2xl font-black",
+                balance > 0 ? "text-red-500" : "text-emerald-500"
+              )}>
+                {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+              </span>
+              <span className={cn(
+                "text-[10px] font-bold uppercase",
+                balance > 0 ? "text-red-500" : "text-emerald-500"
+              )}>
+                {balance > 0 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < 0 ? "Credit Balance" : "Account Settled"}
+              </span>
+            </div>
+          </div>
                   
                   <button
                     onClick={() => setShowSettlePayment(true)}

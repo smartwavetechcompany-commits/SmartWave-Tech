@@ -273,19 +273,23 @@ export const deleteLedgerEntry = async (
   }
 
   // 3. Reverse the balance update
-  const reverseAmount = type === 'debit' ? amount : -amount;
+  // If it was a debit (charge), deleting it should decrease the balance.
+  // If it was a credit (payment), deleting it should increase the balance.
+  const reverseAmount = type === 'debit' ? -amount : amount;
 
   if (corporateId) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
     await updateDoc(corpRef, {
       currentBalance: increment(reverseAmount),
-      totalDebits: increment(type === 'debit' ? -amount : 0)
+      totalDebits: increment(type === 'debit' ? -amount : 0),
+      totalCredits: increment(type === 'credit' ? -amount : 0)
     });
   } else {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
     await updateDoc(guestRef, {
       ledgerBalance: increment(reverseAmount),
-      totalSpent: increment(type === 'debit' ? -amount : 0)
+      // totalSpent only tracks successful payments (credits), so reverse only credits
+      totalSpent: increment(type === 'credit' && category === 'payment' ? -amount : 0)
     });
   }
 };

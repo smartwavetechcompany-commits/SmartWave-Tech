@@ -693,6 +693,7 @@ export function AuthPage() {
             <div className="mt-6 text-center space-y-2">
           {!user && (
             <button
+              type="button"
               onClick={() => {
                 setIsLogin(!isLogin);
                 setIsResetting(false);
@@ -706,6 +707,7 @@ export function AuthPage() {
           )}
           {user && (
             <button
+              type="button"
               onClick={() => auth.signOut()}
               className="block w-full text-zinc-500 text-sm hover:text-white transition-all active:opacity-70"
             >
@@ -714,6 +716,7 @@ export function AuthPage() {
           )}
           {isLogin && !user && (
             <button
+              type="button"
               onClick={() => setIsRequesting(true)}
               className="block w-full text-emerald-500/80 text-xs font-bold uppercase tracking-widest hover:text-emerald-400 transition-all active:opacity-70"
             >

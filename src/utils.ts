@@ -124,6 +124,7 @@ export function exportToCSV(data: any[], filename: string) {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     link.setAttribute('download', filename);
+    link.setAttribute('target', '_self');
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
