@@ -103,6 +103,7 @@ export function Rooms() {
     description: '',
     notes: '',
   });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (roomTypes.length > 0 && !newRoom.type) {
@@ -2030,7 +2031,7 @@ export function Rooms() {
                     onClick={async () => {
                       if (!hotel?.id || !editingRoom) return;
                       try {
-                        setLoading(true);
+                        setIsSaving(true);
                         await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
                           ...editingRoom,
                           updatedAt: new Date().toISOString()
@@ -2041,7 +2042,7 @@ export function Rooms() {
                         handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${editingRoom.id}`);
                         toast.error('Failed to update room');
                       } finally {
-                        setLoading(false);
+                        setIsSaving(false);
                       }
                     }}
                     className="flex-1 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95"

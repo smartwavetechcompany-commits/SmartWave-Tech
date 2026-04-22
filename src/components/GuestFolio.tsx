@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,10 +40,15 @@ interface GuestFolioProps {
 export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioProps) {
   const { hotel, currency, exchangeRate, profile } = useAuth();
   const [currentReservation, setCurrentReservation] = useState<Reservation>(reservation);
+  const reservationRef = useRef<Reservation>(reservation);
 
   useEffect(() => {
     setCurrentReservation(reservation);
   }, [reservation]);
+
+  useEffect(() => {
+    reservationRef.current = currentReservation;
+  }, [currentReservation]);
 
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [guest, setGuest] = useState<Guest | null>(null);
@@ -273,8 +278,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
       // If no entries in collection, fallback to currentReservation.ledgerEntries
-      if (entries.length === 0 && currentReservation.ledgerEntries && currentReservation.ledgerEntries.length > 0) {
-        setLedgerEntries(currentReservation.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);
+      if (entries.length === 0 && reservationRef.current.ledgerEntries && reservationRef.current.ledgerEntries.length > 0) {
+        setLedgerEntries(reservationRef.current.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);
       } else {
         setLedgerEntries(entries as any);
       }
@@ -300,17 +305,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>('guest');
 
+  // Improved filtering:
+  // If it's a corporate reservation, split the entries.
+  // If it's NOT a corporate reservation, show everything on the Guest folio.
   const companyEntries = ledgerEntries.filter(e => 
-    currentReservation.corporateId && e.corporateId
+    !!e.corporateId
   );
   
   const guestEntries = ledgerEntries.filter(e => 
     !e.corporateId
   );
 
-  const displayedEntries = currentReservation.corporateId && activeFolio === 'company' 
-    ? companyEntries 
-    : guestEntries;
+  const displayedEntries = currentReservation.corporateId
+    ? (activeFolio === 'company' ? companyEntries : guestEntries)
+    : ledgerEntries; // Show all for regular guest bookings
 
   const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);

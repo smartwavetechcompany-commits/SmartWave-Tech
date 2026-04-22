@@ -909,7 +909,7 @@ export function FrontDesk() {
         resource: `Res #${res.id.slice(-6)} - Extended to ${newCheckOutDate}`,
         hotelId: hotel.id,
         module: 'Front Desk',
-        details: `Extended by ${extraNights} nights. Added ${formatCurrency(extraAmount, currency, exchangeRate)} to total.`
+        details: `Extended by ${extraNights} nights. Added ${formatCurrency(baseExtraAmount + extraExclusiveTaxTotal, currency, exchangeRate)} to total.`
       });
 
       toast.success('Stay postponed successfully');
@@ -1400,26 +1400,7 @@ export function FrontDesk() {
         postedBy: profile.uid
       }, profile.uid, res.corporateId);
 
-      // 2. Automatically post taxes if applicable
-      const activeTaxes = (hotel.taxes || []).filter(t => 
-        t.status === 'active' && 
-        !t.isInclusive && 
-        (t.category === 'all' || t.category === chargeDetails.category)
-      );
-
-      for (const tax of activeTaxes) {
-        const taxAmount = finalAmount * (tax.percentage / 100);
-        await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
-          amount: taxAmount,
-          type: 'debit',
-          category: 'tax',
-          description: `${tax.name} (${tax.percentage}%) for ${chargeDetails.description}`,
-          referenceId: res.id,
-          postedBy: profile.uid
-        }, profile.uid, res.corporateId);
-      }
-
-      // Log action
+      // 2. Log action
       await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,

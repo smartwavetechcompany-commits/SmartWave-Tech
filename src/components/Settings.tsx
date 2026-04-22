@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch, where } from 'firebase/firestore';
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
-import { Tax } from '../types';
+import { Tax, Reservation } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 import { 
   User, 
@@ -149,12 +149,16 @@ export function Settings() {
 
         for (const resDoc of snap.docs) {
           const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
-          // We need the base price to recalculate. If nightlyRate is missing, we use totalAmount / nights
-          // but that's risky if we don't know the previous context.
-          // However, for recent reservations, nightlyRate is present.
-          const basePrice = res.nightlyRate || (res.totalAmount / (res.nights || 1));
+          // Calculate the existing base amount by removing any exclusive taxes already in totalAmount
+          const existingExclusiveTax = (res.taxDetails || [])
+            .filter(t => !t.isInclusive)
+            .reduce((acc, t) => acc + t.amount, 0);
+          
           const nights = res.nights || 1;
-          const stayBaseAmount = basePrice * nights;
+          // The true base amount for the stay (excl taxes)
+          const stayBaseAmount = res.nightlyRate 
+            ? res.nightlyRate * nights 
+            : (res.totalAmount - existingExclusiveTax);
 
           let stayTaxTotal = 0;
           let stayExclusiveTaxTotal = 0;
