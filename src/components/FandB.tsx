@@ -268,7 +268,7 @@ export function FandB() {
             currentOrderId: orderRef.id,
             currentGuestName: orderData.guestName,
             currentGuestId: newOrder.guestId || res?.guestId || '',
-            totalSpend: (table.totalSpend || 0) + newOrder.price,
+            totalSpend: (table.totalSpend || 0) + finalPrice,
             lastUpdated: new Date().toISOString()
           });
         }
@@ -784,16 +784,35 @@ export function FandB() {
                         <div>
                           <p className="text-sm text-zinc-50 leading-relaxed font-medium">{order.items}</p>
                         </div>
-                        {(order.price > 0) && (
-                          <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
-                            <div className="text-xs font-bold text-emerald-500">
-                              {order.price.toLocaleString()}
+                        <div className="space-y-1 pt-2 border-t border-zinc-800/50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">Subtotal</span>
+                            <span className="text-xs font-bold text-zinc-300">{order.price.toLocaleString()}</span>
+                          </div>
+                          
+                          {order.taxDetails?.map((tax, idx) => (
+                            <div key={idx} className="flex items-center justify-between">
+                              <span className={cn(
+                                "text-[9px] font-bold uppercase",
+                                tax.isInclusive ? "text-blue-400 opacity-60" : "text-emerald-400 opacity-60"
+                              )}>
+                                {tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}
+                              </span>
+                              <span className="text-[9px] font-bold text-zinc-500">
+                                {tax.isInclusive ? '' : '+'}{tax.amount.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+
+                          <div className="flex items-center justify-between pt-1 mt-1 border-t border-zinc-800/30">
+                            <div className="text-sm font-black text-emerald-500">
+                              {(order.totalAmount || order.price).toLocaleString()}
                             </div>
                             <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider bg-zinc-800 px-2 py-0.5 rounded">
                               {order.paymentMethod === 'room' ? 'Post to Room' : order.paymentMethod}
                             </div>
                           </div>
-                        )}
+                        </div>
                         {order.notes && (
                           <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                             <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Notes</div>
@@ -979,20 +998,30 @@ export function FandB() {
                         <span>{(item.price * item.quantity).toLocaleString()}</span>
                       </div>
                     ))}
-                    <div className="border-t border-black pt-1 mt-2 flex justify-between text-sm font-black">
-                      <span>TOTAL</span>
+                    <div className="border-t border-black pt-1 mt-2 flex justify-between text-xs font-bold">
+                      <span>SUBTOTAL</span>
                       <span>{printingOrder.price.toLocaleString()}</span>
                     </div>
-                    {printingOrder.paidAmount !== undefined && (
+                    {printingOrder.taxDetails?.map((tax, idx) => (
+                      <div key={idx} className="flex justify-between text-[10px]">
+                        <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}</span>
+                        <span>{tax.isInclusive ? '' : '+'}{tax.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-black pt-1 mt-1 flex justify-between text-sm font-black">
+                      <span>GRAND TOTAL</span>
+                      <span>{(printingOrder.totalAmount || printingOrder.price).toLocaleString()}</span>
+                    </div>
+                    {printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0 && (
                       <div className="mt-2 space-y-1 border-t border-black pt-2">
                         <div className="flex justify-between text-xs font-bold">
                           <span>PAID ({printingOrder.paymentMethod.toUpperCase()})</span>
                           <span>{printingOrder.paidAmount.toLocaleString()}</span>
                         </div>
-                        {printingOrder.price - printingOrder.paidAmount > 0 && (
+                        {(printingOrder.totalAmount || printingOrder.price) - printingOrder.paidAmount > 0 && (
                           <div className="flex justify-between text-xs font-black">
                             <span>BALANCE TO ROOM</span>
-                            <span>{(printingOrder.price - printingOrder.paidAmount).toLocaleString()}</span>
+                            <span>{((printingOrder.totalAmount || printingOrder.price) - printingOrder.paidAmount).toLocaleString()}</span>
                           </div>
                         )}
                       </div>
@@ -1385,7 +1414,7 @@ export function FandB() {
                         ))}
                         {exclusiveTaxes.map(tax => (
                           <div key={tax.id} className="flex justify-between text-[10px] text-emerald-400/80">
-                            <span>{tax.name} ({tax.percentage}%)</span>
+                            <span>{tax.name} ({tax.percentage}%) [Excl.]</span>
                             <span>+{formatCurrency(baseAmount * (tax.percentage / 100), currency, exchangeRate)}</span>
                           </div>
                         ))}

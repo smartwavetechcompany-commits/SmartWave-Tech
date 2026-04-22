@@ -277,6 +277,9 @@ export interface KitchenOrder {
   preparedAt?: string;
   readyAt?: string;
   deliveredAt?: string;
+  taxAmount?: number;
+  taxDetails?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
+  totalAmount?: number;
 }
 
 export interface BarTable {
