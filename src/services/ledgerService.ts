@@ -138,29 +138,31 @@ export const postToLedger = async (
   if (resSnap.exists()) {
     const resData = resSnap.data() as Reservation;
     
-    // Calculate new totals based on all entries (existing + new)
-    const allEntries = [...(resData.ledgerEntries || []), ...entries];
-    
-    const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-    const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-    
-    // paidAmount reflects actual guest payments
-    const guestPayments = allEntries.filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId).reduce((acc, e) => acc + e.amount, 0);
-    
+    // Increment totals instead of recalculating from scratch to prevent data loss
+    // during the transition from "expected total" to "accrued charges".
+    const totalDebitAdded = entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+    const totalCreditAdded = entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+    const guestPaymentsAdded = entries.filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId).reduce((acc, e) => acc + e.amount, 0);
+
+    if (totalDebitAdded !== 0) resUpdates.totalAmount = increment(totalDebitAdded);
+    if (guestPaymentsAdded !== 0) resUpdates.paidAmount = increment(guestPaymentsAdded);
+
+    // Calculate status (still requires fetching fresh data for accuracy)
+    const freshTotalDebits = (resData.totalAmount || 0) + totalDebitAdded;
+    const freshTotalCredits = (resData.ledgerEntries || []).filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0) + totalCreditAdded;
+
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
-    if (totalDebits > 0) {
-      if (totalCredits >= totalDebits) {
+    if (freshTotalDebits > 0) {
+      if (freshTotalCredits >= freshTotalDebits - 0.01) {
         newPaymentStatus = 'paid';
-      } else if (totalCredits > 0) {
+      } else if (freshTotalCredits > 0) {
         newPaymentStatus = 'partial';
       }
-    } else if (totalCredits > 0) {
+    } else if (freshTotalCredits > 0) {
       newPaymentStatus = 'paid';
     }
 
-    resUpdates.paidAmount = guestPayments;
     resUpdates.paymentStatus = newPaymentStatus;
-    resUpdates.totalAmount = totalDebits; // Reservation total should reflect all posted charges
   }
 
   updatePromises.push(updateDoc(resRef, resUpdates));

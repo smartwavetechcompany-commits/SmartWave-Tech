@@ -303,7 +303,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
-  const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>('guest');
+  const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>(reservation.corporateId ? 'company' : 'guest');
 
   // Improved filtering:
   // If it's a corporate reservation, split the entries.
@@ -563,17 +563,24 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </div>
               </div>
               <div className="space-y-3">
+                <div className="flex justify-between text-xs pb-2 border-b border-zinc-800/50 italic opacity-80">
+                  <span className="text-zinc-500">Scheduled Stay Total</span>
+                  <span className="text-zinc-50 font-bold">{formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}</span>
+                </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Total Charges (Debits)</span>
+                  <span className="text-zinc-500">Accrued Charges (Debits)</span>
                   <span className="text-zinc-50 font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Total Payments (Credits)</span>
+                  <span className="text-zinc-500">Payments & Credits</span>
                   <span className="text-emerald-500 font-bold">{formatCurrency(totalCredits, currency, exchangeRate)}</span>
                 </div>
                 
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
-                  <span className="text-sm font-bold text-zinc-50 uppercase">Ledger Balance</span>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Current Balance</span>
+                    <span className="text-[8px] font-medium text-emerald-500/50 uppercase leading-none mt-0.5">Based on posted ledger</span>
+                  </div>
                   <div className="flex flex-col items-end">
                     <span className={cn(
                       "text-xl font-bold",
@@ -585,7 +592,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       "text-[10px] font-bold uppercase",
                       balance > 0 ? "text-red-500" : "text-emerald-500"
                     )}>
-                      {balance > 0 ? (activeFolio === 'company' ? "Company Owing" : "Guest Owing") : balance < 0 ? "Credit Balance" : "Settled"}
+                      {balance > 0 ? (activeFolio === 'company' ? "Due to Property" : "Guest Balance") : balance < 0 ? "Credit / Deposit" : "Settled"}
                     </span>
                   </div>
                 </div>

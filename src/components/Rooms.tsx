@@ -1436,47 +1436,44 @@ export function Rooms() {
               )}
               <div className="flex justify-between items-start">
                 <div className="flex flex-col">
-                  <span className="text-lg font-bold">{room.roomNumber}</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">{room.type}</span>
+                  <span className="text-xl font-bold font-mono tracking-tight">{room.roomNumber}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 truncate max-w-[100px]">{room.type}</span>
                 </div>
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
-                      className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                      title="Edit Room Details"
-                    >
-                      <Edit2 size={14} />
-                    </button>
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setSelectedRoomForBlocking(room.id);
-                        setIsManagingBlockings(true);
-                      }} 
-                      className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400"
-                      title="Block Room"
-                    >
-                      <XCircle size={14} />
-                    </button>
-                    
-                    <div className="relative group/status" onClick={(e) => e.stopPropagation()}>
-                      <button className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
-                        <MoreVertical size={14} />
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
+                        className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/5"
+                        title="Edit Room Details"
+                      >
+                        <Edit2 size={12} />
                       </button>
-                      <div className="absolute right-full mr-2 top-0 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl py-1 hidden group-hover/status:block z-50 min-w-[120px]">
-                        {(['clean', 'dirty', 'occupied', 'maintenance', 'out_of_service'] as const).map(s => (
-                          <button
-                            key={s}
-                            onClick={() => updateStatus(room.id, s)}
-                            className={cn(
-                              "w-full text-left px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider hover:bg-zinc-800 transition-colors",
-                              room.status === s ? "text-emerald-500" : "text-zinc-400"
-                            )}
-                          >
-                            {s.replace('_', ' ')}
-                          </button>
-                        ))}
-                      </div>
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setSelectedRoomForBlocking(room.id);
+                          setIsManagingBlockings(true);
+                        }} 
+                        className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400 border border-white/5"
+                        title="Block Room / Maintenance"
+                      >
+                        <Wrench size={12} />
+                      </button>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1 mt-1 justify-end">
+                      {(['clean', 'dirty', 'maintenance'] as const).map(s => (
+                        <button
+                          key={s}
+                          onClick={(e) => { e.stopPropagation(); updateStatus(room.id, s); }}
+                          className={cn(
+                            "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter transition-all border",
+                            room.status === s ? "bg-white/20 border-white/20" : "bg-white/5 border-transparent opacity-40 hover:opacity-100"
+                          )}
+                        >
+                          {s[0]}
+                        </button>
+                      ))}
                     </div>
                   </div>
               </div>
@@ -1485,7 +1482,7 @@ export function Rooms() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <div className={cn(
-                      "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border",
+                      "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border shadow-sm",
                       room.status === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
                       room.status === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
                       room.status === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
@@ -1495,8 +1492,8 @@ export function Rooms() {
                       {room.status.replace('_', ' ')}
                     </div>
                     {isRoomBlocked(room.id) && (
-                      <div className="bg-red-500 text-white rounded-full p-0.5 shadow-lg" title="Room IS BLOCKED">
-                        <XCircle size={10} strokeWidth={3} />
+                      <div className="bg-red-500 text-white rounded px-1.5 py-0.5 text-[8px] font-black tracking-tighter flex items-center gap-1 shadow-lg animate-pulse" title="Room IS BLOCKED FOR MAINTENANCE">
+                        <AlertCircle size={8} /> BLOCKED
                       </div>
                     )}
                   </div>
