@@ -638,6 +638,9 @@ export function GuestManagement() {
                           (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                         )}>
                           {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                          <div className="text-[8px] font-black uppercase mt-0.5">
+                            {(guest.ledgerBalance || 0) > 0 ? "Debt / Owing" : (guest.ledgerBalance || 0) < 0 ? "Credit" : "Settled"}
+                          </div>
                         </div>
                       </div>
                     </div>

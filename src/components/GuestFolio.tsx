@@ -614,7 +614,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         "text-[10px] font-bold uppercase",
                         balance > 0 ? "text-red-500" : "text-emerald-500"
                       )}>
-                        {balance > 0 ? "Outstanding Accruals" : balance < 0 ? "Credit Balance" : "Posted Items Settled"}
+                        {balance > 0 ? (activeFolio === 'company' ? "Due to Property (Debt)" : "Guest Debt / Owing") : balance < 0 ? "Credit Balance" : "Posted Items Settled"}
                       </span>
                     </div>
                   </div>

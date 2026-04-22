@@ -133,23 +133,30 @@ export const postToLedger = async (
     }));
   }
 
-  // 6. Handle Reservation Payment Status Synchronization
-  const resSnap = await getDoc(resRef);
-  if (resSnap.exists()) {
-    const resData = resSnap.data() as Reservation;
-    
-    // Increment totals instead of recalculating from scratch to prevent data loss
-    // during the transition from "expected total" to "accrued charges".
-    const totalDebitAdded = entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-    const totalCreditAdded = entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-    const guestPaymentsAdded = entries.filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId).reduce((acc, e) => acc + e.amount, 0);
+    // 6. Handle Reservation Payment Status Synchronization
+    const resSnap = await getDoc(resRef);
+    if (resSnap.exists()) {
+      const resData = resSnap.data() as Reservation;
+      
+      const totalDebitAdded = entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+      const totalCreditAdded = entries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+      
+      // Increment totals for EXTRA charges only. 
+      // Room and Tax charges are assumed to be already part of the initial reservation totalAmount.
+      const totalExtrasAdded = entries
+        .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax')
+        .reduce((acc, e) => acc + e.amount, 0);
+      
+      const guestPaymentsAdded = entries
+        .filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId)
+        .reduce((acc, e) => acc + e.amount, 0);
 
-    if (totalDebitAdded !== 0) resUpdates.totalAmount = increment(totalDebitAdded);
-    if (guestPaymentsAdded !== 0) resUpdates.paidAmount = increment(guestPaymentsAdded);
+      if (totalExtrasAdded !== 0) resUpdates.totalAmount = increment(totalExtrasAdded);
+      if (guestPaymentsAdded !== 0) resUpdates.paidAmount = increment(guestPaymentsAdded);
 
-    // Calculate status (still requires fetching fresh data for accuracy)
-    const freshTotalDebits = (resData.totalAmount || 0) + totalDebitAdded;
-    const freshTotalCredits = (resData.ledgerEntries || []).filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0) + totalCreditAdded;
+    // Calculate status using the NEW calculated total amount
+    const freshTotalDebits = (resData.totalAmount || 0) + totalExtrasAdded;
+    const freshTotalCredits = (resData.paidAmount || 0) + guestPaymentsAdded;
 
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
     if (freshTotalDebits > 0) {
@@ -215,24 +222,52 @@ export const deleteLedgerEntry = async (
       });
     }
 
-    // 4. Synchronize Reservation paidAmount and paymentStatus if this was a payment
-    if (type === 'credit' && category === 'payment') {
-      const newPaidAmount = Math.max(0, (resData.paidAmount || 0) - amount);
-      const newPaymentStatus = newPaidAmount >= resData.totalAmount ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+    // 4. Synchronize Reservation paidAmount and paymentStatus
+    const freshResSnap = await getDoc(resRef);
+    if (freshResSnap.exists()) {
+      const freshResData = freshResSnap.data() as Reservation;
+      const resUpdates: any = {};
+      let totalAdj = 0;
+      let paidAdj = 0;
       
-      await updateDoc(resRef, {
-        paidAmount: newPaidAmount,
-        paymentStatus: newPaymentStatus
-      });
+      if (type === 'credit' && category === 'payment') {
+        paidAdj = -amount;
+        resUpdates.paidAmount = increment(paidAdj);
+      }
+      
+      if (type === 'debit' && category !== 'room' && category !== 'tax') {
+        totalAdj = -amount;
+        resUpdates.totalAmount = increment(totalAdj);
+      }
 
-      // 5. Delete corresponding Finance Record
-      const financeQ = query(
-        collection(db, 'hotels', hotelId, 'finance'),
-        where('referenceId', '==', firestoreId)
-      );
-      const financeSnap = await getDocs(financeQ);
-      for (const fDoc of financeSnap.docs) {
-        await deleteDoc(fDoc.ref);
+      // After potentially updating totalAmount/paidAmount, recalculate paymentStatus
+      const projectedTotal = (freshResData.totalAmount || 0) + totalAdj;
+      const projectedPaid = (freshResData.paidAmount || 0) + paidAdj;
+      
+      let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
+      if (projectedTotal > 0) {
+        if (projectedPaid >= projectedTotal - 0.01) {
+          newPaymentStatus = 'paid';
+        } else if (projectedPaid > 0) {
+          newPaymentStatus = 'partial';
+        }
+      } else if (projectedPaid > 0) {
+        newPaymentStatus = 'paid';
+      }
+      resUpdates.paymentStatus = newPaymentStatus;
+
+      await updateDoc(resRef, resUpdates);
+
+      // 5. Delete corresponding Finance Record if payment
+      if (type === 'credit' && category === 'payment') {
+        const financeQ = query(
+          collection(db, 'hotels', hotelId, 'finance'),
+          where('referenceId', '==', firestoreId || id)
+        );
+        const financeSnap = await getDocs(financeQ);
+        for (const fDoc of financeSnap.docs) {
+          await deleteDoc(fDoc.ref);
+        }
       }
     }
   }
