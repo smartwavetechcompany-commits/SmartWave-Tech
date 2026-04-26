@@ -559,6 +559,7 @@ export function GuestManagement() {
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
+                        type="button"
                         onClick={() => setViewingHistory(guest)}
                         className="p-2 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
                         title="View History"
@@ -566,6 +567,7 @@ export function GuestManagement() {
                         <History size={16} />
                       </button>
                       <button 
+                        type="button"
                         onClick={() => {
                           setEditingGuest(guest);
                           setNewGuest({
@@ -588,6 +590,7 @@ export function GuestManagement() {
                         <Edit2 size={16} />
                       </button>
                       <button 
+                        type="button"
                         onClick={() => {
                           if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
                             toast.error('Only administrators can delete guest profiles');

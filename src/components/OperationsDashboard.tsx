@@ -83,6 +83,7 @@ export function OperationsDashboard() {
         {stats.map((stat) => (
           <button
             key={stat.tab}
+            type="button"
             onClick={() => setActiveTab(stat.tab as any)}
             className={cn(
               "bg-zinc-900 border p-6 rounded-2xl transition-all text-left",

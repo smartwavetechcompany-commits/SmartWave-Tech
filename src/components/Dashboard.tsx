@@ -262,7 +262,7 @@ export function Dashboard() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="font-bold text-zinc-50">Recent Reservations</h3>
-              <Link to="/front-desk" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
+              <Link to="/front-desk" target="_self" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
             </div>
             <div className="divide-y divide-zinc-800">
               {loading ? (
@@ -315,13 +315,14 @@ export function Dashboard() {
                 </div>
                 <div className="flex items-center gap-4">
                   <button 
+                    type="button"
                     onClick={handleExportTransactions}
                     className="text-zinc-400 hover:text-zinc-50 transition-colors"
                     title="Download Transactions"
                   >
                     <Download size={18} />
                   </button>
-                  <Link to="/finance" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
+                  <Link to="/finance" target="_self" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
                 </div>
               </div>
               <div className="divide-y divide-zinc-800">
@@ -414,11 +415,11 @@ export function Dashboard() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
               <h3 className="font-bold text-zinc-50 mb-4">Quick Actions</h3>
               <div className="grid grid-cols-2 gap-3">
-                <Link to="/front-desk" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-emerald-500/50 transition-colors text-center">
+                <Link to="/front-desk" target="_self" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-emerald-500/50 transition-colors text-center">
                   <Calendar size={20} className="mx-auto mb-2 text-emerald-500" />
                   <span className="text-xs font-medium text-zinc-400">New Booking</span>
                 </Link>
-                <Link to="/rooms" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-blue-500/50 transition-colors text-center">
+                <Link to="/rooms" target="_self" className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-blue-500/50 transition-colors text-center">
                   <BedDouble size={20} className="mx-auto mb-2 text-blue-500" />
                   <span className="text-xs font-medium text-zinc-400">Room Status</span>
                 </Link>

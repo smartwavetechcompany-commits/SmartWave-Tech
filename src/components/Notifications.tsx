@@ -80,6 +80,7 @@ export function Notifications() {
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all active:scale-95"
       >
@@ -108,6 +109,7 @@ export function Notifications() {
                 <h3 className="text-sm font-bold text-zinc-50">Notifications</h3>
                 {unreadCount > 0 && (
                   <button 
+                    type="button"
                     onClick={markAllAsRead}
                     className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-wider"
                   >
@@ -166,7 +168,9 @@ export function Notifications() {
               </div>
 
               <div className="p-3 bg-zinc-950/50 border-t border-zinc-800 text-center">
-                <button className="text-[10px] font-bold text-zinc-500 hover:text-zinc-50 uppercase tracking-wider">
+                <button 
+                  type="button"
+                  className="text-[10px] font-bold text-zinc-500 hover:text-zinc-50 uppercase tracking-wider">
                   View all activity
                 </button>
               </div>

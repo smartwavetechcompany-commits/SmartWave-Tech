@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, getDoc, where, updateDoc, deleteDoc, writeBatch, increment } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, getDoc, where, updateDoc, deleteDoc, writeBatch, increment, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
@@ -989,21 +989,25 @@ export function FrontDesk() {
         const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
         const now = new Date();
         
-        // Calculate how many nights have passed since check-in based on 24-hour rolling
-        const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-        let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+        // Calculate nights based on calendar dates
+        const scheduledNights = res.nights || 1;
+        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
+        
+        let targetCharges = actualCalendarNightsPaid;
 
-        // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
+        // Overstay logic: If past overstayChargeTime on any date past arrival, add an extra charge if it's the current day
         if (hotel.autoChargeOverstays !== false) {
           const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
-          if (isAfter(now, checkOutDateTime)) {
-            // Calculate how many days past checkout they are
-            const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
-            const expectedTotalNights = (res.nights || 1) + daysPastCheckout;
-            targetCharges = Math.max(targetCharges, expectedTotalNights);
+          const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
+          
+          if (isAfter(now, todayOverstayThreshold)) {
+            // If they are checking out late TODAY, they get charged for tonight as well
+            targetCharges += 1;
           }
         }
+        
+        // Ensure we don't accidentally charge LESS than scheduled nights if they are still in-house
+        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
         
         // Fetch ledger entries for this reservation to see what's already charged
         const ledgerQ = query(
@@ -1127,9 +1131,25 @@ export function FrontDesk() {
       } else if (status === 'checked_out') {
         // 1. Ensure all nights stayed are charged
         const now = new Date();
-        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
-        const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-        const nightsStayed = Math.max(1, Math.ceil(hoursStayed / 24));
+        
+        // Refined overstay logic for checkout:
+        // Use calendar days as base.
+        const checkInDate = startOfDay(new Date(res.checkIn));
+        const today = startOfDay(now);
+        const nightsElapsed = differenceInDays(today, checkInDate);
+        
+        let nightsToFinalize = Math.max(1, nightsElapsed);
+        
+        // Check for late checkout (Overstay)
+        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+        const deadline = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
+        
+        if (isAfter(now, deadline)) {
+          // If checking out past the overstay time, add an extra night charge
+          nightsToFinalize += 1;
+        }
+
+        const nightsStayed = nightsToFinalize;
         
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
@@ -1209,7 +1229,22 @@ export function FrontDesk() {
           currentReservationId: null
         });
 
-        // 5. If corporate, transfer to City Ledger
+        // 5. Update Guest Profile Statistics
+        if (res.guestId) {
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
+          await updateDoc(guestRef, {
+            totalStays: increment(1),
+            stayHistory: arrayUnion({
+              reservationId: res.id,
+              roomNumber: res.roomNumber,
+              checkIn: res.checkIn,
+              checkOut: format(now, 'yyyy-MM-dd'),
+              totalAmount: totalDebits
+            })
+          });
+        }
+
+        // 6. If corporate, transfer to City Ledger
         if (res.corporateId && outstandingBalance > 0) {
           await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid, res.corporateId);
           toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} transferred to City Ledger.`);
@@ -2960,6 +2995,7 @@ export function FrontDesk() {
                       {res.status === 'checked_in' && (
                         <>
                           <button 
+                            type="button"
                             onClick={() => setShowTransferModal(res)}
                             className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
                             title="Transfer Room"
@@ -2967,6 +3003,7 @@ export function FrontDesk() {
                             <RefreshCw size={18} />
                           </button>
                           <button 
+                            type="button"
                             onClick={() => {
                               setNewCheckOutDate(res.checkOut);
                               setShowPostponeModal(res);
@@ -2977,6 +3014,7 @@ export function FrontDesk() {
                             <Calendar size={18} />
                           </button>
                           <button 
+                            type="button"
                             onClick={() => setShowDiscountModal(res)}
                             className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
                             title="Apply Discount"
@@ -2984,6 +3022,7 @@ export function FrontDesk() {
                             <Tag size={18} />
                           </button>
                           <button 
+                            type="button"
                             onClick={() => setShowChargeModal(res)}
                             className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
                             title="Post Charge to Room"
@@ -2991,6 +3030,7 @@ export function FrontDesk() {
                             <Plus size={18} />
                           </button>
                           <button 
+                            type="button"
                             onClick={() => updateReservationStatus(res, 'checked_out')}
                             className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
                             title="Check Out"
