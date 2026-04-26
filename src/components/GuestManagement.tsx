@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
 import { 
@@ -162,29 +162,33 @@ export function GuestManagement() {
       if (editingGuest) {
         // Exclude read-only financial fields from update to prevent clearing them
         const { ledgerBalance, totalStays, totalSpent, stayHistory, createdAt, ...updateData } = newGuest as any;
-        await updateDoc(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), updateData);
+        await safeWrite(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), {
+          ...updateData,
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'UPDATE_GUEST');
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'guests'), {
+        await safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,
           totalStays: 0,
           totalSpent: 0,
           ledgerBalance: 0,
-          stayHistory: [],
-          createdAt: new Date().toISOString()
-        });
+          // stayHistory subcollection will be used for history, initializing empty list for legacy if needed or just omission
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'CREATE_GUEST');
       }
 
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      // Log action (SafeWrite/SafeAdd will also log, but we can have custom ones)
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
-        action: editingGuest ? 'GUEST_UPDATED' : 'GUEST_CREATED',
+        action: editingGuest ? 'GUEST_PROFILE_UPDATED' : 'GUEST_PROFILE_CREATED',
         resource: `${newGuest.name} (${newGuest.email})`,
         hotelId: hotel.id,
         module: 'Guests'
-      });
+      }, hotel.id, 'LOG_GUEST_ACTION');
 
       setShowAddModal(false);
       setEditingGuest(null);
@@ -217,18 +221,18 @@ export function GuestManagement() {
     }
     
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'guests', guestId));
+      await safeDelete(doc(db, 'hotels', hotel.id, 'guests', guestId), hotel.id, 'DELETE_GUEST_PROFILE');
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         action: 'GUEST_DELETED',
         resource: `Guest ID: ${guestId}`,
         hotelId: hotel.id,
         module: 'Guests'
-      });
+      }, hotel.id, 'LOG_GUEST_DELETION');
       
       toast.success('Guest profile deleted');
       setConfirmDelete(null);

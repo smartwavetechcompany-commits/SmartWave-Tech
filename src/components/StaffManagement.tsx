@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, doc, setDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { sendPasswordResetEmail } from 'firebase/auth';
-import { db, auth, handleFirestoreError } from '../firebase';
+import { db, auth, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType } from '../types';
@@ -81,12 +81,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId) return;
 
     const tempUid = `staff_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = serverTimestamp();
     const staffProfile: any = {
       uid: tempUid,
       email: newStaff.email.toLowerCase(),
       hotelId: hotelId,
       role: 'staff',
-      createdAt: new Date().toISOString(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
       roles: newStaff.roles,
       permissions: newStaff.roles, // Keep for backward compatibility
       status: 'active',
@@ -95,11 +97,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     };
 
     try {
-      await setDoc(doc(db, 'users', tempUid), staffProfile);
+      await safeWrite(doc(db, 'users', tempUid), staffProfile, hotelId, 'CREATE_STAFF');
       
       // Log the action
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
+        timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
         userRole: profile?.role || 'staff',
@@ -108,7 +112,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelId: hotelId,
         module: 'Staff',
         details: `Initial password set by admin: ${newStaff.password}`
-      });
+      }, hotelId, 'LOG_CREATE_STAFF');
 
       setIsAddingStaff(false);
       setNewStaff({ email: '', displayName: '', password: '', role: 'staff', roles: ['frontDesk'] });
@@ -124,11 +128,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId) return;
 
     try {
-      await deleteDoc(doc(db, 'users', staffUid));
+      await safeDelete(doc(db, 'users', staffUid), hotelId, 'DELETE_STAFF');
       
       // Log the action
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
+        timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -136,7 +142,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         resource: `Staff: ${staffEmail}`,
         hotelId: hotelId,
         module: 'Staff'
-      });
+      }, hotelId, 'LOG_DELETE_STAFF');
       toast.success('Staff member removed');
       setShowConfirmRemove(null);
     } catch (err: any) {
@@ -154,8 +160,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       
       // Log the action
       if (hotelId) {
-        await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
-          timestamp: new Date().toISOString(),
+        await safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
+          timestamp: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
           userId: profile?.uid,
           userEmail: profile?.email,
           userRole: profile?.role,
@@ -163,7 +171,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           resource: `Staff: ${email}`,
           hotelId: hotelId,
           module: 'Staff'
-        });
+        }, hotelId, 'LOG_STAFF_PASSWORD_RESET');
       }
       
       toast.success(`Password reset email sent to ${email}`);
@@ -184,10 +192,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       : [...currentRoles, roleId];
       
     try {
-      await setDoc(doc(db, 'users', member.uid), { 
+      const timestamp = serverTimestamp();
+      await safeWrite(doc(db, 'users', member.uid), { 
         roles: newRoles,
-        permissions: newRoles // Keep sync
-      }, { merge: true });
+        permissions: newRoles, // Keep sync
+        updatedAt: timestamp
+      }, hotelId, 'UPDATE_STAFF_ROLES');
       
       // Update local state for immediate feedback
       if (editingPermissions) {
@@ -195,8 +205,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       }
       
       // Log the action (Audit Trail)
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
+        timestamp: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -204,7 +216,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         resource: `Staff: ${member.email}, Roles: ${newRoles.join(', ')}`,
         hotelId: hotelId,
         module: 'Staff'
-      });
+      }, hotelId, 'LOG_UPDATE_STAFF_ROLES');
       toast.success('Permissions updated');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${member.uid}`);

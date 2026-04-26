@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { db, handleFirestoreError, safeAdd, safeWrite, serverTimestamp } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, LedgerEntry, OperationType, Reservation } from '../types';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -125,38 +125,44 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       }
 
       // 1. Update account balance (total amount)
-      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+      await safeWrite(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
         currentBalance: increment(-totalAmount),
-        totalCredits: increment(totalAmount)
-      });
+        totalCredits: increment(totalAmount),
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'SETTLE_CORPORATE_PAYMENT');
 
       // 2. Process each split
+      const actionTimestamp = serverTimestamp();
       for (const split of settleData.splits) {
         if (split.amount > 0) {
           // Add to Ledger
-          await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+          await safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
             hotelId: hotel.id,
             corporateId: currentAccount.id,
             reservationId: 'CORPORATE_SETTLEMENT',
-            timestamp,
             amount: split.amount,
             type: 'credit',
             category: 'payment',
             description: settleData.notes || `Corporate Settlement: ${currentAccount.name} (${split.method})`,
             paymentMethod: split.method,
-            postedBy: profile.uid
-          });
+            postedBy: profile.uid,
+            timestamp: actionTimestamp,
+            createdAt: actionTimestamp,
+            updatedAt: actionTimestamp
+          }, hotel.id, 'POST_CORPORATE_PAYMENT_LEDGER');
 
           // Log to finance
-          await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
             type: 'income',
             amount: split.amount,
             category: 'Corporate Payment',
             description: `Corporate Settlement: ${currentAccount.name}`,
-            timestamp,
             paymentMethod: split.method,
-            referenceId: currentAccount.id
-          });
+            referenceId: currentAccount.id,
+            timestamp: actionTimestamp,
+            createdAt: actionTimestamp,
+            updatedAt: actionTimestamp
+          }, hotel.id, 'POST_CORPORATE_PAYMENT_FINANCE');
         }
       }
 
@@ -180,23 +186,27 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       const timestamp = new Date().toISOString();
 
       // 1. Update account balance
-      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+      const actionTimestamp = serverTimestamp();
+      await safeWrite(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
         currentBalance: increment(chargeData.amount),
-        totalDebits: increment(chargeData.amount)
-      });
+        totalDebits: increment(chargeData.amount),
+        updatedAt: actionTimestamp
+      }, hotel.id, 'POST_CORPORATE_CHARGE');
 
       // 2. Add to Ledger
-      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+      await safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
         hotelId: hotel.id,
         corporateId: currentAccount.id,
         reservationId: 'CORPORATE_CHARGE',
-        timestamp,
         amount: chargeData.amount,
         type: 'debit',
         category: chargeData.category,
         description: chargeData.description,
-        postedBy: profile.uid
-      });
+        postedBy: profile.uid,
+        timestamp: actionTimestamp,
+        createdAt: actionTimestamp,
+        updatedAt: actionTimestamp
+      }, hotel.id, 'POST_CORPORATE_CHARGE_LEDGER');
 
       toast.success('Charge posted successfully');
       setShowPostPostCharge(false);

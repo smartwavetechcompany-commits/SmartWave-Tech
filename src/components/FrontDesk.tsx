@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, getDoc, where, updateDoc, deleteDoc, writeBatch, increment, arrayUnion } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger } from '../services/ledgerService';
@@ -538,8 +538,7 @@ export function FrontDesk() {
 
         let guestId = stay.guestId;
         if (!guestId) {
-          const guestRef = doc(collection(db, 'hotels', hotel.id, 'guests'));
-          batch.set(guestRef, {
+          guestId = await safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
             name: stay.guestName,
             email: stay.guestEmail,
             phone: stay.guestPhone,
@@ -550,12 +549,11 @@ export function FrontDesk() {
             ledgerBalance: 0,
             totalStays: 0,
             totalSpent: 0,
-            createdAt: new Date().toISOString()
-          });
-          guestId = guestRef.id;
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, hotel.id, 'CREATE_GUEST');
         }
 
-        const resRef = doc(collection(db, 'hotels', hotel.id, 'reservations'));
         const resData: any = {
           guestName: stay.guestName,
           guestEmail: stay.guestEmail,
@@ -576,16 +574,16 @@ export function FrontDesk() {
           totalAmount,
           taxAmount: stayTaxTotal,
           taxDetails: stayTaxDetails,
-          paidAmount: 0, // Initialize to 0, settleLedger will update this
+          paidAmount: 0,
           totalDiscount: 0,
           paymentStatus: 'unpaid',
           notes: newBooking.notes,
           corporateReference: newBooking.corporateReference,
-          ledgerEntries: [],
           nightlyRate: pricePerNight,
           autoNightDeduction: newBooking.autoNightDeduction,
           bookedBy: profile.uid,
-          createdAt: new Date().toISOString(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
         };
 
         // Apply discount to the first reservation in the batch
@@ -600,13 +598,10 @@ export function FrontDesk() {
           resData.totalDiscount = discountVal;
         }
 
-        // Note: We don't set paidAmount here anymore because settleLedger 
-        // (called after batch.commit) will handle the increment correctly.
-        // This prevents doubling the paidAmount.
-
-        batch.set(resRef, resData);
+        const resDocRef = await safeAdd(collection(db, 'hotels', hotel.id, 'reservations'), resData, hotel.id, 'CREATE_BOOKING');
+        
         createdStays.push({ 
-          resId: resRef.id, 
+          resId: resDocRef.id, 
           guestId, 
           totalAmount, 
           roomNumber: selectedRoom.roomNumber,
@@ -617,9 +612,8 @@ export function FrontDesk() {
         });
 
         // Activity log for each booking
-        const logRef = doc(collection(db, 'hotels', hotel.id, 'activityLogs'));
-        batch.set(logRef, {
-          timestamp: new Date().toISOString(),
+        await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+          timestamp: serverTimestamp(),
           userId: profile?.uid || 'system',
           userEmail: profile?.email || 'system',
           userRole: profile?.role || 'staff',
@@ -627,7 +621,7 @@ export function FrontDesk() {
           resource: `Booking for ${stay.guestName} (Room ${selectedRoom.roomNumber})`,
           hotelId: hotel.id,
           module: 'Front Desk'
-        });
+        }, hotel.id, 'LOG_BOOKING');
       }
 
       await batch.commit();
@@ -716,12 +710,15 @@ export function FrontDesk() {
       
       // 2. If checked in, mark room as clean
       if (res.status === 'checked_in') {
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+          status: 'clean',
+          updatedAt: serverTimestamp()
+        });
       }
       
       // 3. Log action
       batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
-        timestamp: new Date().toISOString(),
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -749,24 +746,13 @@ export function FrontDesk() {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', editingReservation.id);
       
-      await updateDoc(resRef, {
+      await safeWrite(resRef, {
         checkIn: editForm.checkIn,
         checkOut: editForm.checkOut,
         totalAmount: editForm.totalAmount,
-        notes: editForm.notes
-      });
-
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'EDIT_RESERVATION',
-        resource: `Reservation ${editingReservation.id} updated (Dates: ${editForm.checkIn} to ${editForm.checkOut}, Total: ${editForm.totalAmount})`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      });
+        notes: editForm.notes,
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'EDIT_RESERVATION');
 
       toast.success('Reservation updated successfully');
       setEditingReservation(null);
@@ -793,19 +779,21 @@ export function FrontDesk() {
         if (res && (res.status === 'pending' || res.status === 'confirmed')) {
           batch.update(doc(db, 'hotels', hotel.id, 'reservations', resId), {
             status: 'checked_in',
-            checkInTime: new Date().toISOString()
+            checkInTime: serverTimestamp(),
+            updatedAt: serverTimestamp()
           });
 
           // Update room status
           if (res.roomId) {
             batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
-              status: 'occupied'
+              status: 'occupied',
+              updatedAt: serverTimestamp()
             });
           }
 
-          // Log action
+          // Log action via safeAdd equivalent or direct batch set if safeAdd is not batch-compatible
           batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
-            timestamp: new Date().toISOString(),
+            timestamp: serverTimestamp(),
             userId: profile.uid,
             userEmail: profile.email,
             userRole: profile.role,
@@ -883,10 +871,11 @@ export function FrontDesk() {
 
       const newTotalAmount = res.totalAmount + baseExtraAmount + extraExclusiveTaxTotal;
 
-      await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
+      await safeWrite(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
         checkOut: newCheckOutDate,
-        totalAmount: newTotalAmount
-      });
+        totalAmount: newTotalAmount,
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'POSTPONE_STAY');
 
       // Post the extra charge to the ledger if guest is checked in
       if (res.status === 'checked_in') {
@@ -900,17 +889,17 @@ export function FrontDesk() {
         }, profile?.uid || 'system', res.corporateId);
       }
 
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
         action: 'RESERVATION_POSTPONED',
         resource: `Res #${res.id.slice(-6)} - Extended to ${newCheckOutDate}`,
         hotelId: hotel.id,
         module: 'Front Desk',
         details: `Extended by ${extraNights} nights. Added ${formatCurrency(baseExtraAmount + extraExclusiveTaxTotal, currency, exchangeRate)} to total.`
-      });
+      }, hotel.id, 'LOG_POSTPONE_STAY');
 
       toast.success('Stay postponed successfully');
       setShowPostponeModal(null);
@@ -943,8 +932,8 @@ export function FrontDesk() {
         postedBy: profile.uid
       }, profile.uid);
 
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -953,7 +942,7 @@ export function FrontDesk() {
         hotelId: hotel.id,
         module: 'Front Desk',
         details: `${discountData.type === 'percentage' ? discountData.amount + '%' : 'Fixed'} - ${discountData.reason}`
-      });
+      }, hotel.id, 'LOG_DISCOUNT_APPLIED');
 
       toast.success('Discount applied successfully');
       setShowDiscountModal(null);
@@ -1049,13 +1038,14 @@ export function FrontDesk() {
       }
       
       // Update hotel last audit date
-      await updateDoc(doc(db, 'hotels', hotel.id), {
-        lastAuditDate: format(new Date(), 'yyyy-MM-dd')
-      });
+      await safeWrite(doc(db, 'hotels', hotel.id), {
+        lastAuditDate: format(new Date(), 'yyyy-MM-dd'),
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'UPDATE_LAST_AUDIT_DATE');
 
       // Log audit action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1063,7 +1053,7 @@ export function FrontDesk() {
         resource: `Audit processed ${querySnapshot.docs.length} active stays.`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      });
+      }, hotel.id, 'LOG_NIGHTLY_AUDIT');
 
     } catch (err: any) {
       console.error("Audit error:", err.message || safeStringify(err));
@@ -1081,12 +1071,18 @@ export function FrontDesk() {
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
       // 1. Update reservation status immediately
-      await updateDoc(resRef, { status });
+      await safeWrite(resRef, { 
+        status,
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'UPDATE_RESERVATION_STATUS');
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
         // Mark room as occupied
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
+        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+          status: 'occupied',
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'MARK_ROOM_OCCUPIED');
         
         if (res.guestId) {
           // Post ONLY the first night's charge at check-in
@@ -1167,7 +1163,7 @@ export function FrontDesk() {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           
           for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+            const chargeDate = addDays(startOfDay(checkInDate), existingCharges + i);
             await postToLedger(hotel.id, res.guestId!, res.id, {
               amount: rate,
               type: 'debit',
@@ -1209,39 +1205,48 @@ export function FrontDesk() {
           toast.error(`Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`);
           setLoading(false);
           // Revert status to checked_in
-          await updateDoc(resRef, { status: 'checked_in' });
+          await safeWrite(resRef, { 
+            status: 'checked_in',
+            updatedAt: serverTimestamp()
+          }, hotel.id, 'REVERT_CHECK_IN_STATUS');
           return;
         }
 
         // 3. Update reservation total and checkout details
-        await updateDoc(resRef, { 
+        await safeWrite(resRef, { 
           totalAmount: totalDebits,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
-          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
-        });
+          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid',
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'FINALIZE_CHECK_OUT');
 
         // 4. Mark room as dirty
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
           status: 'dirty',
           housekeepingStatus: 'dirty',
           currentGuestId: null,
-          currentReservationId: null
-        });
+          currentReservationId: null,
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'MARK_ROOM_DIRTY');
 
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          await updateDoc(guestRef, {
+          await safeWrite(guestRef, {
             totalStays: increment(1),
-            stayHistory: arrayUnion({
-              reservationId: res.id,
-              roomNumber: res.roomNumber,
-              checkIn: res.checkIn,
-              checkOut: format(now, 'yyyy-MM-dd'),
-              totalAmount: totalDebits
-            })
-          });
+            updatedAt: serverTimestamp()
+          }, hotel.id, 'UPDATE_GUEST_STATS');
+          
+          // Use subcollection for stayHistory for scalability
+          await safeAdd(collection(db, 'hotels', hotel.id, 'guests', res.guestId, 'stayHistory'), {
+            reservationId: res.id,
+            roomNumber: res.roomNumber,
+            checkIn: res.checkIn,
+            checkOut: format(now, 'yyyy-MM-dd'),
+            totalAmount: totalDebits,
+            timestamp: serverTimestamp()
+          }, hotel.id, 'LOG_GUEST_STAY');
         }
 
         // 6. If corporate, transfer to City Ledger
@@ -1251,12 +1256,15 @@ export function FrontDesk() {
         }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
+        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+          status: 'clean',
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'RELEASE_ROOM');
       }
 
       // 3. Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1264,7 +1272,7 @@ export function FrontDesk() {
         resource: `Booking ${res.id}: ${status}`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      });
+      }, hotel.id, 'LOG_STATUS_UPDATE');
 
       toast.success(`Reservation status updated to ${status.replace('_', ' ')}`);
     } catch (err: any) {
@@ -1295,8 +1303,8 @@ export function FrontDesk() {
       }
 
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1304,7 +1312,7 @@ export function FrontDesk() {
         resource: `Payment for ${res.guestName}: ${formatCurrency(amount, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Finance'
-      });
+      }, hotel.id, 'LOG_PAYMENT_UPDATE');
       toast.success('Payment recorded successfully');
     } catch (err: any) {
       console.error("Payment update error:", err.message || safeStringify(err));
@@ -1354,25 +1362,25 @@ export function FrontDesk() {
       }
 
       // 1. Mark old room as dirty
-      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
         status: 'dirty',
-        updatedAt: new Date().toISOString()
-      });
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'TRANSFER_ROOM_MARK_DIRTY');
       
       // 2. Mark new room as occupied
-      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', newRoomId), { 
+      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', newRoomId), { 
         status: 'occupied',
-        updatedAt: new Date().toISOString()
-      });
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'TRANSFER_ROOM_MARK_OCCUPIED');
 
       // 3. Update reservation
       const newTotalAmount = (res.totalAmount || 0) + priceDifference;
-      await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+      await safeWrite(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
         roomId: newRoomId,
         roomNumber: newRoom.roomNumber,
         totalAmount: newTotalAmount,
-        updatedAt: new Date().toISOString()
-      });
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'TRANSFER_ROOM_UPDATE_RESERVATION');
 
       // 4. Post transfer note to ledger
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
@@ -1385,8 +1393,8 @@ export function FrontDesk() {
       }, profile.uid, res.corporateId);
 
       // 5. Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1394,7 +1402,7 @@ export function FrontDesk() {
         resource: `Transferred ${res.guestName} to Room ${newRoom.roomNumber}. Balance adjusted by ${formatCurrency(priceDifference, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      });
+      }, hotel.id, 'LOG_ROOM_TRANSFER');
 
       toast.success(`Transferred to Room ${newRoom.roomNumber}`);
       setShowTransferModal(null);
@@ -1436,8 +1444,8 @@ export function FrontDesk() {
       }, profile.uid, res.corporateId);
 
       // 2. Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1445,7 +1453,7 @@ export function FrontDesk() {
         resource: `Posted ${chargeDetails.category} charge of ${formatCurrency(finalAmount, currency, exchangeRate)} to ${res.guestName}`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      });
+      }, hotel.id, 'LOG_POST_CHARGE');
 
       setShowChargeModal(null);
       setChargeDetails({ 

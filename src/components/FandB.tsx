@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
 import { postToLedger } from '../services/ledgerService';
@@ -245,32 +245,36 @@ export function FandB() {
       }
       const finalPrice = newOrder.price + totalExclusiveTax - discountAmount;
 
+      const timestamp = serverTimestamp();
       const orderData = {
         ...newOrder,
         itemsList: cart,
         guestName: res?.guestName || guests.find(g => g.id === newOrder.guestId)?.name || 'Walk-in',
         hotelId: hotel.id,
         status: 'pending',
-        timestamp: new Date().toISOString(),
+        timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         taxAmount: totalExclusiveTax,
         taxDetails: taxDetails,
         totalAmount: finalPrice
       };
 
-      const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
+      const orderRef = await safeAdd(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData, hotel.id, 'CREATE_FB_ORDER');
 
       // Update table status if assigned
       if (newOrder.tableId) {
         const table = tables.find(t => t.id === newOrder.tableId);
         if (table) {
-          await updateDoc(doc(db, 'hotels', hotel.id, 'tables', table.id), {
+          await safeWrite(doc(db, 'hotels', hotel.id, 'tables', table.id), {
             status: 'occupied',
             currentOrderId: orderRef.id,
             currentGuestName: orderData.guestName,
             currentGuestId: newOrder.guestId || res?.guestId || '',
             totalSpend: (table.totalSpend || 0) + finalPrice,
-            lastUpdated: new Date().toISOString()
-          });
+            lastUpdated: timestamp,
+            updatedAt: timestamp
+          }, hotel.id, 'OCCUPY_FB_TABLE');
         }
       }
 
@@ -316,36 +320,42 @@ export function FandB() {
             }, profile.uid, res.corporateId);
 
             // Also record the payment in finance
-            await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+            await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
               description: `F & B Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
-              timestamp: new Date().toISOString(),
+              timestamp: serverTimestamp(),
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
               paymentMethod: pay.method,
               referenceId: orderRef.id,
               postedBy: profile.uid
-            });
+            }, hotel.id, 'FB_REVENUE_FINANCE');
           } else if (pay.method !== 'room') {
             // Walk-in or direct payment without room charge
             console.log('Recording walk-in payment in finance...');
-            await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+            await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
               description: `F & B Order ${orderRef.id} (Walk-in) - ${pay.method.toUpperCase()}`,
-              timestamp: new Date().toISOString(),
+              timestamp: serverTimestamp(),
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
               paymentMethod: pay.method,
               referenceId: orderRef.id,
               postedBy: profile.uid
-            });
+            }, hotel.id, 'FB_WALKIN_REVENUE_FINANCE');
           }
         }
       }
 
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -353,7 +363,7 @@ export function FandB() {
         resource: `Room ${newOrder.roomNumber}: ${newOrder.items}`,
         hotelId: hotel.id,
         module: 'F & B'
-      });
+      }, hotel.id, 'LOG_FB_ORDER_CREATED');
 
       toast.success('F & B order created');
       setShowAddModal(false);
@@ -392,11 +402,13 @@ export function FandB() {
     }
 
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId));
+      await safeDelete(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), hotel.id, 'DELETE_FB_ORDER');
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -404,7 +416,7 @@ export function FandB() {
         resource: `Order ${orderId} (Room ${roomNumber})`,
         hotelId: hotel.id,
         module: 'F & B'
-      });
+      }, hotel.id, 'LOG_FB_ORDER_DELETED');
       
       toast.success('Order deleted successfully');
     } catch (err) {
@@ -416,17 +428,20 @@ export function FandB() {
   const updateOrderStatus = async (orderId: string, status: KitchenOrder['status']) => {
     if (!hotel?.id) return;
     
-    const updates: any = { status };
-    if (status === 'preparing') updates.preparedAt = new Date().toISOString();
-    if (status === 'ready') updates.readyAt = new Date().toISOString();
-    if (status === 'delivered') updates.deliveredAt = new Date().toISOString();
+    const timestamp = serverTimestamp();
+    const updates: any = { status, updatedAt: timestamp };
+    if (status === 'preparing') updates.preparedAt = timestamp;
+    if (status === 'ready') updates.readyAt = timestamp;
+    if (status === 'delivered') updates.deliveredAt = timestamp;
 
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), updates);
+      await safeWrite(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), updates, hotel.id, 'UPDATE_FB_ORDER_STATUS');
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -434,7 +449,7 @@ export function FandB() {
         resource: `Order ${orderId}: ${status}`,
         hotelId: hotel.id,
         module: 'F & B'
-      });
+      }, hotel.id, 'LOG_FB_ORDER_STATUS_UPDATE');
       toast.success(`Order status updated to ${status}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
@@ -470,20 +485,25 @@ export function FandB() {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
 
+    const timestamp = serverTimestamp();
     const tableData = {
       tableNumber: editingTable?.tableNumber || '',
       capacity: editingTable?.capacity || 4,
       status: editingTable?.status || 'available',
       totalSpend: editingTable?.totalSpend || 0,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: timestamp,
+      updatedAt: timestamp
     };
 
     try {
       if (editingTable?.id) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'tables', editingTable.id), tableData);
+        await safeWrite(doc(db, 'hotels', hotel.id, 'tables', editingTable.id), tableData, hotel.id, 'UPDATE_FB_TABLE');
         toast.success('Table updated');
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'tables'), tableData);
+        await safeAdd(collection(db, 'hotels', hotel.id, 'tables'), {
+          ...tableData,
+          createdAt: timestamp
+        }, hotel.id, 'CREATE_FB_TABLE');
         toast.success('Table added');
       }
       setShowTableModal(false);
@@ -498,7 +518,7 @@ export function FandB() {
     if (!hotel?.id || !profile || !window.confirm('Are you sure you want to delete this table?')) return;
 
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'tables', tableId));
+      await safeDelete(doc(db, 'hotels', hotel.id, 'tables', tableId), hotel.id, 'DELETE_FB_TABLE');
       toast.success('Table deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/tables/${tableId}`);
@@ -510,13 +530,15 @@ export function FandB() {
     if (!hotel?.id || !profile || !window.confirm('Are you sure you want to clear this table? This will mark it as available.')) return;
 
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'tables', tableId), {
+      await safeWrite(doc(db, 'hotels', hotel.id, 'tables', tableId), {
         status: 'available',
         currentOrderId: '',
         currentGuestName: '',
         currentGuestId: '',
-        currentReservationId: ''
-      });
+        currentReservationId: '',
+        lastUpdated: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'CLEAR_FB_TABLE');
       toast.success('Table cleared');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/tables/${tableId}`);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc, addDoc } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { db, handleFirestoreError, safeAdd, safeDelete } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, deleteLedgerEntry, settleOverpayment } from '../services/ledgerService';
@@ -334,8 +334,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       await deleteLedgerEntry(hotel.id, confirmDelete as any);
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -343,7 +342,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         resource: `${confirmDelete.description} (${formatCurrency(confirmDelete.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Folio'
-      });
+      }, hotel.id, 'LOG_LEDGER_DELETE');
       
       toast.success('Transaction deleted');
       setConfirmDelete(null);

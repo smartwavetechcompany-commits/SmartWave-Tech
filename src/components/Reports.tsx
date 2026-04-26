@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, onSnapshot, query, where, getDocs, orderBy, doc } from 'firebase/firestore';
+import { db, handleFirestoreError, safeAdd, safeDelete } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, Hotel, Room, FinanceRecord, CorporateAccount, Reservation, LedgerEntry, Guest } from '../types';
 import { 
@@ -23,8 +23,6 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
-import { deleteDoc, doc, addDoc } from 'firebase/firestore';
-import { handleFirestoreError } from '../firebase';
 import { OperationType } from '../types';
 import { 
   BarChart, 
@@ -448,11 +446,10 @@ export function Reports() {
     setIsDeleting(true);
     try {
       const { id, collection: colName, label } = recordToDelete;
-      await deleteDoc(doc(db, 'hotels', hotel.id, colName, id));
+      await safeDelete(doc(db, 'hotels', hotel.id, colName, id), hotel.id, 'DELETE_REPORT_RECORD');
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -460,7 +457,7 @@ export function Reports() {
         resource: `${label} deleted from ${activeReport} report`,
         hotelId: hotel.id,
         module: 'Reports'
-      });
+      }, hotel.id, 'LOG_REPORT_RECORD_DELETE');
 
       toast.success('Record deleted successfully');
       

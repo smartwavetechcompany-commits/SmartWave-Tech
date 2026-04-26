@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, where, orderBy, limit, addDoc, updateDoc, doc } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { db, handleFirestoreError, safeAdd, safeWrite, serverTimestamp } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { OperationType } from '../types';
 import { 
@@ -57,7 +57,10 @@ export function Notifications() {
   const markAsRead = async (id: string) => {
     if (!hotel?.id) return;
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'notifications', id), { read: true });
+      await safeWrite(doc(db, 'hotels', hotel.id, 'notifications', id), { 
+        read: true,
+        updatedAt: serverTimestamp()
+      }, hotel.id, 'MARK_NOTIFICATION_READ');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/notifications/${id}`);
     }
@@ -68,7 +71,10 @@ export function Notifications() {
     const unread = notifications.filter(n => !n.read);
     try {
       await Promise.all(unread.map(n => 
-        updateDoc(doc(db, 'hotels', hotel.id, 'notifications', n.id), { read: true })
+        safeWrite(doc(db, 'hotels', hotel.id, 'notifications', n.id), { 
+          read: true,
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'MARK_ALL_NOTIFICATIONS_READ')
       ));
     } catch (err: any) {
       console.error('Error marking all as read:', err.message || safeStringify(err));
@@ -184,11 +190,12 @@ export function Notifications() {
 
 export async function createNotification(hotelId: string, notification: Omit<Notification, 'id' | 'read' | 'timestamp'>) {
   try {
-    await addDoc(collection(db, 'hotels', hotelId, 'notifications'), {
+    await safeAdd(collection(db, 'hotels', hotelId, 'notifications'), {
       ...notification,
       read: false,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: serverTimestamp(),
+      createdAt: serverTimestamp()
+    }, hotelId, 'CREATE_NOTIFICATION');
   } catch (err: any) {
     console.error('Error creating notification:', err.message || safeStringify(err));
   }

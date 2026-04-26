@@ -10,8 +10,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils';
 import { format } from 'date-fns';
-import { db, handleFirestoreError } from '../../firebase';
-import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd } from '../../firebase';
+import { collection, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
 
 interface InventoryAuditingProps {
@@ -44,8 +44,10 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
     if (!hotel?.id || !profile || !activeAudit) return;
     setLoading(true);
     try {
-      const auditData: Omit<InventoryAudit, 'id'> = {
-        timestamp: new Date().toISOString(),
+      const auditData = {
+        timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         userId: profile.uid,
         locationId: activeAudit.locationId,
         status: 'completed',
@@ -56,25 +58,28 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
       };
 
       // Record the audit
-      await addDoc(collection(db, 'hotels', hotel.id, 'inventory_audits'), auditData);
+      await safeAdd(collection(db, 'hotels', hotel.id, 'inventory_audits'), auditData, hotel.id, 'CREATE_INVENTORY_AUDIT');
 
       // Update inventory quantities based on audit
       for (const auditItem of activeAudit.items) {
         if (auditItem.physicalQty !== auditItem.systemQty) {
-          await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', auditItem.itemId), {
+          await safeWrite(doc(db, 'hotels', hotel.id, 'inventory', auditItem.itemId), {
             quantity: auditItem.physicalQty,
-            lastUpdated: new Date().toISOString()
-          });
+            lastUpdated: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, hotel.id, 'INVENTORY_AUDIT_ADJUSTMENT_UPDATE');
 
           // Record adjustment transaction
-          await addDoc(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
+          await safeAdd(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
             type: 'adjustment',
             itemId: auditItem.itemId,
             quantity: Math.abs(auditItem.physicalQty - auditItem.systemQty),
             userId: profile.uid,
-            timestamp: new Date().toISOString(),
+            timestamp: serverTimestamp(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
             reason: `Audit Adjustment: ${auditItem.reason || 'Variance found during physical count'}`
-          });
+          }, hotel.id, 'CREATE_INVENTORY_AUDIT_TRANSACTION');
         }
       }
 

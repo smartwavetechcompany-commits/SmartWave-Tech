@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch, where } from 'firebase/firestore';
+import { doc, collection, getDocs, query, writeBatch, where } from 'firebase/firestore';
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { db, auth } from '../firebase';
+import { db, auth, serverTimestamp, safeWrite, safeAdd } from '../firebase';
 import { Tax, Reservation } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 import { 
@@ -131,9 +131,11 @@ export function Settings() {
     if (!hotel?.id) return;
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
-        taxes: localTaxes
-      }, { merge: true });
+      const timestamp = serverTimestamp();
+      await safeWrite(doc(db, 'hotels', hotel.id), {
+        taxes: localTaxes,
+        updatedAt: timestamp
+      }, hotel.id, 'UPDATE_TAXES');
 
       // After saving taxes, update existing active reservations to reflect new tax policy
       const activeTaxes = localTaxes.filter(t => t.status === 'active' && t.category !== 'restaurant');
@@ -221,8 +223,10 @@ export function Settings() {
       
       // Log action
       if (profile.hotelId) {
-        await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
-          timestamp: new Date().toISOString(),
+        await safeAdd(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+          timestamp: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
           userId: profile.uid,
           userEmail: profile.email,
           userRole: profile.role,
@@ -230,7 +234,7 @@ export function Settings() {
           resource: 'User Security',
           hotelId: profile.hotelId,
           module: 'Security'
-        });
+        }, profile.hotelId, 'LOG_CHANGE_PASSWORD');
       }
 
       toast.success('Password changed successfully!');
@@ -253,14 +257,18 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'users', profile.uid), {
+      const timestamp = serverTimestamp();
+      await safeWrite(doc(db, 'users', profile.uid), {
         displayName: formData.displayName,
-      }, { merge: true });
+        updatedAt: timestamp
+      }, profile.hotelId || 'system', 'UPDATE_PROFILE');
 
       // Log action
       if (profile.hotelId) {
-        await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
-          timestamp: new Date().toISOString(),
+        await safeAdd(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+          timestamp,
+          createdAt: timestamp,
+          updatedAt: timestamp,
           userId: profile.uid,
           userEmail: profile.email,
           userRole: profile.role,
@@ -268,7 +276,7 @@ export function Settings() {
           resource: 'User Profile',
           hotelId: profile.hotelId,
           module: 'Security'
-        });
+        }, profile.hotelId, 'LOG_UPDATE_PROFILE');
       }
 
       toast.success('Profile updated successfully!');
@@ -293,7 +301,8 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
+      const timestamp = serverTimestamp();
+      await safeWrite(doc(db, 'hotels', hotel.id), {
         name: formData.hotelName,
         defaultCurrency: formData.defaultCurrency,
         exchangeRate: formData.exchangeRate,
@@ -301,18 +310,21 @@ export function Settings() {
         defaultCheckOutTime: formData.defaultCheckOutTime,
         overstayChargeTime: formData.overstayChargeTime,
         autoChargeOverstays: formData.autoChargeOverstays,
-      }, { merge: true });
+        updatedAt: timestamp
+      }, hotel.id, 'UPDATE_HOTEL_SETTINGS');
 
       // Log action
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'activityLogs'), {
+        timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
         action: 'UPDATE_HOTEL_SETTINGS',
         resource: `Hotel: ${formData.hotelName} (Currency: ${formData.defaultCurrency}, Rate: ${formData.exchangeRate})`,
         hotelId: hotel.id
-      });
+      }, hotel.id, 'LOG_UPDATE_HOTEL_SETTINGS');
 
       toast.success('Hotel settings updated!');
     } catch (err: any) {
@@ -329,20 +341,24 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
+      const timestamp = serverTimestamp();
+      await safeWrite(doc(db, 'hotels', hotel.id), {
         branding: formData.branding,
-      }, { merge: true });
+        updatedAt: timestamp
+      }, hotel.id, 'UPDATE_HOTEL_BRANDING');
 
       // Log action
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'activityLogs'), {
+        timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
         action: 'UPDATE_HOTEL_BRANDING',
         resource: `Hotel Branding: ${hotel.name}`,
         hotelId: hotel.id
-      });
+      }, hotel.id, 'LOG_UPDATE_HOTEL_BRANDING');
 
       toast.success('Hotel branding updated!');
     } catch (err: any) {
@@ -438,15 +454,17 @@ export function Settings() {
       await Promise.all(roomBatches);
 
       // Log the reset
-      await addDoc(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
+      await safeAdd(collection(db, 'activityLogs'), {
+        timestamp: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
         action: 'SYSTEM_RESET',
         resource: 'All System Data',
         hotelId: hotel.id
-      });
+      }, hotel.id, 'LOG_SYSTEM_RESET');
 
       toast.success('System data cleared successfully!');
       setShowConfirmSystemReset(false);
