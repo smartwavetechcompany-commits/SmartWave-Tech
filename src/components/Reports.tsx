@@ -81,8 +81,8 @@ export function Reports() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const startDate = startOfDay(new Date(dateRange.start));
-        const endDate = endOfDay(new Date(dateRange.end));
+        const startDate = startOfDay(safeToDate(dateRange.start));
+        const endDate = endOfDay(safeToDate(dateRange.end));
 
         // Fetch rooms for occupancy (current)
         const roomsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'rooms'));
@@ -115,7 +115,7 @@ export function Reports() {
         setFinanceRecords(allFinance);
 
         const filteredEntries = allEntries.filter(entry => {
-          const entryDate = new Date(entry.timestamp);
+          const entryDate = safeToDate(entry.timestamp);
           return isWithinInterval(entryDate, { start: startDate, end: endDate });
         });
 
@@ -152,7 +152,7 @@ export function Reports() {
         const dailyRevenue: { [key: string]: number } = {};
         filteredEntries.forEach(entry => {
           if (entry.type === 'debit') {
-            const day = format(new Date(entry.timestamp), 'MMM d');
+            const day = format(safeToDate(entry.timestamp), 'MMM d');
             dailyRevenue[day] = (dailyRevenue[day] || 0) + entry.amount;
           }
         });
@@ -172,12 +172,12 @@ export function Reports() {
 
         // Calculate occupancy trend
         const trend: { name: string; rate: number }[] = [];
-        let curr = new Date(startDate);
+        let curr = new Date(startDate.getTime());
         while (curr <= endDate) {
           const dayStr = format(curr, 'MMM d');
           const activeOnDay = allRes.filter(res => {
-            const checkIn = new Date(res.checkIn);
-            const checkOut = new Date(res.checkOut);
+            const checkIn = safeToDate(res.checkIn);
+            const checkOut = safeToDate(res.checkOut);
             return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut);
           }).length;
           
@@ -229,18 +229,18 @@ export function Reports() {
   };
 
   const getReportData = (type: string): any[] => {
-    const startDate = startOfDay(new Date(dateRange.start));
-    const endDate = endOfDay(new Date(dateRange.end));
+    const startDate = startOfDay(safeToDate(dateRange.start));
+    const endDate = endOfDay(safeToDate(dateRange.end));
 
     switch (type) {
       case 'occupancy': {
         const data: any[] = [];
-        let curr = new Date(startDate);
+        let curr = new Date(startDate.getTime());
         while (curr <= endDate) {
           const dayStr = format(curr, 'yyyy-MM-dd');
           const occupied = reservations.filter(res => {
-            const checkIn = new Date(res.checkIn);
-            const checkOut = new Date(res.checkOut);
+            const checkIn = safeToDate(res.checkIn);
+            const checkOut = safeToDate(res.checkOut);
             return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut) && (res.status === 'checked_in' || res.status === 'checked_out');
           }).length;
           data.push({
@@ -271,7 +271,7 @@ export function Reports() {
       case 'reservations': {
         return reservations
           .filter(res => {
-            const date = new Date(res.createdAt || res.checkIn);
+            const date = safeToDate(res.createdAt || res.checkIn);
             return isWithinInterval(date, { start: startDate, end: endDate });
           })
           .map(res => ({
@@ -289,10 +289,10 @@ export function Reports() {
       }
       case 'daily_sales': {
         const data: any[] = [];
-        let curr = new Date(startDate);
+        let curr = new Date(startDate.getTime());
         while (curr <= endDate) {
           const dayStr = format(curr, 'yyyy-MM-dd');
-          const dayEntries = allEntries.filter(e => format(safeToDate(e.timestamp), 'yyyy-MM-dd') === dayStr);
+          const dayEntries = ledgerEntries.filter(e => format(safeToDate(e.timestamp), 'yyyy-MM-dd') === dayStr);
           const roomRev = dayEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const fbRev = dayEntries.filter(e => e.category === 'F & B' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const otherRev = dayEntries.filter(e => !['room', 'F & B'].includes(e.category) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
@@ -311,7 +311,7 @@ export function Reports() {
         return ledgerEntries
           .filter(e => e.category === 'payment' && e.type === 'credit')
           .map(e => ({
-            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Method: e.description.split('via ')[1] || 'Cash',
             Description: e.description,
@@ -361,7 +361,7 @@ export function Reports() {
         return ledgerEntries
           .filter(e => ['restaurant', 'laundry', 'F & B', 'service'].includes(e.category) && e.type === 'debit')
           .map(e => ({
-            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
             Service: e.category.toUpperCase(),
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
@@ -375,7 +375,7 @@ export function Reports() {
         return ledgerEntries
           .filter(e => e.category === 'laundry' && e.type === 'debit')
           .map(e => ({
-            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
             Description: e.description,

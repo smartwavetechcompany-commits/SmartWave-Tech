@@ -181,7 +181,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               </p>
               <p className="font-bold text-sm">Room {reservation.roomNumber}</p>
               <p className="text-zinc-500 text-xs">
-                {format(new Date(reservation.checkIn), 'MMM dd')} - {format(new Date(reservation.checkOut), 'MMM dd, yyyy')}
+                {format(safeToDate(reservation.checkIn), 'MMM dd')} - {format(safeToDate(reservation.checkOut), 'MMM dd, yyyy')}
               </p>
             </div>
             <div className="text-right">

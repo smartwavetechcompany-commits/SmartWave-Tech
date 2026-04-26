@@ -89,7 +89,7 @@ export function Dashboard() {
  
         const chartData = last7Days.map(date => {
           const dayRevenue = records
-            .filter(r => r.type === 'income' && r.timestamp.startsWith(date))
+            .filter(r => r.type === 'income' && safeToDate(r.timestamp).toISOString().split('T')[0] === date)
             .reduce((acc, curr) => acc + curr.amount, 0);
           return {
             name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
@@ -124,7 +124,7 @@ export function Dashboard() {
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
-        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
+        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && safeToDate(f.timestamp).toISOString().split('T')[0] === new Date().toISOString().split('T')[0]).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
         { label: 'Outstanding', value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
           const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
           if (res) {
@@ -137,7 +137,7 @@ export function Dashboard() {
       ];
 
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-  const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
+  const previousRevenue = finance.filter(f => f.type === 'income' && safeToDate(f.timestamp).toISOString().split('T')[0] !== new Date().toISOString().split('T')[0]).reduce((acc, curr) => acc + curr.amount, 0);
   const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
   const handleExportTransactions = () => {

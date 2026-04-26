@@ -560,11 +560,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check In</p>
-                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(new Date(currentReservation.checkIn), 'MMM d, yyyy') : '-'}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(safeToDate(currentReservation.checkIn), 'MMM d, yyyy') : '-'}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
-                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(new Date(currentReservation.checkOut), 'MMM d, yyyy') : '-'}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(safeToDate(currentReservation.checkOut), 'MMM d, yyyy') : '-'}</p>
                   </div>
                 </div>
               </div>
@@ -667,7 +667,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <option value="">Select Stay</option>
                       {otherReservations.map(r => (
                         <option key={r.id} value={r.id}>
-                          Room {r.roomNumber} ({format(new Date(r.checkIn), 'MMM d')} - {format(new Date(r.checkOut), 'MMM d')})
+                          Room {r.roomNumber} ({format(safeToDate(r.checkIn), 'MMM d')} - {format(safeToDate(r.checkOut), 'MMM d')})
                         </option>
                       ))}
                     </select>

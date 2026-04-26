@@ -39,7 +39,7 @@ import {
   TrendingUp,
   ArrowDownRight
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify, safeToDate } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -1130,7 +1130,7 @@ export function FrontDesk() {
         
         // Refined overstay logic for checkout:
         // Use calendar days as base.
-        const checkInDate = startOfDay(new Date(res.checkIn));
+        const checkInDate = startOfDay(safeToDate(res.checkIn));
         const today = startOfDay(now);
         const nightsElapsed = differenceInDays(today, checkInDate);
         
@@ -1341,7 +1341,7 @@ export function FrontDesk() {
       let priceDifference = 0;
       if (oldRoomType && newRoomType && oldRoomType.id !== newRoomType.id) {
         // Calculate remaining nights
-        const checkOutDate = new Date(res.checkOut);
+        const checkOutDate = safeToDate(res.checkOut);
         const today = new Date();
         const remainingNights = Math.max(1, Math.ceil((checkOutDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
         

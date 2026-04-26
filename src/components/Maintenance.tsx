@@ -21,7 +21,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, exportToCSV } from '../utils';
+import { cn, exportToCSV, safeToDate } from '../utils';
 import { format, isWithinInterval, startOfDay, endOfDay, startOfMonth } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -203,8 +203,8 @@ export function Maintenance() {
     // Date filter (if applicable)
     let matchesDate = true;
     if (reportFilter.startDate) {
-      const targetDate = startOfDay(new Date(reportFilter.startDate));
-      const taskDate = r.dueDate ? startOfDay(new Date(r.dueDate)) : startOfDay(new Date(r.timestamp));
+      const targetDate = startOfDay(safeToDate(reportFilter.startDate));
+      const taskDate = r.dueDate ? startOfDay(safeToDate(r.dueDate)) : startOfDay(safeToDate(r.timestamp));
       matchesDate = taskDate >= targetDate;
     }
 
@@ -218,11 +218,11 @@ export function Maintenance() {
     if (sortBy === 'priority') {
       result = (priorityWeights[a.priority] || 0) - (priorityWeights[b.priority] || 0);
     } else if (sortBy === 'dueDate') {
-      const dateA = a.dueDate ? new Date(a.dueDate).getTime() : 0;
-      const dateB = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+      const dateA = a.dueDate ? safeToDate(a.dueDate).getTime() : 0;
+      const dateB = b.dueDate ? safeToDate(b.dueDate).getTime() : 0;
       result = dateA - dateB;
     } else {
-      result = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      result = safeToDate(a.timestamp).getTime() - safeToDate(b.timestamp).getTime();
     }
     return sortOrder === 'desc' ? -result : result;
   });
@@ -239,23 +239,23 @@ export function Maintenance() {
         const matchesStatus = reportFilter.status === 'all' || req.status === reportFilter.status;
         const matchesPriority = reportFilter.priority === 'all' || req.priority === reportFilter.priority;
         
-        const reqDate = new Date(req.timestamp);
+        const reqDate = safeToDate(req.timestamp);
         const matchesDate = isWithinInterval(reqDate, {
-          start: startOfDay(new Date(reportFilter.startDate)),
-          end: endOfDay(new Date(reportFilter.endDate))
+          start: startOfDay(safeToDate(reportFilter.startDate)),
+          end: endOfDay(safeToDate(reportFilter.endDate))
         });
 
         return matchesStatus && matchesPriority && matchesDate;
       })
       .map(req => ({
-        Timestamp: new Date(req.timestamp).toLocaleString(),
+        Timestamp: safeToDate(req.timestamp).toLocaleString(),
         Room: req.roomNumber,
         Issue: req.issue,
         Priority: req.priority,
         Status: req.status,
         ReportedBy: req.reportedBy,
         Notes: req.notes || '',
-        CompletedAt: req.completedAt ? new Date(req.completedAt).toLocaleString() : 'N/A'
+        CompletedAt: req.completedAt ? safeToDate(req.completedAt).toLocaleString() : 'N/A'
       }));
 
     if (dataToExport.length === 0) {
@@ -451,7 +451,7 @@ export function Maintenance() {
                         <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Room {request.roomNumber}</div>
                         <div className="text-xs text-zinc-400 flex items-center gap-1">
                           <Calendar size={10} />
-                          {format(new Date(request.timestamp), 'MMM d, HH:mm')}
+                          {format(safeToDate(request.timestamp), 'MMM d, HH:mm')}
                         </div>
                       </div>
                     </div>
@@ -483,10 +483,10 @@ export function Maintenance() {
                     {request.dueDate && (
                       <div className={cn(
                         "flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider",
-                        new Date(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
+                        safeToDate(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
                       )}>
                         <Clock size={10} />
-                        Due: {format(new Date(request.dueDate), 'MMM d, yyyy')}
+                        Due: {format(safeToDate(request.dueDate), 'MMM d, yyyy')}
                       </div>
                     )}
 
@@ -537,7 +537,7 @@ export function Maintenance() {
                   {request.status === 'completed' && (
                     <div className="flex-1 flex items-center justify-center gap-2 text-zinc-500 py-2 text-xs font-bold">
                       <CheckCircle2 size={14} />
-                      Completed {request.completedAt && format(new Date(request.completedAt), 'MMM d')}
+                      Completed {request.completedAt && format(safeToDate(request.completedAt), 'MMM d')}
                     </div>
                   )}
                 </div>

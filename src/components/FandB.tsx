@@ -34,7 +34,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify, safeToDate } from '../utils';
 import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 
