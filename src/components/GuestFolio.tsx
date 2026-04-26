@@ -27,7 +27,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, safeStringify } from '../utils';
+import { cn, formatCurrency, safeStringify, safeToDate } from '../utils';
 import { format, addDays, startOfDay, isAfter } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -318,7 +318,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     !e.corporateId
   );
 
-  const displayedEntries = currentReservation.corporateId
+  const displayedEntries = currentReservation?.corporateId
     ? (activeFolio === 'company' ? companyEntries : guestEntries)
     : ledgerEntries; // Show all for regular guest bookings
 
@@ -560,11 +560,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check In</p>
-                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkIn), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(new Date(currentReservation.checkIn), 'MMM d, yyyy') : '-'}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
-                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkOut), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(new Date(currentReservation.checkOut), 'MMM d, yyyy') : '-'}</p>
                   </div>
                 </div>
               </div>
@@ -1137,7 +1137,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     displayedEntries.map((entry) => (
                       <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
+                          {format(safeToDate(entry.timestamp), 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-zinc-50 font-medium">{entry.description}</div>
@@ -1210,7 +1210,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const csvContent = [
                 headers.join(','),
                 ...displayedEntries.map(e => [
-                  format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+                  format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,
                   e.type === 'debit' ? e.amount : 0,
@@ -1220,7 +1220,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
               link.href = URL.createObjectURL(blob);
-              link.download = `folio_${currentReservation.id.slice(-6)}.csv`;
+              link.download = `folio_${currentReservation?.id?.slice(-6) || 'export'}.csv`;
               link.click();
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"

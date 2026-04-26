@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'f
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType } from '../types';
-import { formatCurrency, cn } from '../utils';
+import { formatCurrency, cn, exportToCSV, safeToDate } from '../utils';
 import { 
   Users, 
   BedDouble, 
@@ -31,7 +31,6 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
-import { exportToCSV } from '../utils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -143,7 +142,7 @@ export function Dashboard() {
 
   const handleExportTransactions = () => {
     const dataToExport = finance.slice(0, 100).map(f => ({
-      Date: format(new Date(f.timestamp), 'MMM d, yyyy HH:mm'),
+      Date: format(safeToDate(f.timestamp), 'MMM d, yyyy HH:mm'),
       Type: f.type.toUpperCase(),
       Category: f.category,
       Description: f.description,
@@ -353,7 +352,7 @@ export function Dashboard() {
                         </div>
                         <div>
                           <div className="text-sm font-medium text-zinc-50">{record.description}</div>
-                          <div className="text-xs text-zinc-500">{record.category} • {format(new Date(record.timestamp), 'MMM d, HH:mm')}</div>
+                          <div className="text-xs text-zinc-500">{record.category} • {format(safeToDate(record.timestamp), 'MMM d, HH:mm')}</div>
                         </div>
                       </div>
                       <div className={cn(

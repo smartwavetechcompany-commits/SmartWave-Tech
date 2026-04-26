@@ -21,7 +21,7 @@ import {
   Receipt,
   Trash2
 } from 'lucide-react';
-import { cn, formatCurrency, safeStringify } from '../utils';
+import { cn, formatCurrency, safeStringify, safeToDate } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
 import { OperationType } from '../types';
 import { 
@@ -292,7 +292,7 @@ export function Reports() {
         let curr = new Date(startDate);
         while (curr <= endDate) {
           const dayStr = format(curr, 'yyyy-MM-dd');
-          const dayEntries = ledgerEntries.filter(e => format(new Date(e.timestamp), 'yyyy-MM-dd') === dayStr);
+          const dayEntries = allEntries.filter(e => format(safeToDate(e.timestamp), 'yyyy-MM-dd') === dayStr);
           const roomRev = dayEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const fbRev = dayEntries.filter(e => e.category === 'F & B' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const otherRev = dayEntries.filter(e => !['room', 'F & B'].includes(e.category) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);

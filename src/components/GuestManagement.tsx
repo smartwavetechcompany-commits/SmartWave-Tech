@@ -30,7 +30,7 @@ import {
   ArrowDownRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, safeToDate } from '../utils';
 import Fuse from 'fuse.js';
 import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -753,7 +753,7 @@ export function GuestManagement() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
+                      {guestHistory.sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime()).map(res => (
                         <div key={res.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
                           <div className="flex items-center gap-4">
                             <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-emerald-500">
@@ -762,7 +762,7 @@ export function GuestManagement() {
                             <div>
                               <div className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
                               <div className="text-xs text-zinc-500">
-                                {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                                {format(safeToDate(res.checkIn), 'MMM d, yyyy')} - {format(safeToDate(res.checkOut), 'MMM d, yyyy')}
                               </div>
                               <div className="flex items-center gap-2 mt-1">
                                 <div className={cn(
@@ -815,7 +815,7 @@ export function GuestManagement() {
                           <div>
                             <div className="text-sm font-bold text-zinc-50">{entry.description}</div>
                             <div className="text-[10px] text-zinc-500 flex items-center gap-2">
-                              {format(new Date(entry.timestamp), 'MMM d, yyyy HH:mm')}
+                              {format(safeToDate(entry.timestamp), 'MMM d, yyyy HH:mm')}
                               <span className="px-1.5 py-0.5 bg-zinc-900 rounded text-[8px] font-bold uppercase tracking-wider">
                                 {entry.category}
                               </span>

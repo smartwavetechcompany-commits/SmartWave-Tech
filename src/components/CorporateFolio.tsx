@@ -21,7 +21,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, safeToDate } from '../utils';
 import { format } from 'date-fns';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
@@ -462,10 +462,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                           Room {res.roomNumber}
                         </td>
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(res.checkIn), 'MMM d, yyyy')}
+                          {format(safeToDate(res.checkIn), 'MMM d, yyyy')}
                         </td>
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                          {format(safeToDate(res.checkOut), 'MMM d, yyyy')}
                         </td>
                         <td className={cn(
                           "px-6 py-4 text-right text-sm font-bold",
@@ -516,7 +516,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     ledgerEntries.map((entry) => (
                       <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
+                          {format(safeToDate(entry.timestamp), 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-white font-medium">{entry.description}</div>
@@ -561,7 +561,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               const csvContent = [
                 headers.join(','),
                 ...ledgerEntries.map(e => [
-                  format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+                  format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,
                   e.type === 'debit' ? e.amount : 0,

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Reservation, Hotel, LedgerEntry, CorporateAccount } from '../types';
-import { formatCurrency, cn } from '../utils';
+import { formatCurrency, cn, safeToDate } from '../utils';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
@@ -225,7 +225,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-sm font-bold">{e.description}</p>
-                  <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
+                  <p className="text-[10px] text-zinc-400">{format(safeToDate(e.timestamp), 'MMM dd, HH:mm')}</p>
                 </div>
                 <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>
@@ -245,7 +245,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                 <div key={e.id} className="flex justify-between items-start">
                   <div className="flex-1">
                     <p className="text-sm font-bold">{e.description}</p>
-                    <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
+                    <p className="text-[10px] text-zinc-400">{format(safeToDate(e.timestamp), 'MMM dd, HH:mm')}</p>
                   </div>
                   <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
                 </div>
@@ -277,7 +277,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-emerald-600">{e.description}</p>
-                  <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
+                  <p className="text-[10px] text-zinc-400">{format(safeToDate(e.timestamp), 'MMM dd, HH:mm')}</p>
                 </div>
                 <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>

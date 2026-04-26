@@ -106,6 +106,21 @@ export function convertCurrency(amount: number, to: 'NGN' | 'USD', exchangeRate:
   return amount;
 }
 
+export function safeToDate(timestamp: any): Date {
+  if (!timestamp) return new Date();
+  if (timestamp instanceof Date) return timestamp;
+  if (typeof timestamp.toDate === 'function') return timestamp.toDate();
+  if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+    const d = new Date(timestamp);
+    return isNaN(d.getTime()) ? new Date() : d;
+  }
+  // Handle Firestore FieldValue or simple objects with seconds/nanoseconds
+  if (timestamp.seconds !== undefined) {
+    return new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+  }
+  return new Date();
+}
+
 export function exportToCSV(data: any[], filename: string) {
   if (data.length === 0) return;
   
