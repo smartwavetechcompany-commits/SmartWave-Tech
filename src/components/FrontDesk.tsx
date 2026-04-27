@@ -223,10 +223,10 @@ export function FrontDesk() {
     if (!matchesStaff) return false;
 
     if (dateRange.start) {
-      if (new Date(res.checkIn) < new Date(dateRange.start)) return false;
+      if (safeToDate(res.checkIn) < safeToDate(dateRange.start)) return false;
     }
     if (dateRange.end) {
-      if (new Date(res.checkIn) > new Date(dateRange.end)) return false;
+      if (safeToDate(res.checkIn) > safeToDate(dateRange.end)) return false;
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -251,7 +251,7 @@ export function FrontDesk() {
     if (sortBy === 'guestName') result = a.guestName.localeCompare(b.guestName);
     else if (sortBy === 'roomNumber') result = a.roomNumber.localeCompare(b.roomNumber);
     else if (sortBy === 'status') result = a.status.localeCompare(b.status);
-    else result = new Date(a.checkIn).getTime() - new Date(b.checkIn).getTime();
+    else result = safeToDate(a.checkIn).getTime() - safeToDate(b.checkIn).getTime();
     return sortOrder === 'desc' ? -result : result;
   });
 
@@ -276,7 +276,7 @@ export function FrontDesk() {
     const unsubRes = onSnapshot(resRef, (snap) => {
       const allRes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
       // Client-side sorting
-      const sortedRes = allRes.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
+      const sortedRes = allRes.sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime());
       setReservations(sortedRes);
       setIsFetching(false);
     }, (err) => {
@@ -344,8 +344,8 @@ export function FrontDesk() {
     if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
       const activeRate = activeCorporateRates.find(r => 
         (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
-        new Date(newBooking.checkIn) <= new Date(r.endDate)
+        safeToDate(newBooking.checkIn) >= safeToDate(r.startDate) &&
+        safeToDate(newBooking.checkIn) <= safeToDate(r.endDate)
       );
 
       if (activeRate) {
@@ -397,8 +397,8 @@ export function FrontDesk() {
       if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
         const rate = activeCorporateRates.find(r => 
           (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-          new Date(stay.checkIn) >= new Date(r.startDate) &&
-          new Date(stay.checkIn) <= new Date(r.endDate)
+          safeToDate(stay.checkIn) >= safeToDate(r.startDate) &&
+          safeToDate(stay.checkIn) <= safeToDate(r.endDate)
         );
         if (rate) stayPrice = rate.rate;
       }

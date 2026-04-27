@@ -38,7 +38,7 @@ import {
   Trash2,
   PlusCircle
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify, safeToDate } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -567,7 +567,7 @@ export function Finance() {
     const end = endOfDay(new Date(reportFilter.endDate));
 
     const filterByDate = (items: any[]) => items.filter(item => {
-      const date = new Date(item.timestamp || item.createdAt || item.date);
+      const date = safeToDate(item.timestamp || item.createdAt || item.date);
       return date >= start && date <= end;
     });
 
@@ -594,7 +594,7 @@ export function Finance() {
         data = filterByDate(records)
           .filter(r => reportFilter.category === 'all' || r.category === reportFilter.category)
           .map(r => ({
-            Date: format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: format(safeToDate(r.timestamp), 'yyyy-MM-dd HH:mm'),
             Description: r.description,
             Category: r.category,
             Type: r.type,
@@ -682,16 +682,16 @@ export function Finance() {
     const matchesMethod = methodFilter === 'all' || r.paymentMethod === methodFilter;
     
     let matchesTime = true;
-    if (timeRange === 'today') matchesTime = isToday(new Date(r.timestamp));
+    if (timeRange === 'today') matchesTime = isToday(safeToDate(r.timestamp));
     if (timeRange === 'month') {
       const start = startOfMonth(new Date());
       const end = endOfMonth(new Date());
-      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
+      matchesTime = isWithinInterval(safeToDate(r.timestamp), { start, end });
     }
     if (timeRange === 'custom' && customDateRange.start && customDateRange.end) {
       const start = startOfDay(new Date(customDateRange.start));
       const end = endOfDay(new Date(customDateRange.end));
-      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
+      matchesTime = isWithinInterval(safeToDate(r.timestamp), { start, end });
     }
 
     return matchesSearch && matchesType && matchesCategory && matchesMethod && matchesTime;
@@ -729,7 +729,7 @@ export function Finance() {
       if (activeTab === 'transactions') {
         const record = item as FinanceRecord;
         return {
-          Date: format(new Date(record.timestamp), 'yyyy-MM-dd HH:mm'),
+          Date: format(safeToDate(record.timestamp), 'yyyy-MM-dd HH:mm'),
           Description: record.description,
           Type: record.type,
           Category: record.category,
@@ -995,8 +995,8 @@ export function Finance() {
                     {filteredRecords.map((record) => (
                       <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
                         <td className="px-6 py-4">
-                          <div className="text-sm text-zinc-50">{new Date(record.timestamp).toLocaleDateString()}</div>
-                          <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
+                          <div className="text-sm text-zinc-50">{safeToDate(record.timestamp).toLocaleDateString()}</div>
+                          <div className="text-[10px] text-zinc-500">{safeToDate(record.timestamp).toLocaleTimeString()}</div>
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
                         <td className="px-6 py-4">
@@ -1068,13 +1068,17 @@ export function Finance() {
                               </button>
                               <button
                                 onClick={() => {
-                                  // Find the active reservation for this guest to open folio
+                                  // Find the active reservation or latest reservation for this guest to open folio
                                   const activeRes = reservations.find(r => r.guestId === guest.id && (r.status === 'checked_in' || r.status === 'pending'));
-                                  if (activeRes) {
-                                    setSelectedReservation(activeRes);
+                                  const latestRes = activeRes || reservations
+                                    .filter(r => r.guestId === guest.id)
+                                    .sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime())[0];
+                                  
+                                  if (latestRes) {
+                                    setSelectedReservation(latestRes);
                                     setShowFolio(true);
                                   } else {
-                                    toast.error('No active reservation found for this guest');
+                                    toast.error('No reservation history found for this guest');
                                   }
                                 }}
                                 className="text-xs font-bold text-zinc-400 hover:text-zinc-200"

@@ -248,7 +248,7 @@ export function GuestManagement() {
         const matchesType = reportFilter.type === 'all' || 
           (reportFilter.type === 'corporate' ? !!guest.corporateId : !guest.corporateId);
         
-        const guestDate = guest.createdAt ? new Date(guest.createdAt) : null;
+        const guestDate = guest.createdAt ? safeToDate(guest.createdAt) : null;
         const matchesDate = !guestDate || isWithinInterval(guestDate, {
           start: startOfDay(new Date(reportFilter.startDate)),
           end: endOfDay(new Date(reportFilter.endDate))
@@ -269,7 +269,7 @@ export function GuestManagement() {
         'Balance': g.ledgerBalance || 0,
         'Tags': (g.tags || []).join(', '),
         'Preferences': (g.preferences || []).join(', '),
-        'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
+        'Created At': g.createdAt ? format(safeToDate(g.createdAt), 'yyyy-MM-dd') : 'N/A'
       }));
 
     if (data.length === 0) {
@@ -668,7 +668,7 @@ export function GuestManagement() {
                 </div>
                 <div className="px-6 py-3 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
                   <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                    Last Stay: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yyyy') : 'Never'}
+                    Last Stay: {guest.lastStay ? format(safeToDate(guest.lastStay), 'MMM d, yyyy') : 'Never'}
                   </div>
                   <ChevronRight size={14} className="text-zinc-700" />
                 </div>

@@ -32,7 +32,7 @@ import {
   TrendingUp,
   Package
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeToDate } from '../utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
@@ -1037,7 +1037,7 @@ export function Rooms() {
                     <div key={b.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
                       <div>
                         <div className="font-bold text-zinc-50">Room {rooms.find(r => r.id === b.roomId)?.roomNumber}</div>
-                        <div className="text-xs text-zinc-500">{format(new Date(b.startDate), 'MMM dd')} - {format(new Date(b.endDate), 'MMM dd')}</div>
+                        <div className="text-xs text-zinc-500">{format(safeToDate(b.startDate), 'MMM dd')} - {format(safeToDate(b.endDate), 'MMM dd')}</div>
                         <div className="text-[10px] text-emerald-500 font-bold uppercase mt-1">{b.reason}</div>
                       </div>
                       <button 
