@@ -49,10 +49,7 @@ export const roomService = {
 
   async unblockRoom(hotelId: string, blockingId: string, roomId: string) {
     try {
-      await safeWrite(doc(db, 'hotels', hotelId, 'room_blockings', blockingId), { 
-        endDate: new Date().toISOString(),
-        updatedAt: serverTimestamp()
-      }, hotelId, 'UNBLOCK_ROOM');
+      await safeDelete(doc(db, 'hotels', hotelId, 'room_blockings', blockingId), hotelId, 'UNBLOCK_ROOM');
       
       // Reset room status to dirty so it needs cleaning before booking
       await safeWrite(doc(db, 'hotels', hotelId, 'rooms', roomId), { 
@@ -60,7 +57,7 @@ export const roomService = {
         updatedAt: serverTimestamp()
       }, hotelId, 'RESET_ROOM_STATUS_AFTER_UNBLOCK');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `hotels/${hotelId}/room_blockings/${blockingId}`);
+      handleFirestoreError(error, OperationType.DELETE, `hotels/${hotelId}/room_blockings/${blockingId}`);
       throw error;
     }
   },

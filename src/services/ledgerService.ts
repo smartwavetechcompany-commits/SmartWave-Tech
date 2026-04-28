@@ -135,8 +135,19 @@ export const postToLedger = async (
       .filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId)
       .reduce((acc, e) => acc + e.amount, 0);
 
+    const totalDebitsForRes = entries
+      .filter(e => e.type === 'debit')
+      .reduce((acc, e) => acc + e.amount, 0);
+    
+    const totalCreditsForRes = entries
+      .filter(e => e.type === 'credit')
+      .reduce((acc, e) => acc + e.amount, 0);
+
     if (totalExtrasAdded !== 0) resUpdates.totalAmount = increment(totalExtrasAdded);
     if (guestPaymentsAdded !== 0) resUpdates.paidAmount = increment(guestPaymentsAdded);
+    
+    // Maintain a real-time ledger balance on the reservation document
+    resUpdates.ledgerBalance = increment(totalDebitsForRes - totalCreditsForRes);
 
     // Calculate status
     const freshTotalDebits = (resData.totalAmount || 0) + totalExtrasAdded;
@@ -234,6 +245,9 @@ export const deleteLedgerEntry = async (
       totalAdj = -amount;
       resUpdates.totalAmount = increment(totalAdj);
     }
+
+    // Always adjust the reservation's summary ledgerBalance
+    resUpdates.ledgerBalance = increment(type === 'debit' ? -amount : amount);
 
     // Recalculate payment status
     const projectedTotal = (resData.totalAmount || 0) + totalAdj;

@@ -1200,10 +1200,16 @@ export function FrontDesk() {
 
         // 2. Check if ledger is settled (for individual guests)
         const freshResSnap = await getDoc(resRef);
+        if (!freshResSnap.exists()) throw new Error('Reservation not found');
         const freshResData = freshResSnap.data() as Reservation;
         
-        // Calculate current ledger balance
-        const allEntries = freshResData.ledgerEntries || [];
+        // Fetch ALL ledger entries for this reservation from the collection
+        const fullLedgerSnap = await getDocs(query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id)
+        ));
+        
+        const allEntries = fullLedgerSnap.docs.map(doc => doc.data() as LedgerEntry);
         const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
         const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
         const outstandingBalance = totalDebits - totalCredits;
@@ -2981,9 +2987,9 @@ export function FrontDesk() {
                         <span className="px-1 bg-emerald-500/20 text-emerald-500 rounded-[4px] text-[8px]">Deposit</span>
                       )}
                     </div>
-                    {res.guestId && (
+                    {res.status !== 'pending' && (
                       <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {formatCurrency((res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0), currency, exchangeRate)}
+                        Ledger: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
                       </div>
                     )}
                   </td>
