@@ -530,7 +530,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-white font-medium">{entry.description}</div>
-                          <div className="text-[10px] text-zinc-500">Ref: {entry.id.slice(-8).toUpperCase()}</div>
+                          <div className="text-[10px] text-zinc-500">Ref: {entry.id?.slice(-8).toUpperCase() || 'NEW'}</div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">

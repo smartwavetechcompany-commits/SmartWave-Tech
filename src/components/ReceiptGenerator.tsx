@@ -169,7 +169,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
             <Receipt size={10} /> {type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : (folioType === 'company' ? 'CORPORATE FOLIO STATEMENT' : 'OFFICIAL GUEST RECEIPT')}
           </p>
-          <p className="font-bold text-base">#{type === 'corporate' ? account?.id?.slice(-8).toUpperCase() : reservation?.id?.slice(-8).toUpperCase()}</p>
+          <p className="font-bold text-base">#{(type === 'corporate' ? account?.id : reservation?.id)?.slice(-8).toUpperCase() || 'NEW'}</p>
           <p className="text-zinc-500 text-xs">{format(new Date(), 'MMMM dd, yyyy HH:mm')}</p>
         </div>
         

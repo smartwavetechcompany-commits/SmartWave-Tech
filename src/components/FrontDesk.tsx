@@ -1345,7 +1345,7 @@ export function FrontDesk() {
         module: 'Front Desk'
       }, hotel.id, 'LOG_STATUS_UPDATE');
 
-      toast.success(`Reservation status updated to ${status.replace('_', ' ')}`);
+      toast.success(`Reservation status updated to ${(status || '').replace('_', ' ')}`);
     } catch (err: any) {
       console.error("Update status error:", err.message || safeStringify(err));
       toast.error('Failed to update status');
@@ -1814,7 +1814,7 @@ export function FrontDesk() {
                 </div>
                 <div>
                   <h4 className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">
-                    {problem.type.replace('_', ' ')}
+                    {(problem.type || '').replace('_', ' ')}
                   </h4>
                   <p className="text-sm font-bold text-zinc-50 leading-tight">{problem.message}</p>
                 </div>
@@ -3074,7 +3074,7 @@ export function FrontDesk() {
                         res.status === 'no_show' ? "bg-amber-500/10 text-amber-500" :
                         res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
                       )}>
-                        {res.status.replace('_', ' ')}
+                        {(res.status || '').replace('_', ' ')}
                       </span>
                       {res.status === 'checked_in' && new Date() > new Date(res.checkOut) && (
                         <span className="px-2 py-0.5 bg-red-500/10 text-red-500 text-[8px] font-bold uppercase rounded w-fit animate-pulse">

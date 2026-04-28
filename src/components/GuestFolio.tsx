@@ -431,7 +431,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
             <div>
               <h2 className="text-xl font-bold text-zinc-50">Guest Folio</h2>
-              <p className="text-sm text-zinc-500">Reservation #{currentReservation.id.slice(-6).toUpperCase()}</p>
+              <p className="text-sm text-zinc-500">Reservation #{currentReservation?.id?.slice(-6).toUpperCase() || 'UNKNOWN'}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">

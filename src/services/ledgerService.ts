@@ -127,6 +127,11 @@ export const postToLedger = async (
   if (resSnap.exists()) {
     const resData = resSnap.data() as Reservation;
     
+    // We include tax in the total expectation for extras
+    const taxOnExtras = entries
+      .filter(e => e.type === 'debit' && e.category === 'tax' && e.description.toLowerCase().indexOf('room') === -1 && e.description.toLowerCase().indexOf('nightly') === -1)
+      .reduce((acc, e) => acc + e.amount, 0);
+
     const totalExtrasAdded = entries
       .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax')
       .reduce((acc, e) => acc + e.amount, 0);
@@ -143,14 +148,20 @@ export const postToLedger = async (
       .filter(e => e.type === 'credit')
       .reduce((acc, e) => acc + e.amount, 0);
 
-    if (totalExtrasAdded !== 0) resUpdates.totalAmount = increment(totalExtrasAdded);
+    // Update Reservation stats
+    let totalToIncrement = totalExtrasAdded + taxOnExtras;
+    if (totalToIncrement !== 0) resUpdates.totalAmount = increment(totalToIncrement);
     if (paymentsAdded !== 0) resUpdates.paidAmount = increment(paymentsAdded);
     
     // Maintain a real-time ledger balance on the reservation document
-    resUpdates.ledgerBalance = increment(totalDebitsForRes - totalCreditsForRes);
+    const debitsToAdd = totalDebitsForRes;
+    const creditsToAdd = totalCreditsForRes;
+    resUpdates.ledgerBalance = increment(debitsToAdd - creditsToAdd);
 
     // Calculate status - consider all credits as settling the balance
-    const freshTotalDebits = (resData.totalAmount || 0) + totalExtrasAdded;
+    // We include tax in the total expectation for extras
+    
+    const freshTotalDebits = (resData.totalAmount || 0) + totalToIncrement;
     const freshTotalCredits = (resData.paidAmount || 0) + paymentsAdded;
 
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
@@ -241,9 +252,12 @@ export const deleteLedgerEntry = async (
       resUpdates.paidAmount = increment(paidAdj);
     }
     
-    if (type === 'debit' && category !== 'room' && category !== 'tax') {
-      totalAdj = -amount;
-      resUpdates.totalAmount = increment(totalAdj);
+    if (type === 'debit' && category !== 'room') {
+      const isRoomTax = category === 'tax' && (entry.description?.toLowerCase().indexOf('room') !== -1 || entry.description?.toLowerCase().indexOf('nightly') !== -1);
+      if (!isRoomTax) {
+        totalAdj = -amount;
+        resUpdates.totalAmount = increment(totalAdj);
+      }
     }
 
     // Always adjust the reservation's summary ledgerBalance
