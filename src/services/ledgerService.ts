@@ -131,8 +131,8 @@ export const postToLedger = async (
       .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax')
       .reduce((acc, e) => acc + e.amount, 0);
     
-    const guestPaymentsAdded = entries
-      .filter(e => e.type === 'credit' && !e.corporateId)
+    const paymentsAdded = entries
+      .filter(e => e.type === 'credit')
       .reduce((acc, e) => acc + e.amount, 0);
 
     const totalDebitsForRes = entries
@@ -144,14 +144,14 @@ export const postToLedger = async (
       .reduce((acc, e) => acc + e.amount, 0);
 
     if (totalExtrasAdded !== 0) resUpdates.totalAmount = increment(totalExtrasAdded);
-    if (guestPaymentsAdded !== 0) resUpdates.paidAmount = increment(guestPaymentsAdded);
+    if (paymentsAdded !== 0) resUpdates.paidAmount = increment(paymentsAdded);
     
     // Maintain a real-time ledger balance on the reservation document
     resUpdates.ledgerBalance = increment(totalDebitsForRes - totalCreditsForRes);
 
     // Calculate status - consider all credits as settling the balance
     const freshTotalDebits = (resData.totalAmount || 0) + totalExtrasAdded;
-    const freshTotalCredits = (resData.paidAmount || 0) + guestPaymentsAdded;
+    const freshTotalCredits = (resData.paidAmount || 0) + paymentsAdded;
 
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
     if (freshTotalDebits > 0) {
@@ -236,7 +236,7 @@ export const deleteLedgerEntry = async (
 
     let paidAdj = 0;
     let totalAdj = 0;
-    if (type === 'credit' && category === 'payment' && !corporateId) {
+    if (type === 'credit' && (category === 'payment' || category === 'transfer')) {
       paidAdj = -amount;
       resUpdates.paidAmount = increment(paidAdj);
     }

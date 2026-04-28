@@ -54,6 +54,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [guest, setGuest] = useState<Guest | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showTransferBalanceModal, setShowTransferBalanceModal] = useState(false);
   const [otherReservations, setOtherReservations] = useState<Reservation[]>([]);
   const [transferTargetId, setTransferTargetId] = useState('');
@@ -267,7 +268,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const unsubRes = onSnapshot(doc(db, 'hotels', hotel.id, 'reservations', reservation.id), (snap) => {
       if (snap.exists()) {
         setCurrentReservation({ id: snap.id, ...snap.data() } as Reservation);
+        setError(null);
+      } else {
+        setError('Reservation not found.');
       }
+    }, (err) => {
+      console.error("Reservation snapshot error:", err);
+      // Don't throw here, just set error state
+      setError(`Failed to load reservation: ${err.message}`);
     });
 
     // Listen to ledger entries for this reservation
@@ -301,9 +309,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       setLedgerEntries(combined);
       setLoading(false);
+      setError(null);
     }, (err) => {
       console.error("Ledger loading error:", err);
-      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
+      // Instead of handleFirestoreError (which throws), set local error state
+      setError(`Ledger Access Denied: ${err.message}`);
       setLoading(false);
     });
 
@@ -311,7 +321,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     let unsubGuest = () => {};
     if (reservation.guestId) {
       unsubGuest = onSnapshot(doc(db, 'hotels', hotel.id, 'guests', reservation.guestId), (doc) => {
-        if (doc.exists()) setGuest({ id: doc.id, ...doc.data() } as Guest);
+        if (doc.exists()) {
+          setGuest({ id: doc.id, ...doc.data() } as Guest);
+        }
+      }, (err) => {
+        console.warn("Guest snapshot error:", err);
+        // We don't necessarily want to block the whole folio for guest info
       });
     }
 
@@ -339,8 +354,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     ? (activeFolio === 'company' ? companyEntries : guestEntries)
     : ledgerEntries; // Show all for regular guest bookings
 
-  const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + (e.amount || 0), 0);
+  const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + (e.amount || 0), 0);
   const balance = totalDebits - totalCredits;
 
   const handleDeleteEntry = async () => {
@@ -370,6 +385,36 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setIsDeleting(false);
     }
   };
+
+  if (error) {
+    return (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+        <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl w-full max-w-md text-center space-y-6">
+          <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto">
+            <XCircle size={32} />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-zinc-50">Problem Loading Folio</h3>
+            <p className="text-sm text-zinc-500 mt-2">{error}</p>
+          </div>
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+            >
+              Reload App
+            </button>
+            <button 
+              onClick={onClose}
+              className="w-full py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all"
+            >
+              Go Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -570,7 +615,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       "text-[10px] font-bold uppercase px-2 py-0.5 rounded",
                       currentReservation.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
                     )}>
-                      {currentReservation.status.replace('_', ' ')}
+                      {(currentReservation?.status || '').replace('_', ' ')}
                     </span>
                   </div>
                 </div>
@@ -1158,7 +1203,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-zinc-50 font-medium">{entry.description}</div>
-                          <div className="text-[10px] text-zinc-500">Ref: {entry.id.slice(-8).toUpperCase()}</div>
+                          <div className="text-[10px] text-zinc-500">Ref: {entry.id?.slice(-8).toUpperCase() || 'NEW'}</div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">

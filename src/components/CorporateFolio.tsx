@@ -43,6 +43,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [individualReservations, setIndividualReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showSettlePayment, setShowSettlePayment] = useState(false);
   const [showPostCharge, setShowPostPostCharge] = useState(false);
@@ -82,8 +83,11 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       });
       setLedgerEntries(entries);
       setLoading(false);
+      setError(null);
     }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
+      console.error("Corporate Ledger error:", err);
+      setError(`Ledger Access Denied: ${err.message}`);
+      setLoading(false);
     });
 
     // Listen to individual reservations linked to this corporate account
@@ -577,7 +581,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
               link.href = URL.createObjectURL(blob);
-              link.download = `corporate_folio_${currentAccount.name.replace(/\s+/g, '_')}.csv`;
+              link.download = `corporate_folio_${(currentAccount?.name || 'account').replace(/\s+/g, '_')}.csv`;
               link.click();
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
