@@ -41,7 +41,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify, safeToDate } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
-import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
+import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 
@@ -960,50 +960,81 @@ export function FrontDesk() {
     }
   };
 
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    
+    // Check if nightly audit was run today
+    const checkAudit = async () => {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      if (hotel.lastAuditDate !== todayStr) {
+        // Find if we have checked-in guests past their checkout date
+        const overstays = reservations.filter(r => 
+          r.status === 'checked_in' && 
+          isAfter(startOfDay(new Date()), startOfDay(safeToDate(r.checkOut)))
+        );
+        
+        if (overstays.length > 0) {
+          toast.info(`Found ${overstays.length} overstaying guests. Consider running the Nightly Audit.`, {
+            action: {
+              label: 'Run Audit',
+              onClick: () => runNightlyAudit()
+            }
+          });
+        }
+      }
+    };
+    
+    checkAudit();
+  }, [hotel?.id, hotel?.lastAuditDate, reservations.length, profile?.uid]);
+
   const runNightlyAudit = async () => {
     if (!hotel?.id || !profile) return;
     
     try {
       setIsAuditing(true);
-      const today = startOfDay(new Date());
-      let auditCount = 0;
-      let totalCharged = 0;
-
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
+      
       // 1. Get all checked-in reservations
       const q = query(
         collection(db, 'hotels', hotel.id, 'reservations'),
         where('status', '==', 'checked_in')
       );
       const querySnapshot = await getDocs(q);
+      let auditCount = 0;
+      let totalCharged = 0;
       
       for (const resDoc of querySnapshot.docs) {
         const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
         if (!res.guestId || !res.autoNightDeduction) continue;
 
-        const checkInDateStr = format(safeToDate(res.checkIn), 'yyyy-MM-dd');
-        const checkInDateTime = new Date(`${checkInDateStr}T${res.checkInTime || '14:00'}`);
-        const now = new Date();
+        // Calculate how many nights they SHOULD have been charged by now
+        const checkInDateTime = safeToDate(res.checkIn);
+        const scheduledCheckOut = safeToDate(res.checkOut);
         
-        // Calculate nights based on calendar dates
-        const scheduledNights = res.nights || 1;
-        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
+        // Use midnight of check-in day as base
+        const checkInMidnight = startOfDay(checkInDateTime);
+        const todayMidnight = startOfDay(now);
         
-        let targetCharges = actualCalendarNightsPaid;
-
-        // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
-        if (hotel.autoChargeOverstays !== false) {
+        // Total calendar nights elapsed (Day 1 - Day 0 = 1 night)
+        const calendarNightsElapsed = differenceInDays(todayMidnight, checkInMidnight);
+        
+        // Target charges: at least 1 night if checked in, up to today's night
+        let targetCharges = Math.max(1, calendarNightsElapsed);
+        
+        // Handle Overstay: If today is >= check-out date, check the overstay time
+        if (todayMidnight >= startOfDay(scheduledCheckOut)) {
           const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const checkOutDateStr = format(safeToDate(res.checkOut), 'yyyy-MM-dd');
-          const overstayThreshold = new Date(`${checkOutDateStr}T${overstayTime}`);
+          const [hours, minutes] = overstayTime.split(':').map(Number);
+          const deadline = new Date(todayMidnight);
+          deadline.setHours(hours, minutes || 0, 0, 0);
           
-          if (isAfter(now, overstayThreshold)) {
-            // If they are checking out late on their checkout date (or past it), they get charged for tonight as well
+          if (isAfter(now, deadline)) {
+            // It's past the checkout time on/after the checkout day.
+            // Charge an additional night for the day starting now.
             targetCharges += 1;
           }
         }
-        
-        // Ensure we don't accidentally charge LESS than scheduled nights if they are still in-house
-        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
         
         // Fetch ledger entries for this reservation to see what's already charged
         const ledgerQ = query(
@@ -1020,8 +1051,8 @@ export function FrontDesk() {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           
           for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-            const isOverstay = isAfter(chargeDate, startOfDay(safeToDate(res.checkOut)));
+            const chargeDate = addDays(checkInMidnight, existingCharges + i);
+            const isOverstay = isAfter(chargeDate, startOfDay(scheduledCheckOut)) || isSameDay(chargeDate, startOfDay(scheduledCheckOut));
             
             await postToLedger(hotel.id, res.guestId, res.id, {
               amount: rate,
@@ -1088,45 +1119,47 @@ export function FrontDesk() {
         // Mark room as occupied
         await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
           status: 'occupied',
+          currentGuestId: res.guestId,
+          currentReservationId: res.id,
           updatedAt: serverTimestamp()
         }, hotel.id, 'MARK_ROOM_OCCUPIED');
         
         if (res.guestId) {
-          // Post ONLY the first night's charge at check-in
-          // Subsequent nights will be posted by the Night Audit
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          const checkInDate = safeToDate(res.checkIn);
+          // Check if already charged for the first night to avoid duplicates
+          const ledgerQ = query(
+            collection(db, 'hotels', hotel.id, 'ledger'),
+            where('reservationId', '==', res.id),
+            where('category', '==', 'room'),
+            where('type', '==', 'debit')
+          );
+          const ledgerSnap = await getDocs(ledgerQ);
           
-          await postToLedger(hotel.id, res.guestId, res.id, {
-            amount: rate,
-            type: 'debit',
-            category: 'room',
-            description: `Room Charge: Room ${res.roomNumber} (Night of ${format(checkInDate, 'MMM dd, yyyy')})`,
-            referenceId: res.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId || undefined);
-
-          // Taxes are automatically posted by postToLedger if it's a room charge
-
-          // Fetch fresh data to avoid stale state issues with auto-deduction
-          const [guestSnap, freshResSnap] = await Promise.all([
-            getDoc(doc(db, 'hotels', hotel.id, 'guests', res.guestId)),
-            getDoc(resRef)
-          ]);
-          
-          if (guestSnap.exists() && freshResSnap.exists()) {
-            const guestData = guestSnap.data() as Guest;
-            const freshResData = freshResSnap.data() as Reservation;
+          if (ledgerSnap.empty) {
+            const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+            const checkInDate = safeToDate(res.checkIn);
             
-            // AUTO DEDUCTION: If guest has credit balance (negative ledgerBalance), apply it
-            if (guestData.ledgerBalance < 0) {
-              const creditBalance = Math.abs(guestData.ledgerBalance);
-              const remainingBalance = freshResData.totalAmount - (freshResData.paidAmount || 0) - (freshResData.totalDiscount || 0);
-              const creditToApply = Math.min(creditBalance, Math.max(0, remainingBalance));
-              
-              if (creditToApply > 0) {
-                await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
-                toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
+            await postToLedger(hotel.id, res.guestId, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Initial Room Charge: Room ${res.roomNumber} (Night of ${format(checkInDate, 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId || undefined);
+            
+            // Re-fetch ledger balance after initial charge
+            const guestSnap = await getDoc(doc(db, 'hotels', hotel.id, 'guests', res.guestId));
+            if (guestSnap.exists()) {
+              const guestData = guestSnap.data() as Guest;
+              // If guest has credit balance (negative ledgerBalance), apply it automatically
+              if (guestData.ledgerBalance < 0) {
+                const creditBalance = Math.abs(guestData.ledgerBalance);
+                const creditToApply = Math.min(creditBalance, rate);
+                
+                if (creditToApply > 0) {
+                  await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
+                  toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
+                }
               }
             }
           }
@@ -1308,24 +1341,53 @@ export function FrontDesk() {
     }
   };
 
-  const updatePayment = async (res: Reservation, amount: number) => {
+  const [showPaymentModal, setShowPaymentModal] = useState<Reservation | null>(null);
+  const [paymentInput, setPaymentInput] = useState<{ amount: string, method: 'cash' | 'card' | 'transfer' }>({ 
+    amount: '', 
+    method: 'cash' 
+  });
+
+  const updatePayment = async (res: Reservation, amount: number, method: 'cash' | 'card' | 'transfer' = 'cash') => {
     if (!hotel?.id || !profile) return;
     
     try {
       setLoading(true);
+      
+      let effectiveGuestId = res.guestId;
+      
+      // If guestId is missing (should be rare but can happen with imported or malformed data)
+      if (!effectiveGuestId || effectiveGuestId === '') {
+        const guestRef = await safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
+          name: res.guestName,
+          email: res.guestEmail || '',
+          phone: res.guestPhone || '',
+          idType: res.idType || '',
+          idNumber: res.idNumber || '',
+          address: res.address || '',
+          ledgerBalance: 0,
+          totalStays: 0,
+          totalSpent: 0
+        }, hotel.id, 'CREATE_GUEST_ON_PREPAYMENT');
+        effectiveGuestId = guestRef.id;
+        
+        // Link it back to reservation to maintain integrity
+        await safeWrite(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
+          guestId: effectiveGuestId,
+          updatedAt: serverTimestamp()
+        }, hotel.id, 'LINK_GUEST_ON_PREPAYMENT');
+      }
+
       // Use settleLedger to record payment and update guest balance
       // settleLedger also updates reservation.paidAmount and paymentStatus automatically
-      if (res.guestId) {
-        await settleLedger(
-          hotel.id, 
-          res.guestId, 
-          res.id, 
-          amount, 
-          'cash', 
-          profile.uid,
-          res.corporateId
-        );
-      }
+      await settleLedger(
+        hotel.id, 
+        effectiveGuestId, 
+        res.id, 
+        amount, 
+        method, 
+        profile.uid,
+        res.corporateId
+      );
 
       // Log action
       await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
@@ -1338,6 +1400,7 @@ export function FrontDesk() {
         hotelId: hotel.id,
         module: 'Finance'
       }, hotel.id, 'LOG_PAYMENT_UPDATE');
+
       toast.success('Payment recorded successfully');
     } catch (err: any) {
       console.error("Payment update error:", err.message || safeStringify(err));
@@ -2999,7 +3062,7 @@ export function FrontDesk() {
                         <span className="px-1 bg-emerald-500/20 text-emerald-500 rounded-[4px] text-[8px]">Deposit</span>
                       )}
                     </div>
-                    {res.status !== 'pending' && (
+                    {res.status !== 'cancelled' && res.status !== 'no_show' && (
                       <div className="text-[10px] text-zinc-500 mt-1">
                         Ledger: {(() => {
                           const balance = res.ledgerBalance !== undefined 
@@ -3079,14 +3142,15 @@ export function FrontDesk() {
                         </>
                       )}
                       
-                      {res.status === 'pending' && (
+                      {(res.status === 'pending' || res.status === 'confirmed') && (
                         <>
                           <button 
                             onClick={() => {
-                              const amount = prompt("Enter payment amount:");
-                              if (amount && !isNaN(Number(amount))) {
-                                updatePayment(res, Number(amount));
-                              }
+                              setShowPaymentModal(res);
+                              setPaymentInput({
+                                amount: '',
+                                method: 'cash'
+                              });
                             }}
                             className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
                             title="Take Prepayment / Deposit"
@@ -3556,6 +3620,92 @@ export function FrontDesk() {
                 className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
               >
                 {loading ? 'Applying...' : 'Apply Discount'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-zinc-50">Record Payment</h3>
+                <p className="text-xs text-zinc-500">Post deposit or settlement for {showPaymentModal.guestName}</p>
+              </div>
+              <button 
+                onClick={() => setShowPaymentModal(null)}
+                className="text-zinc-500 hover:text-zinc-50"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                <div className="text-xs text-zinc-500 font-bold uppercase">Folio Balance</div>
+                <div className="text-lg font-bold text-zinc-50">
+                  {formatCurrency((showPaymentModal.ledgerBalance || 0), currency, exchangeRate)}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Amount to Pay</label>
+                  <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">$</div>
+                    <input 
+                      type="number"
+                      autoFocus
+                      placeholder="0.00"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-3 text-zinc-50 focus:border-emerald-500 outline-none font-bold"
+                      value={paymentInput.amount}
+                      onChange={(e) => setPaymentInput({ ...paymentInput, amount: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Payment Method</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['cash', 'card', 'transfer'] as const).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setPaymentInput({ ...paymentInput, method: m })}
+                        className={cn(
+                          "py-2 rounded-lg border text-xs font-bold uppercase transition-all",
+                          paymentInput.method === m 
+                            ? "bg-emerald-500 border-emerald-500 text-black" 
+                            : "bg-zinc-950 border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                        )}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  const amount = Number(paymentInput.amount);
+                  if (amount > 0) {
+                    updatePayment(showPaymentModal, amount, paymentInput.method);
+                    setShowPaymentModal(null);
+                  } else {
+                    toast.error("Please enter a valid amount");
+                  }
+                }}
+                disabled={loading || !paymentInput.amount || Number(paymentInput.amount) <= 0}
+                className="w-full bg-emerald-500 text-black font-bold py-4 rounded-xl hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <RefreshCw className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
+                Post Payment
               </button>
             </div>
           </motion.div>

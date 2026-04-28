@@ -132,7 +132,7 @@ export const postToLedger = async (
       .reduce((acc, e) => acc + e.amount, 0);
     
     const guestPaymentsAdded = entries
-      .filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId)
+      .filter(e => e.type === 'credit' && !e.corporateId)
       .reduce((acc, e) => acc + e.amount, 0);
 
     const totalDebitsForRes = entries
@@ -149,7 +149,7 @@ export const postToLedger = async (
     // Maintain a real-time ledger balance on the reservation document
     resUpdates.ledgerBalance = increment(totalDebitsForRes - totalCreditsForRes);
 
-    // Calculate status
+    // Calculate status - consider all credits as settling the balance
     const freshTotalDebits = (resData.totalAmount || 0) + totalExtrasAdded;
     const freshTotalCredits = (resData.paidAmount || 0) + guestPaymentsAdded;
 
@@ -169,23 +169,23 @@ export const postToLedger = async (
 
   await safeWrite(resRef, resUpdates, hotelId, 'UPDATE_RESERVATION_LEDGER');
 
-  // 7. Finance records for actual payments/refunds
-  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId);
-  if (payments.length > 0) {
+  // 7. Finance records for actual payments/refunds (only cash/bank transactions)
+  const financeEntries = savedEntries
+    .map((docRef, i) => ({ entry: entries[i], id: docRef.id }))
+    .filter(item => (item.entry.category === 'payment' || item.entry.category === 'refund') && !item.entry.corporateId);
+
+  if (financeEntries.length > 0) {
     const financeRef = collection(db, 'hotels', hotelId, 'finance');
-    const financePromises = savedEntries.filter((_, i) => (entries[i].category === 'payment' || entries[i].category === 'refund') && !entries[i].corporateId).map((docRef, i) => {
-      const p = entries.find(ent => ent.description === entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId)[i].description); // Rough match
-      if (!p) return Promise.resolve();
-      
+    const financePromises = financeEntries.map(item => {
       const financeRecord = {
-        type: p.type === 'credit' ? 'income' : 'expense',
-        amount: p.amount,
-        category: p.category === 'payment' ? 'Room Revenue' : 'Other',
-        description: p.description,
+        type: item.entry.type === 'credit' ? 'income' : 'expense',
+        amount: item.entry.amount,
+        category: item.entry.category === 'payment' ? 'Room Revenue' : 'Refunds',
+        description: item.entry.description,
         timestamp: serverTimestamp(),
         paymentMethod,
         guestId,
-        referenceId: docRef.id
+        referenceId: item.id
       };
       return safeAdd(financeRef, financeRecord, hotelId, 'POST_FINANCE_RECORD');
     });

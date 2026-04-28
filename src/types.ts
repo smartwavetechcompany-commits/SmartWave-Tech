@@ -188,6 +188,9 @@ export interface Reservation {
   guestName: string;
   guestEmail?: string;
   guestPhone?: string;
+  idType?: string;
+  idNumber?: string;
+  address?: string;
   guestId?: string; // Link to Guest profile
   corporateId?: string; // Link to CorporateAccount
   roomId: string;
