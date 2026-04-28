@@ -82,7 +82,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     
     try {
       setIsAuditing(true);
-      const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
+      const checkInDateStr = format(safeToDate(currentReservation.checkIn), 'yyyy-MM-dd');
+      const checkInDateTime = new Date(`${checkInDateStr}T${currentReservation.checkInTime || '14:00'}`);
       const now = new Date();
       const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
       let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
@@ -90,7 +91,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
       if (hotel.autoChargeOverstays !== false) {
         const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
+        const checkOutDateStr = format(safeToDate(currentReservation.checkOut), 'yyyy-MM-dd');
+        const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
         if (isAfter(now, checkOutDateTime)) {
           // Calculate how many days past checkout they are
           const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
@@ -107,7 +109,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         
         for (let i = 0; i < nightsToCharge; i++) {
           const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-          const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
+          const isOverstay = isAfter(chargeDate, startOfDay(safeToDate(currentReservation.checkOut)));
           
           await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
             amount: rate,

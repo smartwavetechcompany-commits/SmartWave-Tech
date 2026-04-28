@@ -314,7 +314,7 @@ export function Finance() {
       // Find the most recent reservation for this entity to post the ledger entry
       const lastRes = reservations
         .filter(r => isCorporate ? r.corporateId === entityId : r.guestId === entityId)
-        .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())[0];
+        .sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime())[0];
 
       if (!lastRes) {
         toast.error('No reservation found for this account to post the settlement.');
@@ -563,8 +563,8 @@ export function Finance() {
     let data: any[] = [];
     let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`;
 
-    const start = startOfDay(new Date(reportFilter.startDate));
-    const end = endOfDay(new Date(reportFilter.endDate));
+    const start = startOfDay(safeToDate(reportFilter.startDate));
+    const end = endOfDay(safeToDate(reportFilter.endDate));
 
     const filterByDate = (items: any[]) => items.filter(item => {
       const date = safeToDate(item.timestamp || item.createdAt || item.date);
@@ -689,8 +689,8 @@ export function Finance() {
       matchesTime = isWithinInterval(safeToDate(r.timestamp), { start, end });
     }
     if (timeRange === 'custom' && customDateRange.start && customDateRange.end) {
-      const start = startOfDay(new Date(customDateRange.start));
-      const end = endOfDay(new Date(customDateRange.end));
+      const start = startOfDay(safeToDate(customDateRange.start));
+      const end = endOfDay(safeToDate(customDateRange.end));
       matchesTime = isWithinInterval(safeToDate(r.timestamp), { start, end });
     }
 

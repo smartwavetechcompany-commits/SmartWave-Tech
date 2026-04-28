@@ -48,8 +48,8 @@ export function Rooms() {
     return blockings.some(b => 
       b.roomId === roomId && 
       isWithinInterval(today, { 
-        start: parseISO(b.startDate), 
-        end: parseISO(b.endDate) 
+        start: safeToDate(b.startDate), 
+        end: safeToDate(b.endDate) 
       })
     );
   };
@@ -1784,8 +1784,8 @@ export function Rooms() {
                         res.status !== 'cancelled' &&
                         res.status !== 'no_show' &&
                         isWithinInterval(day, {
-                          start: startOfDay(parseISO(res.checkIn)),
-                          end: subDays(startOfDay(parseISO(res.checkOut)), 1)
+                          start: startOfDay(safeToDate(res.checkIn)),
+                          end: subDays(startOfDay(safeToDate(res.checkOut)), 1)
                         })
                       );
 
@@ -1793,14 +1793,14 @@ export function Rooms() {
                         res.roomId === room.id &&
                         res.status !== 'cancelled' &&
                         res.status !== 'no_show' &&
-                        isSameDay(day, parseISO(res.checkOut))
+                        isSameDay(day, safeToDate(res.checkOut))
                       );
 
                       const checkinToday = reservations.find(res =>
                         res.roomId === room.id &&
                         res.status !== 'cancelled' &&
                         res.status !== 'no_show' &&
-                        isSameDay(day, parseISO(res.checkIn))
+                        isSameDay(day, safeToDate(res.checkIn))
                       );
 
                       return (
@@ -1820,7 +1820,7 @@ export function Rooms() {
                                 "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border text-left transition-all hover:scale-[1.02] active:scale-95 z-10",
                                 reservation.status === 'checked_in' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
                               )}
-                              title={`${reservation.guestName} (${format(parseISO(reservation.checkIn), 'MMM dd')} - ${format(parseISO(reservation.checkOut), 'MMM dd')})`}
+                              title={`${reservation.guestName} (${format(safeToDate(reservation.checkIn), 'MMM dd')} - ${format(safeToDate(reservation.checkOut), 'MMM dd')})`}
                             >
                               <div className="truncate">{reservation.guestName}</div>
                               <div className="opacity-60 flex items-center justify-between">
@@ -1911,11 +1911,11 @@ export function Rooms() {
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
                     <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-In</div>
-                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkIn), 'MMM dd, yyyy')}</div>
+                    <div className="text-xs font-bold text-zinc-50">{format(safeToDate(selectedReservation.checkIn), 'MMM dd, yyyy')}</div>
                   </div>
                   <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
                     <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-Out</div>
-                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkOut), 'MMM dd, yyyy')}</div>
+                    <div className="text-xs font-bold text-zinc-50">{format(safeToDate(selectedReservation.checkOut), 'MMM dd, yyyy')}</div>
                   </div>
                 </div>
 

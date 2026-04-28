@@ -241,7 +241,8 @@ export function FrontDesk() {
     }
     if (activeTab === 'overstay') {
       const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-      const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+      const checkOutDateStr = format(safeToDate(res.checkOut), 'yyyy-MM-dd');
+      const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
       const now = new Date();
       return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
     }
@@ -403,8 +404,10 @@ export function FrontDesk() {
         if (rate) stayPrice = rate.rate;
       }
       
-      const sCheckInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
-      const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+      const sCheckInDateStr = format(safeToDate(stay.checkIn), 'yyyy-MM-dd');
+      const sCheckInDateTime = new Date(`${sCheckInDateStr}T${newBooking.checkInTime || '14:00'}`);
+      const sCheckOutDateStr = format(safeToDate(stay.checkOut), 'yyyy-MM-dd');
+      const sCheckOutDateTime = new Date(`${sCheckOutDateStr}T${newBooking.checkOutTime || '12:00'}`);
       const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
       const sNights = Math.max(1, Math.ceil(sHours / 24));
       const stayTotal = stayPrice * sNights;
@@ -501,14 +504,16 @@ export function FrontDesk() {
         if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
           const activeRate = activeCorporateRates.find(r => 
             (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-            new Date(stay.checkIn) >= new Date(r.startDate) &&
-            new Date(stay.checkIn) <= new Date(r.endDate)
+            safeToDate(stay.checkIn) >= safeToDate(r.startDate) &&
+            safeToDate(stay.checkIn) <= safeToDate(r.endDate)
           );
           if (activeRate) pricePerNight = activeRate.rate;
         }
 
-        const checkInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
-        const checkOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+        const checkInDateStr = format(safeToDate(stay.checkIn), 'yyyy-MM-dd');
+        const checkInDateTime = new Date(`${checkInDateStr}T${newBooking.checkInTime || '14:00'}`);
+        const checkOutDateStr = format(safeToDate(stay.checkOut), 'yyyy-MM-dd');
+        const checkOutDateTime = new Date(`${checkOutDateStr}T${newBooking.checkOutTime || '12:00'}`);
         const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
         const nights = Math.max(1, Math.ceil(hours / 24));
         const baseAmount = pricePerNight * nights;
@@ -842,8 +847,8 @@ export function FrontDesk() {
       setLoading(true);
       const res = showPostponeModal;
       
-      const oldCheckOut = new Date(res.checkOut);
-      const newCheckOut = new Date(newCheckOutDate);
+      const oldCheckOut = safeToDate(res.checkOut);
+      const newCheckOut = safeToDate(newCheckOutDate);
       const extraNights = Math.ceil((newCheckOut.getTime() - oldCheckOut.getTime()) / (1000 * 60 * 60 * 24));
       
       if (extraNights <= 0) {
@@ -975,7 +980,8 @@ export function FrontDesk() {
         const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
         if (!res.guestId || !res.autoNightDeduction) continue;
 
-        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
+        const checkInDateStr = format(safeToDate(res.checkIn), 'yyyy-MM-dd');
+        const checkInDateTime = new Date(`${checkInDateStr}T${res.checkInTime || '14:00'}`);
         const now = new Date();
         
         // Calculate nights based on calendar dates
@@ -1088,7 +1094,7 @@ export function FrontDesk() {
           // Post ONLY the first night's charge at check-in
           // Subsequent nights will be posted by the Night Audit
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          const checkInDate = new Date(res.checkIn);
+          const checkInDate = safeToDate(res.checkIn);
           
           await postToLedger(hotel.id, res.guestId, res.id, {
             amount: rate,
@@ -2003,8 +2009,8 @@ export function FrontDesk() {
                       if (newBooking.corporateId) {
                         const activeRate = activeCorporateRates.find(r => 
                           (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-                          new Date(newBooking.checkIn) >= new Date(r.startDate) &&
-                          new Date(newBooking.checkIn) <= new Date(r.endDate)
+                          safeToDate(newBooking.checkIn) >= safeToDate(r.startDate) &&
+                          safeToDate(newBooking.checkIn) <= safeToDate(r.endDate)
                         );
                         if (activeRate) {
                           displayPrice = activeRate.rate;
@@ -2029,8 +2035,8 @@ export function FrontDesk() {
                     if (newBooking.corporateId) {
                       const activeRate = activeCorporateRates.find(r => 
                         (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-                        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
-                        new Date(newBooking.checkIn) <= new Date(r.endDate)
+                        safeToDate(newBooking.checkIn) >= safeToDate(r.startDate) &&
+                        safeToDate(newBooking.checkIn) <= safeToDate(r.endDate)
                       );
                       if (activeRate) displayPrice = activeRate.rate;
                     }
