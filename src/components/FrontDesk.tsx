@@ -990,13 +990,14 @@ export function FrontDesk() {
         
         let targetCharges = actualCalendarNightsPaid;
 
-        // Overstay logic: If past overstayChargeTime on any date past arrival, add an extra charge if it's the current day
+        // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
         if (hotel.autoChargeOverstays !== false) {
           const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
+          const checkOutDateStr = format(safeToDate(res.checkOut), 'yyyy-MM-dd');
+          const overstayThreshold = new Date(`${checkOutDateStr}T${overstayTime}`);
           
-          if (isAfter(now, todayOverstayThreshold)) {
-            // If they are checking out late TODAY, they get charged for tonight as well
+          if (isAfter(now, overstayThreshold)) {
+            // If they are checking out late on their checkout date (or past it), they get charged for tonight as well
             targetCharges += 1;
           }
         }
@@ -1020,7 +1021,7 @@ export function FrontDesk() {
           
           for (let i = 0; i < nightsToCharge; i++) {
             const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-            const isOverstay = isAfter(chargeDate, startOfDay(new Date(res.checkOut)));
+            const isOverstay = isAfter(chargeDate, startOfDay(safeToDate(res.checkOut)));
             
             await postToLedger(hotel.id, res.guestId, res.id, {
               amount: rate,
@@ -1103,7 +1104,7 @@ export function FrontDesk() {
             description: `Room Charge: Room ${res.roomNumber} (Night of ${format(checkInDate, 'MMM dd, yyyy')})`,
             referenceId: res.id,
             postedBy: profile.uid
-          }, profile.uid, res.corporateId);
+          }, profile.uid, res.corporateId || undefined);
 
           // Taxes are automatically posted by postToLedger if it's a room charge
 

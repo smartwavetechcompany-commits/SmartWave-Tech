@@ -273,12 +273,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     // Listen to ledger entries for this reservation
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('reservationId', '==', reservation.id),
-      orderBy('timestamp', 'desc')
+      where('reservationId', '==', reservation.id)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
+      // Sort client-side to avoid missing index errors
+      entries.sort((a, b) => {
+        const timeA = safeToDate(a.timestamp).getTime();
+        const timeB = safeToDate(b.timestamp).getTime();
+        return timeB - timeA;
+      });
+      
       // If no entries in collection, fallback to currentReservation.ledgerEntries (if available)
       if (entries.length === 0 && reservationRef.current.ledgerEntries && reservationRef.current.ledgerEntries.length > 0) {
         setLedgerEntries(reservationRef.current.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);

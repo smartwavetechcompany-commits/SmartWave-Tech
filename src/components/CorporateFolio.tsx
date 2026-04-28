@@ -69,12 +69,18 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     // Listen to ledger entries for this corporate account
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('corporateId', '==', account.id),
-      orderBy('timestamp', 'desc')
+      where('corporateId', '==', account.id)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      // Sort client-side
+      entries.sort((a, b) => {
+        const timeA = safeToDate(a.timestamp).getTime();
+        const timeB = safeToDate(b.timestamp).getTime();
+        return timeB - timeA;
+      });
+      setLedgerEntries(entries);
       setLoading(false);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
