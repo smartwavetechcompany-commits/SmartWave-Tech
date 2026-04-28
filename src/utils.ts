@@ -83,8 +83,9 @@ export function safeStringify(obj: any): string {
   }
 }
 
-export function formatCurrency(amount: number, currency: 'NGN' | 'USD' = 'NGN', exchangeRate: number = 1500) {
-  const value = currency === 'USD' ? amount / exchangeRate : amount;
+export function formatCurrency(amount: number | undefined | null, currency: 'NGN' | 'USD' = 'NGN', exchangeRate: number = 1500) {
+  const safeAmount = (typeof amount === 'number' && !isNaN(amount)) ? amount : 0;
+  const value = currency === 'USD' ? safeAmount / exchangeRate : safeAmount;
   
   if (currency === 'NGN') {
     return '₦' + new Intl.NumberFormat('en-NG', {

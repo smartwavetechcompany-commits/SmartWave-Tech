@@ -58,26 +58,9 @@ export function FrontDesk() {
   const [isAuditing, setIsAuditing] = useState(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
 
-  // Automatic Nightly Audit Check
-  useEffect(() => {
-    if (!hotel?.id || !profile || loading) return;
-    
-    const checkAndRunAudit = async () => {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      if (hotel.lastAuditDate !== today) {
-        // Only run if user has permission
-        const canRunAudit = profile.role === 'hotelAdmin' || 
-                          (profile.role === 'staff' && (profile.permissions || []).includes('frontDesk'));
-        
-        if (canRunAudit) {
-          console.log("Running automatic nightly audit for", today);
-          await runNightlyAudit();
-        }
-      }
-    };
+  // Problem Detection & Nightly Audit Suggestions
+  const [detectedProblems, setDetectedProblems] = useState<any[]>([]);
 
-    checkAndRunAudit();
-  }, [hotel?.id, hotel?.lastAuditDate, profile?.uid]);
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
@@ -134,6 +117,62 @@ export function FrontDesk() {
   const [isFetching, setIsFetching] = useState(true);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Problem Detection & Nightly Audit Suggestions
+  useEffect(() => {
+    if (!hotel?.id || !profile || isFetching) return;
+    
+    const problems: any[] = [];
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    
+    // 1. Check for missing nightly audit
+    if (hotel.lastAuditDate !== todayStr) {
+      const overstays = reservations.filter(r => 
+        r.status === 'checked_in' && 
+        isAfter(startOfDay(now), startOfDay(safeToDate(r.checkOut)))
+      );
+      
+      const uncharged = reservations.filter(r => {
+        if (r.status !== 'checked_in') return false;
+        // Check if ledger entries for 'room' are less than expected nights so far
+        const nightsSoFar = Math.max(1, differenceInDays(startOfDay(now), startOfDay(safeToDate(r.checkIn))));
+        const roomCharges = (r.ledgerEntries || []).filter(e => e.type === 'debit' && e.category === 'room').length;
+        return roomCharges < nightsSoFar;
+      });
+
+      if (overstays.length > 0 || uncharged.length > 0) {
+        problems.push({
+          type: 'AUDIT_REQUIRED',
+          severity: 'high',
+          message: `Nightly audit pending. ${overstays.length} overstays detected.`,
+          action: () => runNightlyAudit()
+        });
+      }
+    }
+
+    // 2. Check for missing guest IDs
+    const missingGuestIds = reservations.filter(r => !r.guestId);
+    if (missingGuestIds.length > 0) {
+      problems.push({
+        type: 'DATA_INTEGRITY',
+        severity: 'medium',
+        message: `${missingGuestIds.length} reservations missing linked guest profiles.`
+      });
+    }
+
+    // 3. Check for high balances
+    const highBalance = reservations.filter(r => (r.ledgerBalance || 0) > 100000); // 100k balance threshold
+    if (highBalance.length > 0) {
+      problems.push({
+        type: 'FINANCE',
+        severity: 'low',
+        message: `${highBalance.length} guests have high outstanding balances.`
+      });
+    }
+
+    setDetectedProblems(problems);
+  }, [hotel?.id, hotel?.lastAuditDate, reservations.length, profile?.uid, isFetching]);
   const [statusFilter, setStatusFilter] = useState<Reservation['status'] | 'all'>('all');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all');
   const [roomTypeFilter, setRoomTypeFilter] = useState<string>('all');
@@ -960,32 +999,6 @@ export function FrontDesk() {
     }
   };
 
-  useEffect(() => {
-    if (!hotel?.id || !profile) return;
-    
-    // Check if nightly audit was run today
-    const checkAudit = async () => {
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      if (hotel.lastAuditDate !== todayStr) {
-        // Find if we have checked-in guests past their checkout date
-        const overstays = reservations.filter(r => 
-          r.status === 'checked_in' && 
-          isAfter(startOfDay(new Date()), startOfDay(safeToDate(r.checkOut)))
-        );
-        
-        if (overstays.length > 0) {
-          toast.info(`Found ${overstays.length} overstaying guests. Consider running the Nightly Audit.`, {
-            action: {
-              label: 'Run Audit',
-              onClick: () => runNightlyAudit()
-            }
-          });
-        }
-      }
-    };
-    
-    checkAudit();
-  }, [hotel?.id, hotel?.lastAuditDate, reservations.length, profile?.uid]);
 
   const runNightlyAudit = async () => {
     if (!hotel?.id || !profile) return;
@@ -1775,73 +1788,52 @@ export function FrontDesk() {
         </div>
       </div>
 
-      {/* Alerts Section */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {reservations.filter(r => {
-          if (r.status !== 'checked_in') return false;
-          const today = format(new Date(), 'yyyy-MM-dd');
-          return r.checkOut < today;
-        }).length > 0 && (
-          <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-center gap-4">
-            <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center text-red-500">
-              <AlertCircle size={20} />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-red-500 uppercase tracking-wider">Overstay Alert</div>
-              <div className="text-lg font-bold text-zinc-50">
-                {reservations.filter(r => r.status === 'checked_in' && r.checkOut < format(new Date(), 'yyyy-MM-dd')).length} Guests
+      {/* System Health & Action Center - Detects and helps solve problems */}
+      {detectedProblems.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {detectedProblems.map((problem, i) => (
+            <motion.div 
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                "p-5 rounded-2xl flex items-center justify-between border shadow-sm",
+                problem.severity === 'high' ? "bg-red-500/5 border-red-500/10 text-red-500" :
+                problem.severity === 'medium' ? "bg-amber-500/5 border-amber-500/10 text-amber-500" :
+                "bg-blue-500/5 border-blue-500/10 text-blue-500"
+              )}
+            >
+              <div className="flex items-center gap-4">
+                <div className={cn(
+                  "w-12 h-12 rounded-xl flex items-center justify-center shadow-inner",
+                  problem.severity === 'high' ? "bg-red-500/10" :
+                  problem.severity === 'medium' ? "bg-amber-500/10" : "bg-blue-500/10"
+                )}>
+                  {problem.type === 'AUDIT_REQUIRED' ? <Zap size={24} /> :
+                   problem.type === 'DATA_INTEGRITY' ? <AlertCircle size={24} /> : <DollarSign size={24} />}
+                </div>
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">
+                    {problem.type.replace('_', ' ')}
+                  </h4>
+                  <p className="text-sm font-bold text-zinc-50 leading-tight">{problem.message}</p>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-
-        {reservations.filter(r => {
-          if (r.status !== 'checked_in' || !r.guestId) return false;
-          const guest = guests.find(g => g.id === r.guestId);
-          return guest && guest.ledgerBalance > 0;
-        }).length > 0 && (
-          <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-4">
-            <div className="w-10 h-10 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500">
-              <DollarSign size={20} />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-amber-500 uppercase tracking-wider">Outstanding Payments</div>
-              <div className="text-lg font-bold text-zinc-50">
-                {reservations.filter(r => {
-                  if (r.status !== 'checked_in' || !r.guestId) return false;
-                  const guest = guests.find(g => g.id === r.guestId);
-                  return guest && guest.ledgerBalance > 0;
-                }).length} Guests Owing
-              </div>
-            </div>
-          </div>
-        )}
-
-        {reservations.filter(r => {
-          if (r.status !== 'checked_in' || !r.guestId) return false;
-          const guest = guests.find(g => g.id === r.guestId);
-          const rate = r.nightlyRate || (r.totalAmount / (r.nights || 1)) || 0;
-          // Low balance = credit is less than one night's rate
-          return guest && guest.ledgerBalance < 0 && Math.abs(guest.ledgerBalance) <= rate;
-        }).length > 0 && (
-          <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl flex items-center gap-4">
-            <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-500">
-              <Clock size={20} />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-blue-500 uppercase tracking-wider">Low Balance Warning</div>
-              <div className="text-lg font-bold text-zinc-50">
-                {reservations.filter(r => {
-                  if (r.status !== 'checked_in' || !r.guestId) return false;
-                  const guest = guests.find(g => g.id === r.guestId);
-                  const rate = r.nightlyRate || (r.totalAmount / (r.nights || 1)) || 0;
-                  return guest && guest.ledgerBalance < 0 && Math.abs(guest.ledgerBalance) <= rate;
-                }).length} Guests
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+              {problem.action && (
+                <button 
+                  onClick={problem.action}
+                  className={cn(
+                    "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all active:scale-95 shadow-md",
+                    problem.severity === 'high' ? "bg-red-500 text-white hover:bg-red-400" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  )}
+                >
+                  Resolve
+                </button>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      )}
 
       {/* Night Audit Modal */}
       {showNightAuditModal && (
@@ -3631,7 +3623,7 @@ export function FrontDesk() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md shadow-2xl"
           >
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -3640,17 +3632,26 @@ export function FrontDesk() {
               </div>
               <button 
                 onClick={() => setShowPaymentModal(null)}
-                className="text-zinc-500 hover:text-zinc-50"
+                className="text-zinc-500 hover:text-zinc-50 transition-colors"
+                type="button"
               >
                 <XCircle size={24} />
               </button>
             </div>
             
             <div className="space-y-6">
-              <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
-                <div className="text-xs text-zinc-500 font-bold uppercase">Folio Balance</div>
-                <div className="text-lg font-bold text-zinc-50">
-                  {formatCurrency((showPaymentModal.ledgerBalance || 0), currency, exchangeRate)}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                  <div className="text-[10px] text-zinc-500 font-bold uppercase mb-1">Folio Debt</div>
+                  <div className="text-lg font-bold text-red-400">
+                    {formatCurrency((showPaymentModal.ledgerBalance || 0), currency, exchangeRate)}
+                  </div>
+                </div>
+                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
+                  <div className="text-[10px] text-zinc-500 font-bold uppercase mb-1">Stay Balance</div>
+                  <div className="text-lg font-bold text-zinc-50">
+                    {formatCurrency(Math.max(0, (showPaymentModal.totalAmount || 0) - (showPaymentModal.paidAmount || 0)), currency, exchangeRate)}
+                  </div>
                 </div>
               </div>
 
@@ -3658,16 +3659,23 @@ export function FrontDesk() {
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Amount to Pay</label>
                   <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">$</div>
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-bold">{currency === 'USD' ? '$' : '₦'}</div>
                     <input 
                       type="number"
                       autoFocus
                       placeholder="0.00"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-4 py-3 text-zinc-50 focus:border-emerald-500 outline-none font-bold"
-                      value={paymentInput.amount}
-                      onChange={(e) => setPaymentInput({ ...paymentInput, amount: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-4 text-zinc-50 focus:border-emerald-500 outline-none font-bold text-xl"
+                      value={currency === 'USD' ? (Number(paymentInput.amount) / exchangeRate || '') : (paymentInput.amount || '')}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        const newAmount = currency === 'USD' ? (val * exchangeRate) : val;
+                        setPaymentInput({ ...paymentInput, amount: isNaN(newAmount) ? '' : String(newAmount) });
+                      }}
                     />
                   </div>
+                  <p className="text-[10px] text-zinc-600 mt-2">
+                    Enter the amount received from the guest. This will reflect in their folio and update the reservation status.
+                  </p>
                 </div>
 
                 <div>
@@ -3676,11 +3684,12 @@ export function FrontDesk() {
                     {(['cash', 'card', 'transfer'] as const).map(m => (
                       <button
                         key={m}
+                        type="button"
                         onClick={() => setPaymentInput({ ...paymentInput, method: m })}
                         className={cn(
-                          "py-2 rounded-lg border text-xs font-bold uppercase transition-all",
+                          "py-3 rounded-xl border text-xs font-black uppercase transition-all active:scale-95",
                           paymentInput.method === m 
-                            ? "bg-emerald-500 border-emerald-500 text-black" 
+                            ? "bg-emerald-500 border-emerald-500 text-black shadow-lg shadow-emerald-500/20" 
                             : "bg-zinc-950 border-zinc-800 text-zinc-500 hover:border-zinc-700"
                         )}
                       >
@@ -3691,22 +3700,32 @@ export function FrontDesk() {
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  const amount = Number(paymentInput.amount);
-                  if (amount > 0) {
-                    updatePayment(showPaymentModal, amount, paymentInput.method);
-                    setShowPaymentModal(null);
-                  } else {
-                    toast.error("Please enter a valid amount");
-                  }
-                }}
-                disabled={loading || !paymentInput.amount || Number(paymentInput.amount) <= 0}
-                className="w-full bg-emerald-500 text-black font-bold py-4 rounded-xl hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loading ? <RefreshCw className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
-                Post Payment
-              </button>
+              <div className="flex flex-col gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const amount = Number(paymentInput.amount);
+                    if (amount > 0) {
+                      updatePayment(showPaymentModal, amount, paymentInput.method);
+                      setShowPaymentModal(null);
+                    } else {
+                      toast.error("Please enter a valid amount");
+                    }
+                  }}
+                  disabled={loading || !paymentInput.amount || Number(paymentInput.amount) <= 0}
+                  className="w-full bg-emerald-500 text-black font-black py-4 rounded-xl hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10"
+                >
+                  {loading ? <RefreshCw className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
+                  Confirm Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentModal(null)}
+                  className="w-full p-2 text-xs font-bold text-zinc-500 hover:text-zinc-300"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </motion.div>
         </div>
