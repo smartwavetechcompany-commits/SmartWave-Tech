@@ -8,7 +8,7 @@ import {
   increment,
   getDoc
 } from 'firebase/firestore';
-import { db, serverTimestamp, safeWrite, safeAdd, handleFirestoreError } from '../firebase';
+import { db, serverTimestamp, safeWrite, safeAdd, safeDelete, handleFirestoreError } from '../firebase';
 import { 
   Room, 
   RoomType, 

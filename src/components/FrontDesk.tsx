@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, getDoc, where, updateDoc, deleteDoc, writeBatch, increment, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, LedgerEntry } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -1209,7 +1209,19 @@ export function FrontDesk() {
           where('reservationId', '==', res.id)
         ));
         
-        const allEntries = fullLedgerSnap.docs.map(doc => doc.data() as LedgerEntry);
+        const collectionEntries = fullLedgerSnap.docs.map(doc => ({ 
+          ...doc.data(), 
+          id: doc.id 
+        } as LedgerEntry));
+
+        // Merge with array-based entries for backward compatibility
+        const arrayEntries = freshResData.ledgerEntries || [];
+        const seenIds = new Set(collectionEntries.map(e => e.id));
+        const allEntries = [
+          ...collectionEntries,
+          ...arrayEntries.filter(e => !seenIds.has(e.id))
+        ];
+        
         const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
         const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
         const outstandingBalance = totalDebits - totalCredits;
@@ -2989,7 +3001,12 @@ export function FrontDesk() {
                     </div>
                     {res.status !== 'pending' && (
                       <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
+                        Ledger: {(() => {
+                          const balance = res.ledgerBalance !== undefined 
+                            ? res.ledgerBalance 
+                            : (res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+                          return formatCurrency(balance, currency, exchangeRate);
+                        })()}
                       </div>
                     )}
                   </td>

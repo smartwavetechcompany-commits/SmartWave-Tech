@@ -277,20 +277,29 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
-      // Sort client-side to avoid missing index errors
-      entries.sort((a, b) => {
+      const entries = snap.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          ...data, 
+          id: doc.id, 
+          firestoreId: doc.id 
+        } as LedgerEntry & { firestoreId: string };
+      });
+      const arrayEntries = (reservationRef.current.ledgerEntries || []) as (LedgerEntry & { firestoreId: string })[];
+      const seenIds = new Set(entries.map(e => e.id));
+      const combined = [
+        ...entries,
+        ...arrayEntries.filter(e => !seenIds.has(e.id || (e as any).firestoreId))
+      ];
+
+      // Sort client-side to ensure proper order after merge
+      combined.sort((a, b) => {
         const timeA = safeToDate(a.timestamp).getTime();
         const timeB = safeToDate(b.timestamp).getTime();
         return timeB - timeA;
       });
-      
-      // If no entries in collection, fallback to currentReservation.ledgerEntries (if available)
-      if (entries.length === 0 && reservationRef.current.ledgerEntries && reservationRef.current.ledgerEntries.length > 0) {
-        setLedgerEntries(reservationRef.current.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);
-      } else {
-        setLedgerEntries(entries as any);
-      }
+
+      setLedgerEntries(combined);
       setLoading(false);
     }, (err) => {
       console.error("Ledger loading error:", err);
