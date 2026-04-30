@@ -6,6 +6,7 @@ import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, deleteLedgerEntry, settleOverpayment } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { ConfirmModal } from './ConfirmModal';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Receipt, 
   User, 
@@ -26,7 +27,6 @@ import {
   RefreshCw,
   X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter } from 'date-fns';
 import { toast } from 'sonner';
@@ -588,14 +588,26 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </div>
                 
                 <div className="pt-3 border-t border-zinc-800 flex flex-col gap-4">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center group">
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider underline decoration-zinc-800 underline-offset-4">Contractual Stay Booking Total</span>
-              <span className="text-[8px] font-medium text-amber-500/50 uppercase leading-none mt-0.5">Full stay amount set at booking</span>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Projected Stay Total</span>
+              <span className="text-[8px] font-medium text-zinc-600 uppercase leading-none mt-0.5">Total estimated at time of booking</span>
             </div>
             <div className="flex flex-col items-end">
-              <span className="text-sm font-bold text-zinc-400 line-through decoration-zinc-700">
+              <span className="text-sm font-bold text-zinc-400">
                 {formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Actually Accrued (Debits)</span>
+              <span className="text-[8px] font-medium text-zinc-600 uppercase leading-none mt-0.5">Total amount posted to ledger</span>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-lg font-bold text-zinc-200">
+                {formatCurrency(totalDebits, currency, exchangeRate)}
               </span>
             </div>
           </div>
@@ -607,28 +619,33 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
             <div className="flex flex-col items-end">
               <span className="text-lg font-bold text-emerald-500">
-                {formatCurrency(currentReservation.paidAmount || 0, currency, exchangeRate)}
+                {formatCurrency(totalCredits, currency, exchangeRate)}
               </span>
             </div>
           </div>
 
-          <div className="flex justify-between items-center border-t border-zinc-800 pt-3">
+          <div className="flex justify-between items-center border-t border-zinc-800 pt-4">
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Final Bill (Outstanding Balance)</span>
-              <span className="text-[8px] font-medium text-red-500/50 uppercase leading-none mt-0.5">Actual debt currently in ledger</span>
+              <span className="text-[11px] font-black text-zinc-400 uppercase tracking-widest">Balance Outstanding</span>
+              <span className="text-[8px] font-medium text-red-500/50 uppercase leading-none mt-1">Real-time ledger balance</span>
             </div>
             <div className="flex flex-col items-end">
-              <span className={cn(
-                "text-2xl font-black",
-                balance > 0 ? "text-red-500" : "text-emerald-500"
-              )}>
+              <motion.span 
+                key={balance}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={cn(
+                  "text-3xl font-black",
+                  balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-500"
+                )}
+              >
                 {formatCurrency(Math.abs(balance), currency, exchangeRate)}
-              </span>
+              </motion.span>
               <span className={cn(
                 "text-[10px] font-bold uppercase",
-                balance > 0 ? "text-red-500" : "text-emerald-500"
+                balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-500"
               )}>
-                {balance > 0 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < 0 ? "Credit Balance" : "Account Settled"}
+                {balance > 0.01 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < -0.01 ? "Credit Balance (Overpaid)" : "Account Fully Settled"}
               </span>
             </div>
           </div>

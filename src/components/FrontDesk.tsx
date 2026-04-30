@@ -1167,7 +1167,7 @@ export function FrontDesk() {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           
           for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+            const chargeDate = addDays(startOfDay(checkInDate), existingCharges + i);
             await postToLedger(hotel.id, res.guestId!, res.id, {
               amount: rate,
               type: 'debit',

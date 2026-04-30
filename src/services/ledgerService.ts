@@ -37,12 +37,25 @@ export const postToLedger = async (
         const status = (t.status || '').toLowerCase().trim();
         const category = (t.category || '').toLowerCase().trim();
         const entryCategory = (entry.category || '').toLowerCase().trim();
-        return status === 'active' && 
-          (category === 'all' || 
-           category === entryCategory || 
-           (entryCategory === 'room' && category === 'service') ||
-           ((entryCategory === 'f & b' || entryCategory === 'restaurant') && (category === 'f & b' || category === 'restaurant'))
-          );
+        
+        if (status !== 'active') return false;
+        
+        // Match logic:
+        // 1. "all" always matches
+        // 2. Explicit category match
+        // 3. For room charges, any tax that isn't specific to F&B/Restaurant
+        // 4. For F&B/Restaurant, any tax that isn't specific to Room
+        if (category === 'all' || category === entryCategory) return true;
+        
+        if (entryCategory === 'room') {
+          return category !== 'f & b' && category !== 'restaurant' && category !== 'food';
+        }
+        
+        if (entryCategory === 'restaurant' || entryCategory === 'f & b' || entryCategory === 'food') {
+          return category !== 'room';
+        }
+
+        return false;
       });
       
       const baseAmount = entry.amount;
