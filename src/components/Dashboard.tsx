@@ -31,6 +31,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
+import { ErrorBoundary } from './ErrorBoundary';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -59,21 +60,32 @@ export function Dashboard() {
         setAllHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
         setLoading(false);
       }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'hotels');
+        console.error("Dashboard hotels fetch error:", err);
         if (err.code === 'permission-denied') setHasPermissionError(true);
+        setLoading(false);
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'hotels');
+        } catch (e) { /* logged */ }
       });
     } else if (hotel?.id) {
       unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
         setLoading(false);
       }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+        console.error("Dashboard rooms fetch error:", err);
+        setLoading(false);
+        try {
+          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+        } catch (e) { /* logged */ }
       });
  
       unsubRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), limit(5)), (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+        console.error("Dashboard reservations fetch error:", err);
+        try {
+          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+        } catch (e) { /* logged */ }
       });
  
       unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
@@ -98,7 +110,10 @@ export function Dashboard() {
         });
         setRevenueChartData(chartData);
       }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
+        console.error("Dashboard finance fetch error:", err);
+        try {
+          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
+        } catch (e) { /* logged */ }
       });
     }
 
@@ -377,7 +392,9 @@ export function Dashboard() {
               </div>
             </div>
             <div className="max-h-[400px] overflow-y-auto">
-              <AuditLogs />
+              <ErrorBoundary>
+                <AuditLogs />
+              </ErrorBoundary>
             </div>
           </div>
         </div>

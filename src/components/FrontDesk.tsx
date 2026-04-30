@@ -342,6 +342,9 @@ export function FrontDesk() {
 
     const unsubStaff = onSnapshot(collection(db, 'hotels', hotel.id, 'staff'), (snap) => {
       setStaffMembers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.error("Staff fetch error:", err);
+      // Optional: handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/staff`);
     });
 
     return () => {

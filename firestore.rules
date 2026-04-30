@@ -22,8 +22,13 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isAuthenticated() && (
         request.auth.uid == "ighGTXpOuehSqh1pTwSXLPz0Akk1" ||
-        (request.auth.token.email != null && request.auth.token.email.toLower() == "smartwavetechcompany@gmail.com")
+        (request.auth.token.email != null && request.auth.token.email.lower() == "smartwavetechcompany@gmail.com")
       );
+    }
+
+    // Master rule for superAdmin
+    match /{document=**} {
+      allow read, write: if isSuperAdmin();
     }
 
     function isAdmin() {
@@ -113,7 +118,7 @@ service cloud.firestore {
                     resource != null && resource.data.hotelId == getHotelId();
       
       allow create: if isAuthenticated() && (
-                      (request.auth.uid == userId && request.resource.data.role == "staff") ||
+                      (request.auth.uid == userId && (request.resource.data.role == "staff" || request.resource.data.role == "hotelAdmin")) ||
                       (isAdmin() && request.resource.data.hotelId == getHotelId() && request.resource.data.role == "staff")
                     );
 
@@ -187,8 +192,8 @@ service cloud.firestore {
     }
 
     // Collection Group rule for activityLogs
-    match /{path=**}/activityLogs/{logId} {
-      allow read, list: if isSuperAdmin();
+    match /{anyPath=**}/activityLogs/{logId} {
+      allow read: if isSuperAdmin();
     }
 
     match /auditLogs/{logId} {

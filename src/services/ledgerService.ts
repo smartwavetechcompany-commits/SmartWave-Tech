@@ -253,7 +253,7 @@ export const deleteLedgerEntry = async (
     }
     
     if (type === 'debit' && category !== 'room') {
-      const isRoomTax = category === 'tax' && (entry.description?.toLowerCase().indexOf('room') !== -1 || entry.description?.toLowerCase().indexOf('nightly') !== -1);
+      const isRoomTax = category === 'tax' && (ledgerEntry.description?.toLowerCase().indexOf('room') !== -1 || ledgerEntry.description?.toLowerCase().indexOf('nightly') !== -1);
       if (!isRoomTax) {
         totalAdj = -amount;
         resUpdates.totalAmount = increment(totalAdj);
