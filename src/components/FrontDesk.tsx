@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, addDoc, query, orderBy, doc, setDoc, getDocs, getDoc, where, updateDoc, deleteDoc, writeBatch, increment, arrayUnion } from 'firebase/firestore';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, LedgerEntry } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -39,7 +39,7 @@ import {
   TrendingUp,
   ArrowDownRight
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV, safeStringify, safeToDate } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -223,10 +223,10 @@ export function FrontDesk() {
     if (!matchesStaff) return false;
 
     if (dateRange.start) {
-      if (safeToDate(res.checkIn) < safeToDate(dateRange.start)) return false;
+      if (new Date(res.checkIn) < new Date(dateRange.start)) return false;
     }
     if (dateRange.end) {
-      if (safeToDate(res.checkIn) > safeToDate(dateRange.end)) return false;
+      if (new Date(res.checkIn) > new Date(dateRange.end)) return false;
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -241,8 +241,7 @@ export function FrontDesk() {
     }
     if (activeTab === 'overstay') {
       const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-      const checkOutDateStr = format(safeToDate(res.checkOut), 'yyyy-MM-dd');
-      const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
+      const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
       const now = new Date();
       return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
     }
@@ -252,7 +251,7 @@ export function FrontDesk() {
     if (sortBy === 'guestName') result = a.guestName.localeCompare(b.guestName);
     else if (sortBy === 'roomNumber') result = a.roomNumber.localeCompare(b.roomNumber);
     else if (sortBy === 'status') result = a.status.localeCompare(b.status);
-    else result = safeToDate(a.checkIn).getTime() - safeToDate(b.checkIn).getTime();
+    else result = new Date(a.checkIn).getTime() - new Date(b.checkIn).getTime();
     return sortOrder === 'desc' ? -result : result;
   });
 
@@ -277,7 +276,7 @@ export function FrontDesk() {
     const unsubRes = onSnapshot(resRef, (snap) => {
       const allRes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
       // Client-side sorting
-      const sortedRes = allRes.sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime());
+      const sortedRes = allRes.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
       setReservations(sortedRes);
       setIsFetching(false);
     }, (err) => {
@@ -345,8 +344,8 @@ export function FrontDesk() {
     if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
       const activeRate = activeCorporateRates.find(r => 
         (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-        safeToDate(newBooking.checkIn) >= safeToDate(r.startDate) &&
-        safeToDate(newBooking.checkIn) <= safeToDate(r.endDate)
+        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+        new Date(newBooking.checkIn) <= new Date(r.endDate)
       );
 
       if (activeRate) {
@@ -398,16 +397,14 @@ export function FrontDesk() {
       if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
         const rate = activeCorporateRates.find(r => 
           (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-          safeToDate(stay.checkIn) >= safeToDate(r.startDate) &&
-          safeToDate(stay.checkIn) <= safeToDate(r.endDate)
+          new Date(stay.checkIn) >= new Date(r.startDate) &&
+          new Date(stay.checkIn) <= new Date(r.endDate)
         );
         if (rate) stayPrice = rate.rate;
       }
       
-      const sCheckInDateStr = format(safeToDate(stay.checkIn), 'yyyy-MM-dd');
-      const sCheckInDateTime = new Date(`${sCheckInDateStr}T${newBooking.checkInTime || '14:00'}`);
-      const sCheckOutDateStr = format(safeToDate(stay.checkOut), 'yyyy-MM-dd');
-      const sCheckOutDateTime = new Date(`${sCheckOutDateStr}T${newBooking.checkOutTime || '12:00'}`);
+      const sCheckInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
+      const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
       const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
       const sNights = Math.max(1, Math.ceil(sHours / 24));
       const stayTotal = stayPrice * sNights;
@@ -504,16 +501,14 @@ export function FrontDesk() {
         if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
           const activeRate = activeCorporateRates.find(r => 
             (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-            safeToDate(stay.checkIn) >= safeToDate(r.startDate) &&
-            safeToDate(stay.checkIn) <= safeToDate(r.endDate)
+            new Date(stay.checkIn) >= new Date(r.startDate) &&
+            new Date(stay.checkIn) <= new Date(r.endDate)
           );
           if (activeRate) pricePerNight = activeRate.rate;
         }
 
-        const checkInDateStr = format(safeToDate(stay.checkIn), 'yyyy-MM-dd');
-        const checkInDateTime = new Date(`${checkInDateStr}T${newBooking.checkInTime || '14:00'}`);
-        const checkOutDateStr = format(safeToDate(stay.checkOut), 'yyyy-MM-dd');
-        const checkOutDateTime = new Date(`${checkOutDateStr}T${newBooking.checkOutTime || '12:00'}`);
+        const checkInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
+        const checkOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
         const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
         const nights = Math.max(1, Math.ceil(hours / 24));
         const baseAmount = pricePerNight * nights;
@@ -543,7 +538,8 @@ export function FrontDesk() {
 
         let guestId = stay.guestId;
         if (!guestId) {
-          guestId = await safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
+          const guestRef = doc(collection(db, 'hotels', hotel.id, 'guests'));
+          batch.set(guestRef, {
             name: stay.guestName,
             email: stay.guestEmail,
             phone: stay.guestPhone,
@@ -554,11 +550,12 @@ export function FrontDesk() {
             ledgerBalance: 0,
             totalStays: 0,
             totalSpent: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, hotel.id, 'CREATE_GUEST');
+            createdAt: new Date().toISOString()
+          });
+          guestId = guestRef.id;
         }
 
+        const resRef = doc(collection(db, 'hotels', hotel.id, 'reservations'));
         const resData: any = {
           guestName: stay.guestName,
           guestEmail: stay.guestEmail,
@@ -579,16 +576,16 @@ export function FrontDesk() {
           totalAmount,
           taxAmount: stayTaxTotal,
           taxDetails: stayTaxDetails,
-          paidAmount: 0,
+          paidAmount: 0, // Initialize to 0, settleLedger will update this
           totalDiscount: 0,
           paymentStatus: 'unpaid',
           notes: newBooking.notes,
           corporateReference: newBooking.corporateReference,
+          ledgerEntries: [],
           nightlyRate: pricePerNight,
           autoNightDeduction: newBooking.autoNightDeduction,
           bookedBy: profile.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          createdAt: new Date().toISOString(),
         };
 
         // Apply discount to the first reservation in the batch
@@ -603,10 +600,13 @@ export function FrontDesk() {
           resData.totalDiscount = discountVal;
         }
 
-        const resDocRef = await safeAdd(collection(db, 'hotels', hotel.id, 'reservations'), resData, hotel.id, 'CREATE_BOOKING');
-        
+        // Note: We don't set paidAmount here anymore because settleLedger 
+        // (called after batch.commit) will handle the increment correctly.
+        // This prevents doubling the paidAmount.
+
+        batch.set(resRef, resData);
         createdStays.push({ 
-          resId: resDocRef.id, 
+          resId: resRef.id, 
           guestId, 
           totalAmount, 
           roomNumber: selectedRoom.roomNumber,
@@ -617,8 +617,9 @@ export function FrontDesk() {
         });
 
         // Activity log for each booking
-        await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-          timestamp: serverTimestamp(),
+        const logRef = doc(collection(db, 'hotels', hotel.id, 'activityLogs'));
+        batch.set(logRef, {
+          timestamp: new Date().toISOString(),
           userId: profile?.uid || 'system',
           userEmail: profile?.email || 'system',
           userRole: profile?.role || 'staff',
@@ -626,7 +627,7 @@ export function FrontDesk() {
           resource: `Booking for ${stay.guestName} (Room ${selectedRoom.roomNumber})`,
           hotelId: hotel.id,
           module: 'Front Desk'
-        }, hotel.id, 'LOG_BOOKING');
+        });
       }
 
       await batch.commit();
@@ -715,15 +716,12 @@ export function FrontDesk() {
       
       // 2. If checked in, mark room as clean
       if (res.status === 'checked_in') {
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
-          status: 'clean',
-          updatedAt: serverTimestamp()
-        });
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
       }
       
       // 3. Log action
       batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
-        timestamp: serverTimestamp(),
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -751,13 +749,24 @@ export function FrontDesk() {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', editingReservation.id);
       
-      await safeWrite(resRef, {
+      await updateDoc(resRef, {
         checkIn: editForm.checkIn,
         checkOut: editForm.checkOut,
         totalAmount: editForm.totalAmount,
-        notes: editForm.notes,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'EDIT_RESERVATION');
+        notes: editForm.notes
+      });
+
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'EDIT_RESERVATION',
+        resource: `Reservation ${editingReservation.id} updated (Dates: ${editForm.checkIn} to ${editForm.checkOut}, Total: ${editForm.totalAmount})`,
+        hotelId: hotel.id,
+        module: 'Front Desk'
+      });
 
       toast.success('Reservation updated successfully');
       setEditingReservation(null);
@@ -784,21 +793,19 @@ export function FrontDesk() {
         if (res && (res.status === 'pending' || res.status === 'confirmed')) {
           batch.update(doc(db, 'hotels', hotel.id, 'reservations', resId), {
             status: 'checked_in',
-            checkInTime: serverTimestamp(),
-            updatedAt: serverTimestamp()
+            checkInTime: new Date().toISOString()
           });
 
           // Update room status
           if (res.roomId) {
             batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
-              status: 'occupied',
-              updatedAt: serverTimestamp()
+              status: 'occupied'
             });
           }
 
-          // Log action via safeAdd equivalent or direct batch set if safeAdd is not batch-compatible
+          // Log action
           batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
-            timestamp: serverTimestamp(),
+            timestamp: new Date().toISOString(),
             userId: profile.uid,
             userEmail: profile.email,
             userRole: profile.role,
@@ -847,8 +854,8 @@ export function FrontDesk() {
       setLoading(true);
       const res = showPostponeModal;
       
-      const oldCheckOut = safeToDate(res.checkOut);
-      const newCheckOut = safeToDate(newCheckOutDate);
+      const oldCheckOut = new Date(res.checkOut);
+      const newCheckOut = new Date(newCheckOutDate);
       const extraNights = Math.ceil((newCheckOut.getTime() - oldCheckOut.getTime()) / (1000 * 60 * 60 * 24));
       
       if (extraNights <= 0) {
@@ -876,11 +883,10 @@ export function FrontDesk() {
 
       const newTotalAmount = res.totalAmount + baseExtraAmount + extraExclusiveTaxTotal;
 
-      await safeWrite(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
+      await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
         checkOut: newCheckOutDate,
-        totalAmount: newTotalAmount,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'POSTPONE_STAY');
+        totalAmount: newTotalAmount
+      });
 
       // Post the extra charge to the ledger if guest is checked in
       if (res.status === 'checked_in') {
@@ -894,17 +900,17 @@ export function FrontDesk() {
         }, profile?.uid || 'system', res.corporateId);
       }
 
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'system',
-        userRole: profile?.role || 'staff',
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile?.uid,
+        userEmail: profile?.email,
+        userRole: profile?.role,
         action: 'RESERVATION_POSTPONED',
         resource: `Res #${res.id.slice(-6)} - Extended to ${newCheckOutDate}`,
         hotelId: hotel.id,
         module: 'Front Desk',
         details: `Extended by ${extraNights} nights. Added ${formatCurrency(baseExtraAmount + extraExclusiveTaxTotal, currency, exchangeRate)} to total.`
-      }, hotel.id, 'LOG_POSTPONE_STAY');
+      });
 
       toast.success('Stay postponed successfully');
       setShowPostponeModal(null);
@@ -937,8 +943,8 @@ export function FrontDesk() {
         postedBy: profile.uid
       }, profile.uid);
 
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -947,7 +953,7 @@ export function FrontDesk() {
         hotelId: hotel.id,
         module: 'Front Desk',
         details: `${discountData.type === 'percentage' ? discountData.amount + '%' : 'Fixed'} - ${discountData.reason}`
-      }, hotel.id, 'LOG_DISCOUNT_APPLIED');
+      });
 
       toast.success('Discount applied successfully');
       setShowDiscountModal(null);
@@ -980,8 +986,7 @@ export function FrontDesk() {
         const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
         if (!res.guestId || !res.autoNightDeduction) continue;
 
-        const checkInDateStr = format(safeToDate(res.checkIn), 'yyyy-MM-dd');
-        const checkInDateTime = new Date(`${checkInDateStr}T${res.checkInTime || '14:00'}`);
+        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
         const now = new Date();
         
         // Calculate nights based on calendar dates
@@ -990,14 +995,13 @@ export function FrontDesk() {
         
         let targetCharges = actualCalendarNightsPaid;
 
-        // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
+        // Overstay logic: If past overstayChargeTime on any date past arrival, add an extra charge if it's the current day
         if (hotel.autoChargeOverstays !== false) {
           const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const checkOutDateStr = format(safeToDate(res.checkOut), 'yyyy-MM-dd');
-          const overstayThreshold = new Date(`${checkOutDateStr}T${overstayTime}`);
+          const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
           
-          if (isAfter(now, overstayThreshold)) {
-            // If they are checking out late on their checkout date (or past it), they get charged for tonight as well
+          if (isAfter(now, todayOverstayThreshold)) {
+            // If they are checking out late TODAY, they get charged for tonight as well
             targetCharges += 1;
           }
         }
@@ -1021,7 +1025,7 @@ export function FrontDesk() {
           
           for (let i = 0; i < nightsToCharge; i++) {
             const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-            const isOverstay = isAfter(chargeDate, startOfDay(safeToDate(res.checkOut)));
+            const isOverstay = isAfter(chargeDate, startOfDay(new Date(res.checkOut)));
             
             await postToLedger(hotel.id, res.guestId, res.id, {
               amount: rate,
@@ -1045,14 +1049,13 @@ export function FrontDesk() {
       }
       
       // Update hotel last audit date
-      await safeWrite(doc(db, 'hotels', hotel.id), {
-        lastAuditDate: format(new Date(), 'yyyy-MM-dd'),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'UPDATE_LAST_AUDIT_DATE');
+      await updateDoc(doc(db, 'hotels', hotel.id), {
+        lastAuditDate: format(new Date(), 'yyyy-MM-dd')
+      });
 
       // Log audit action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1060,7 +1063,7 @@ export function FrontDesk() {
         resource: `Audit processed ${querySnapshot.docs.length} active stays.`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      }, hotel.id, 'LOG_NIGHTLY_AUDIT');
+      });
 
     } catch (err: any) {
       console.error("Audit error:", err.message || safeStringify(err));
@@ -1078,24 +1081,18 @@ export function FrontDesk() {
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
       // 1. Update reservation status immediately
-      await safeWrite(resRef, { 
-        status,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'UPDATE_RESERVATION_STATUS');
+      await updateDoc(resRef, { status });
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
         // Mark room as occupied
-        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
-          status: 'occupied',
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'MARK_ROOM_OCCUPIED');
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
         
         if (res.guestId) {
           // Post ONLY the first night's charge at check-in
           // Subsequent nights will be posted by the Night Audit
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          const checkInDate = safeToDate(res.checkIn);
+          const checkInDate = new Date(res.checkIn);
           
           await postToLedger(hotel.id, res.guestId, res.id, {
             amount: rate,
@@ -1104,7 +1101,7 @@ export function FrontDesk() {
             description: `Room Charge: Room ${res.roomNumber} (Night of ${format(checkInDate, 'MMM dd, yyyy')})`,
             referenceId: res.id,
             postedBy: profile.uid
-          }, profile.uid, res.corporateId || undefined);
+          }, profile.uid, res.corporateId);
 
           // Taxes are automatically posted by postToLedger if it's a room charge
 
@@ -1137,7 +1134,7 @@ export function FrontDesk() {
         
         // Refined overstay logic for checkout:
         // Use calendar days as base.
-        const checkInDate = startOfDay(safeToDate(res.checkIn));
+        const checkInDate = startOfDay(new Date(res.checkIn));
         const today = startOfDay(now);
         const nightsElapsed = differenceInDays(today, checkInDate);
         
@@ -1170,7 +1167,7 @@ export function FrontDesk() {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           
           for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDate), existingCharges + i);
+            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
             await postToLedger(hotel.id, res.guestId!, res.id, {
               amount: rate,
               type: 'debit',
@@ -1200,28 +1197,10 @@ export function FrontDesk() {
 
         // 2. Check if ledger is settled (for individual guests)
         const freshResSnap = await getDoc(resRef);
-        if (!freshResSnap.exists()) throw new Error('Reservation not found');
         const freshResData = freshResSnap.data() as Reservation;
         
-        // Fetch ALL ledger entries for this reservation from the collection
-        const fullLedgerSnap = await getDocs(query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        ));
-        
-        const collectionEntries = fullLedgerSnap.docs.map(doc => ({ 
-          ...doc.data(), 
-          id: doc.id 
-        } as LedgerEntry));
-
-        // Merge with array-based entries for backward compatibility
-        const arrayEntries = freshResData.ledgerEntries || [];
-        const seenIds = new Set(collectionEntries.map(e => e.id));
-        const allEntries = [
-          ...collectionEntries,
-          ...arrayEntries.filter(e => !seenIds.has(e.id))
-        ];
-        
+        // Calculate current ledger balance
+        const allEntries = freshResData.ledgerEntries || [];
         const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
         const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
         const outstandingBalance = totalDebits - totalCredits;
@@ -1230,48 +1209,39 @@ export function FrontDesk() {
           toast.error(`Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`);
           setLoading(false);
           // Revert status to checked_in
-          await safeWrite(resRef, { 
-            status: 'checked_in',
-            updatedAt: serverTimestamp()
-          }, hotel.id, 'REVERT_CHECK_IN_STATUS');
+          await updateDoc(resRef, { status: 'checked_in' });
           return;
         }
 
         // 3. Update reservation total and checkout details
-        await safeWrite(resRef, { 
+        await updateDoc(resRef, { 
           totalAmount: totalDebits,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
-          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid',
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'FINALIZE_CHECK_OUT');
+          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+        });
 
         // 4. Mark room as dirty
-        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
           status: 'dirty',
           housekeepingStatus: 'dirty',
           currentGuestId: null,
-          currentReservationId: null,
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'MARK_ROOM_DIRTY');
+          currentReservationId: null
+        });
 
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          await safeWrite(guestRef, {
+          await updateDoc(guestRef, {
             totalStays: increment(1),
-            updatedAt: serverTimestamp()
-          }, hotel.id, 'UPDATE_GUEST_STATS');
-          
-          // Use subcollection for stayHistory for scalability
-          await safeAdd(collection(db, 'hotels', hotel.id, 'guests', res.guestId, 'stayHistory'), {
-            reservationId: res.id,
-            roomNumber: res.roomNumber,
-            checkIn: res.checkIn,
-            checkOut: format(now, 'yyyy-MM-dd'),
-            totalAmount: totalDebits,
-            timestamp: serverTimestamp()
-          }, hotel.id, 'LOG_GUEST_STAY');
+            stayHistory: arrayUnion({
+              reservationId: res.id,
+              roomNumber: res.roomNumber,
+              checkIn: res.checkIn,
+              checkOut: format(now, 'yyyy-MM-dd'),
+              totalAmount: totalDebits
+            })
+          });
         }
 
         // 6. If corporate, transfer to City Ledger
@@ -1281,15 +1251,12 @@ export function FrontDesk() {
         }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
-        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
-          status: 'clean',
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'RELEASE_ROOM');
+        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
       }
 
       // 3. Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1297,7 +1264,7 @@ export function FrontDesk() {
         resource: `Booking ${res.id}: ${status}`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      }, hotel.id, 'LOG_STATUS_UPDATE');
+      });
 
       toast.success(`Reservation status updated to ${status.replace('_', ' ')}`);
     } catch (err: any) {
@@ -1313,46 +1280,23 @@ export function FrontDesk() {
     
     try {
       setLoading(true);
-      
-      let effectiveGuestId = res.guestId;
-      
-      // If guestId is missing (should be rare but can happen with imported or malformed data)
-      if (!effectiveGuestId || effectiveGuestId === '') {
-        const guestRef = await safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
-          name: res.guestName,
-          email: res.guestEmail || '',
-          phone: res.guestPhone || '',
-          idType: res.idType || '',
-          idNumber: res.idNumber || '',
-          address: res.address || '',
-          ledgerBalance: 0,
-          totalStays: 0,
-          totalSpent: 0
-        }, hotel.id, 'CREATE_GUEST_ON_PREPAYMENT');
-        effectiveGuestId = guestRef.id;
-        
-        // Link it back to reservation to maintain integrity
-        await safeWrite(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
-          guestId: effectiveGuestId,
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'LINK_GUEST_ON_PREPAYMENT');
-      }
-
       // Use settleLedger to record payment and update guest balance
       // settleLedger also updates reservation.paidAmount and paymentStatus automatically
-      await settleLedger(
-        hotel.id, 
-        effectiveGuestId, 
-        res.id, 
-        amount, 
-        'cash', 
-        profile.uid,
-        res.corporateId
-      );
+      if (res.guestId) {
+        await settleLedger(
+          hotel.id, 
+          res.guestId, 
+          res.id, 
+          amount, 
+          'cash', 
+          profile.uid,
+          res.corporateId
+        );
+      }
 
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1360,8 +1304,7 @@ export function FrontDesk() {
         resource: `Payment for ${res.guestName}: ${formatCurrency(amount, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Finance'
-      }, hotel.id, 'LOG_PAYMENT_UPDATE');
-
+      });
       toast.success('Payment recorded successfully');
     } catch (err: any) {
       console.error("Payment update error:", err.message || safeStringify(err));
@@ -1390,7 +1333,7 @@ export function FrontDesk() {
       let priceDifference = 0;
       if (oldRoomType && newRoomType && oldRoomType.id !== newRoomType.id) {
         // Calculate remaining nights
-        const checkOutDate = safeToDate(res.checkOut);
+        const checkOutDate = new Date(res.checkOut);
         const today = new Date();
         const remainingNights = Math.max(1, Math.ceil((checkOutDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
         
@@ -1411,25 +1354,25 @@ export function FrontDesk() {
       }
 
       // 1. Mark old room as dirty
-      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
         status: 'dirty',
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'TRANSFER_ROOM_MARK_DIRTY');
+        updatedAt: new Date().toISOString()
+      });
       
       // 2. Mark new room as occupied
-      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', newRoomId), { 
+      await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', newRoomId), { 
         status: 'occupied',
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'TRANSFER_ROOM_MARK_OCCUPIED');
+        updatedAt: new Date().toISOString()
+      });
 
       // 3. Update reservation
       const newTotalAmount = (res.totalAmount || 0) + priceDifference;
-      await safeWrite(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+      await updateDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
         roomId: newRoomId,
         roomNumber: newRoom.roomNumber,
         totalAmount: newTotalAmount,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'TRANSFER_ROOM_UPDATE_RESERVATION');
+        updatedAt: new Date().toISOString()
+      });
 
       // 4. Post transfer note to ledger
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
@@ -1442,8 +1385,8 @@ export function FrontDesk() {
       }, profile.uid, res.corporateId);
 
       // 5. Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1451,7 +1394,7 @@ export function FrontDesk() {
         resource: `Transferred ${res.guestName} to Room ${newRoom.roomNumber}. Balance adjusted by ${formatCurrency(priceDifference, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      }, hotel.id, 'LOG_ROOM_TRANSFER');
+      });
 
       toast.success(`Transferred to Room ${newRoom.roomNumber}`);
       setShowTransferModal(null);
@@ -1493,8 +1436,8 @@ export function FrontDesk() {
       }, profile.uid, res.corporateId);
 
       // 2. Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -1502,7 +1445,7 @@ export function FrontDesk() {
         resource: `Posted ${chargeDetails.category} charge of ${formatCurrency(finalAmount, currency, exchangeRate)} to ${res.guestName}`,
         hotelId: hotel.id,
         module: 'Front Desk'
-      }, hotel.id, 'LOG_POST_CHARGE');
+      });
 
       setShowChargeModal(null);
       setChargeDetails({ 
@@ -2052,8 +1995,8 @@ export function FrontDesk() {
                       if (newBooking.corporateId) {
                         const activeRate = activeCorporateRates.find(r => 
                           (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-                          safeToDate(newBooking.checkIn) >= safeToDate(r.startDate) &&
-                          safeToDate(newBooking.checkIn) <= safeToDate(r.endDate)
+                          new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+                          new Date(newBooking.checkIn) <= new Date(r.endDate)
                         );
                         if (activeRate) {
                           displayPrice = activeRate.rate;
@@ -2078,8 +2021,8 @@ export function FrontDesk() {
                     if (newBooking.corporateId) {
                       const activeRate = activeCorporateRates.find(r => 
                         (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-                        safeToDate(newBooking.checkIn) >= safeToDate(r.startDate) &&
-                        safeToDate(newBooking.checkIn) <= safeToDate(r.endDate)
+                        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+                        new Date(newBooking.checkIn) <= new Date(r.endDate)
                       );
                       if (activeRate) displayPrice = activeRate.rate;
                     }
@@ -3023,14 +2966,9 @@ export function FrontDesk() {
                         <span className="px-1 bg-emerald-500/20 text-emerald-500 rounded-[4px] text-[8px]">Deposit</span>
                       )}
                     </div>
-                    {res.status !== 'cancelled' && res.status !== 'no_show' && (
+                    {res.guestId && (
                       <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {(() => {
-                          const balance = res.ledgerBalance !== undefined 
-                            ? res.ledgerBalance 
-                            : (res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
-                          return formatCurrency(balance, currency, exchangeRate);
-                        })()}
+                        Ledger: {formatCurrency((res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0), currency, exchangeRate)}
                       </div>
                     )}
                   </td>
@@ -3103,7 +3041,7 @@ export function FrontDesk() {
                         </>
                       )}
                       
-                      {(res.status === 'pending' || res.status === 'confirmed') && (
+                      {res.status === 'pending' && (
                         <>
                           <button 
                             onClick={() => {

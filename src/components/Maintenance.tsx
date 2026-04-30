@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, orderBy, addDoc, updateDoc, doc, onSnapshot, where } from 'firebase/firestore';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { MaintenanceRequest, OperationType, Room, UserProfile } from '../types';
 import { 
@@ -21,7 +21,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, exportToCSV, safeToDate } from '../utils';
+import { cn, exportToCSV } from '../utils';
 import { format, isWithinInterval, startOfDay, endOfDay, startOfMonth } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -101,21 +101,16 @@ export function Maintenance() {
     if (!validateForm()) return;
 
     try {
-      const timestamp = serverTimestamp();
-      await safeAdd(collection(db, 'hotels', hotel.id, 'maintenance'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'maintenance'), {
         ...newRequest,
         status: 'pending',
         reportedBy: profile.email,
-        timestamp,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      }, hotel.id, 'CREATE_MAINTENANCE_REQUEST');
+        timestamp: new Date().toISOString()
+      });
 
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp,
-        createdAt: timestamp,
-        updatedAt: timestamp,
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -123,7 +118,7 @@ export function Maintenance() {
         resource: `Room ${newRequest.roomNumber}: ${newRequest.issue}`,
         hotelId: hotel.id,
         module: 'Maintenance'
-      }, hotel.id, 'LOG_MAINTENANCE_REQUEST_CREATED');
+      });
 
       toast.success('Maintenance request created');
       setShowAddModal(false);
@@ -137,19 +132,16 @@ export function Maintenance() {
 
   const updateRequestStatus = async (requestId: string, status: MaintenanceRequest['status'], assignedTo?: string) => {
     if (!hotel?.id) return;
-    const timestamp = serverTimestamp();
-    const updates: any = { status, updatedAt: timestamp };
-    if (status === 'completed') updates.completedAt = timestamp;
+    const updates: any = { status };
+    if (status === 'completed') updates.completedAt = new Date().toISOString();
     if (assignedTo !== undefined) updates.assignedTo = assignedTo;
 
     try {
-      await safeWrite(doc(db, 'hotels', hotel.id, 'maintenance', requestId), updates, hotel.id, 'UPDATE_MAINTENANCE_STATUS');
+      await updateDoc(doc(db, 'hotels', hotel.id, 'maintenance', requestId), updates);
       
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: timestamp,
-        createdAt: timestamp,
-        updatedAt: timestamp,
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -157,7 +149,7 @@ export function Maintenance() {
         resource: `Request ${requestId}: ${status}${assignedTo ? ` (Assigned to: ${staff.find(s => s.uid === assignedTo)?.displayName || assignedTo})` : ''}`,
         hotelId: hotel.id,
         module: 'Maintenance'
-      }, hotel.id, 'LOG_MAINTENANCE_STATUS_UPDATE');
+      });
       toast.success(`Request status updated to ${status.replace('_', ' ')}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/maintenance/${requestId}`);
@@ -173,13 +165,12 @@ export function Maintenance() {
     }
 
     try {
-      await safeDelete(doc(db, 'hotels', hotel.id, 'maintenance', requestId), hotel.id, 'DELETE_MAINTENANCE_REQUEST');
+      const { deleteDoc } = await import('firebase/firestore');
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'maintenance', requestId));
       
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -187,7 +178,7 @@ export function Maintenance() {
         resource: `Request ${requestId}`,
         hotelId: hotel.id,
         module: 'Maintenance'
-      }, hotel.id, 'LOG_MAINTENANCE_REQUEST_DELETED');
+      });
       toast.success('Maintenance request deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/maintenance/${requestId}`);
@@ -203,8 +194,8 @@ export function Maintenance() {
     // Date filter (if applicable)
     let matchesDate = true;
     if (reportFilter.startDate) {
-      const targetDate = startOfDay(safeToDate(reportFilter.startDate));
-      const taskDate = r.dueDate ? startOfDay(safeToDate(r.dueDate)) : startOfDay(safeToDate(r.timestamp));
+      const targetDate = startOfDay(new Date(reportFilter.startDate));
+      const taskDate = r.dueDate ? startOfDay(new Date(r.dueDate)) : startOfDay(new Date(r.timestamp));
       matchesDate = taskDate >= targetDate;
     }
 
@@ -218,11 +209,11 @@ export function Maintenance() {
     if (sortBy === 'priority') {
       result = (priorityWeights[a.priority] || 0) - (priorityWeights[b.priority] || 0);
     } else if (sortBy === 'dueDate') {
-      const dateA = a.dueDate ? safeToDate(a.dueDate).getTime() : 0;
-      const dateB = b.dueDate ? safeToDate(b.dueDate).getTime() : 0;
+      const dateA = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+      const dateB = b.dueDate ? new Date(b.dueDate).getTime() : 0;
       result = dateA - dateB;
     } else {
-      result = safeToDate(a.timestamp).getTime() - safeToDate(b.timestamp).getTime();
+      result = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
     }
     return sortOrder === 'desc' ? -result : result;
   });
@@ -239,23 +230,23 @@ export function Maintenance() {
         const matchesStatus = reportFilter.status === 'all' || req.status === reportFilter.status;
         const matchesPriority = reportFilter.priority === 'all' || req.priority === reportFilter.priority;
         
-        const reqDate = safeToDate(req.timestamp);
+        const reqDate = new Date(req.timestamp);
         const matchesDate = isWithinInterval(reqDate, {
-          start: startOfDay(safeToDate(reportFilter.startDate)),
-          end: endOfDay(safeToDate(reportFilter.endDate))
+          start: startOfDay(new Date(reportFilter.startDate)),
+          end: endOfDay(new Date(reportFilter.endDate))
         });
 
         return matchesStatus && matchesPriority && matchesDate;
       })
       .map(req => ({
-        Timestamp: safeToDate(req.timestamp).toLocaleString(),
+        Timestamp: new Date(req.timestamp).toLocaleString(),
         Room: req.roomNumber,
         Issue: req.issue,
         Priority: req.priority,
         Status: req.status,
         ReportedBy: req.reportedBy,
         Notes: req.notes || '',
-        CompletedAt: req.completedAt ? safeToDate(req.completedAt).toLocaleString() : 'N/A'
+        CompletedAt: req.completedAt ? new Date(req.completedAt).toLocaleString() : 'N/A'
       }));
 
     if (dataToExport.length === 0) {
@@ -451,7 +442,7 @@ export function Maintenance() {
                         <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Room {request.roomNumber}</div>
                         <div className="text-xs text-zinc-400 flex items-center gap-1">
                           <Calendar size={10} />
-                          {format(safeToDate(request.timestamp), 'MMM d, HH:mm')}
+                          {format(new Date(request.timestamp), 'MMM d, HH:mm')}
                         </div>
                       </div>
                     </div>
@@ -483,10 +474,10 @@ export function Maintenance() {
                     {request.dueDate && (
                       <div className={cn(
                         "flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider",
-                        safeToDate(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
+                        new Date(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
                       )}>
                         <Clock size={10} />
-                        Due: {format(safeToDate(request.dueDate), 'MMM d, yyyy')}
+                        Due: {format(new Date(request.dueDate), 'MMM d, yyyy')}
                       </div>
                     )}
 
@@ -537,7 +528,7 @@ export function Maintenance() {
                   {request.status === 'completed' && (
                     <div className="flex-1 flex items-center justify-center gap-2 text-zinc-500 py-2 text-xs font-bold">
                       <CheckCircle2 size={14} />
-                      Completed {request.completedAt && format(safeToDate(request.completedAt), 'MMM d')}
+                      Completed {request.completedAt && format(new Date(request.completedAt), 'MMM d')}
                     </div>
                   )}
                 </div>

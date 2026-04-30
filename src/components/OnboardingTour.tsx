@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db, safeWrite, serverTimestamp } from '../firebase';
+import { db } from '../firebase';
 import { 
   X, 
   ChevronRight, 
@@ -72,10 +72,9 @@ export function OnboardingTour() {
   const handleComplete = async () => {
     if (!profile?.uid) return;
     try {
-      await safeWrite(doc(db, 'users', profile.uid), {
-        hasCompletedOnboarding: true,
-        updatedAt: serverTimestamp()
-      }, profile.hotelId || 'system', 'COMPLETE_ONBOARDING');
+      await updateDoc(doc(db, 'users', profile.uid), {
+        hasCompletedOnboarding: true
+      });
       setIsVisible(false);
     } catch (err: any) {
       console.error("Failed to complete onboarding:", err.message || safeStringify(err));

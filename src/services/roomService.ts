@@ -1,105 +1,92 @@
 import { 
   collection, 
+  addDoc, 
+  updateDoc, 
   doc, 
   getDocs, 
   query, 
   where, 
   writeBatch, 
   increment,
+  Timestamp,
   getDoc
 } from 'firebase/firestore';
-import { db, serverTimestamp, safeWrite, safeAdd, safeDelete, handleFirestoreError } from '../firebase';
+import { db } from '../firebase';
 import { 
   Room, 
   RoomType, 
   RoomBlocking, 
   InventoryConsumptionRule, 
   InventoryItem,
-  InventoryTransaction,
-  OperationType
+  InventoryTransaction
 } from '../types';
 
 export const roomService = {
   // Room Blocking
   async blockRoom(hotelId: string, blocking: Omit<RoomBlocking, 'id' | 'timestamp'>) {
-    try {
-      const docId = await safeAdd(collection(db, 'hotels', hotelId, 'room_blockings'), {
-        ...blocking,
-        timestamp: serverTimestamp()
-      }, hotelId, 'BLOCK_ROOM');
-      
-      // Update room status if blocking is current
-      const now = new Date();
-      const start = new Date(blocking.startDate);
-      const end = new Date(blocking.endDate);
-      
-      if (start <= now && end >= now) {
-        await safeWrite(doc(db, 'hotels', hotelId, 'rooms', blocking.roomId), { 
-          status: blocking.reason === 'maintenance' ? 'maintenance' : 'out_of_service',
-          updatedAt: serverTimestamp()
-        }, hotelId, 'UPDATE_ROOM_STATUS_FOR_BLOCKING');
-      }
-      
-      return docId;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `hotels/${hotelId}/room_blockings`);
-      throw error;
+    const blockingRef = collection(db, 'hotels', hotelId, 'room_blockings');
+    const docRef = await addDoc(blockingRef, {
+      ...blocking,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Update room status if blocking is current
+    const now = new Date().toISOString();
+    if (blocking.startDate <= now && blocking.endDate >= now) {
+      const roomRef = doc(db, 'hotels', hotelId, 'rooms', blocking.roomId);
+      await updateDoc(roomRef, { 
+        status: blocking.reason === 'maintenance' ? 'maintenance' : 'out_of_order' 
+      });
     }
+    
+    return docRef.id;
   },
 
   async unblockRoom(hotelId: string, blockingId: string, roomId: string) {
-    try {
-      await safeDelete(doc(db, 'hotels', hotelId, 'room_blockings', blockingId), hotelId, 'UNBLOCK_ROOM');
-      
-      // Reset room status to dirty so it needs cleaning before booking
-      await safeWrite(doc(db, 'hotels', hotelId, 'rooms', roomId), { 
-        status: 'dirty',
-        updatedAt: serverTimestamp()
-      }, hotelId, 'RESET_ROOM_STATUS_AFTER_UNBLOCK');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `hotels/${hotelId}/room_blockings/${blockingId}`);
-      throw error;
-    }
+    const blockingRef = doc(db, 'hotels', hotelId, 'room_blockings', blockingId);
+    await updateDoc(blockingRef, { endDate: new Date().toISOString() });
+    
+    // Reset room status to dirty so it needs cleaning before booking
+    const roomRef = doc(db, 'hotels', hotelId, 'rooms', roomId);
+    await updateDoc(roomRef, { status: 'dirty' });
   },
 
   // Inventory Integration
   async triggerInventoryConsumption(hotelId: string, roomTypeId: string, trigger: InventoryConsumptionRule['trigger'], userId: string) {
-    try {
-      const rulesRef = collection(db, 'hotels', hotelId, 'inventory_consumption_rules');
-      const q = query(rulesRef, where('trigger', '==', trigger));
-      const snap = await getDocs(q);
+    const rulesRef = collection(db, 'hotels', hotelId, 'inventory_consumption_rules');
+    const q = query(rulesRef, where('trigger', '==', trigger));
+    const snap = await getDocs(q);
+    
+    const rules = snap.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as InventoryConsumptionRule))
+      .filter(rule => !rule.roomTypeId || rule.roomTypeId === roomTypeId);
       
-      const rules = snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as InventoryConsumptionRule))
-        .filter(rule => !rule.roomTypeId || rule.roomTypeId === roomTypeId);
-        
-      if (rules.length === 0) return;
+    if (rules.length === 0) return;
 
-      const batch = writeBatch(db);
+    const batch = writeBatch(db);
+    
+    for (const rule of rules) {
+      const itemRef = doc(db, 'hotels', hotelId, 'inventory', rule.itemId);
+      const txRef = doc(collection(db, 'hotels', hotelId, 'inventory_transactions'));
       
-      for (const rule of rules) {
-        const itemRef = doc(db, 'hotels', hotelId, 'inventory', rule.itemId);
-        
-        batch.update(itemRef, {
-          quantity: increment(-rule.quantity),
-          lastUpdated: serverTimestamp()
-        });
-        
-        await safeAdd(collection(db, 'hotels', hotelId, 'inventory_transactions'), {
-          type: 'consumption',
-          itemId: rule.itemId,
-          quantity: rule.quantity,
-          userId: userId,
-          timestamp: serverTimestamp(),
-          reason: `Auto-consumption triggered by ${trigger} for room type ${roomTypeId}`,
-        }, hotelId, 'INVENTORY_CONSUMPTION');
-      }
+      batch.update(itemRef, {
+        quantity: increment(-rule.quantity),
+        lastUpdated: new Date().toISOString()
+      });
       
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `hotels/${hotelId}/inventory`);
-      throw error;
+      const tx: Omit<InventoryTransaction, 'id'> = {
+        type: 'consumption',
+        itemId: rule.itemId,
+        quantity: rule.quantity,
+        userId: userId,
+        timestamp: new Date().toISOString(),
+        reason: `Auto-consumption triggered by ${trigger} for room type ${roomTypeId}`,
+      };
+      
+      batch.set(txRef, tx);
     }
+    
+    await batch.commit();
   },
 
   // Rate Management

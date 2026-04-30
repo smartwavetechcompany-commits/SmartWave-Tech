@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
 import { 
@@ -30,7 +30,7 @@ import {
   ArrowDownRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, safeToDate } from '../utils';
+import { cn, formatCurrency } from '../utils';
 import Fuse from 'fuse.js';
 import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -162,33 +162,29 @@ export function GuestManagement() {
       if (editingGuest) {
         // Exclude read-only financial fields from update to prevent clearing them
         const { ledgerBalance, totalStays, totalSpent, stayHistory, createdAt, ...updateData } = newGuest as any;
-        await safeWrite(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), {
-          ...updateData,
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'UPDATE_GUEST');
+        await updateDoc(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), updateData);
       } else {
-        await safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
+        await addDoc(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,
           totalStays: 0,
           totalSpent: 0,
           ledgerBalance: 0,
-          // stayHistory subcollection will be used for history, initializing empty list for legacy if needed or just omission
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'CREATE_GUEST');
+          stayHistory: [],
+          createdAt: new Date().toISOString()
+        });
       }
 
-      // Log action (SafeWrite/SafeAdd will also log, but we can have custom ones)
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
-        action: editingGuest ? 'GUEST_PROFILE_UPDATED' : 'GUEST_PROFILE_CREATED',
+        action: editingGuest ? 'GUEST_UPDATED' : 'GUEST_CREATED',
         resource: `${newGuest.name} (${newGuest.email})`,
         hotelId: hotel.id,
         module: 'Guests'
-      }, hotel.id, 'LOG_GUEST_ACTION');
+      });
 
       setShowAddModal(false);
       setEditingGuest(null);
@@ -221,18 +217,18 @@ export function GuestManagement() {
     }
     
     try {
-      await safeDelete(doc(db, 'hotels', hotel.id, 'guests', guestId), hotel.id, 'DELETE_GUEST_PROFILE');
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'guests', guestId));
       
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         action: 'GUEST_DELETED',
         resource: `Guest ID: ${guestId}`,
         hotelId: hotel.id,
         module: 'Guests'
-      }, hotel.id, 'LOG_GUEST_DELETION');
+      });
       
       toast.success('Guest profile deleted');
       setConfirmDelete(null);
@@ -248,7 +244,7 @@ export function GuestManagement() {
         const matchesType = reportFilter.type === 'all' || 
           (reportFilter.type === 'corporate' ? !!guest.corporateId : !guest.corporateId);
         
-        const guestDate = guest.createdAt ? safeToDate(guest.createdAt) : null;
+        const guestDate = guest.createdAt ? new Date(guest.createdAt) : null;
         const matchesDate = !guestDate || isWithinInterval(guestDate, {
           start: startOfDay(new Date(reportFilter.startDate)),
           end: endOfDay(new Date(reportFilter.endDate))
@@ -269,7 +265,7 @@ export function GuestManagement() {
         'Balance': g.ledgerBalance || 0,
         'Tags': (g.tags || []).join(', '),
         'Preferences': (g.preferences || []).join(', '),
-        'Created At': g.createdAt ? format(safeToDate(g.createdAt), 'yyyy-MM-dd') : 'N/A'
+        'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
       }));
 
     if (data.length === 0) {
@@ -668,7 +664,7 @@ export function GuestManagement() {
                 </div>
                 <div className="px-6 py-3 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
                   <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                    Last Stay: {guest.lastStay ? format(safeToDate(guest.lastStay), 'MMM d, yyyy') : 'Never'}
+                    Last Stay: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yyyy') : 'Never'}
                   </div>
                   <ChevronRight size={14} className="text-zinc-700" />
                 </div>
@@ -753,7 +749,7 @@ export function GuestManagement() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {guestHistory.sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime()).map(res => (
+                      {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
                         <div key={res.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
                           <div className="flex items-center gap-4">
                             <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-emerald-500">
@@ -762,7 +758,7 @@ export function GuestManagement() {
                             <div>
                               <div className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
                               <div className="text-xs text-zinc-500">
-                                {format(safeToDate(res.checkIn), 'MMM d, yyyy')} - {format(safeToDate(res.checkOut), 'MMM d, yyyy')}
+                                {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
                               </div>
                               <div className="flex items-center gap-2 mt-1">
                                 <div className={cn(
@@ -815,7 +811,7 @@ export function GuestManagement() {
                           <div>
                             <div className="text-sm font-bold text-zinc-50">{entry.description}</div>
                             <div className="text-[10px] text-zinc-500 flex items-center gap-2">
-                              {format(safeToDate(entry.timestamp), 'MMM d, yyyy HH:mm')}
+                              {format(new Date(entry.timestamp), 'MMM d, yyyy HH:mm')}
                               <span className="px-1.5 py-0.5 bg-zinc-900 rounded text-[8px] font-bold uppercase tracking-wider">
                                 {entry.category}
                               </span>

@@ -10,8 +10,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../../utils';
 import { format } from 'date-fns';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../../firebase';
-import { collection, doc } from 'firebase/firestore';
+import { db, handleFirestoreError } from '../../firebase';
+import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 
 interface ItemMasterProps {
@@ -86,18 +86,14 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
     try {
       const itemData = {
         ...formData,
-        lastUpdated: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        lastUpdated: new Date().toISOString()
       };
 
       if (editingItem) {
-        await safeWrite(doc(db, 'hotels', hotel.id, 'inventory', editingItem.id), itemData, hotel.id, 'UPDATE_INVENTORY_ITEM');
+        await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', editingItem.id), itemData);
         toast.success('Item updated successfully');
       } else {
-        await safeAdd(collection(db, 'hotels', hotel.id, 'inventory'), {
-          ...itemData,
-          createdAt: serverTimestamp()
-        }, hotel.id, 'CREATE_INVENTORY_ITEM');
+        await addDoc(collection(db, 'hotels', hotel.id, 'inventory'), itemData);
         toast.success('Item created successfully');
       }
 
@@ -119,7 +115,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
   const handleDelete = async (id: string) => {
     if (!hotel?.id || !window.confirm('Are you sure you want to delete this item?')) return;
     try {
-      await safeDelete(doc(db, 'hotels', hotel.id, 'inventory', id), hotel.id, 'DELETE_INVENTORY_ITEM');
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'inventory', id));
       toast.success('Item deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory/${id}`);
@@ -622,19 +618,11 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
     setLoading(true);
 
     try {
-      const categoryData = {
-        ...newCategory,
-        updatedAt: serverTimestamp()
-      };
-
       if (editingCategory) {
-        await safeWrite(doc(db, 'hotels', hotelId, 'inventory_categories', editingCategory.id), categoryData, hotelId, 'UPDATE_INVENTORY_CATEGORY');
+        await updateDoc(doc(db, 'hotels', hotelId, 'inventory_categories', editingCategory.id), newCategory);
         toast.success('Category updated');
       } else {
-        await safeAdd(collection(db, 'hotels', hotelId, 'inventory_categories'), {
-          ...categoryData,
-          createdAt: serverTimestamp()
-        }, hotelId, 'CREATE_INVENTORY_CATEGORY');
+        await addDoc(collection(db, hotelId ? `hotels/${hotelId}/inventory_categories` : ''), newCategory);
         toast.success('Category created');
       }
       setNewCategory({ name: '', description: '', isFB: false });
@@ -649,7 +637,7 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this category? Items using it will remain but category link will be broken.')) return;
     try {
-      await safeDelete(doc(db, 'hotels', hotelId, 'inventory_categories', id), hotelId, 'DELETE_INVENTORY_CATEGORY');
+      await deleteDoc(doc(db, 'hotels', hotelId, 'inventory_categories', id));
       toast.success('Category deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotelId}/inventory_categories/${id}`);

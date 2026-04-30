@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'f
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType } from '../types';
-import { formatCurrency, cn, exportToCSV, safeToDate } from '../utils';
+import { formatCurrency, cn } from '../utils';
 import { 
   Users, 
   BedDouble, 
@@ -31,6 +31,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
+import { exportToCSV } from '../utils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -89,7 +90,7 @@ export function Dashboard() {
  
         const chartData = last7Days.map(date => {
           const dayRevenue = records
-            .filter(r => r.type === 'income' && safeToDate(r.timestamp).toISOString().split('T')[0] === date)
+            .filter(r => r.type === 'income' && r.timestamp.startsWith(date))
             .reduce((acc, curr) => acc + curr.amount, 0);
           return {
             name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
@@ -124,7 +125,7 @@ export function Dashboard() {
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
-        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && safeToDate(f.timestamp).toISOString().split('T')[0] === new Date().toISOString().split('T')[0]).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
+        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
         { label: 'Outstanding', value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
           const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
           if (res) {
@@ -137,12 +138,12 @@ export function Dashboard() {
       ];
 
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-  const previousRevenue = finance.filter(f => f.type === 'income' && safeToDate(f.timestamp).toISOString().split('T')[0] !== new Date().toISOString().split('T')[0]).reduce((acc, curr) => acc + curr.amount, 0);
+  const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
   const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
   const handleExportTransactions = () => {
     const dataToExport = finance.slice(0, 100).map(f => ({
-      Date: format(safeToDate(f.timestamp), 'MMM d, yyyy HH:mm'),
+      Date: format(new Date(f.timestamp), 'MMM d, yyyy HH:mm'),
       Type: f.type.toUpperCase(),
       Category: f.category,
       Description: f.description,
@@ -352,7 +353,7 @@ export function Dashboard() {
                         </div>
                         <div>
                           <div className="text-sm font-medium text-zinc-50">{record.description}</div>
-                          <div className="text-xs text-zinc-500">{record.category} • {format(safeToDate(record.timestamp), 'MMM d, HH:mm')}</div>
+                          <div className="text-xs text-zinc-500">{record.category} • {format(new Date(record.timestamp), 'MMM d, HH:mm')}</div>
                         </div>
                       </div>
                       <div className={cn(

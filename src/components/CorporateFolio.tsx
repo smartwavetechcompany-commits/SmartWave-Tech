@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
-import { db, handleFirestoreError, safeAdd, safeWrite, serverTimestamp } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, LedgerEntry, OperationType, Reservation } from '../types';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -21,7 +21,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, safeToDate } from '../utils';
+import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
@@ -69,18 +69,12 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     // Listen to ledger entries for this corporate account
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('corporateId', '==', account.id)
+      where('corporateId', '==', account.id),
+      orderBy('timestamp', 'desc')
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
-      // Sort client-side
-      entries.sort((a, b) => {
-        const timeA = safeToDate(a.timestamp).getTime();
-        const timeB = safeToDate(b.timestamp).getTime();
-        return timeB - timeA;
-      });
-      setLedgerEntries(entries);
+      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
       setLoading(false);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
@@ -131,44 +125,38 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       }
 
       // 1. Update account balance (total amount)
-      await safeWrite(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
         currentBalance: increment(-totalAmount),
-        totalCredits: increment(totalAmount),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'SETTLE_CORPORATE_PAYMENT');
+        totalCredits: increment(totalAmount)
+      });
 
       // 2. Process each split
-      const actionTimestamp = serverTimestamp();
       for (const split of settleData.splits) {
         if (split.amount > 0) {
           // Add to Ledger
-          await safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
+          await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
             hotelId: hotel.id,
             corporateId: currentAccount.id,
             reservationId: 'CORPORATE_SETTLEMENT',
+            timestamp,
             amount: split.amount,
             type: 'credit',
             category: 'payment',
             description: settleData.notes || `Corporate Settlement: ${currentAccount.name} (${split.method})`,
             paymentMethod: split.method,
-            postedBy: profile.uid,
-            timestamp: actionTimestamp,
-            createdAt: actionTimestamp,
-            updatedAt: actionTimestamp
-          }, hotel.id, 'POST_CORPORATE_PAYMENT_LEDGER');
+            postedBy: profile.uid
+          });
 
           // Log to finance
-          await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+          await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
             type: 'income',
             amount: split.amount,
             category: 'Corporate Payment',
             description: `Corporate Settlement: ${currentAccount.name}`,
+            timestamp,
             paymentMethod: split.method,
-            referenceId: currentAccount.id,
-            timestamp: actionTimestamp,
-            createdAt: actionTimestamp,
-            updatedAt: actionTimestamp
-          }, hotel.id, 'POST_CORPORATE_PAYMENT_FINANCE');
+            referenceId: currentAccount.id
+          });
         }
       }
 
@@ -192,27 +180,23 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       const timestamp = new Date().toISOString();
 
       // 1. Update account balance
-      const actionTimestamp = serverTimestamp();
-      await safeWrite(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
         currentBalance: increment(chargeData.amount),
-        totalDebits: increment(chargeData.amount),
-        updatedAt: actionTimestamp
-      }, hotel.id, 'POST_CORPORATE_CHARGE');
+        totalDebits: increment(chargeData.amount)
+      });
 
       // 2. Add to Ledger
-      await safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
         hotelId: hotel.id,
         corporateId: currentAccount.id,
         reservationId: 'CORPORATE_CHARGE',
+        timestamp,
         amount: chargeData.amount,
         type: 'debit',
         category: chargeData.category,
         description: chargeData.description,
-        postedBy: profile.uid,
-        timestamp: actionTimestamp,
-        createdAt: actionTimestamp,
-        updatedAt: actionTimestamp
-      }, hotel.id, 'POST_CORPORATE_CHARGE_LEDGER');
+        postedBy: profile.uid
+      });
 
       toast.success('Charge posted successfully');
       setShowPostPostCharge(false);
@@ -468,10 +452,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                           Room {res.roomNumber}
                         </td>
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(safeToDate(res.checkIn), 'MMM d, yyyy')}
+                          {format(new Date(res.checkIn), 'MMM d, yyyy')}
                         </td>
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(safeToDate(res.checkOut), 'MMM d, yyyy')}
+                          {format(new Date(res.checkOut), 'MMM d, yyyy')}
                         </td>
                         <td className={cn(
                           "px-6 py-4 text-right text-sm font-bold",
@@ -522,7 +506,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     ledgerEntries.map((entry) => (
                       <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(safeToDate(entry.timestamp), 'MMM d, HH:mm')}
+                          {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-white font-medium">{entry.description}</div>
@@ -567,7 +551,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               const csvContent = [
                 headers.join(','),
                 ...ledgerEntries.map(e => [
-                  format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
+                  format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,
                   e.type === 'debit' ? e.amount : 0,

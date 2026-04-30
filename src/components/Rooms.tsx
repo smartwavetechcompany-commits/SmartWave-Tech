@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, addDoc, doc, setDoc, deleteDoc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,7 +32,7 @@ import {
   TrendingUp,
   Package
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV, safeToDate } from '../utils';
+import { cn, formatCurrency, exportToCSV } from '../utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
@@ -44,12 +44,12 @@ export function Rooms() {
   const [staff, setStaff] = useState<UserProfile[]>([]);
 
   const isRoomBlocked = (roomId: string) => {
-    const now = new Date();
+    const today = startOfDay(new Date());
     return blockings.some(b => 
       b.roomId === roomId && 
-      isWithinInterval(now, { 
-        start: safeToDate(b.startDate), 
-        end: safeToDate(b.endDate) 
+      isWithinInterval(today, { 
+        start: parseISO(b.startDate), 
+        end: parseISO(b.endDate) 
       })
     );
   };
@@ -224,16 +224,15 @@ export function Rooms() {
     if (!hotel?.id) return;
     try {
       const selectedType = roomTypes.find(t => t.name === newRoom.type);
-      await safeAdd(collection(db, 'hotels', hotel.id, 'rooms'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'rooms'), {
         ...newRoom,
         roomTypeId: selectedType?.id,
         capacity: selectedType?.capacity || newRoom.capacity,
         price: selectedType?.basePrice || newRoom.price,
         amenities: selectedType?.amenities || newRoom.amenities,
         status: 'dirty',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'ADD_ROOM');
+        createdAt: new Date().toISOString()
+      });
       setIsAddingRoom(false);
       toast.success('Room added successfully');
     } catch (err) {
@@ -246,17 +245,16 @@ export function Rooms() {
     if (!hotel?.id) return;
     try {
       if (editingRoomType) {
-        await safeWrite(doc(db, 'hotels', hotel.id, 'room_types', editingRoomType.id), {
+        await setDoc(doc(db, 'hotels', hotel.id, 'room_types', editingRoomType.id), {
           ...newRoomType,
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'UPDATE_ROOM_TYPE');
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
         toast.success('Room type updated successfully');
       } else {
-        await safeAdd(collection(db, 'hotels', hotel.id, 'room_types'), {
+        await addDoc(collection(db, 'hotels', hotel.id, 'room_types'), {
           ...newRoomType,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'ADD_ROOM_TYPE');
+          createdAt: new Date().toISOString()
+        });
         toast.success('Room type added successfully');
       }
       setNewRoomType({
@@ -278,10 +276,10 @@ export function Rooms() {
     e.preventDefault();
     if (!hotel?.id || !editingRoom) return;
     try {
-      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
+      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
         ...editingRoom,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'UPDATE_ROOM');
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
       toast.success('Room updated successfully');
       setEditingRoom(null);
     } catch (err) {
@@ -295,20 +293,7 @@ export function Rooms() {
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
     try {
-      await safeDelete(doc(db, 'hotels', hotel.id, 'room_types', id), hotel.id, 'DELETE_ROOM_TYPE');
-      
-      // Audit log the deletion
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'system',
-        userRole: profile?.role || 'staff',
-        action: 'DELETE_ROOM_TYPE',
-        resource: `Room Type ID: ${id}`,
-        hotelId: hotel.id,
-        module: 'Rooms'
-      }, hotel.id, 'LOG_ROOM_TYPE_DELETE');
-
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'room_types', id));
       toast.success('Room type deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/room_types/${id}`);
@@ -318,20 +303,7 @@ export function Rooms() {
   const deleteRoom = async (id: string) => {
     if (!hotel?.id) return;
     try {
-      await safeDelete(doc(db, 'hotels', hotel.id, 'rooms', id), hotel.id, 'DELETE_ROOM');
-      
-      // Audit log the deletion
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'system',
-        userRole: profile?.role || 'staff',
-        action: 'DELETE_ROOM',
-        resource: `Room ID: ${id}`,
-        hotelId: hotel.id,
-        module: 'Rooms'
-      }, hotel.id, 'LOG_ROOM_DELETE');
-
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'rooms', id));
       toast.success('Room deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rooms/${id}`);
@@ -342,14 +314,11 @@ export function Rooms() {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
     try {
-      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', roomId), { 
-        status,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'UPDATE_ROOM_STATUS');
+      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
 
-      // Log the action (handled by safeWrite, but if we want custom resource text:)
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      // Log the action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
         userRole: profile?.role || 'staff',
@@ -357,7 +326,7 @@ export function Rooms() {
         resource: `Room ${room?.roomNumber || roomId}: ${status}`,
         hotelId: hotel.id,
         module: 'Rooms'
-      }, hotel.id, 'LOG_ROOM_STATUS_UPDATE');
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
     }
@@ -386,17 +355,14 @@ export function Rooms() {
     
     try {
       const promises = selectedRooms.map(roomId => 
-        safeWrite(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { 
-          status,
-          updatedAt: serverTimestamp()
-        }, hotel.id!, 'BULK_UPDATE_ROOM_STATUS')
+        setDoc(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { status }, { merge: true })
       );
       
       await Promise.all(promises);
 
       // Log the action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
         userRole: profile?.role || 'staff',
@@ -404,7 +370,7 @@ export function Rooms() {
         resource: `${selectedRooms.length} rooms set to ${status}`,
         hotelId: hotel.id,
         module: 'Rooms'
-      }, hotel.id, 'LOG_BULK_ROOM_STATUS_UPDATE');
+      });
 
       toast.success(`Successfully updated ${selectedRooms.length} rooms`, { id: loadingToast });
       setSelectedRooms([]);
@@ -491,28 +457,19 @@ export function Rooms() {
       const batch = writeBatch(db);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
-      batch.update(resRef, { 
-        status,
-        updatedAt: serverTimestamp()
-      });
+      batch.update(resRef, { status });
       
       if (status === 'checked_in') {
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
-          status: 'occupied',
-          updatedAt: serverTimestamp()
-        });
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
       } else if (status === 'checked_out') {
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
-          status: 'dirty',
-          updatedAt: serverTimestamp()
-        });
+        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
       }
 
       await batch.commit();
       
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -520,7 +477,7 @@ export function Rooms() {
         resource: `Reservation for ${res.guestName} updated to ${status}`,
         hotelId: hotel.id,
         module: 'Rooms'
-      }, hotel.id, 'LOG_RESERVATION_STATUS_UPDATE');
+      });
 
       toast.success(`Reservation updated to ${status.replace('_', ' ')}`);
       setShowQuickActionMenu(false);
@@ -1033,27 +990,15 @@ export function Rooms() {
               <div className="space-y-6">
                 <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Active Blockings</h4>
                 <div className="space-y-3">
-                  {blockings
-                    .filter(b => isAfter(safeToDate(b.endDate), startOfDay(new Date())) || isSameDay(safeToDate(b.endDate), new Date()))
-                    .sort((a, b) => safeToDate(a.startDate).getTime() - safeToDate(b.startDate).getTime())
-                    .map(b => (
+                  {blockings.map(b => (
                     <div key={b.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
                       <div>
                         <div className="font-bold text-zinc-50">Room {rooms.find(r => r.id === b.roomId)?.roomNumber}</div>
-                        <div className="text-xs text-zinc-500">{format(safeToDate(b.startDate), 'MMM dd, yyyy')} - {format(safeToDate(b.endDate), 'MMM dd, yyyy')}</div>
+                        <div className="text-xs text-zinc-500">{format(new Date(b.startDate), 'MMM dd')} - {format(new Date(b.endDate), 'MMM dd')}</div>
                         <div className="text-[10px] text-emerald-500 font-bold uppercase mt-1">{b.reason}</div>
-                        {b.notes && <div className="text-[10px] text-zinc-500 mt-1 italic">"{b.notes}"</div>}
                       </div>
                       <button 
-                        onClick={async () => {
-                          if (!hotel?.id) return;
-                          try {
-                            await roomService.unblockRoom(hotel.id, b.id, b.roomId);
-                            toast.success('Room unblocked successfully');
-                          } catch (err) {
-                            toast.error('Failed to unblock room');
-                          }
-                        }}
+                        onClick={() => hotel?.id && roomService.unblockRoom(hotel.id, b.id, b.roomId)}
                         className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={18} />
@@ -1089,17 +1034,17 @@ export function Rooms() {
 
                   if (!hotel?.id) return;
                   try {
-                    await safeAdd(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
+                    await addDoc(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
                       roomTypeId,
                       baseRate,
                       weekendRate,
                       weekdayRate,
-                      timestamp: serverTimestamp()
-                    }, hotel.id, 'ADD_RATE_RULE');
+                      timestamp: new Date().toISOString()
+                    });
                     toast.success('Rate rule added');
                     e.currentTarget.reset();
                   } catch (err) {
-                    handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rate_configurations`);
+                    toast.error('Failed to add rate rule');
                   }
                 }} className="space-y-4">
                   <div>
@@ -1141,25 +1086,7 @@ export function Rooms() {
                         </div>
                       </div>
                       <button 
-                        onClick={async () => {
-                          if (!hotel?.id) return;
-                          try {
-                            await safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), hotel.id, 'DELETE_RATE_RULE');
-                            await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-                              timestamp: serverTimestamp(),
-                              userId: profile?.uid || 'system',
-                              userEmail: profile?.email || 'system',
-                              userRole: profile?.role || 'staff',
-                              action: 'DELETE_RATE_RULE',
-                              resource: `Rate Rule for ${roomTypes.find(t => t.id === c.roomTypeId)?.name}`,
-                              hotelId: hotel.id,
-                              module: 'Rooms'
-                            }, hotel.id, 'LOG_RATE_RULE_DELETE');
-                            toast.success('Rate rule deleted');
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
-                          }
-                        }}
+                        onClick={() => hotel?.id && deleteDoc(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id))}
                         className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={18} />
@@ -1195,17 +1122,17 @@ export function Rooms() {
 
                   if (!hotel?.id) return;
                   try {
-                    await safeAdd(collection(db, 'hotels', hotel.id, 'inventory_consumption_rules'), {
+                    await addDoc(collection(db, 'hotels', hotel.id, 'inventory_consumption_rules'), {
                       roomTypeId: roomTypeId === 'all' ? null : roomTypeId,
                       itemId,
                       quantity,
                       trigger,
-                      timestamp: serverTimestamp()
-                    }, hotel.id, 'ADD_INVENTORY_SYNC_RULE');
+                      timestamp: new Date().toISOString()
+                    });
                     toast.success('Consumption rule added');
                     e.currentTarget.reset();
                   } catch (err) {
-                    handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/inventory_consumption_rules`);
+                    toast.error('Failed to add rule');
                   }
                 }} className="space-y-4">
                   <div>
@@ -1254,25 +1181,7 @@ export function Rooms() {
                         </div>
                       </div>
                       <button 
-                        onClick={async () => {
-                          if (!hotel?.id) return;
-                          try {
-                            await safeDelete(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id), hotel.id, 'DELETE_INVENTORY_SYNC_RULE');
-                            await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-                              timestamp: serverTimestamp(),
-                              userId: profile?.uid || 'system',
-                              userEmail: profile?.email || 'system',
-                              userRole: profile?.role || 'staff',
-                              action: 'DELETE_INVENTORY_SYNC_RULE',
-                              resource: `Rule for item: ${inventoryItems.find(i => i.id === r.itemId)?.name}`,
-                              hotelId: hotel.id,
-                              module: 'Rooms'
-                            }, hotel.id, 'LOG_INVENTORY_SYNC_RULE_DELETE');
-                            toast.success('Sync rule deleted');
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory_consumption_rules/${r.id}`);
-                          }
-                        }}
+                        onClick={() => hotel?.id && deleteDoc(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id))}
                         className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={18} />
@@ -1796,8 +1705,8 @@ export function Rooms() {
                         res.status !== 'cancelled' &&
                         res.status !== 'no_show' &&
                         isWithinInterval(day, {
-                          start: startOfDay(safeToDate(res.checkIn)),
-                          end: subDays(startOfDay(safeToDate(res.checkOut)), 1)
+                          start: startOfDay(parseISO(res.checkIn)),
+                          end: subDays(startOfDay(parseISO(res.checkOut)), 1)
                         })
                       );
 
@@ -1805,14 +1714,14 @@ export function Rooms() {
                         res.roomId === room.id &&
                         res.status !== 'cancelled' &&
                         res.status !== 'no_show' &&
-                        isSameDay(day, safeToDate(res.checkOut))
+                        isSameDay(day, parseISO(res.checkOut))
                       );
 
                       const checkinToday = reservations.find(res =>
                         res.roomId === room.id &&
                         res.status !== 'cancelled' &&
                         res.status !== 'no_show' &&
-                        isSameDay(day, safeToDate(res.checkIn))
+                        isSameDay(day, parseISO(res.checkIn))
                       );
 
                       return (
@@ -1832,7 +1741,7 @@ export function Rooms() {
                                 "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border text-left transition-all hover:scale-[1.02] active:scale-95 z-10",
                                 reservation.status === 'checked_in' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
                               )}
-                              title={`${reservation.guestName} (${format(safeToDate(reservation.checkIn), 'MMM dd')} - ${format(safeToDate(reservation.checkOut), 'MMM dd')})`}
+                              title={`${reservation.guestName} (${format(parseISO(reservation.checkIn), 'MMM dd')} - ${format(parseISO(reservation.checkOut), 'MMM dd')})`}
                             >
                               <div className="truncate">{reservation.guestName}</div>
                               <div className="opacity-60 flex items-center justify-between">
@@ -1923,11 +1832,11 @@ export function Rooms() {
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
                     <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-In</div>
-                    <div className="text-xs font-bold text-zinc-50">{format(safeToDate(selectedReservation.checkIn), 'MMM dd, yyyy')}</div>
+                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkIn), 'MMM dd, yyyy')}</div>
                   </div>
                   <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
                     <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-Out</div>
-                    <div className="text-xs font-bold text-zinc-50">{format(safeToDate(selectedReservation.checkOut), 'MMM dd, yyyy')}</div>
+                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkOut), 'MMM dd, yyyy')}</div>
                   </div>
                 </div>
 
@@ -2116,26 +2025,26 @@ export function Rooms() {
                   </button>
                   <button
                     type="button"
-                    disabled={isSaving}
                     onClick={async () => {
                       if (!hotel?.id || !editingRoom) return;
                       try {
                         setIsSaving(true);
-                        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
+                        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
                           ...editingRoom,
-                          updatedAt: serverTimestamp()
-                        }, hotel.id, 'UPDATE_ROOM_DETAILS');
+                          updatedAt: new Date().toISOString()
+                        }, { merge: true });
                         toast.success('Room updated successfully');
                         setEditingRoom(null);
                       } catch (err) {
                         handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${editingRoom.id}`);
+                        toast.error('Failed to update room');
                       } finally {
                         setIsSaving(false);
                       }
                     }}
-                    className="flex-1 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
+                    className="flex-1 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95"
                   >
-                    {isSaving ? 'Saving...' : 'Save Changes'}
+                    Save Changes
                   </button>
                 </div>
               </form>

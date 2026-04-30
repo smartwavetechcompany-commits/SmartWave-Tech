@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, getDocs, getDoc, query, where, orderBy } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc, query, where, orderBy } from 'firebase/firestore';
+import { auth, db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings, PlanType } from '../types';
 import { 
@@ -136,12 +136,10 @@ export function SuperAdmin() {
 
   const updateSettings = async () => {
     try {
-      await safeWrite(doc(db, 'system', 'settings'), {
-        ...settings,
-        updatedAt: serverTimestamp()
-      }, 'system', 'UPDATE_SYSTEM_SETTINGS');
+      await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
       toast.success('System settings updated successfully');
     } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'system/settings');
       toast.error('Failed to update settings');
     }
   };
@@ -177,7 +175,6 @@ export function SuperAdmin() {
       else if (request.message?.includes('1 year')) durationMs = 365 * 24 * 60 * 60 * 1000;
 
       const expiryDate = new Date(Date.now() + durationMs).toISOString();
-      const timestamp = serverTimestamp();
 
       const tc: TrackingCode = {
         code,
@@ -186,33 +183,32 @@ export function SuperAdmin() {
         plan: (request.plan?.toLowerCase() as PlanType) || 'standard',
         maxHotels: 1,
         issuedBy: auth.currentUser.uid,
-        createdAt: timestamp as any, // serverTimestamp for consistency
+        createdAt: new Date().toISOString(),
         targetEmail: request.email
       };
 
       // 1. Create the tracking code
-      await safeWrite(doc(db, 'trackingCodes', code), tc, 'system', 'GENERATE_CODE');
+      await setDoc(doc(db, 'trackingCodes', code), tc);
       
       // 2. Approve the request
-      await safeWrite(doc(db, 'trackingCodeRequests', request.id), {
+      await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
         status: 'approved',
-        generatedCode: code,
-        updatedAt: timestamp
-      }, 'system', 'APPROVE_REQUEST');
+        generatedCode: code
+      });
 
       // 3. Log the action
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: profile?.email || auth.currentUser.email || auth.currentUser.uid,
         userRole: 'superAdmin',
         action: 'APPROVE_CODE_REQUEST',
         target: `Hotel: ${request.hotelName}, Code: ${code}`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, 'system', 'LOG_APPROVE_REQUEST');
+      await addDoc(collection(db, 'activityLogs'), log);
 
       toast.success(`Code ${code} approved for ${request.hotelName}`);
     } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
       toast.error('Failed to approve request');
     } finally {
       setLoading(false);
@@ -221,12 +217,10 @@ export function SuperAdmin() {
 
   const rejectRequest = async (requestId: string) => {
     try {
-      await safeWrite(doc(db, 'trackingCodeRequests', requestId), { 
-        status: 'rejected',
-        updatedAt: serverTimestamp()
-      }, 'system', 'REJECT_REQUEST');
+      await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
       toast.success('Request rejected');
     } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `trackingCodeRequests/${requestId}`);
       toast.error('Failed to reject request');
     }
   };
@@ -263,7 +257,6 @@ export function SuperAdmin() {
       if (newCode.duration === '6 months') durationMs = 6 * 30 * 24 * 60 * 60 * 1000;
       else if (newCode.duration === '1 year') durationMs = 365 * 24 * 60 * 60 * 1000;
 
-      const timestamp = serverTimestamp();
       const tc: TrackingCode = {
         code,
         expiryDate: new Date(Date.now() + durationMs).toISOString(),
@@ -271,27 +264,27 @@ export function SuperAdmin() {
         plan: newCode.type.toLowerCase() as PlanType,
         maxHotels: 1,
         issuedBy: auth.currentUser.uid,
-        createdAt: timestamp as any,
+        createdAt: new Date().toISOString(),
         price: newCode.price,
         targetEmail: newCode.targetEmail.toLowerCase()
       };
 
-      await safeWrite(doc(db, 'trackingCodes', code), tc, 'system', 'GENERATE_CODE_MANUAL');
+      await setDoc(doc(db, 'trackingCodes', code), tc);
 
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
         userRole: 'superAdmin',
         action: 'GENERATE_TRACKING_CODE',
         target: `Code: ${code} (${newCode.duration})`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, 'system', 'LOG_GENERATE_CODE');
+      await addDoc(collection(db, 'activityLogs'), log);
 
       setGeneratedCode(code);
       setNewCode({ duration: '1 month', type: 'Standard', price: 0, targetEmail: '' });
       toast.success('Tracking code generated successfully');
     } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
       toast.error('Failed to generate code');
     } finally {
       setLoading(false);
@@ -303,28 +296,26 @@ export function SuperAdmin() {
 
     setLoading(true);
     try {
-      const currentExpiry = new Date(code.expiryDate || Date.now()).getTime();
+      const currentExpiry = new Date(code.expiryDate).getTime();
       const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
-      const timestamp = serverTimestamp();
       
-      await safeWrite(doc(db, 'trackingCodes', code.code), { 
-        expiryDate: newExpiry,
-        updatedAt: timestamp
-      }, 'system', 'EXTEND_CODE');
+      await updateDoc(doc(db, 'trackingCodes', code.code), { 
+        expiryDate: newExpiry
+      });
 
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
         userRole: 'superAdmin',
         action: 'EXTEND_TRACKING_CODE',
         target: `Code ${code.code}: +${months} months`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, 'system', 'LOG_EXTEND_CODE');
+      await addDoc(collection(db, 'activityLogs'), log);
       
       setExtendingCode(null);
       toast.success(`Code ${code.code} extended by ${months} months`);
     } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${code.code}`);
       toast.error('Failed to extend code');
     } finally {
       setLoading(false);
@@ -334,28 +325,26 @@ export function SuperAdmin() {
   const giveLiveAccess = async (hotel: Hotel) => {
     try {
       const now = Date.now();
-      const currentExpiry = new Date(hotel.subscriptionExpiry || now).getTime();
+      const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
       const newExpiry = new Date((currentExpiry > now ? currentExpiry : now) + (30 * 24 * 60 * 60 * 1000)).toISOString();
-      const timestamp = serverTimestamp();
       
-      await safeWrite(doc(db, 'hotels', hotel.id), { 
+      await updateDoc(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
-        subscriptionStatus: 'active',
-        updatedAt: timestamp
-      }, hotel.id, 'GIVE_LIVE_ACCESS');
+        subscriptionStatus: 'active' 
+      });
 
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: profile?.email || profile?.uid || 'system',
         userRole: 'superAdmin',
         action: 'GIVE_LIVE_ACCESS',
         target: `Hotel: ${hotel.name}`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, hotel.id, 'LOG_LIVE_ACCESS');
+      await addDoc(collection(db, 'activityLogs'), log);
       
       toast.success(`Live access granted to ${hotel.name}`);
     } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
       toast.error('Failed to grant live access');
     }
   };
@@ -366,18 +355,19 @@ export function SuperAdmin() {
       message: `Are you sure you want to delete ${hotel.name}? This will delete all hotel data including rooms, reservations, and staff profiles. This action cannot be undone.`,
       onConfirm: async () => {
         try {
-          await safeDelete(doc(db, 'hotels', hotel.id), hotel.id, 'DELETE_HOTEL_AND_DATA');
-          
-          const log = {
+          await deleteDoc(doc(db, 'hotels', hotel.id));
+          const log: Omit<GlobalAuditLog, 'id'> = {
+            timestamp: new Date().toISOString(),
             actor: profile?.email || profile?.uid || 'system',
             userRole: 'superAdmin',
             action: 'DELETE_HOTEL',
             target: `Hotel: ${hotel.name}`
           };
-          await safeAdd(collection(db, 'activityLogs'), log, 'system', 'LOG_DELETE_HOTEL');
+          await addDoc(collection(db, 'activityLogs'), log);
           toast.success(`Hotel ${hotel.name} deleted`);
           setConfirmAction(null);
         } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}`);
           toast.error('Failed to delete hotel');
         }
       }
@@ -387,53 +377,46 @@ export function SuperAdmin() {
   const toggleHotelStatus = async (hotel: Hotel) => {
     try {
       const newStatus = hotel.subscriptionStatus === 'active' ? 'suspended' : 'active';
-      const timestamp = serverTimestamp();
-      await safeWrite(doc(db, 'hotels', hotel.id), { 
-        subscriptionStatus: newStatus,
-        updatedAt: timestamp
-      }, hotel.id, 'TOGGLE_HOTEL_STATUS');
+      await updateDoc(doc(db, 'hotels', hotel.id), { subscriptionStatus: newStatus });
 
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: profile?.email || profile?.uid || 'system',
         userRole: 'superAdmin',
         action: 'TOGGLE_HOTEL_STATUS',
         target: `Hotel ${hotel.name}: ${newStatus}`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, hotel.id, 'LOG_TOGGLE_STATUS');
+      await addDoc(collection(db, 'activityLogs'), log);
       toast.success(`Hotel ${hotel.name} ${newStatus}`);
     } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
       toast.error('Failed to update hotel status');
     }
   };
 
   const extendSubscription = async (hotel: Hotel, months: number) => {
     try {
-      const now = Date.now();
-      const currentExpiry = new Date(hotel.subscriptionExpiry || now).getTime();
+      const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
       const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
-      const timestamp = serverTimestamp();
       
-      await safeWrite(doc(db, 'hotels', hotel.id), { 
+      await updateDoc(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
-        subscriptionStatus: 'active',
-        updatedAt: timestamp
-      }, hotel.id, 'EXTEND_SUBSCRIPTION');
+        subscriptionStatus: 'active' 
+      });
 
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: profile?.email || profile?.uid || 'system',
         userRole: 'superAdmin',
         action: 'EXTEND_SUBSCRIPTION',
         target: `Hotel ${hotel.name}: +${months} months`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, hotel.id, 'LOG_EXTEND_SUBSCRIPTION');
+      await addDoc(collection(db, 'activityLogs'), log);
       
       setExtendingHotel(null);
       toast.success(`Subscription for ${hotel.name} extended by ${months} months`);
     } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
       toast.error('Failed to extend subscription');
     }
   };
@@ -460,7 +443,6 @@ export function SuperAdmin() {
 
       const features = planFeatures[newPlan];
       
-      const timestamp = serverTimestamp();
       const planHistoryItem = {
         plan: newPlan,
         previousPlan: hotel.plan,
@@ -469,15 +451,14 @@ export function SuperAdmin() {
         reason: planChangeReason
       };
 
-      await safeWrite(doc(db, 'hotels', hotel.id), { 
+      await updateDoc(doc(db, 'hotels', hotel.id), { 
         plan: newPlan,
         modulesEnabled: features.modules,
         roomLimit: features.limits.rooms,
         staffLimit: features.limits.staff,
         limits: features.limits,
-        planHistory: [...(hotel.planHistory || []), planHistoryItem],
-        updatedAt: timestamp
-      }, hotel.id, 'CHANGE_PLAN');
+        planHistory: [...(hotel.planHistory || []), planHistoryItem]
+      });
 
       // Update the tracking code associated with the hotel if it exists
       if (hotel.trackingCode) {
@@ -485,11 +466,10 @@ export function SuperAdmin() {
           const tcRef = doc(db, 'trackingCodes', hotel.trackingCode.toUpperCase());
           const tcDoc = await getDoc(tcRef);
           if (tcDoc.exists()) {
-            await safeWrite(tcRef, { 
+            await updateDoc(tcRef, { 
               plan: newPlan,
-              price: ((tcDoc.data() as TrackingCode).price || 0) + planChangeAmount,
-              updatedAt: timestamp
-            }, 'system', 'UPDATE_CODE_PLAN');
+              price: (tcDoc.data() as TrackingCode).price || 0 + planChangeAmount
+            });
           }
         } catch (err: any) {
           console.error("Failed to update tracking code plan:", err.message || safeStringify(err));
@@ -497,15 +477,14 @@ export function SuperAdmin() {
         }
       }
 
-      const log = {
-        timestamp,
-        createdAt: timestamp,
+      const log: Omit<GlobalAuditLog, 'id'> = {
+        timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
         userRole: 'superAdmin',
         action: 'CHANGE_HOTEL_PLAN',
         target: `Hotel ${hotel.name}: ${hotel.plan} -> ${newPlan} (Amount: ${planChangeAmount})`
       };
-      await safeAdd(collection(db, 'activityLogs'), log, hotel.id, 'LOG_CHANGE_PLAN');
+      await addDoc(collection(db, 'activityLogs'), log);
       
       setChangingPlanHotel(null);
       setPlanChangeAmount(0);
@@ -1231,7 +1210,7 @@ export function SuperAdmin() {
                                 message: `Are you sure you want to delete code ${code.code}? This action cannot be undone.`,
                                 onConfirm: async () => {
                                   try {
-                                    await safeDelete(doc(db, 'trackingCodes', code.id || code.code), 'system', 'DELETE_TRACKING_CODE');
+                                    await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
                                     toast.success('Tracking code deleted');
                                     setConfirmAction(null);
                                   } catch (err) {

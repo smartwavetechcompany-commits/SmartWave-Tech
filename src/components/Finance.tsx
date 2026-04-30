@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, getDoc, deleteDoc, increment } from 'firebase/firestore';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd, safeDelete } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
@@ -38,7 +38,7 @@ import {
   Trash2,
   PlusCircle
 } from 'lucide-react';
-import { cn, formatCurrency, exportToCSV, safeStringify, safeToDate } from '../utils';
+import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -254,11 +254,11 @@ export function Finance() {
     }
 
     try {
-      await safeDelete(doc(db, 'hotels', hotel.id, 'finance', id), hotel.id, 'DELETE_FINANCE_RECORD');
+      await deleteDoc(doc(db, 'hotels', hotel.id, 'finance', id));
       
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -266,7 +266,7 @@ export function Finance() {
         resource: `${description} (${formatCurrency(amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
-      }, hotel.id, 'LOG_FINANCE_DELETION');
+      });
       
       toast.success('Transaction deleted successfully');
     } catch (err) {
@@ -314,7 +314,7 @@ export function Finance() {
       // Find the most recent reservation for this entity to post the ledger entry
       const lastRes = reservations
         .filter(r => isCorporate ? r.corporateId === entityId : r.guestId === entityId)
-        .sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime())[0];
+        .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())[0];
 
       if (!lastRes) {
         toast.error('No reservation found for this account to post the settlement.');
@@ -351,11 +351,11 @@ export function Finance() {
     setIsSaving(true);
     console.log('Starting handleAddSupplier with data:', newSupplier);
     try {
-      await safeAdd(collection(db, 'hotels', hotel.id, 'suppliers'), {
+      const supplierRef = await addDoc(collection(db, 'hotels', hotel.id, 'suppliers'), {
         ...newSupplier,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'CREATE_SUPPLIER');
+        createdAt: new Date().toISOString()
+      });
+      console.log('Supplier added with ID:', supplierRef.id);
       toast.success('Supplier added successfully');
       setShowAddSupplierModal(false);
       setNewSupplier({ name: '', email: '', phone: '', address: '', category: 'Supplies', balance: 0 });
@@ -376,21 +376,19 @@ export function Finance() {
       const amount = payData.amount;
 
       // Update supplier balance
-      await safeWrite(doc(db, 'hotels', hotel.id, 'suppliers', supplier.id), {
-        balance: (supplier.balance || 0) - amount,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'SUPPLIER_PAYMENT_BALANCE');
+      await updateDoc(doc(db, 'hotels', hotel.id, 'suppliers', supplier.id), {
+        balance: (supplier.balance || 0) - amount
+      });
 
       // Record as expense
-      await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
         type: 'expense',
         amount: amount,
         category: 'Supplies',
         description: `Supplier Payment: ${supplier.name} (${payData.notes || 'No notes'})`,
-        timestamp: serverTimestamp(),
-        paymentMethod: payData.method,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'SUPPLIER_PAYMENT_FINANCE');
+        timestamp: new Date().toISOString(),
+        paymentMethod: payData.method
+      });
 
       toast.success('Payment recorded successfully');
       setShowPaySupplierModal(null);
@@ -408,12 +406,11 @@ export function Finance() {
     setIsSaving(true);
     console.log('Starting handleCreateAccount with data:', newAccount);
     try {
-      await safeAdd(collection(db, 'hotels', hotel.id, 'accounts'), {
+      const accountRef = await addDoc(collection(db, 'hotels', hotel.id, 'accounts'), {
         ...newAccount,
-        balance: Number(newAccount.balance),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'CREATE_ACCOUNT');
+        balance: Number(newAccount.balance)
+      });
+      console.log('Account created with ID:', accountRef.id);
       toast.success('Account created successfully');
       setShowAddAccountModal(false);
       setNewAccount({ code: '', name: '', type: 'asset', description: '', balance: 0 });
@@ -435,20 +432,18 @@ export function Finance() {
     setIsSaving(true);
     console.log('Starting handleCreatePO with data:', newPO);
     try {
-      await safeAdd(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
+      const poRef = await addDoc(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
         ...newPO,
-        timestamp: serverTimestamp(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'CREATE_PO');
+        timestamp: new Date().toISOString()
+      });
 
       // Update supplier balance (liability)
       const supplierRef = doc(db, 'hotels', hotel.id, 'suppliers', newPO.supplierId);
-      await safeWrite(supplierRef, {
-        balance: increment(newPO.totalAmount),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'PO_UPDATE_SUPPLIER_BALANCE');
+      await updateDoc(supplierRef, {
+        balance: increment(newPO.totalAmount)
+      });
 
+      console.log('Purchase Order created with ID:', poRef.id);
       toast.success('Purchase Order created successfully');
       setShowAddPOModal(false);
       setNewPO({ supplierId: '', items: [], totalAmount: 0, status: 'pending', paymentStatus: 'unpaid', dueDate: format(addDays(new Date(), 7), 'yyyy-MM-dd') });
@@ -467,10 +462,9 @@ export function Finance() {
     setIsSaving(true);
     try {
       // Update PO status
-      await safeWrite(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
-        status: 'received',
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'RECEIVE_PO');
+      await updateDoc(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
+        status: 'received'
+      });
 
       // Update inventory for each item
       for (const item of po.items) {
@@ -478,17 +472,16 @@ export function Finance() {
         const itemDoc = await getDoc(itemRef);
         if (itemDoc.exists()) {
           const currentQty = itemDoc.data().quantity || 0;
-          await safeWrite(itemRef, {
+          await updateDoc(itemRef, {
             quantity: currentQty + item.quantity,
-            lastUpdated: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, hotel.id, 'INVENTORY_UPDATE_FROM_PO');
+            lastUpdated: new Date().toISOString()
+          });
         }
       }
 
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -496,7 +489,7 @@ export function Finance() {
         resource: `PO #${po.id.slice(0, 8)} received, inventory updated`,
         hotelId: hotel.id,
         module: 'Inventory'
-      }, hotel.id, 'LOG_PO_RECEIVE');
+      });
 
       toast.success('Purchase Order received and inventory updated');
     } catch (err) {
@@ -513,35 +506,32 @@ export function Finance() {
     setIsSaving(true);
     try {
       // Update PO payment status
-      await safeWrite(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
-        paymentStatus: 'paid',
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'PAY_PO');
+      await updateDoc(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
+        paymentStatus: 'paid'
+      });
 
       // Update supplier balance
       const supplierRef = doc(db, 'hotels', hotel.id, 'suppliers', po.supplierId);
-      await safeWrite(supplierRef, {
-        balance: increment(-po.totalAmount),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'PAY_PO_SUPPLIER_BALANCE');
+      await updateDoc(supplierRef, {
+        balance: increment(-po.totalAmount)
+      });
 
       // Record as expense in finance
       const supplier = suppliers.find(s => s.id === po.supplierId);
-      await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
         type: 'expense',
         amount: po.totalAmount,
         category: 'Supplies',
         description: `PO Payment: #${po.id.slice(0, 8)} to ${supplier?.name || 'Supplier'}`,
-        timestamp: serverTimestamp(),
+        timestamp: new Date().toISOString(),
         paymentMethod: 'transfer', // Default for POs
         referenceId: po.id,
-        postedBy: profile.uid,
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'PAY_PO_FINANCE_RECORD');
+        postedBy: profile.uid
+      });
 
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -549,7 +539,7 @@ export function Finance() {
         resource: `PO #${po.id.slice(0, 8)} paid (${formatCurrency(po.totalAmount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
-      }, hotel.id, 'LOG_PO_PAY');
+      });
 
       toast.success('Purchase Order marked as paid and finance record created');
     } catch (err) {
@@ -563,11 +553,11 @@ export function Finance() {
     let data: any[] = [];
     let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`;
 
-    const start = startOfDay(safeToDate(reportFilter.startDate));
-    const end = endOfDay(safeToDate(reportFilter.endDate));
+    const start = startOfDay(new Date(reportFilter.startDate));
+    const end = endOfDay(new Date(reportFilter.endDate));
 
     const filterByDate = (items: any[]) => items.filter(item => {
-      const date = safeToDate(item.timestamp || item.createdAt || item.date);
+      const date = new Date(item.timestamp || item.createdAt || item.date);
       return date >= start && date <= end;
     });
 
@@ -594,7 +584,7 @@ export function Finance() {
         data = filterByDate(records)
           .filter(r => reportFilter.category === 'all' || r.category === reportFilter.category)
           .map(r => ({
-            Date: format(safeToDate(r.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
             Description: r.description,
             Category: r.category,
             Type: r.type,
@@ -649,15 +639,14 @@ export function Finance() {
     if (!hotel?.id) return;
 
     try {
-      await safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
         ...newRecord,
-        timestamp: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, hotel.id, 'CREATE_FINANCE_RECORD');
+        timestamp: new Date().toISOString()
+      });
 
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
         userRole: profile?.role,
@@ -665,7 +654,7 @@ export function Finance() {
         resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
-      }, hotel.id, 'LOG_FINANCE_RECORD');
+      });
 
       setShowAddModal(false);
       setNewRecord({ description: '', amount: 0, type: 'income', category: 'Room Revenue', paymentMethod: 'cash' });
@@ -682,16 +671,16 @@ export function Finance() {
     const matchesMethod = methodFilter === 'all' || r.paymentMethod === methodFilter;
     
     let matchesTime = true;
-    if (timeRange === 'today') matchesTime = isToday(safeToDate(r.timestamp));
+    if (timeRange === 'today') matchesTime = isToday(new Date(r.timestamp));
     if (timeRange === 'month') {
       const start = startOfMonth(new Date());
       const end = endOfMonth(new Date());
-      matchesTime = isWithinInterval(safeToDate(r.timestamp), { start, end });
+      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
     }
     if (timeRange === 'custom' && customDateRange.start && customDateRange.end) {
-      const start = startOfDay(safeToDate(customDateRange.start));
-      const end = endOfDay(safeToDate(customDateRange.end));
-      matchesTime = isWithinInterval(safeToDate(r.timestamp), { start, end });
+      const start = startOfDay(new Date(customDateRange.start));
+      const end = endOfDay(new Date(customDateRange.end));
+      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
     }
 
     return matchesSearch && matchesType && matchesCategory && matchesMethod && matchesTime;
@@ -729,7 +718,7 @@ export function Finance() {
       if (activeTab === 'transactions') {
         const record = item as FinanceRecord;
         return {
-          Date: format(safeToDate(record.timestamp), 'yyyy-MM-dd HH:mm'),
+          Date: format(new Date(record.timestamp), 'yyyy-MM-dd HH:mm'),
           Description: record.description,
           Type: record.type,
           Category: record.category,
@@ -995,8 +984,8 @@ export function Finance() {
                     {filteredRecords.map((record) => (
                       <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
                         <td className="px-6 py-4">
-                          <div className="text-sm text-zinc-50">{safeToDate(record.timestamp).toLocaleDateString()}</div>
-                          <div className="text-[10px] text-zinc-500">{safeToDate(record.timestamp).toLocaleTimeString()}</div>
+                          <div className="text-sm text-zinc-50">{new Date(record.timestamp).toLocaleDateString()}</div>
+                          <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
                         <td className="px-6 py-4">
@@ -1068,17 +1057,13 @@ export function Finance() {
                               </button>
                               <button
                                 onClick={() => {
-                                  // Find the active reservation or latest reservation for this guest to open folio
+                                  // Find the active reservation for this guest to open folio
                                   const activeRes = reservations.find(r => r.guestId === guest.id && (r.status === 'checked_in' || r.status === 'pending'));
-                                  const latestRes = activeRes || reservations
-                                    .filter(r => r.guestId === guest.id)
-                                    .sort((a, b) => safeToDate(b.checkIn).getTime() - safeToDate(a.checkIn).getTime())[0];
-                                  
-                                  if (latestRes) {
-                                    setSelectedReservation(latestRes);
+                                  if (activeRes) {
+                                    setSelectedReservation(activeRes);
                                     setShowFolio(true);
                                   } else {
-                                    toast.error('No reservation history found for this guest');
+                                    toast.error('No active reservation found for this guest');
                                   }
                                 }}
                                 className="text-xs font-bold text-zinc-400 hover:text-zinc-200"

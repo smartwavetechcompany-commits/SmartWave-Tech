@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, setDoc, addDoc, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, serverTimestamp, safeWrite, safeAdd } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType, UserProfile, Reservation } from '../types';
 import { 
@@ -95,31 +95,31 @@ export function Housekeeping() {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
     const notes = roomNotes[roomId] ?? room?.notes ?? '';
+    const now = new Date().toISOString();
     
     try {
       const updateData: any = { 
         status,
-        notes,
-        updatedAt: serverTimestamp()
+        notes 
       };
 
       if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
-      if (status === 'clean') updateData.lastCleanedAt = serverTimestamp();
-      if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = serverTimestamp();
+      if (status === 'clean') updateData.lastCleanedAt = now;
+      if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = now;
 
-      await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, hotel.id, 'HOUSEKEEPING_UPDATE');
+      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, { merge: true });
 
-      // (Log action is handled by safeWrite but we can add more specific logs if needed)
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: serverTimestamp(),
+      // Log action
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: now,
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
         userRole: profile?.role || 'staff',
-        action: 'HOUSEKEEPING_UPDATE_DETAIL',
+        action: 'HOUSEKEEPING_UPDATE',
         resource: `Room ${room?.roomNumber || roomId}: ${status}${notes ? ` (Note: ${notes})` : ''}${assignedTo ? ` (Assigned to: ${staff.find(s => s.uid === assignedTo)?.displayName || assignedTo})` : ''}`,
         hotelId: hotel.id,
         module: 'Housekeeping'
-      }, hotel.id, 'LOG_HOUSEKEEPING_DETAIL');
+      });
       toast.success(`Room ${room?.roomNumber} updated`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
@@ -131,20 +131,21 @@ export function Housekeeping() {
     if (!hotel?.id || selectedRoomIds.length === 0) return;
     
     const loadingToast = toast.loading(`Updating ${selectedRoomIds.length} rooms...`);
+    const now = new Date().toISOString();
 
     try {
       await Promise.all(selectedRoomIds.map(async (roomId) => {
         const room = rooms.find(r => r.id === roomId);
         const notes = roomNotes[roomId] ?? room?.notes ?? '';
         
-        const updateData: any = { status, notes, updatedAt: serverTimestamp() };
-        if (status === 'clean') updateData.lastCleanedAt = serverTimestamp();
-        if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = serverTimestamp();
+        const updateData: any = { status, notes };
+        if (status === 'clean') updateData.lastCleanedAt = now;
+        if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = now;
 
-        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, hotel.id, 'HOUSEKEEPING_BULK_UPDATE');
+        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, { merge: true });
 
-        await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-          timestamp: serverTimestamp(),
+        await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+          timestamp: now,
           userId: profile?.uid || 'system',
           userEmail: profile?.email || 'system',
           userRole: profile?.role || 'staff',
@@ -152,7 +153,7 @@ export function Housekeeping() {
           resource: `Room ${room?.roomNumber || roomId}: ${status}`,
           hotelId: hotel.id,
           module: 'Housekeeping'
-        }, hotel.id, 'LOG_HOUSEKEEPING_BULK');
+        });
       }));
 
       toast.dismiss(loadingToast);
@@ -169,17 +170,17 @@ export function Housekeeping() {
     if (!hotel?.id || selectedRoomIds.length === 0 || !assignStaffId) return;
     
     const loadingToast = toast.loading(`Assigning ${selectedRoomIds.length} rooms...`);
+    const now = new Date().toISOString();
     const staffMember = staff.find(s => s.uid === assignStaffId);
 
     try {
       await Promise.all(selectedRoomIds.map(async (roomId) => {
-        await safeWrite(doc(db, 'hotels', hotel.id, 'rooms', roomId), { 
-          assignedTo: assignStaffId,
-          updatedAt: serverTimestamp()
-        }, hotel.id, 'HOUSEKEEPING_ASSIGN');
+        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { 
+          assignedTo: assignStaffId 
+        }, { merge: true });
 
-        await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-          timestamp: serverTimestamp(),
+        await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+          timestamp: now,
           userId: profile?.uid || 'system',
           userEmail: profile?.email || 'system',
           userRole: profile?.role || 'staff',
@@ -187,7 +188,7 @@ export function Housekeeping() {
           resource: `Room ${rooms.find(r => r.id === roomId)?.roomNumber || roomId} assigned to ${staffMember?.displayName || staffMember?.email || assignStaffId}`,
           hotelId: hotel.id,
           module: 'Housekeeping'
-        }, hotel.id, 'LOG_HOUSEKEEPING_ASSIGN');
+        });
       }));
 
       toast.dismiss(loadingToast);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc, addDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, safeAdd, safeDelete } from '../firebase';
+import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, deleteLedgerEntry, settleOverpayment } from '../services/ledgerService';
@@ -27,7 +27,7 @@ import {
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, safeStringify, safeToDate } from '../utils';
+import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -82,8 +82,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     
     try {
       setIsAuditing(true);
-      const checkInDateStr = format(safeToDate(currentReservation.checkIn), 'yyyy-MM-dd');
-      const checkInDateTime = new Date(`${checkInDateStr}T${currentReservation.checkInTime || '14:00'}`);
+      const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
       const now = new Date();
       const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
       let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
@@ -91,8 +90,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
       if (hotel.autoChargeOverstays !== false) {
         const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateStr = format(safeToDate(currentReservation.checkOut), 'yyyy-MM-dd');
-        const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
+        const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
         if (isAfter(now, checkOutDateTime)) {
           // Calculate how many days past checkout they are
           const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
@@ -109,7 +107,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         
         for (let i = 0; i < nightsToCharge; i++) {
           const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-          const isOverstay = isAfter(chargeDate, startOfDay(safeToDate(currentReservation.checkOut)));
+          const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
           
           await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
             amount: rate,
@@ -273,33 +271,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     // Listen to ledger entries for this reservation
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('reservationId', '==', reservation.id)
+      where('reservationId', '==', reservation.id),
+      orderBy('timestamp', 'desc')
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      const entries = snap.docs.map(doc => {
-        const data = doc.data();
-        return { 
-          ...data, 
-          id: doc.id, 
-          firestoreId: doc.id 
-        } as LedgerEntry & { firestoreId: string };
-      });
-      const arrayEntries = (reservationRef.current.ledgerEntries || []) as (LedgerEntry & { firestoreId: string })[];
-      const seenIds = new Set(entries.map(e => e.id));
-      const combined = [
-        ...entries,
-        ...arrayEntries.filter(e => !seenIds.has(e.id || (e as any).firestoreId))
-      ];
-
-      // Sort client-side to ensure proper order after merge
-      combined.sort((a, b) => {
-        const timeA = safeToDate(a.timestamp).getTime();
-        const timeB = safeToDate(b.timestamp).getTime();
-        return timeB - timeA;
-      });
-
-      setLedgerEntries(combined);
+      const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
+      // If no entries in collection, fallback to currentReservation.ledgerEntries (if available)
+      if (entries.length === 0 && reservationRef.current.ledgerEntries && reservationRef.current.ledgerEntries.length > 0) {
+        setLedgerEntries(reservationRef.current.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);
+      } else {
+        setLedgerEntries(entries as any);
+      }
       setLoading(false);
     }, (err) => {
       console.error("Ledger loading error:", err);
@@ -335,7 +318,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     !e.corporateId
   );
 
-  const displayedEntries = currentReservation?.corporateId
+  const displayedEntries = currentReservation.corporateId
     ? (activeFolio === 'company' ? companyEntries : guestEntries)
     : ledgerEntries; // Show all for regular guest bookings
 
@@ -351,7 +334,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       await deleteLedgerEntry(hotel.id, confirmDelete as any);
       
       // Log action
-      await safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
@@ -359,7 +343,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         resource: `${confirmDelete.description} (${formatCurrency(confirmDelete.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Folio'
-      }, hotel.id, 'LOG_LEDGER_DELETE');
+      });
       
       toast.success('Transaction deleted');
       setConfirmDelete(null);
@@ -577,11 +561,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check In</p>
-                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(safeToDate(currentReservation.checkIn), 'MMM d, yyyy') : '-'}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkIn), 'MMM d, yyyy')}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
-                    <p className="text-sm text-zinc-50 font-medium">{currentReservation ? format(safeToDate(currentReservation.checkOut), 'MMM d, yyyy') : '-'}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkOut), 'MMM d, yyyy')}</p>
                   </div>
                 </div>
               </div>
@@ -684,7 +668,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <option value="">Select Stay</option>
                       {otherReservations.map(r => (
                         <option key={r.id} value={r.id}>
-                          Room {r.roomNumber} ({format(safeToDate(r.checkIn), 'MMM d')} - {format(safeToDate(r.checkOut), 'MMM d')})
+                          Room {r.roomNumber} ({format(new Date(r.checkIn), 'MMM d')} - {format(new Date(r.checkOut), 'MMM d')})
                         </option>
                       ))}
                     </select>
@@ -1154,7 +1138,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     displayedEntries.map((entry) => (
                       <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(safeToDate(entry.timestamp), 'MMM d, HH:mm')}
+                          {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-zinc-50 font-medium">{entry.description}</div>
@@ -1227,7 +1211,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const csvContent = [
                 headers.join(','),
                 ...displayedEntries.map(e => [
-                  format(safeToDate(e.timestamp), 'yyyy-MM-dd HH:mm'),
+                  format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,
                   e.type === 'debit' ? e.amount : 0,
@@ -1237,7 +1221,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
               link.href = URL.createObjectURL(blob);
-              link.download = `folio_${currentReservation?.id?.slice(-6) || 'export'}.csv`;
+              link.download = `folio_${currentReservation.id.slice(-6)}.csv`;
               link.click();
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"

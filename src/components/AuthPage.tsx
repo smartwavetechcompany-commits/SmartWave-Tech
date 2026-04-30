@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, safeWrite, safeAdd, safeDelete } from '../firebase';
+import { auth, db, handleFirestoreError } from '../firebase';
 import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail } from 'lucide-react';
 import { cn } from '../utils';
-import { serverTimestamp } from 'firebase/firestore';
 
 export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -105,17 +104,19 @@ export function AuthPage() {
     setSuccess('');
 
     try {
-      await safeAdd(collection(db, 'trackingCodeRequests'), {
+      await addDoc(collection(db, 'trackingCodeRequests'), {
         hotelName: formData.hotelName,
         email: formData.email,
         phone: formData.phone,
         plan: formData.plan,
         status: 'pending',
-      }, 'system', 'REQUEST_TRACKING_CODE');
+        timestamp: new Date().toISOString(),
+      });
       showNotification('Request submitted! Our team will contact you with payment instructions shortly.');
       
       setFormData({ ...formData, hotelName: '', email: '', phone: '' });
     } catch (err: any) {
+      handleFirestoreError(err, OperationType.CREATE, 'trackingCodeRequests');
       setError(err.message);
       showNotification(err.message, 'error');
     } finally {
@@ -153,16 +154,31 @@ export function AuthPage() {
               const newUser = userCredential.user;
               
               // Update the user document: link to real UID and remove initialPassword
-              await safeWrite(doc(db, 'users', newUser.uid), {
+              await setDoc(doc(db, 'users', newUser.uid), {
                 ...staffData,
                 uid: newUser.uid,
                 initialPassword: null, // Remove for security
                 status: 'active',
-              }, staffData.hotelId || 'system', 'STAFF_ACTIVATED');
+                updatedAt: new Date().toISOString()
+              });
               
               // Delete the temporary staff document if it had a different ID
               if (staffDoc.id !== newUser.uid) {
-                await safeDelete(doc(db, 'users', staffDoc.id), staffData.hotelId || 'system', 'DELETE_TEMP_STAFF_PROFILE');
+                await deleteDoc(doc(db, 'users', staffDoc.id));
+              }
+              
+              // Log the activation
+              if (staffData.hotelId) {
+                await addDoc(collection(db, 'hotels', staffData.hotelId, 'activityLogs'), {
+                  timestamp: new Date().toISOString(),
+                  userId: newUser.uid,
+                  userEmail: newUser.email,
+                  userRole: 'staff',
+                  action: 'STAFF_ACTIVATED',
+                  resource: `Staff: ${newUser.email}`,
+                  hotelId: staffData.hotelId,
+                  module: 'Auth'
+                });
               }
               
               showNotification('Welcome! Your account has been activated. Please change your password in settings for better security.', 'success');
@@ -235,23 +251,23 @@ export function AuthPage() {
           currentUser = userCredential.user;
         }
 
-        // 3. Generate IDs and Prepare Data
-        // If it's a staff member, they already have a hotelId from the existing profile
-        const hotelId = existingStaffProfile ? existingStaffProfile.hotelId : `hotel_${Math.random().toString(36).substr(2, 9)}`;
-
         // 2.5 Record Registration Attempt
         try {
-          await safeAdd(collection(db, 'registration'), {
+          await addDoc(collection(db, 'registration'), {
             uid: currentUser.uid,
             email: formData.email,
             hotelName: formData.hotelName || (existingStaffProfile ? 'Staff Registration' : ''),
             trackingCode: formData.trackingCode,
+            timestamp: new Date().toISOString(),
             status: 'pending'
-          }, hotelId, 'REGISTRATION_ATTEMPT');
+          });
         } catch (err) {
-          // Handled by safeAdd
+          handleFirestoreError(err, OperationType.CREATE, 'registration');
         }
 
+        // 3. Generate IDs and Prepare Data
+        // If it's a staff member, they already have a hotelId from the existing profile
+        const hotelId = existingStaffProfile ? existingStaffProfile.hotelId : `hotel_${Math.random().toString(36).substr(2, 9)}`;
         const selectedPlan = (tcData.plan?.toLowerCase() as PlanType) || 'standard';
         
         // Define plan features
@@ -277,27 +293,27 @@ export function AuthPage() {
           ...existingStaffProfile,
           uid: currentUser.uid, // Update with real UID
           status: 'active',
-          displayName: formData.hotelName || existingStaffProfile.displayName || currentUser.displayName || formData.email.split('@')[0],
-          createdAt: existingStaffProfile.createdAt || new Date().toISOString()
+          displayName: formData.hotelName || existingStaffProfile.displayName || currentUser.displayName || formData.email.split('@')[0]
         } : {
           uid: currentUser.uid,
           email: formData.email,
           hotelId: hotelId,
           role: 'hotelAdmin',
+          createdAt: new Date().toISOString(),
           status: 'active',
           displayName: formData.hotelName + ' Admin',
           permissions: ['all'],
-          subscriptionExpiry: tcData.expiryDate || '',
-          createdAt: new Date().toISOString()
+          subscriptionExpiry: tcData.expiryDate
         };
 
         try {
           // If we found an existing staff doc with a different ID (like tempUid), delete it first
           if (staffDocId && staffDocId !== currentUser.uid) {
-            await safeDelete(doc(db, 'users', staffDocId), hotelId, 'DELETE_TEMP_STAFF_RECORD');
+            await deleteDoc(doc(db, 'users', staffDocId));
           }
-          await safeWrite(doc(db, 'users', currentUser.uid), profileData, hotelId, 'CREATE_USER_PROFILE', { isNew: true });
+          await setDoc(doc(db, 'users', currentUser.uid), profileData);
         } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
           throw err;
         }
 
@@ -319,18 +335,19 @@ export function AuthPage() {
           };
 
           try {
-            await safeWrite(doc(db, 'hotels', hotelId), hotelData, hotelId, 'CREATE_HOTEL', { isNew: true });
+            await setDoc(doc(db, 'hotels', hotelId), hotelData);
           } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, `hotels/${hotelId}`);
             throw err;
           }
 
           // 6. Update Tracking Code
           try {
-            await safeWrite(doc(db, 'trackingCodes', formData.trackingCode.toUpperCase()), { 
+            await updateDoc(doc(db, 'trackingCodes', formData.trackingCode.toUpperCase()), { 
               status: 'used',
-              usedAt: serverTimestamp(),
+              usedAt: new Date().toISOString(),
               usedByHotel: hotelId
-            }, 'system', 'USE_TRACKING_CODE');
+            });
           } catch (err) {
             handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${formData.trackingCode}`);
             throw err;
@@ -339,15 +356,16 @@ export function AuthPage() {
 
         // 7. Record Registration Attempt
         try {
-          await safeAdd(collection(db, 'registration'), {
+          await addDoc(collection(db, 'registration'), {
             uid: currentUser.uid,
             email: formData.email,
             hotelName: formData.hotelName,
             trackingCode: formData.trackingCode,
+            timestamp: new Date().toISOString(),
             status: 'completed'
-          }, hotelId, 'REGISTRATION_COMPLETED');
+          });
         } catch (err) {
-          // handleFirestoreError is now inside safeAdd
+          handleFirestoreError(err, OperationType.CREATE, 'registration');
         }
         
         showNotification('Registration successful!');
