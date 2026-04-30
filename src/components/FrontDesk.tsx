@@ -581,7 +581,7 @@ export function FrontDesk() {
           paymentStatus: 'unpaid',
           notes: newBooking.notes,
           corporateReference: newBooking.corporateReference,
-          ledgerEntries: [],
+          ledgerBalance: 0,
           nightlyRate: pricePerNight,
           autoNightDeduction: newBooking.autoNightDeduction,
           bookedBy: profile.uid,
@@ -1200,10 +1200,8 @@ export function FrontDesk() {
         const freshResData = freshResSnap.data() as Reservation;
         
         // Calculate current ledger balance
-        const allEntries = freshResData.ledgerEntries || [];
-        const totalDebits = allEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-        const totalCredits = allEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-        const outstandingBalance = totalDebits - totalCredits;
+        const outstandingBalance = freshResData.ledgerBalance || 0;
+        const totalDebits = (freshResData.totalAmount || 0);
 
         if (!res.corporateId && outstandingBalance > 0.01) {
           toast.error(`Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`);
@@ -2968,7 +2966,7 @@ export function FrontDesk() {
                     </div>
                     {res.guestId && (
                       <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {formatCurrency((res.ledgerEntries || []).reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0), currency, exchangeRate)}
+                        Ledger: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
                       </div>
                     )}
                   </td>
@@ -3353,7 +3351,7 @@ export function FrontDesk() {
                 hotel={hotel} 
                 reservation={showReceipt.res} 
                 type={showReceipt.type} 
-                ledgerEntries={showReceipt.res.ledgerEntries || []}
+                ledgerEntries={[]} // Ledger entries are now fetched from collection, this path is legacy
               />
             </div>
           </div>

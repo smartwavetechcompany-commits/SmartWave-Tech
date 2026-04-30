@@ -859,7 +859,7 @@ export function GuestManagement() {
                 hotel={hotel} 
                 reservation={showReceipt.res} 
                 type={showReceipt.type}
-                ledgerEntries={showReceipt.res.ledgerEntries || []}
+                ledgerEntries={[]} // Ledger entries should be fetched from collection, this is legacy path
               />
             </div>
           </div>

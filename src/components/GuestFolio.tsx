@@ -277,12 +277,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
-      // If no entries in collection, fallback to currentReservation.ledgerEntries (if available)
-      if (entries.length === 0 && reservationRef.current.ledgerEntries && reservationRef.current.ledgerEntries.length > 0) {
-        setLedgerEntries(reservationRef.current.ledgerEntries as (LedgerEntry & { firestoreId: string })[]);
-      } else {
-        setLedgerEntries(entries as any);
-      }
+      setLedgerEntries(entries as any);
       setLoading(false);
     }, (err) => {
       console.error("Ledger loading error:", err);
