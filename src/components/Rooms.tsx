@@ -1031,22 +1031,15 @@ export function Rooms() {
                 </form>
               </div>
               <div className="space-y-6">
-                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Managed Blockings</h4>
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Active Blockings</h4>
                 <div className="space-y-3">
                   {blockings
-                    .sort((a, b) => safeToDate(b.startDate).getTime() - safeToDate(a.startDate).getTime())
+                    .filter(b => isAfter(safeToDate(b.endDate), startOfDay(new Date())) || isSameDay(safeToDate(b.endDate), new Date()))
+                    .sort((a, b) => safeToDate(a.startDate).getTime() - safeToDate(b.startDate).getTime())
                     .map(b => (
-                    <div key={b.id} className={cn(
-                      "bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between",
-                      isAfter(startOfDay(new Date()), safeToDate(b.endDate)) && "opacity-50"
-                    )}>
+                    <div key={b.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
                       <div>
-                        <div className="font-bold text-zinc-50 flex items-center gap-2">
-                          Room {rooms.find(r => r.id === b.roomId)?.roomNumber}
-                          {isAfter(startOfDay(new Date()), safeToDate(b.endDate)) && (
-                            <span className="text-[8px] px-1 bg-zinc-800 text-zinc-500 rounded font-normal uppercase">Expired</span>
-                          )}
-                        </div>
+                        <div className="font-bold text-zinc-50">Room {rooms.find(r => r.id === b.roomId)?.roomNumber}</div>
                         <div className="text-xs text-zinc-500">{format(safeToDate(b.startDate), 'MMM dd, yyyy')} - {format(safeToDate(b.endDate), 'MMM dd, yyyy')}</div>
                         <div className="text-[10px] text-emerald-500 font-bold uppercase mt-1">{b.reason}</div>
                         {b.notes && <div className="text-[10px] text-zinc-500 mt-1 italic">"{b.notes}"</div>}
@@ -1067,11 +1060,6 @@ export function Rooms() {
                       </button>
                     </div>
                   ))}
-                  {blockings.length === 0 && (
-                    <div className="text-center py-8 text-zinc-600 border border-dashed border-zinc-800 rounded-xl">
-                      No room blockings found.
-                    </div>
-                  )}
                 </div>
               </div>
             </div>

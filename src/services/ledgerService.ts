@@ -127,17 +127,12 @@ export const postToLedger = async (
   if (resSnap.exists()) {
     const resData = resSnap.data() as Reservation;
     
-    // We include tax in the total expectation for extras
-    const taxOnExtras = entries
-      .filter(e => e.type === 'debit' && e.category === 'tax' && e.description.toLowerCase().indexOf('room') === -1 && e.description.toLowerCase().indexOf('nightly') === -1)
-      .reduce((acc, e) => acc + e.amount, 0);
-
     const totalExtrasAdded = entries
       .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax')
       .reduce((acc, e) => acc + e.amount, 0);
     
-    const paymentsAdded = entries
-      .filter(e => e.type === 'credit')
+    const guestPaymentsAdded = entries
+      .filter(e => e.type === 'credit' && e.category === 'payment' && !e.corporateId)
       .reduce((acc, e) => acc + e.amount, 0);
 
     const totalDebitsForRes = entries
@@ -148,21 +143,15 @@ export const postToLedger = async (
       .filter(e => e.type === 'credit')
       .reduce((acc, e) => acc + e.amount, 0);
 
-    // Update Reservation stats
-    let totalToIncrement = totalExtrasAdded + taxOnExtras;
-    if (totalToIncrement !== 0) resUpdates.totalAmount = increment(totalToIncrement);
-    if (paymentsAdded !== 0) resUpdates.paidAmount = increment(paymentsAdded);
+    if (totalExtrasAdded !== 0) resUpdates.totalAmount = increment(totalExtrasAdded);
+    if (guestPaymentsAdded !== 0) resUpdates.paidAmount = increment(guestPaymentsAdded);
     
     // Maintain a real-time ledger balance on the reservation document
-    const debitsToAdd = totalDebitsForRes;
-    const creditsToAdd = totalCreditsForRes;
-    resUpdates.ledgerBalance = increment(debitsToAdd - creditsToAdd);
+    resUpdates.ledgerBalance = increment(totalDebitsForRes - totalCreditsForRes);
 
-    // Calculate status - consider all credits as settling the balance
-    // We include tax in the total expectation for extras
-    
-    const freshTotalDebits = (resData.totalAmount || 0) + totalToIncrement;
-    const freshTotalCredits = (resData.paidAmount || 0) + paymentsAdded;
+    // Calculate status
+    const freshTotalDebits = (resData.totalAmount || 0) + totalExtrasAdded;
+    const freshTotalCredits = (resData.paidAmount || 0) + guestPaymentsAdded;
 
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
     if (freshTotalDebits > 0) {
@@ -180,23 +169,23 @@ export const postToLedger = async (
 
   await safeWrite(resRef, resUpdates, hotelId, 'UPDATE_RESERVATION_LEDGER');
 
-  // 7. Finance records for actual payments/refunds (only cash/bank transactions)
-  const financeEntries = savedEntries
-    .map((docRef, i) => ({ entry: entries[i], id: docRef.id }))
-    .filter(item => (item.entry.category === 'payment' || item.entry.category === 'refund') && !item.entry.corporateId);
-
-  if (financeEntries.length > 0) {
+  // 7. Finance records for actual payments/refunds
+  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId);
+  if (payments.length > 0) {
     const financeRef = collection(db, 'hotels', hotelId, 'finance');
-    const financePromises = financeEntries.map(item => {
+    const financePromises = savedEntries.filter((_, i) => (entries[i].category === 'payment' || entries[i].category === 'refund') && !entries[i].corporateId).map((docRef, i) => {
+      const p = entries.find(ent => ent.description === entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId)[i].description); // Rough match
+      if (!p) return Promise.resolve();
+      
       const financeRecord = {
-        type: item.entry.type === 'credit' ? 'income' : 'expense',
-        amount: item.entry.amount,
-        category: item.entry.category === 'payment' ? 'Room Revenue' : 'Refunds',
-        description: item.entry.description,
+        type: p.type === 'credit' ? 'income' : 'expense',
+        amount: p.amount,
+        category: p.category === 'payment' ? 'Room Revenue' : 'Other',
+        description: p.description,
         timestamp: serverTimestamp(),
         paymentMethod,
         guestId,
-        referenceId: item.id
+        referenceId: docRef.id
       };
       return safeAdd(financeRef, financeRecord, hotelId, 'POST_FINANCE_RECORD');
     });
@@ -247,17 +236,14 @@ export const deleteLedgerEntry = async (
 
     let paidAdj = 0;
     let totalAdj = 0;
-    if (type === 'credit' && (category === 'payment' || category === 'transfer')) {
+    if (type === 'credit' && category === 'payment' && !corporateId) {
       paidAdj = -amount;
       resUpdates.paidAmount = increment(paidAdj);
     }
     
-    if (type === 'debit' && category !== 'room') {
-      const isRoomTax = category === 'tax' && (ledgerEntry.description?.toLowerCase().indexOf('room') !== -1 || ledgerEntry.description?.toLowerCase().indexOf('nightly') !== -1);
-      if (!isRoomTax) {
-        totalAdj = -amount;
-        resUpdates.totalAmount = increment(totalAdj);
-      }
+    if (type === 'debit' && category !== 'room' && category !== 'tax') {
+      totalAdj = -amount;
+      resUpdates.totalAmount = increment(totalAdj);
     }
 
     // Always adjust the reservation's summary ledgerBalance

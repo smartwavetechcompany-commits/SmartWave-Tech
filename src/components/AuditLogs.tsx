@@ -68,13 +68,6 @@ export function AuditLogs() {
             hotelMap[doc.id] = doc.data().name;
           });
           setHotels(hotelMap);
-        }, (err: any) => {
-          console.error("Hotels fetch error:", err);
-          setLoading(false);
-          if (err.code === 'permission-denied') setHasPermissionError(true);
-          try {
-            handleFirestoreError(err, OperationType.LIST, 'hotels');
-          } catch (e) { /* logged */ }
         });
 
         const q = collectionGroup(db, 'activityLogs');
@@ -91,16 +84,10 @@ export function AuditLogs() {
           });
           setLogs(allLogs);
           setLoading(false);
-          setHasPermissionError(false);
         }, (err: any) => {
-          console.error("Audit logs fetch error:", err);
+          handleFirestoreError(err, OperationType.LIST, 'collectionGroup/activityLogs');
+          if (err.code === 'permission-denied') setHasPermissionError(true);
           setLoading(false);
-          if (err.code === 'permission-denied') {
-            setHasPermissionError(true);
-          }
-          try {
-            handleFirestoreError(err, OperationType.LIST, 'collectionGroup/activityLogs');
-          } catch (e) { /* logged */ }
         });
       } else if (hotel?.id) {
         const q = collection(db, 'hotels', hotel.id, 'activityLogs');
@@ -206,23 +193,6 @@ export function AuditLogs() {
 
     return result;
   }, [logs, searchQuery, sortConfig]);
-
-  if (hasPermissionError) {
-    return (
-      <div className="p-8 flex flex-col items-center justify-center min-h-[400px] text-center space-y-4">
-        <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center">
-          <ShieldAlert size={32} />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-zinc-50">Permission Denied</h2>
-          <p className="text-zinc-400 max-w-md mx-auto mt-2">
-            You do not have the required permissions to view these activity logs.
-            Please ensure you are logged in as a Super Admin.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   if (profile?.role !== 'superAdmin' && profile?.role !== 'hotelAdmin') {
     return (
