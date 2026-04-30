@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, onSnapshot, orderBy, doc, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,7 +7,6 @@ import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, deleteLedgerEntry, settleOverpayment } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { ConfirmModal } from './ConfirmModal';
-import { motion, AnimatePresence } from 'motion/react';
 import { 
   Receipt, 
   User, 
@@ -116,7 +116,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             description: `${isOverstay ? 'Overstay' : 'Manual Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
             referenceId: currentReservation.id,
             postedBy: profile.uid
-          }, profile.uid, currentReservation.corporateId);
+          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
         }
         toast.success(`Posted ${nightsToCharge} nightly charge(s)`);
       } else {
@@ -173,7 +173,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     try {
       setIsSaving(true);
       const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
-      await settleOverpayment(hotel.id, currentReservation.guestId || 'unknown', currentReservation.id, totalAmount, settleData.splits[0]?.method || 'cash', profile.uid, currentReservation.corporateId);
+      await settleOverpayment(hotel.id, currentReservation.guestId || 'unknown', currentReservation.id, totalAmount, settleData.splits[0]?.method || 'cash', profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
       toast.success('Overpayment settled successfully');
       setShowSettleOverpayment(false);
     } catch (err: any) {
@@ -201,7 +201,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         description: chargeDetails.description || `Charge: ${chargeDetails.category}`,
         referenceId: currentReservation.id,
         postedBy: profile.uid
-      }, profile.uid, currentReservation.corporateId);
+      }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
 
       toast.success('Charge posted successfully');
       setShowPostChargeModal(false);
@@ -246,7 +246,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         transferTargetId,
         balance,
         profile.uid,
-        currentReservation.corporateId
+        activeFolio === 'company' ? currentReservation.corporateId : undefined
       );
       toast.success('Balance transferred successfully');
       setShowTransferBalanceModal(false);
@@ -352,9 +352,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
+      <div
         className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Header */}
@@ -630,20 +628,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <span className="text-[8px] font-medium text-red-500/50 uppercase leading-none mt-1">Real-time ledger balance</span>
             </div>
             <div className="flex flex-col items-end">
-              <motion.span 
-                key={balance}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={cn(
-                  "text-3xl font-black",
-                  balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-500"
-                )}
-              >
+              <span className={cn(
+                  "text-3xl font-black transition-colors duration-300",
+                  balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
+                )}>
                 {formatCurrency(Math.abs(balance), currency, exchangeRate)}
-              </motion.span>
+              </span>
               <span className={cn(
                 "text-[10px] font-bold uppercase",
-                balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-500"
+                balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
               )}>
                 {balance > 0.01 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < -0.01 ? "Credit Balance (Overpaid)" : "Account Fully Settled"}
               </span>
@@ -1248,7 +1241,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             Close Folio
           </button>
         </div>
-      </motion.div>
+      </div>
 
       <ConfirmModal
         isOpen={!!confirmDelete}
