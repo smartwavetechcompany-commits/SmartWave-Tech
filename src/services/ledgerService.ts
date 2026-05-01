@@ -114,13 +114,18 @@ export const postToLedger = async (
   
   // 3. Post entries to ledger (append-only) using batch
   const postedIds: string[] = [];
+  const nowISO = new Date().toISOString();
+  
   entries.forEach(e => {
     const newDocRef = doc(ledgerRef);
-    batch.set(newDocRef, {
+    // Ensure every entry has a timestamp for stable ordering
+    const finalEntry = {
       ...e,
+      timestamp: e.timestamp || nowISO,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
-    });
+    };
+    batch.set(newDocRef, finalEntry);
     postedIds.push(newDocRef.id);
   });
 
@@ -157,18 +162,13 @@ export const postToLedger = async (
       .filter(e => e.type === 'credit')
       .reduce((acc, e) => acc + (e.category === 'refund' ? -e.amount : e.amount), 0);
 
-    // FIXED LOGIC:
-    // Room stay charges (and their taxes) are already part of the initial reservation.totalAmount.
-    // We only increment totalAmount for ADDITIONAL services (restaurant, laundry, etc.) posted later.
-    // If the PARENT entry (the first one) is 'room', then NONE of the entries in this batch should increase totalAmount.
     const isRoomCharge = entry.category === 'room';
+    const isPaymentCharge = entry.category === 'payment';
     
     // Calculate how much we should increase the projected total
-    // If it's a room charge, we don't increase it at all.
-    // If it's NOT a room charge, we increase it by EVERY debit in this batch (Entry + its Taxes)
-    const projectedTotalAdj = isRoomCharge 
+    const projectedTotalAdj = (isRoomCharge || isPaymentCharge)
       ? 0 
-      : entries.filter(e => e.type === 'debit' && e.category !== 'payment').reduce((acc, e) => acc + e.amount, 0);
+      : entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
 
     if (projectedTotalAdj !== 0) resUpdates.totalAmount = increment(projectedTotalAdj);
     if (totalCreditAdjustments !== 0) resUpdates.paidAmount = increment(totalCreditAdjustments);
@@ -195,6 +195,7 @@ export const postToLedger = async (
     batch.update(resRef, resUpdates);
   }
 
+
   // 6. Finance records
   const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId);
   const financeRef = collection(db, 'hotels', hotelId, 'finance');
@@ -215,27 +216,64 @@ export const postToLedger = async (
   });
 
   // 7. Commit batch and Log once
-  await batch.commit();
-  await createAuditLog(hotelId, 'Ledger', 'POST_LEDGER_BATCH', `Posted ${entries.length} entries to ${reservationId} Folio. Status: ${entry.type}, Amount: ${entry.amount}`);
+  await database.commitBatch(hotelId, batch, {
+    module: 'Ledger',
+    action: 'POST_LEDGER_BATCH',
+    details: `Posted ${entries.length} entries to ${reservationId} Folio. Status: ${entry.type}, Amount: ${entry.amount}`
+  });
 
   return { id: postedIds[0], ...mainEntry };
 };
 
+/**
+ * PRODUCTION-GRADE REVERSAL:
+ * Instead of deleting ledger entries, we post a "Reversal" charge.
+ * This maintains a complete financial audit trail.
+ */
+export const voidLedgerEntry = async (
+  hotelId: string,
+  ledgerEntry: LedgerEntry & { firestoreId?: string },
+  voidedBy: string
+) => {
+  const { firestoreId, id, reservationId, guestId, corporateId, amount, type, category, description } = ledgerEntry;
+  
+  // 1. Create the reversal entry
+  const reversalEntry: Omit<LedgerEntry, 'id'> = {
+    hotelId,
+    guestId,
+    reservationId,
+    corporateId,
+    amount: amount, // Reversal has the same amount but opposite effect
+    type: type === 'debit' ? 'credit' : 'debit', // FLIP THE TYPE
+    category: 'other',
+    description: `REVERSAL: ${description} (Ref: ${firestoreId || id})`,
+    timestamp: new Date().toISOString(),
+    postedBy: voidedBy
+  };
+
+  // 2. Post the reversal
+  return postToLedger(
+    hotelId,
+    guestId,
+    reservationId!,
+    reversalEntry,
+    voidedBy,
+    corporateId
+  );
+};
+
+// Deprecated in favor of voidLedgerEntry for production audit compliance
 export const deleteLedgerEntry = async (
   hotelId: string,
   ledgerEntry: LedgerEntry & { firestoreId?: string }
 ) => {
+  console.warn("deleteLedgerEntry is deprecated. Use voidLedgerEntry for production audit compliance.");
   const { id, firestoreId, reservationId, guestId, corporateId, amount, type, category, description } = ledgerEntry;
   const docId = firestoreId || id;
 
-  // 1. Delete from Ledger Collection (or mark as deleted/reversed for audit?)
-  // For production PMS, usually we don't delete, we reverse. 
-  // But if the user wants purely append-only, deletion is risky.
-  // However, I will follow safe deletion if requested, but better to use safeUpdate to mark it.
-  // For now, I'll stick to deletion as per existing logic but using safe tools.
+  // For backward compatibility, we still allow it but strongly discourage
   if (docId) {
     await deleteDoc(doc(db, 'hotels', hotelId, 'ledger', docId));
-    await createAuditLog(hotelId, 'Ledger', 'DELETE_LEDGER_ENTRY', `Deleted ledger entry ${docId}`);
   }
 
   // 2. Synchronize Reservation
@@ -253,8 +291,6 @@ export const deleteLedgerEntry = async (
     }
     
     if (type === 'debit') {
-      // Room charges and taxes associated with room charges do NOT affect totalAmount
-      // because they were already factored into the projected total at booking.
       const isRoomRelated = category === 'room' || description.toLowerCase().includes('room charge');
       if (!isRoomRelated) {
         totalAdj = -amount;
@@ -262,11 +298,9 @@ export const deleteLedgerEntry = async (
       }
     }
 
-    // Adjust ledger balance
     const balanceAdj = type === 'debit' ? -amount : amount;
     resUpdates.ledgerBalance = increment(balanceAdj);
 
-    // Recalculate status
     const projectedTotal = (resData.totalAmount || 0) + totalAdj;
     const projectedPaid = (resData.paidAmount || 0) + paidAdj;
     
@@ -288,18 +322,6 @@ export const deleteLedgerEntry = async (
       action: 'SYNC_AFTER_DELETE',
       details: `Synced reservation after deleting ledger entry`
     });
-
-    // 3. Delete corresponding Finance Record if payment
-    if (type === 'credit' && category === 'payment') {
-      const financeQ = query(
-        collection(db, 'hotels', hotelId, 'finance'),
-        where('referenceId', '==', docId)
-      );
-      const financeSnap = await getDocs(financeQ);
-      for (const fDoc of financeSnap.docs) {
-        await deleteDoc(fDoc.ref);
-      }
-    }
   }
 
   // 4. Reverse the balance update
@@ -330,6 +352,7 @@ export const deleteLedgerEntry = async (
     });
   }
 };
+
 
 export const settleLedger = async (
   hotelId: string,

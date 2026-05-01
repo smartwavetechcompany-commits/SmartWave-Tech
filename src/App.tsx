@@ -22,6 +22,7 @@ import { Finance } from './components/Finance';
 import { Reports } from './components/Reports';
 import { Notifications } from './components/Notifications';
 import { TopBar } from './components/TopBar';
+import { PermissionGuard } from './components/PermissionGuard';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { Toaster } from 'sonner';
@@ -109,16 +110,22 @@ function AppContent() {
             <Route path="/corporate" element={<CorporateManagement />} />
             <Route path="/operations" element={<OperationsDashboard />} />
             <Route path="/finance" element={<Finance />} />
-            <Route path="/reports" element={<Reports />} />
+            <Route path="/reports" element={
+              <PermissionGuard permission="view_reports" showError>
+                <Reports />
+              </PermissionGuard>
+            } />
             <Route path="/super-admin" element={
-              profile.role === 'superAdmin' ? (
+              <PermissionGuard permission="access_super_admin">
                 <ErrorBoundary>
                   <SuperAdmin />
                 </ErrorBoundary>
-              ) : <Navigate to="/" />
+              </PermissionGuard>
             } />
             <Route path="/staff" element={
-              profile.role === 'hotelAdmin' ? <StaffManagement /> : <Navigate to="/" />
+              <PermissionGuard permission="manage_staff" showError>
+                <StaffManagement />
+              </PermissionGuard>
             } />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />

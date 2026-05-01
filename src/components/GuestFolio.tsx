@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, onSnapshot, orderBy, doc, addDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, addDoc, limit } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance, deleteLedgerEntry, settleOverpayment } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { ConfirmModal } from './ConfirmModal';
 import { 
@@ -272,7 +273,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
       where('reservationId', '==', reservation.id),
-      orderBy('timestamp', 'desc')
+      orderBy('timestamp', 'desc'),
+      limit(1000)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
@@ -301,6 +303,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
   const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>(reservation.corporateId ? 'company' : 'guest');
+  
+  // Sync active folio if reservation data loads later
+  useEffect(() => {
+    if (currentReservation.corporateId && activeFolio === 'guest' && !reservation.corporateId) {
+      setActiveFolio('company');
+    }
+  }, [currentReservation.corporateId]);
 
   // Improved filtering:
   // If it's a corporate reservation, split the entries.
@@ -321,30 +330,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
   const balance = totalDebits - totalCredits;
 
-  const handleDeleteEntry = async () => {
+  const handleVoidEntry = async () => {
     if (!hotel?.id || !confirmDelete || !profile) return;
     
     try {
       setIsDeleting(true);
-      await deleteLedgerEntry(hotel.id, confirmDelete as any);
+      await voidLedgerEntry(hotel.id, confirmDelete as any, profile.uid);
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'LEDGER_ENTRY_DELETED',
-        resource: `${confirmDelete.description} (${formatCurrency(confirmDelete.amount, currency, exchangeRate)})`,
-        hotelId: hotel.id,
-        module: 'Folio'
-      });
-      
-      toast.success('Transaction deleted');
+      toast.success('Transaction voided and reversed');
       setConfirmDelete(null);
     } catch (err: any) {
-      console.error("Delete error:", err.message || safeStringify(err));
-      toast.error('Failed to delete transaction');
+      console.error("Void error:", err.message || safeStringify(err));
+      toast.error('Failed to void transaction');
     } finally {
       setIsDeleting(false);
     }
@@ -1120,7 +1117,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <th className="px-6 py-3">Category</th>
                     <th className="px-6 py-3 text-right">Debit</th>
                     <th className="px-6 py-3 text-right">Credit</th>
-                    {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                    {hasPermission(profile?.role, 'void_transaction') && (
                       <th className="px-6 py-3 text-right">Actions</th>
                     )}
                   </tr>
@@ -1128,14 +1125,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <tbody className="divide-y divide-zinc-800">
                   {loading ? (
                     <tr>
-                      <td colSpan={(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
                         <Clock size={24} className="mx-auto mb-2 animate-spin opacity-20" />
                         Loading transactions...
                       </td>
                     </tr>
                   ) : displayedEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
                         No transactions recorded for this folio.
                       </td>
                     </tr>
@@ -1160,12 +1157,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
                           {entry.type === 'credit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
                         </td>
-                        {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                        {hasPermission(profile?.role, 'void_transaction') && (
                           <td className="px-6 py-4 text-right">
                             <button
                               onClick={() => setConfirmDelete(entry)}
                               className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
-                              title="Delete Transaction"
+                              title="Void Transaction"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1184,7 +1181,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
                       {formatCurrency(totalCredits, currency, exchangeRate)}
                     </td>
-                    {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                    {hasPermission(profile?.role, 'void_transaction') && (
                       <td className="px-6 py-4"></td>
                     )}
                   </tr>
@@ -1197,7 +1194,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       {formatCurrency(Math.abs(totalDebits - totalCredits), currency, exchangeRate)}
                       {(totalDebits - totalCredits) > 0 ? " (Owing)" : (totalDebits - totalCredits) < 0 ? " (Credit)" : " (Settled)"}
                     </td>
-                    {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                    {hasPermission(profile?.role, 'void_transaction') && (
                       <td className="px-6 py-2"></td>
                     )}
                   </tr>
@@ -1245,11 +1242,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       <ConfirmModal
         isOpen={!!confirmDelete}
-        title="Delete Transaction"
-        message={`Are you sure you want to delete the transaction "${confirmDelete?.description}"? This will also reverse the balance update for the guest.`}
-        onConfirm={handleDeleteEntry}
+        title="Void Transaction"
+        message={`Are you sure you want to void the transaction "${confirmDelete?.description}"? This will create a reversal entry in the ledger to maintain the audit trail.`}
+        onConfirm={handleVoidEntry}
         onCancel={() => setConfirmDelete(null)}
-        confirmText="Delete"
+        confirmText="Void Transaction"
         type="danger"
         isLoading={isDeleting}
       />

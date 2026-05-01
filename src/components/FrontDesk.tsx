@@ -40,6 +40,7 @@ import {
   ArrowDownRight
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
+import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -1049,8 +1050,13 @@ export function FrontDesk() {
       }
       
       // Update hotel last audit date
-      await updateDoc(doc(db, 'hotels', hotel.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id), {
         lastAuditDate: format(new Date(), 'yyyy-MM-dd')
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'NIGHTLY_AUDIT_COMPLETED',
+        details: 'Nightly audit completed and charges posted'
       });
 
       // Log audit action
@@ -1081,12 +1087,23 @@ export function FrontDesk() {
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
       // 1. Update reservation status immediately
-      await updateDoc(resRef, { status });
+      await database.safeUpdate(resRef, { status }, {
+        hotelId: hotel.id,
+        module: 'Front Desk',
+        action: 'UPDATE_RESERVATION_STATUS',
+        details: `Reservation ${res.id} status changed to ${status}`
+      });
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
         // Mark room as occupied
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
+        const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
+        await database.safeUpdate(roomRef, { status: 'occupied' }, {
+          hotelId: hotel.id,
+          module: 'Rooms',
+          action: 'ROOM_CHECKIN',
+          details: `Room ${res.roomNumber} occupied during check-in`
+        });
         
         if (res.guestId) {
           // Post ONLY the first night's charge at check-in
@@ -1207,30 +1224,46 @@ export function FrontDesk() {
           toast.error(`Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`);
           setLoading(false);
           // Revert status to checked_in
-          await updateDoc(resRef, { status: 'checked_in' });
+          await database.safeUpdate(resRef, { status: 'checked_in' }, { 
+            hotelId: hotel.id, 
+            module: 'Front Desk', 
+            action: 'REVERT_CHECKOUT', 
+            details: 'Reverting status to checked_in due to outstanding balance' 
+          });
           return;
         }
 
         // 3. Update reservation total and checkout details
-        await updateDoc(resRef, { 
+        await database.safeUpdate(resRef, { 
           totalAmount: totalDebits,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
           paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+        }, {
+          hotelId: hotel.id,
+          module: 'Front Desk',
+          action: 'FINALIZE_CHECKOUT',
+          details: `Finalized checkout for reservation ${res.id}`
         });
 
         // 4. Mark room as dirty
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { 
+        const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
+        await database.safeUpdate(roomRef, { 
           status: 'dirty',
           housekeepingStatus: 'dirty',
           currentGuestId: null,
           currentReservationId: null
+        }, {
+          hotelId: hotel.id,
+          module: 'Housekeeping',
+          action: 'ROOM_VACATED',
+          details: `Room ${res.roomNumber} vacated and marked dirty`
         });
 
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          await updateDoc(guestRef, {
+          await database.safeUpdate(guestRef, {
             totalStays: increment(1),
             stayHistory: arrayUnion({
               reservationId: res.id,
@@ -1239,6 +1272,11 @@ export function FrontDesk() {
               checkOut: format(now, 'yyyy-MM-dd'),
               totalAmount: totalDebits
             })
+          }, {
+            hotelId: hotel.id,
+            module: 'Guests',
+            action: 'UPDATE_GUEST_STATS',
+            details: `Updated stats for guest ${res.guestId} after stay`
           });
         }
 
@@ -1249,7 +1287,13 @@ export function FrontDesk() {
         }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
-        await updateDoc(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
+        const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
+        await database.safeUpdate(roomRef, { status: 'clean' }, {
+          hotelId: hotel.id,
+          module: 'Rooms',
+          action: 'ROOM_RELEASE',
+          details: `Room ${res.roomNumber} released due to cancellation`
+        });
       }
 
       // 3. Log action

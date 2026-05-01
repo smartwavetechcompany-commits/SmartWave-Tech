@@ -78,14 +78,21 @@ export const database = {
     options: { hotelId: string; module: string; action: string; details: string }
   ) {
     try {
-      await setDoc(docRef, data, { merge: true });
+      // Production guard: Always default to merge: true to prevent accidental overwrites
+      await setDoc(docRef, {
+        ...data,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
       
-      // Verify write if critical (optional, can be expanded)
-      
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success');
-      return { success: true };
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+        docPath: docRef.path
+      });
+      return { success: true, id: docRef.id };
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { error: String(error) });
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+        error: String(error),
+        docPath: docRef.path
+      });
       throw error;
     }
   },
@@ -99,11 +106,19 @@ export const database = {
     options: { hotelId: string; module: string; action: string; details: string }
   ) {
     try {
-      await updateDoc(docRef, data as any);
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success');
+      await updateDoc(docRef, {
+        ...(data as any),
+        updatedAt: serverTimestamp()
+      });
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+        docPath: docRef.path
+      });
       return { success: true };
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { error: String(error) });
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+        error: String(error),
+        docPath: docRef.path
+      });
       throw error;
     }
   },
@@ -122,10 +137,34 @@ export const database = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success');
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+        docId: docRef.id,
+        colPath: colRef.path
+      });
       return docRef;
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { error: String(error) });
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+        error: String(error),
+        colPath: colRef.path
+      });
+      throw error;
+    }
+  },
+
+  /**
+   * Commits a batch with a unified audit log
+   */
+  async commitBatch(
+    hotelId: string,
+    batch: WriteBatch,
+    options: { module: string; action: string; details: string }
+  ) {
+    try {
+      await batch.commit();
+      await createAuditLog(hotelId, options.module, options.action, options.details, 'success');
+      return { success: true };
+    } catch (error) {
+      await createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) });
       throw error;
     }
   },

@@ -21,6 +21,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import { cn } from '../utils';
 import { auth } from '../firebase';
 import { toast } from 'sonner';
@@ -34,55 +35,43 @@ export function Sidebar() {
   const location = useLocation();
 
   const menuItems = [
-    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', roles: ['hotelAdmin', 'staff', 'superAdmin'], permission: 'dashboard' },
-    { icon: Activity, label: 'Operations', path: '/operations', roles: ['hotelAdmin', 'staff'], permission: 'dashboard' },
-    { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', roles: ['hotelAdmin', 'staff'], permission: 'frontDesk' },
-    { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', roles: ['hotelAdmin', 'staff'], permission: 'rooms' },
-    { icon: ClipboardList, label: t('sidebar.housekeeping'), path: '/housekeeping', roles: ['hotelAdmin', 'staff'], permission: 'housekeeping' },
-    { icon: ChefHat, label: 'F & B', path: '/f-and-b', roles: ['hotelAdmin', 'staff'], permission: 'kitchen' },
-    { icon: Package, label: t('sidebar.inventory'), path: '/inventory', roles: ['hotelAdmin', 'staff'], permission: 'inventory' },
-    { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', roles: ['hotelAdmin', 'staff'], permission: 'maintenance' },
-    { icon: Users, label: t('sidebar.guests'), path: '/guests', roles: ['hotelAdmin', 'staff'], permission: 'guests' },
-    { icon: Building2, label: 'Corporate', path: '/corporate', roles: ['hotelAdmin', 'staff'], permission: 'corporate' },
-    { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', roles: ['hotelAdmin', 'staff'], permission: 'finance' },
-    { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', roles: ['hotelAdmin', 'staff'], permission: 'reports' },
-    { icon: UserCog, label: t('sidebar.staff'), path: '/staff', roles: ['hotelAdmin', 'staff'], permission: 'staff' },
-    { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', roles: ['superAdmin'] },
-    { icon: Settings, label: t('sidebar.settings'), path: '/settings', roles: ['hotelAdmin', 'superAdmin', 'staff'], permission: 'settings' },
+    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', capability: null, module: 'dashboard' },
+    { icon: Activity, label: 'Operations', path: '/operations', capability: null, module: 'dashboard' },
+    { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', capability: null, module: 'frontDesk' },
+    { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', capability: 'manage_rooms', module: 'rooms' },
+    { icon: ClipboardList, label: t('sidebar.housekeeping'), path: '/housekeeping', capability: 'manage_rooms', module: 'housekeeping' },
+    { icon: ChefHat, label: 'F & B', path: '/f-and-b', capability: null, module: 'kitchen' },
+    { icon: Package, label: t('sidebar.inventory'), path: '/inventory', capability: null, module: 'inventory' },
+    { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', capability: null, module: 'maintenance' },
+    { icon: Users, label: t('sidebar.guests'), path: '/guests', capability: null, module: 'guests' },
+    { icon: Building2, label: 'Corporate', path: '/corporate', capability: null, module: 'corporate' },
+    { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'process_payments', module: 'finance' },
+    { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports' },
+    { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff' },
+    { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', capability: 'access_super_admin' },
+    { icon: Settings, label: t('sidebar.settings'), path: '/settings', capability: null, module: 'settings' },
   ];
 
   const filteredItems = menuItems.filter(item => {
     if (!profile) return false;
     
-    // Super Admin always sees their items + everything else for diagnosis
-    if (profile.role === 'superAdmin') {
-      return true;
+    // 1. Super Admin sees everything
+    if (profile.role === 'superAdmin') return true;
+
+    // 2. Check Role-based Capability
+    if (item.capability && !hasPermission(profile.role, item.capability as any)) {
+      return false;
     }
 
-    // Hotel Admin and Staff checks
-    if (profile.role === 'hotelAdmin' || profile.role === 'staff') {
-      // Check if role is allowed
-      if (!item.roles.includes(profile.role)) return false;
-
-      // Check if module is enabled for the hotel
-      if (item.permission && hotel?.modulesEnabled) {
-        // Special case: Corporate is always available for Premium and Enterprise plans
-        if (item.permission === 'corporate' && (hotel.plan === 'premium' || hotel.plan === 'enterprise')) {
-          return true;
-        }
-        if (!hotel.modulesEnabled.includes(item.permission)) return false;
+    // 3. Check Module toggles for the hotel
+    if (item.module && hotel?.modulesEnabled) {
+      if (item.module === 'corporate' && (hotel.plan === 'premium' || hotel.plan === 'enterprise')) {
+        return true;
       }
-
-      // Staff specific permission check
-      if (profile.role === 'staff') {
-        if (item.permission === 'dashboard') return true;
-        return (profile.permissions || []).includes(item.permission || '');
-      }
-
-      return true;
+      if (!hotel.modulesEnabled.includes(item.module)) return false;
     }
-    
-    return false;
+
+    return true;
   });
 
   return (

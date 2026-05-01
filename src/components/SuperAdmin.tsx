@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc, query, where, orderBy } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings, PlanType } from '../types';
 import { 
   Plus, 
@@ -88,7 +89,9 @@ export function SuperAdmin() {
     }
 
     // Only proceed if superAdmin
-    if (profile?.role !== 'superAdmin') {
+    if (!hasPermission(profile?.role, 'access_super_admin')) {
+      setHasPermissionError(true);
+      setLoading(false);
       return;
     }
 
