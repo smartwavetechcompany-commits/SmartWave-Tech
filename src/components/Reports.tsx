@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, Hotel, Room, FinanceRecord, CorporateAccount, Reservation, LedgerEntry, Guest } from '../types';
 import { 
@@ -448,19 +449,17 @@ export function Reports() {
     setIsDeleting(true);
     try {
       const { id, collection: colName, label } = recordToDelete;
-      await deleteDoc(doc(db, 'hotels', hotel.id, colName, id));
-      
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'REPORT_RECORD_DELETED',
-        resource: `${label} deleted from ${activeReport} report`,
+      await database.safeDelete(doc(db, 'hotels', hotel.id, colName, id), {
         hotelId: hotel.id,
-        module: 'Reports'
+        module: 'Reports',
+        action: 'REPORT_RECORD_DELETE',
+        details: `Deleted ${label} from ${activeReport} report`
       });
+      
+      // Log action is handled by safeDelete if auditLog provided, 
+      // but the code originally had a separate activityLogs entry too.
+      // I'll keep the specific activityLogs entry for consistency with current patterns 
+      // if it adds more context. Actually, safe* methods handle activityLogs.
 
       toast.success('Record deleted successfully');
       

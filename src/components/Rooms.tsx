@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, addDoc, doc, setDoc, deleteDoc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
+import { collection, getDocs, query, doc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { useAuth } from '../contexts/AuthContext';
@@ -224,7 +225,7 @@ export function Rooms() {
     if (!hotel?.id) return;
     try {
       const selectedType = roomTypes.find(t => t.name === newRoom.type);
-      await addDoc(collection(db, 'hotels', hotel.id, 'rooms'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'rooms'), {
         ...newRoom,
         roomTypeId: selectedType?.id,
         capacity: selectedType?.capacity || newRoom.capacity,
@@ -232,6 +233,11 @@ export function Rooms() {
         amenities: selectedType?.amenities || newRoom.amenities,
         status: 'dirty',
         createdAt: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'ADD_ROOM',
+        details: `Added room ${newRoom.roomNumber}`
       });
       setIsAddingRoom(false);
       toast.success('Room added successfully');
@@ -245,15 +251,25 @@ export function Rooms() {
     if (!hotel?.id) return;
     try {
       if (editingRoomType) {
-        await setDoc(doc(db, 'hotels', hotel.id, 'room_types', editingRoomType.id), {
+        await database.safeSet(doc(db, 'hotels', hotel.id, 'room_types', editingRoomType.id), {
           ...newRoomType,
           updatedAt: new Date().toISOString()
-        }, { merge: true });
+        }, {
+          hotelId: hotel.id,
+          module: 'Rooms',
+          action: 'UPDATE_ROOM_TYPE',
+          details: `Updated room type ${editingRoomType.name}`
+        });
         toast.success('Room type updated successfully');
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'room_types'), {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'room_types'), {
           ...newRoomType,
           createdAt: new Date().toISOString()
+        }, {
+          hotelId: hotel.id,
+          module: 'Rooms',
+          action: 'ADD_ROOM_TYPE',
+          details: `Added room type ${newRoomType.name}`
         });
         toast.success('Room type added successfully');
       }
@@ -276,10 +292,15 @@ export function Rooms() {
     e.preventDefault();
     if (!hotel?.id || !editingRoom) return;
     try {
-      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
+      await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
         ...editingRoom,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      }, {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'UPDATE_ROOM',
+        details: `Updated room ${editingRoom.roomNumber}`
+      });
       toast.success('Room updated successfully');
       setEditingRoom(null);
     } catch (err) {
@@ -292,8 +313,14 @@ export function Rooms() {
 
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
+    const type = roomTypes.find(t => t.id === id);
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'room_types', id));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'room_types', id), {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'DELETE_ROOM_TYPE',
+        details: `Deleted room type ${type?.name || id}`
+      });
       toast.success('Room type deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/room_types/${id}`);
@@ -302,8 +329,14 @@ export function Rooms() {
 
   const deleteRoom = async (id: string) => {
     if (!hotel?.id) return;
+    const room = rooms.find(r => r.id === id);
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'rooms', id));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'rooms', id), {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'DELETE_ROOM',
+        details: `Deleted room ${room?.roomNumber || id}`
+      });
       toast.success('Room deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rooms/${id}`);
@@ -314,10 +347,15 @@ export function Rooms() {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, { merge: true });
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'UPDATE_ROOM_STATUS',
+        details: `Room ${room?.roomNumber || roomId} status changed to ${status}`
+      });
 
-      // Log the action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log the action to activityLogs for UI
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
@@ -326,6 +364,11 @@ export function Rooms() {
         resource: `Room ${room?.roomNumber || roomId}: ${status}`,
         hotelId: hotel.id,
         module: 'Rooms'
+      }, {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Room status update activity'
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
@@ -354,14 +397,22 @@ export function Rooms() {
     const loadingToast = toast.loading(`Updating ${selectedRooms.length} rooms...`);
     
     try {
-      const promises = selectedRooms.map(roomId => 
-        setDoc(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { status }, { merge: true })
-      );
+      const batch = writeBatch(db);
+      selectedRooms.forEach(roomId => {
+        batch.update(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { 
+          status,
+          updatedAt: new Date().toISOString()
+        });
+      });
       
-      await Promise.all(promises);
+      await database.commitBatch(hotel.id, batch, {
+        module: 'Rooms',
+        action: 'BULK_UPDATE_ROOM_STATUS',
+        details: `Set status to ${status} for ${selectedRooms.length} rooms`
+      });
 
-      // Log the action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log the action to activityLogs for UI
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
@@ -370,6 +421,11 @@ export function Rooms() {
         resource: `${selectedRooms.length} rooms set to ${status}`,
         hotelId: hotel.id,
         module: 'Rooms'
+      }, {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Bulk room status update activity'
       });
 
       toast.success(`Successfully updated ${selectedRooms.length} rooms`, { id: loadingToast });
@@ -465,10 +521,14 @@ export function Rooms() {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
       }
 
-      await batch.commit();
+      await database.commitBatch(hotel.id, batch, {
+        module: 'Rooms',
+        action: 'RESERVATION_STATUS_UPDATE',
+        details: `Updated reservation for ${res.guestName} to ${status}`
+      });
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -477,6 +537,11 @@ export function Rooms() {
         resource: `Reservation for ${res.guestName} updated to ${status}`,
         hotelId: hotel.id,
         module: 'Rooms'
+      }, {
+        hotelId: hotel.id,
+        module: 'Rooms',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Reservation status update activity from Rooms'
       });
 
       toast.success(`Reservation updated to ${status.replace('_', ' ')}`);
@@ -1034,12 +1099,17 @@ export function Rooms() {
 
                   if (!hotel?.id) return;
                   try {
-                    await addDoc(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
+                    await database.safeAdd(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
                       roomTypeId,
                       baseRate,
                       weekendRate,
                       weekdayRate,
                       timestamp: new Date().toISOString()
+                    }, {
+                      hotelId: hotel.id,
+                      module: 'Rooms',
+                      action: 'ADD_RATE_RULE',
+                      details: `Added rate rule for room type ${roomTypes.find(t => t.id === roomTypeId)?.name || roomTypeId}`
                     });
                     toast.success('Rate rule added');
                     e.currentTarget.reset();
@@ -1086,7 +1156,19 @@ export function Rooms() {
                         </div>
                       </div>
                       <button 
-                        onClick={() => hotel?.id && deleteDoc(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id))}
+                        onClick={async () => {
+                          if (!hotel?.id) return;
+                          try {
+                            await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
+                              hotelId: hotel.id,
+                              module: 'Rooms',
+                              action: 'DELETE_RATE_RULE',
+                              details: `Deleted rate rule for room type ${roomTypes.find(t => t.id === c.roomTypeId)?.name || c.roomTypeId}`
+                            });
+                          } catch (err) {
+                            handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
+                          }
+                        }}
                         className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={18} />
@@ -1122,12 +1204,17 @@ export function Rooms() {
 
                   if (!hotel?.id) return;
                   try {
-                    await addDoc(collection(db, 'hotels', hotel.id, 'inventory_consumption_rules'), {
+                    await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory_consumption_rules'), {
                       roomTypeId: roomTypeId === 'all' ? null : roomTypeId,
                       itemId,
                       quantity,
                       trigger,
                       timestamp: new Date().toISOString()
+                    }, {
+                      hotelId: hotel.id,
+                      module: 'Rooms',
+                      action: 'ADD_CONSUMPTION_RULE',
+                      details: `Added consumption rule for item ${inventoryItems.find(i => i.id === itemId)?.name || itemId} on ${trigger}`
                     });
                     toast.success('Consumption rule added');
                     e.currentTarget.reset();
@@ -1181,7 +1268,19 @@ export function Rooms() {
                         </div>
                       </div>
                       <button 
-                        onClick={() => hotel?.id && deleteDoc(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id))}
+                        onClick={async () => {
+                          if (!hotel?.id) return;
+                          try {
+                            await database.safeDelete(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id), {
+                              hotelId: hotel.id,
+                              module: 'Rooms',
+                              action: 'DELETE_CONSUMPTION_RULE',
+                              details: `Deleted consumption rule for item ${inventoryItems.find(i => i.id === r.itemId)?.name || r.itemId}`
+                            });
+                          } catch (err) {
+                            handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory_consumption_rules/${r.id}`);
+                          }
+                        }}
                         className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={18} />
@@ -2029,10 +2128,15 @@ export function Rooms() {
                       if (!hotel?.id || !editingRoom) return;
                       try {
                         setIsSaving(true);
-                        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
+                        await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
                           ...editingRoom,
                           updatedAt: new Date().toISOString()
-                        }, { merge: true });
+                        }, {
+                          hotelId: hotel.id,
+                          module: 'Rooms',
+                          action: 'UPDATE_ROOM',
+                          details: `Updated room ${editingRoom.roomNumber} from modal`
+                        });
                         toast.success('Room updated successfully');
                         setEditingRoom(null);
                       } catch (err) {

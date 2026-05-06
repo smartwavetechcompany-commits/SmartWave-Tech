@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, orderBy, limit, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, limit, doc, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { OperationType } from '../types';
 import { 
@@ -58,7 +59,12 @@ export function Notifications() {
   const markAsRead = async (id: string) => {
     if (!hotel?.id) return;
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'notifications', id), { read: true });
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'notifications', id), { read: true }, {
+        hotelId: hotel.id,
+        module: 'Notifications',
+        action: 'MARK_READ',
+        details: `Marked notification ${id} as read`
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/notifications/${id}`);
     }
@@ -67,10 +73,16 @@ export function Notifications() {
   const markAllAsRead = async () => {
     if (!hotel?.id) return;
     const unread = notifications.filter(n => !n.read);
+    const batch = writeBatch(db);
     try {
-      await Promise.all(unread.map(n => 
-        updateDoc(doc(db, 'hotels', hotel.id, 'notifications', n.id), { read: true })
-      ));
+      unread.forEach(n => {
+        batch.update(doc(db, 'hotels', hotel.id!, 'notifications', n.id), { read: true });
+      });
+      await database.commitBatch(hotel.id, batch, {
+        module: 'Notifications',
+        action: 'MARK_ALL_READ',
+        details: `Marked ${unread.length} notifications as read`
+      });
     } catch (err: any) {
       errorService.handleError(err, { module: 'Notifications', severity: ErrorSeverity.MEDIUM });
     }
@@ -185,10 +197,15 @@ export function Notifications() {
 
 export async function createNotification(hotelId: string, notification: Omit<Notification, 'id' | 'read' | 'timestamp'>) {
   try {
-    await addDoc(collection(db, 'hotels', hotelId, 'notifications'), {
+    await database.safeAdd(collection(db, 'hotels', hotelId, 'notifications'), {
       ...notification,
       read: false,
       timestamp: new Date().toISOString()
+    }, {
+      hotelId,
+      module: 'Notifications',
+      action: 'NOTIFICATION_CREATE',
+      details: `Created notification: ${notification.title}`
     });
   } catch (err: any) {
     errorService.handleError(err, { module: 'Notifications', severity: ErrorSeverity.MEDIUM });

@@ -3,6 +3,7 @@ import {
   setDoc, 
   updateDoc, 
   addDoc, 
+  deleteDoc,
   collection, 
   getDoc, 
   serverTimestamp,
@@ -16,6 +17,7 @@ import {
 import { db, auth } from '../firebase';
 import { OperationType } from '../types';
 import { errorService, ErrorSeverity } from '../services/errorService';
+import { deepCloneSafe } from '../utils';
 
 /**
  * Audit log entry structure
@@ -54,11 +56,16 @@ export async function createAuditLog(
       module,
       details,
       status,
-      metadata
+      metadata: metadata ? deepCloneSafe(metadata) : undefined
     };
 
     // We use addDoc for append-only logging
-    await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), logData);
+    const isSystemLog = hotelId.toLowerCase() === 'system' || hotelId.toLowerCase() === 'global' || hotelId.toLowerCase() === 'none';
+    if (isSystemLog) {
+      await addDoc(collection(db, 'auditLogs'), logData);
+    } else {
+      await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), logData);
+    }
   } catch (error) {
     // Log failures to create audit logs as system errors
     await errorService.handleError(error, { 
@@ -88,8 +95,10 @@ export const database = {
         updatedAt: serverTimestamp()
       }, { merge: true });
       
+      const cleanedMetadata = deepCloneSafe(data);
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
-        docPath: docRef.path
+        docPath: docRef.path,
+        data: cleanedMetadata
       });
       return { success: true, id: docRef.id };
     } catch (error) {
@@ -119,8 +128,10 @@ export const database = {
         ...(data as any),
         updatedAt: serverTimestamp()
       });
+      const cleanedMetadata = deepCloneSafe(data);
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
-        docPath: docRef.path
+        docPath: docRef.path,
+        data: cleanedMetadata
       });
       return { success: true };
     } catch (error) {
@@ -151,9 +162,11 @@ export const database = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      const cleanedMetadata = deepCloneSafe(data);
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docId: docRef.id,
-        colPath: colRef.path
+        colPath: colRef.path,
+        data: cleanedMetadata
       });
       return docRef;
     } catch (error) {
@@ -208,5 +221,32 @@ export const database = {
       action: options.action || 'TRANSACTION_CREATE',
       details: options.details
     });
+  },
+
+  /**
+   * Safely deletes a document
+   */
+  async safeDelete(
+    docRef: DocumentReference<any>, 
+    options: { hotelId: string; module: string; action: string; details: string }
+  ) {
+    try {
+      await deleteDoc(docRef);
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+        docPath: docRef.path
+      });
+      return { success: true };
+    } catch (error) {
+      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+        error: String(error),
+        docPath: docRef.path
+      });
+
+      await errorService.handleError(error, { 
+        module: options.module, 
+        severity: ErrorSeverity.HIGH 
+      });
+      throw error;
+    }
   }
 };

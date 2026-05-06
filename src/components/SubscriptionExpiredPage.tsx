@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, addDoc, collection, query, where, getDocs, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, auth, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { SystemSettings, OperationType, TrackingCode, Hotel, GlobalAuditLog, PlanType } from '../types';
 import { 
@@ -52,7 +53,7 @@ export function SubscriptionExpiredPage() {
     setLoading(true);
 
     try {
-      await addDoc(collection(db, 'trackingCodeRequests'), {
+      await database.safeAdd(collection(db, 'trackingCodeRequests'), {
         hotelName: formData.hotelName,
         email: formData.email,
         message: formData.message,
@@ -60,6 +61,11 @@ export function SubscriptionExpiredPage() {
         status: 'pending',
         timestamp: new Date().toISOString(),
         type: 'renewal'
+      }, {
+        hotelId: hotel?.id || 'system',
+        module: 'Subscription',
+        action: 'RENEWAL_REQUEST_CREATE',
+        details: `Renewal request submitted for ${formData.hotelName}`
       });
 
       showNotification('Renewal request submitted! We will review your payment and issue your renewal code.');
@@ -122,24 +128,33 @@ export function SubscriptionExpiredPage() {
       const selectedPlan = (tcData.plan as keyof typeof planFeatures) || 'Standard';
       const features = planFeatures[selectedPlan];
 
-      await setDoc(doc(db, 'hotels', hotel.id), {
-        ...hotel,
+      // 2. Update Hotel
+      await database.safeSet(doc(db, 'hotels', hotel.id), {
         subscriptionStatus: 'active',
         subscriptionExpiry: tcData.expiryDate,
         plan: selectedPlan,
         modulesEnabled: features.modules,
         limits: features.limits,
         trackingCode: trackingCode.trim()
-      }, { merge: true });
+      }, {
+        hotelId: hotel.id,
+        module: 'Subscription',
+        action: 'SUBSCRIPTION_RENEW',
+        details: `Subscription renewed using code ${trackingCode.trim()} for plan ${selectedPlan}`
+      });
 
       // 3. Update Tracking Code
-      await setDoc(doc(db, 'trackingCodes', tcDoc.id), {
-        ...tcData,
+      await database.safeSet(doc(db, 'trackingCodes', tcDoc.id), {
         hotelId: hotel.id,
         status: 'used',
         usedAt: new Date().toISOString(),
         usedByHotel: hotel.id
-      }, { merge: true });
+      }, {
+        hotelId: hotel.id,
+        module: 'Subscription',
+        action: 'TRACKING_CODE_USE',
+        details: `Tracking code ${trackingCode.trim()} marked as used by hotel ${hotel.id}`
+      });
 
       showNotification('Subscription renewed successfully! Welcome back.');
       // The AuthContext listener will pick up the changes and redirect automatically

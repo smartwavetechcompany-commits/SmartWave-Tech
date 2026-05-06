@@ -12,7 +12,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../../utils';
 import { format } from 'date-fns';
 import { db, handleFirestoreError } from '../../firebase';
-import { collection, addDoc, updateDoc, doc, increment } from 'firebase/firestore';
+import { database } from '../../utils/database';
+import { collection, doc, increment } from 'firebase/firestore';
 import { toast } from 'sonner';
 
 interface StockMovementsProps {
@@ -54,16 +55,26 @@ export function StockMovements({ items, transactions, locations }: StockMovement
       const quantityChange = ['stock_in', 'return'].includes(moveForm.type) ? moveForm.quantity : -moveForm.quantity;
 
       // Update Item Quantity
-      await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', moveForm.itemId), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'inventory', moveForm.itemId), {
         quantity: increment(quantityChange),
         lastUpdated: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'INVENTORY_STOCK_ADJUST',
+        details: `Updated stock count for item ${moveForm.itemId} by ${quantityChange}`
       });
 
       // Record Transaction
-      await addDoc(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
         ...moveForm,
         userId: profile.uid,
         timestamp: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'INVENTORY_TRANSACTION_CREATE',
+        details: `Recorded stock movement: ${moveForm.type}`
       });
 
       toast.success('Stock movement recorded successfully');

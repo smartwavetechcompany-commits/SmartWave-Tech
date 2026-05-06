@@ -11,7 +11,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../../utils';
 import { format } from 'date-fns';
 import { db, handleFirestoreError } from '../../firebase';
-import { collection, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { database } from '../../utils/database';
+import { collection, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
 
 interface ItemMasterProps {
@@ -90,10 +91,20 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
       };
 
       if (editingItem) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', editingItem.id), itemData);
+        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'inventory', editingItem.id), itemData, {
+          hotelId: hotel.id,
+          module: 'Inventory',
+          action: 'INVENTORY_ITEM_UPDATE',
+          details: `Updated inventory item: ${itemData.name}`
+        });
         toast.success('Item updated successfully');
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'inventory'), itemData);
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory'), itemData, {
+          hotelId: hotel.id,
+          module: 'Inventory',
+          action: 'INVENTORY_ITEM_CREATE',
+          details: `Created new inventory item: ${itemData.name}`
+        });
         toast.success('Item created successfully');
       }
 
@@ -115,7 +126,12 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
   const handleDelete = async (id: string) => {
     if (!hotel?.id || !window.confirm('Are you sure you want to delete this item?')) return;
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'inventory', id));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'inventory', id), {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'INVENTORY_ITEM_DELETE',
+        details: `Deleted inventory item: ${id}`
+      });
       toast.success('Item deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory/${id}`);
@@ -619,10 +635,22 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
 
     try {
       if (editingCategory) {
-        await updateDoc(doc(db, 'hotels', hotelId, 'inventory_categories', editingCategory.id), newCategory);
+        await database.safeUpdate(doc(db, 'hotels', hotelId, 'inventory_categories', editingCategory.id), newCategory, {
+          hotelId,
+          module: 'Inventory',
+          action: 'INVENTORY_CATEGORY_UPDATE',
+          details: `Updated inventory category: ${newCategory.name}`
+        });
         toast.success('Category updated');
       } else {
-        await addDoc(collection(db, hotelId ? `hotels/${hotelId}/inventory_categories` : ''), newCategory);
+        const colPath = hotelId ? `hotels/${hotelId}/inventory_categories` : '';
+        if (!colPath) return; // Guard
+        await database.safeAdd(collection(db, colPath), newCategory, {
+          hotelId,
+          module: 'Inventory',
+          action: 'INVENTORY_CATEGORY_CREATE',
+          details: `Created new inventory category: ${newCategory.name}`
+        });
         toast.success('Category created');
       }
       setNewCategory({ name: '', description: '', isFB: false });
@@ -637,7 +665,12 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this category? Items using it will remain but category link will be broken.')) return;
     try {
-      await deleteDoc(doc(db, 'hotels', hotelId, 'inventory_categories', id));
+      await database.safeDelete(doc(db, 'hotels', hotelId, 'inventory_categories', id), {
+        hotelId,
+        module: 'Inventory',
+        action: 'INVENTORY_CATEGORY_DELETE',
+        details: `Deleted inventory category: ${id}`
+      });
       toast.success('Category deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotelId}/inventory_categories/${id}`);

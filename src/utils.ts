@@ -5,42 +5,55 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function safeStringify(obj: any): string {
-  if (obj === undefined) return 'undefined';
-  if (obj === null) return 'null';
-  if (typeof obj !== 'object') return String(obj);
+/**
+ * Performs a deep clone that is safe from circular references.
+ * Useful for preparing data for Firestore or other serialization-heavy operations.
+ */
+export function deepCloneSafe(obj: any): any {
+  if (obj === undefined) return undefined;
+  if (obj === null) return null;
+  if (typeof obj !== 'object') return obj;
 
-  const cache = new Set();
+  const cache = new WeakSet();
   
   function getSafeValue(val: any, depth: number = 0): any {
     // Prevent deep recursion
-    if (depth > 5) return '[Max Depth Reached]';
+    if (depth > 8) return '[Max Depth Reached]';
     
     if (val === null || typeof val !== 'object') {
       return val;
     }
 
-    if (cache.has(val)) {
-      return '[Circular]';
+    // Handle Dates
+    if (val instanceof Date) {
+      return val.toISOString();
     }
-    cache.add(val);
 
-    // Handle Errors specifically
+    // Handle Errors
     if (val instanceof Error || (val.message && val.stack)) {
       return {
         name: val.name || 'Error',
         message: val.message,
-        code: val.code,
-        stack: val.stack,
-        details: val.details ? getSafeValue(val.details, depth + 1) : undefined
+        code: (val as any).code,
+        stack: val.stack
       };
+    }
+
+    if (cache.has(val)) {
+      return '[Circular]';
+    }
+    
+    // Only add objects/arrays to cache
+    try {
+      cache.add(val);
+    } catch (e) {
+      return '[Unserializable]';
     }
 
     // Handle Arrays
     if (Array.isArray(val)) {
-      // Limit array size in logs
-      if (val.length > 50) {
-        return val.slice(0, 50).map(item => getSafeValue(item, depth + 1)).concat(['... and ' + (val.length - 50) + ' more items']);
+      if (val.length > 100) {
+        return val.slice(0, 100).map(item => getSafeValue(item, depth + 1)).concat([`... and ${val.length - 100} more items`]);
       }
       return val.map(item => getSafeValue(item, depth + 1));
     }
@@ -48,37 +61,52 @@ export function safeStringify(obj: any): string {
     // Handle Plain Objects
     const safeObj: any = {};
     let count = 0;
-    const MAX_KEYS = 50; // Limit keys to prevent hanging on massive objects
+    const MAX_KEYS = 100;
     
-    for (const key in val) {
-      if (Object.prototype.hasOwnProperty.call(val, key)) {
-        if (count++ > MAX_KEYS) {
-          safeObj['...'] = 'Truncated (' + Object.keys(val).length + ' total keys)';
-          break;
-        }
-        
-        // Skip potentially problematic internal properties (starting with _)
-        if (key.startsWith('_')) continue;
-        
-        try {
-          safeObj[key] = getSafeValue(val[key], depth + 1);
-        } catch (e) {
-          safeObj[key] = '[Unserializable Property]';
-        }
+    const keys = Object.keys(val);
+    
+    for (const key of keys) {
+      if (count++ > MAX_KEYS) {
+        safeObj['...'] = `Truncated (${keys.length} total keys)`;
+        break;
+      }
+      
+      if (key.startsWith('_') || key.startsWith('$')) continue;
+      
+      try {
+        const value = val[key];
+        safeObj[key] = getSafeValue(value, depth + 1);
+      } catch (e) {
+        safeObj[key] = '[Unserializable Property]';
       }
     }
+    
     return safeObj;
   }
 
+  return getSafeValue(obj);
+}
+
+export function safeStringify(obj: any): string {
+  if (obj === undefined) return 'undefined';
+  if (obj === null) return 'null';
+  if (typeof obj !== 'object') return String(obj);
+
   try {
-    const safeTarget = getSafeValue(obj);
+    const safeTarget = deepCloneSafe(obj);
     return JSON.stringify(safeTarget, null, 2);
   } catch (e) {
     try {
-      if (obj.message) return `Error: ${obj.message}`;
-      return String(obj);
+      // Fallback: iterate top level at least
+      const fallback: any = {};
+      for (const key in obj) {
+        if (typeof obj[key] !== 'function' && !key.startsWith('_')) {
+          fallback[key] = String(obj[key]);
+        }
+      }
+      return JSON.stringify(fallback, null, 2);
     } catch (finalError) {
-      return '[Unstringifiable Object]';
+      return `[Unstringifiable Object: ${e instanceof Error ? e.message : 'Unknown Error'}]`;
     }
   }
 }

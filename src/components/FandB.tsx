@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
 import { postToLedger } from '../services/ledgerService';
@@ -257,19 +258,29 @@ export function FandB() {
         totalAmount: finalPrice
       };
 
-      const orderRef = await addDoc(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData);
+      const orderRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ADD_ORDER',
+        details: `F & B Order for ${orderData.guestName} (Room ${newOrder.roomNumber})`
+      });
 
       // Update table status if assigned
       if (newOrder.tableId) {
         const table = tables.find(t => t.id === newOrder.tableId);
         if (table) {
-          await updateDoc(doc(db, 'hotels', hotel.id, 'tables', table.id), {
+          await database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', table.id), {
             status: 'occupied',
             currentOrderId: orderRef.id,
             currentGuestName: orderData.guestName,
             currentGuestId: newOrder.guestId || res?.guestId || '',
             totalSpend: (table.totalSpend || 0) + finalPrice,
             lastUpdated: new Date().toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'F & B',
+            action: 'UPDATE_TABLE_STATUS',
+            details: `Table ${table.tableNumber} status set to occupied`
           });
         }
       }
@@ -315,8 +326,8 @@ export function FandB() {
               paymentMethod: pay.method as any
             }, profile.uid, res.corporateId);
 
-            // Also record the payment in finance
-            await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+             // Also record the payment in finance
+            await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
@@ -325,11 +336,16 @@ export function FandB() {
               paymentMethod: pay.method,
               referenceId: orderRef.id,
               postedBy: profile.uid
+            }, {
+              hotelId: hotel.id,
+              module: 'Finance',
+              action: 'F&B_INCOME_RECORD',
+              details: `Recorded F&B income from Room ${newOrder.roomNumber}`
             });
           } else if (pay.method !== 'room') {
             // Walk-in or direct payment without room charge
             console.log('Recording walk-in payment in finance...');
-            await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+            await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
@@ -338,13 +354,18 @@ export function FandB() {
               paymentMethod: pay.method,
               referenceId: orderRef.id,
               postedBy: profile.uid
+            }, {
+              hotelId: hotel.id,
+              module: 'Finance',
+              action: 'F&B_INCOME_RECORD',
+              details: `Recorded walk-in F&B income`
             });
           }
         }
       }
 
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -353,6 +374,11 @@ export function FandB() {
         resource: `Room ${newOrder.roomNumber}: ${newOrder.items}`,
         hotelId: hotel.id,
         module: 'F & B'
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'F&B order creation activity'
       });
 
       toast.success('F & B order created');
@@ -392,10 +418,15 @@ export function FandB() {
     }
 
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'F&B_ORDER_DELETED',
+        details: `Deleted order for room ${roomNumber}`
+      });
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -404,6 +435,11 @@ export function FandB() {
         resource: `Order ${orderId} (Room ${roomNumber})`,
         hotelId: hotel.id,
         module: 'F & B'
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'F&B order deletion activity'
       });
       
       toast.success('Order deleted successfully');
@@ -422,10 +458,15 @@ export function FandB() {
     if (status === 'delivered') updates.deliveredAt = new Date().toISOString();
 
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), updates);
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), updates, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'F&B_ORDER_STATUS_UPDATE',
+        details: `Set status to ${status} for order ${orderId}`
+      });
       
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -434,6 +475,11 @@ export function FandB() {
         resource: `Order ${orderId}: ${status}`,
         hotelId: hotel.id,
         module: 'F & B'
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'F&B status update activity'
       });
       toast.success(`Order status updated to ${status}`);
     } catch (err) {
@@ -480,10 +526,20 @@ export function FandB() {
 
     try {
       if (editingTable?.id) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'tables', editingTable.id), tableData);
+        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', editingTable.id), tableData, {
+          hotelId: hotel.id,
+          module: 'F & B',
+          action: 'TABLE_UPDATE',
+          details: `Updated table ${tableData.tableNumber}`
+        });
         toast.success('Table updated');
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'tables'), tableData);
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'tables'), tableData, {
+          hotelId: hotel.id,
+          module: 'F & B',
+          action: 'TABLE_CREATE',
+          details: `Created table ${tableData.tableNumber}`
+        });
         toast.success('Table added');
       }
       setShowTableModal(false);
@@ -498,7 +554,12 @@ export function FandB() {
     if (!hotel?.id || !profile || !window.confirm('Are you sure you want to delete this table?')) return;
 
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'tables', tableId));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'tables', tableId), {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'TABLE_DELETE',
+        details: `Deleted table ${tableId}`
+      });
       toast.success('Table deleted');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/tables/${tableId}`);
@@ -510,12 +571,17 @@ export function FandB() {
     if (!hotel?.id || !profile || !window.confirm('Are you sure you want to clear this table? This will mark it as available.')) return;
 
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'tables', tableId), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', tableId), {
         status: 'available',
         currentOrderId: '',
         currentGuestName: '',
         currentGuestId: '',
         currentReservationId: ''
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'TABLE_CLEAR',
+        details: `Cleared and reset table ${tableId}`
       });
       toast.success('Table cleared');
     } catch (err) {

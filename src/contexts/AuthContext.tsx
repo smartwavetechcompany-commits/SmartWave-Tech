@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { UserProfile, Hotel, SystemSettings, OperationType } from '../types';
 import { safeStringify } from '../utils';
 
@@ -125,7 +126,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           status: 'active',
           uid: user.uid
         };
-        await setDoc(profileRef, bootstrapProfile);
+        await database.safeSet(profileRef, bootstrapProfile, {
+          hotelId: 'system',
+          module: 'Auth',
+          action: 'BOOTSTRAP_PROFILE',
+          details: `Bootstrapped superAdmin profile for ${user.email}`
+        });
         setProfile(bootstrapProfile);
         setLoading(false);
       } else {

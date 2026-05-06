@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, LedgerEntry, OperationType, Reservation } from '../types';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -134,16 +135,21 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       }
 
       // 1. Update account balance (total amount)
-      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
         currentBalance: increment(-totalAmount),
         totalCredits: increment(totalAmount)
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'BALANCE_UPDATE',
+        details: `Updated balance for ${currentAccount.name} by ${-totalAmount}`
       });
 
       // 2. Process each split
       for (const split of settleData.splits) {
         if (split.amount > 0) {
           // Add to Ledger
-          await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+          await database.safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
             hotelId: hotel.id,
             corporateId: currentAccount.id,
             reservationId: 'CORPORATE_SETTLEMENT',
@@ -154,10 +160,15 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             description: settleData.notes || `Corporate Settlement: ${currentAccount.name} (${split.method})`,
             paymentMethod: split.method,
             postedBy: profile.uid
+          }, {
+            hotelId: hotel.id,
+            module: 'Ledger',
+            action: 'PAYMENT_POST',
+            details: `Posted payment of ${split.amount} via ${split.method} for ${currentAccount.name}`
           });
 
           // Log to finance
-          await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+          await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
             type: 'income',
             amount: split.amount,
             category: 'Corporate Payment',
@@ -165,6 +176,11 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             timestamp,
             paymentMethod: split.method,
             referenceId: currentAccount.id
+          }, {
+            hotelId: hotel.id,
+            module: 'Finance',
+            action: 'FINANCE_LOG',
+            details: `Logged finance entry for corporate settlement: ${split.amount}`
           });
         }
       }
@@ -189,13 +205,18 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       const timestamp = new Date().toISOString();
 
       // 1. Update account balance
-      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
         currentBalance: increment(chargeData.amount),
         totalDebits: increment(chargeData.amount)
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'BALANCE_CHARGE',
+        details: `Posted charge of ${chargeData.amount} to ${currentAccount.name}`
       });
 
       // 2. Add to Ledger
-      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
         hotelId: hotel.id,
         corporateId: currentAccount.id,
         reservationId: 'CORPORATE_CHARGE',
@@ -205,6 +226,11 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         category: chargeData.category,
         description: chargeData.description,
         postedBy: profile.uid
+      }, {
+        hotelId: hotel.id,
+        module: 'Ledger',
+        action: 'CHARGE_POST',
+        details: `Posted ${chargeData.category} charge: ${chargeData.description}`
       });
 
       toast.success('Charge posted successfully');

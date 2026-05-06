@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, doc, setDoc, addDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, doc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType, UserProfile, Reservation } from '../types';
 import { 
@@ -107,10 +108,15 @@ export function Housekeeping() {
       if (status === 'clean') updateData.lastCleanedAt = now;
       if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = now;
 
-      await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, { merge: true });
+      await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, {
+        hotelId: hotel.id,
+        module: 'Housekeeping',
+        action: 'HOUSEKEEPING_UPDATE',
+        details: `Updated room ${room?.roomNumber || roomId} status to ${status}`
+      });
 
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: now,
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
@@ -119,6 +125,11 @@ export function Housekeeping() {
         resource: `Room ${room?.roomNumber || roomId}: ${status}${notes ? ` (Note: ${notes})` : ''}${assignedTo ? ` (Assigned to: ${staff.find(s => s.uid === assignedTo)?.displayName || assignedTo})` : ''}`,
         hotelId: hotel.id,
         module: 'Housekeeping'
+      }, {
+        hotelId: hotel.id,
+        module: 'Housekeeping',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Housekeeping update activity'
       });
       toast.success(`Room ${room?.roomNumber} updated`);
     } catch (err) {
@@ -134,27 +145,45 @@ export function Housekeeping() {
     const now = new Date().toISOString();
 
     try {
-      await Promise.all(selectedRoomIds.map(async (roomId) => {
+      const batch = writeBatch(db);
+      
+      selectedRoomIds.forEach(roomId => {
         const room = rooms.find(r => r.id === roomId);
         const notes = roomNotes[roomId] ?? room?.notes ?? '';
         
-        const updateData: any = { status, notes };
+        const updateData: any = { 
+          status, 
+          notes,
+          updatedAt: now
+        };
         if (status === 'clean') updateData.lastCleanedAt = now;
         if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = now;
 
-        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, { merge: true });
+        batch.update(doc(db, 'hotels', hotel.id!, 'rooms', roomId), updateData);
+      });
 
-        await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-          timestamp: now,
-          userId: profile?.uid || 'system',
-          userEmail: profile?.email || 'system',
-          userRole: profile?.role || 'staff',
-          action: 'HOUSEKEEPING_BULK_UPDATE',
-          resource: `Room ${room?.roomNumber || roomId}: ${status}`,
-          hotelId: hotel.id,
-          module: 'Housekeeping'
-        });
-      }));
+      await database.commitBatch(hotel.id, batch, {
+        module: 'Housekeeping',
+        action: 'HOUSEKEEPING_BULK_UPDATE',
+        details: `Bulk updated ${selectedRoomIds.length} rooms to ${status}`
+      });
+
+      // Log the bulk action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: now,
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
+        action: 'HOUSEKEEPING_BULK_UPDATE',
+        resource: `${selectedRoomIds.length} rooms updated to ${status}`,
+        hotelId: hotel.id,
+        module: 'Housekeeping'
+      }, {
+        hotelId: hotel.id,
+        module: 'Housekeeping',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Bulk housekeeping update activity'
+      });
 
       toast.dismiss(loadingToast);
       toast.success(`Successfully updated ${selectedRoomIds.length} rooms to ${status.replace('_', ' ')}`);
@@ -174,22 +203,37 @@ export function Housekeeping() {
     const staffMember = staff.find(s => s.uid === assignStaffId);
 
     try {
-      await Promise.all(selectedRoomIds.map(async (roomId) => {
-        await setDoc(doc(db, 'hotels', hotel.id, 'rooms', roomId), { 
-          assignedTo: assignStaffId 
-        }, { merge: true });
-
-        await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-          timestamp: now,
-          userId: profile?.uid || 'system',
-          userEmail: profile?.email || 'system',
-          userRole: profile?.role || 'staff',
-          action: 'HOUSEKEEPING_ASSIGN',
-          resource: `Room ${rooms.find(r => r.id === roomId)?.roomNumber || roomId} assigned to ${staffMember?.displayName || staffMember?.email || assignStaffId}`,
-          hotelId: hotel.id,
-          module: 'Housekeeping'
+      const batch = writeBatch(db);
+      
+      selectedRoomIds.forEach(roomId => {
+        batch.update(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { 
+          assignedTo: assignStaffId,
+          updatedAt: now
         });
-      }));
+      });
+
+      await database.commitBatch(hotel.id, batch, {
+        module: 'Housekeeping',
+        action: 'HOUSEKEEPING_BULK_ASSIGN',
+        details: `Assigned ${selectedRoomIds.length} rooms to ${staffMember?.displayName || assignStaffId}`
+      });
+
+      // Log the bulk action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: now,
+        userId: profile?.uid || 'system',
+        userEmail: profile?.email || 'system',
+        userRole: profile?.role || 'staff',
+        action: 'HOUSEKEEPING_ASSIGN',
+        resource: `${selectedRoomIds.length} rooms assigned to ${staffMember?.displayName || staffMember?.email || assignStaffId}`,
+        hotelId: hotel.id,
+        module: 'Housekeeping'
+      }, {
+        hotelId: hotel.id,
+        module: 'Housekeeping',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Bulk housekeeping assignment activity'
+      });
 
       toast.dismiss(loadingToast);
       toast.success(`Successfully assigned ${selectedRoomIds.length} rooms to ${staffMember?.displayName || staffMember?.email}`);

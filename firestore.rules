@@ -22,7 +22,7 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isAuthenticated() && (
         request.auth.uid == "ighGTXpOuehSqh1pTwSXLPz0Akk1" ||
-        (request.auth.token.email != null && request.auth.token.email.toLower() == "smartwavetechcompany@gmail.com")
+        (request.auth.token.email != null && request.auth.token.email.lower() == "smartwavetechcompany@gmail.com")
       );
     }
 
@@ -31,6 +31,7 @@ service cloud.firestore {
         isSuperAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hotelAdmin" ||
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "manager") ||
           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles != null && 
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(['manager', 'corporate']))))
       );
@@ -166,7 +167,11 @@ service cloud.firestore {
       match /{allSubcollections=**} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId);
         allow create, update: if isSuperAdmin() || (
-          isStaffOf(hotelId) && subscriptionActive(hotelId)
+          isStaffOf(hotelId) && (
+            subscriptionActive(hotelId) || 
+            allSubcollections[0] == 'auditLogs' || 
+            allSubcollections[0] == 'activityLogs'
+          )
         );
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }
@@ -179,6 +184,11 @@ service cloud.firestore {
     match /system/{docId} {
       allow read: if true;
       allow write: if isSuperAdmin();
+    }
+
+    match /systemLogs/{allPaths=**} {
+      allow read: if isSuperAdmin();
+      allow create: if isAuthenticated();
     }
 
     match /activityLogs/{logId} {

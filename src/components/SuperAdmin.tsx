@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc, getDocs, getDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDocs, getDoc, query, where, orderBy } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { TrackingCode, Hotel, TrackingCodeRequest, OperationType, GlobalAuditLog, SystemSettings, PlanType } from '../types';
@@ -139,7 +140,12 @@ export function SuperAdmin() {
 
   const updateSettings = async () => {
     try {
-      await setDoc(doc(db, 'system', 'settings'), settings, { merge: true });
+      await database.safeSet(doc(db, 'system', 'settings'), settings, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'UPDATE_SYSTEM_SETTINGS',
+        details: 'Updated global system settings'
+      });
       toast.success('System settings updated successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'system/settings');
@@ -191,15 +197,25 @@ export function SuperAdmin() {
       };
 
       // 1. Create the tracking code
-      await setDoc(doc(db, 'trackingCodes', code), tc);
+      await database.safeSet(doc(db, 'trackingCodes', code), tc, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'GENERATE_TRACKING_CODE',
+        details: `Generated code ${code} for ${request.email}`
+      });
       
       // 2. Approve the request
-      await updateDoc(doc(db, 'trackingCodeRequests', request.id), {
+      await database.safeUpdate(doc(db, 'trackingCodeRequests', request.id), {
         status: 'approved',
         generatedCode: code
+      }, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'APPROVE_CODE_REQUEST',
+        details: `Approved request for ${request.hotelName}`
       });
 
-      // 3. Log the action
+      // 3. Log the action for UI visibility
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: profile?.email || auth.currentUser.email || auth.currentUser.uid,
@@ -207,7 +223,12 @@ export function SuperAdmin() {
         action: 'APPROVE_CODE_REQUEST',
         target: `Hotel: ${request.hotelName}, Code: ${code}`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Approved tracking code request activity'
+      });
 
       toast.success(`Code ${code} approved for ${request.hotelName}`);
     } catch (err) {
@@ -220,7 +241,12 @@ export function SuperAdmin() {
 
   const rejectRequest = async (requestId: string) => {
     try {
-      await updateDoc(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' });
+      await database.safeUpdate(doc(db, 'trackingCodeRequests', requestId), { status: 'rejected' }, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'REJECT_CODE_REQUEST',
+        details: `Rejected request ${requestId}`
+      });
       toast.success('Request rejected');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `trackingCodeRequests/${requestId}`);
@@ -272,7 +298,12 @@ export function SuperAdmin() {
         targetEmail: newCode.targetEmail.toLowerCase()
       };
 
-      await setDoc(doc(db, 'trackingCodes', code), tc);
+      await database.safeSet(doc(db, 'trackingCodes', code), tc, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'GENERATE_TRACKING_CODE',
+        details: `Manually generated code ${code} for ${newCode.targetEmail}`
+      });
 
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
@@ -281,7 +312,12 @@ export function SuperAdmin() {
         action: 'GENERATE_TRACKING_CODE',
         target: `Code: ${code} (${newCode.duration})`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Manual code generation activity'
+      });
 
       setGeneratedCode(code);
       setNewCode({ duration: '1 month', type: 'Standard', price: 0, targetEmail: '' });
@@ -302,8 +338,13 @@ export function SuperAdmin() {
       const currentExpiry = new Date(code.expiryDate).getTime();
       const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
       
-      await updateDoc(doc(db, 'trackingCodes', code.code), { 
+      await database.safeUpdate(doc(db, 'trackingCodes', code.code), { 
         expiryDate: newExpiry
+      }, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'EXTEND_TRACKING_CODE',
+        details: `Extended code ${code.code} expiry to ${newExpiry}`
       });
 
       const log: Omit<GlobalAuditLog, 'id'> = {
@@ -313,7 +354,12 @@ export function SuperAdmin() {
         action: 'EXTEND_TRACKING_CODE',
         target: `Code ${code.code}: +${months} months`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Code extension activity'
+      });
       
       setExtendingCode(null);
       toast.success(`Code ${code.code} extended by ${months} months`);
@@ -331,9 +377,14 @@ export function SuperAdmin() {
       const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
       const newExpiry = new Date((currentExpiry > now ? currentExpiry : now) + (30 * 24 * 60 * 60 * 1000)).toISOString();
       
-      await updateDoc(doc(db, 'hotels', hotel.id), { 
+      await database.safeUpdate(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
         subscriptionStatus: 'active' 
+      }, {
+        hotelId: hotel.id,
+        module: 'SuperAdmin',
+        action: 'GIVE_LIVE_ACCESS',
+        details: `Granted live access to ${hotel.name}`
       });
 
       const log: Omit<GlobalAuditLog, 'id'> = {
@@ -343,7 +394,12 @@ export function SuperAdmin() {
         action: 'GIVE_LIVE_ACCESS',
         target: `Hotel: ${hotel.name}`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Live access grant activity'
+      });
       
       toast.success(`Live access granted to ${hotel.name}`);
     } catch (err) {
@@ -358,7 +414,12 @@ export function SuperAdmin() {
       message: `Are you sure you want to delete ${hotel.name}? This will delete all hotel data including rooms, reservations, and staff profiles. This action cannot be undone.`,
       onConfirm: async () => {
         try {
-          await deleteDoc(doc(db, 'hotels', hotel.id));
+          await database.safeDelete(doc(db, 'hotels', hotel.id), {
+            hotelId: hotel.id,
+            module: 'SuperAdmin',
+            action: 'DELETE_HOTEL',
+            details: `Deleted hotel ${hotel.name}`
+          });
           const log: Omit<GlobalAuditLog, 'id'> = {
             timestamp: new Date().toISOString(),
             actor: profile?.email || profile?.uid || 'system',
@@ -366,7 +427,12 @@ export function SuperAdmin() {
             action: 'DELETE_HOTEL',
             target: `Hotel: ${hotel.name}`
           };
-          await addDoc(collection(db, 'activityLogs'), log);
+          await database.safeAdd(collection(db, 'activityLogs'), log, {
+            hotelId: 'system',
+            module: 'SuperAdmin',
+            action: 'ACTIVITY_LOG_CREATE',
+            details: 'Hotel deletion activity'
+          });
           toast.success(`Hotel ${hotel.name} deleted`);
           setConfirmAction(null);
         } catch (err) {
@@ -380,7 +446,12 @@ export function SuperAdmin() {
   const toggleHotelStatus = async (hotel: Hotel) => {
     try {
       const newStatus = hotel.subscriptionStatus === 'active' ? 'suspended' : 'active';
-      await updateDoc(doc(db, 'hotels', hotel.id), { subscriptionStatus: newStatus });
+      await database.safeUpdate(doc(db, 'hotels', hotel.id), { subscriptionStatus: newStatus }, {
+        hotelId: hotel.id,
+        module: 'SuperAdmin',
+        action: 'TOGGLE_HOTEL_STATUS',
+        details: `Changed subscription status for ${hotel.name} to ${newStatus}`
+      });
 
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
@@ -389,7 +460,12 @@ export function SuperAdmin() {
         action: 'TOGGLE_HOTEL_STATUS',
         target: `Hotel ${hotel.name}: ${newStatus}`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Hotel status toggle activity'
+      });
       toast.success(`Hotel ${hotel.name} ${newStatus}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
@@ -402,9 +478,14 @@ export function SuperAdmin() {
       const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
       const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
       
-      await updateDoc(doc(db, 'hotels', hotel.id), { 
+      await database.safeUpdate(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
         subscriptionStatus: 'active' 
+      }, {
+        hotelId: hotel.id,
+        module: 'SuperAdmin',
+        action: 'EXTEND_SUBSCRIPTION',
+        details: `Extended ${hotel.name} subscription by ${months} months`
       });
 
       const log: Omit<GlobalAuditLog, 'id'> = {
@@ -414,7 +495,12 @@ export function SuperAdmin() {
         action: 'EXTEND_SUBSCRIPTION',
         target: `Hotel ${hotel.name}: +${months} months`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Subscription extension activity'
+      });
       
       setExtendingHotel(null);
       toast.success(`Subscription for ${hotel.name} extended by ${months} months`);
@@ -454,13 +540,18 @@ export function SuperAdmin() {
         reason: planChangeReason
       };
 
-      await updateDoc(doc(db, 'hotels', hotel.id), { 
+      await database.safeUpdate(doc(db, 'hotels', hotel.id), { 
         plan: newPlan,
         modulesEnabled: features.modules,
         roomLimit: features.limits.rooms,
         staffLimit: features.limits.staff,
         limits: features.limits,
         planHistory: [...(hotel.planHistory || []), planHistoryItem]
+      }, {
+        hotelId: hotel.id,
+        module: 'SuperAdmin',
+        action: 'CHANGE_HOTEL_PLAN',
+        details: `Upgraded/Downgraded ${hotel.name} to ${newPlan}`
       });
 
       // Update the tracking code associated with the hotel if it exists
@@ -469,9 +560,14 @@ export function SuperAdmin() {
           const tcRef = doc(db, 'trackingCodes', hotel.trackingCode.toUpperCase());
           const tcDoc = await getDoc(tcRef);
           if (tcDoc.exists()) {
-            await updateDoc(tcRef, { 
+            await database.safeUpdate(tcRef, { 
               plan: newPlan,
-              price: (tcDoc.data() as TrackingCode).price || 0 + planChangeAmount
+              price: ((tcDoc.data() as TrackingCode).price || 0) + planChangeAmount
+            }, {
+              hotelId: 'system',
+              module: 'SuperAdmin',
+              action: 'UPDATE_TRACKING_CODE_PLAN',
+              details: `Syncing plan change to code ${hotel.trackingCode.toUpperCase()}`
             });
           }
         } catch (err: any) {
@@ -487,7 +583,12 @@ export function SuperAdmin() {
         action: 'CHANGE_HOTEL_PLAN',
         target: `Hotel ${hotel.name}: ${hotel.plan} -> ${newPlan} (Amount: ${planChangeAmount})`
       };
-      await addDoc(collection(db, 'activityLogs'), log);
+      await database.safeAdd(collection(db, 'activityLogs'), log, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Hotel plan change activity'
+      });
       
       setChangingPlanHotel(null);
       setPlanChangeAmount(0);
@@ -1213,7 +1314,12 @@ export function SuperAdmin() {
                                 message: `Are you sure you want to delete code ${code.code}? This action cannot be undone.`,
                                 onConfirm: async () => {
                                   try {
-                                    await deleteDoc(doc(db, 'trackingCodes', code.id || code.code));
+                                    await database.safeDelete(doc(db, 'trackingCodes', code.id || code.code), {
+                                      hotelId: 'system',
+                                      module: 'SuperAdmin',
+                                      action: 'DELETE_TRACKING_CODE',
+                                      details: `Deleted tracking code ${code.code}`
+                                    });
                                     toast.success('Tracking code deleted');
                                     setConfirmAction(null);
                                   } catch (err) {

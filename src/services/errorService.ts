@@ -1,8 +1,10 @@
 
 import { toast } from 'sonner';
 import { db, auth } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, serverTimestamp, addDoc } from 'firebase/firestore';
 import { safeStringify } from '../utils';
+
+
 
 export enum ErrorSeverity {
   LOW = 'low',
@@ -74,6 +76,7 @@ class ErrorService {
 
   private async logToFirestore(error: AppError) {
     try {
+      // Use direct addDoc to avoid circular dependency with 'database' utility
       await addDoc(collection(db, 'systemLogs', 'errors', 'entries'), {
         ...error,
         createdAt: serverTimestamp()

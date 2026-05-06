@@ -11,7 +11,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils';
 import { format } from 'date-fns';
 import { db, handleFirestoreError } from '../../firebase';
-import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { database } from '../../utils/database';
+import { collection, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
 
 interface InventoryAuditingProps {
@@ -56,24 +57,39 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
       };
 
       // Record the audit
-      await addDoc(collection(db, 'hotels', hotel.id, 'inventory_audits'), auditData);
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory_audits'), auditData, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'INVENTORY_AUDIT_COMPLETED',
+        details: `Completed physical stock count for location: ${activeAudit.locationId}`
+      });
 
       // Update inventory quantities based on audit
       for (const auditItem of activeAudit.items) {
         if (auditItem.physicalQty !== auditItem.systemQty) {
-          await updateDoc(doc(db, 'hotels', hotel.id, 'inventory', auditItem.itemId), {
+          await database.safeUpdate(doc(db, 'hotels', hotel.id, 'inventory', auditItem.itemId), {
             quantity: auditItem.physicalQty,
             lastUpdated: new Date().toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'Inventory',
+            action: 'INVENTORY_AUDIT_ADJUSTMENT',
+            details: `Adjusted stock for item ${auditItem.itemId} based on audit`
           });
 
           // Record adjustment transaction
-          await addDoc(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
+          await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
             type: 'adjustment',
             itemId: auditItem.itemId,
             quantity: Math.abs(auditItem.physicalQty - auditItem.systemQty),
             userId: profile.uid,
             timestamp: new Date().toISOString(),
             reason: `Audit Adjustment: ${auditItem.reason || 'Variance found during physical count'}`
+          }, {
+            hotelId: hotel.id,
+            module: 'Inventory',
+            action: 'INVENTORY_TRANSACTION_CREATE',
+            details: 'Audit variance adjustment transaction'
           });
         }
       }

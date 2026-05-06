@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { database } from '../utils/database';
+import { OperationType } from '../types';
+import { handleFirestoreError } from '../firebase';
 import { 
   X, 
   ChevronRight, 
@@ -72,12 +75,18 @@ export function OnboardingTour() {
   const handleComplete = async () => {
     if (!profile?.uid) return;
     try {
-      await updateDoc(doc(db, 'users', profile.uid), {
+      await database.safeUpdate(doc(db, 'users', profile.uid), {
         hasCompletedOnboarding: true
+      }, {
+        hotelId: profile.hotelId || 'global',
+        module: 'Onboarding',
+        action: 'COMPLETE_ONBOARDING',
+        details: `User ${profile.email} completed onboarding tour`
       });
       setIsVisible(false);
     } catch (err: any) {
       console.error("Failed to complete onboarding:", err.message || safeStringify(err));
+      handleFirestoreError(err, OperationType.WRITE, `users/${profile.uid}`);
       setIsVisible(false);
     }
   };

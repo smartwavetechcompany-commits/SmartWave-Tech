@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, orderBy, addDoc, updateDoc, doc, onSnapshot, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { MaintenanceRequest, OperationType, Room, UserProfile } from '../types';
 import { 
@@ -101,15 +102,20 @@ export function Maintenance() {
     if (!validateForm()) return;
 
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'maintenance'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'maintenance'), {
         ...newRequest,
         status: 'pending',
         reportedBy: profile.email,
         timestamp: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Maintenance',
+        action: 'MAINTENANCE_REQUEST_CREATED',
+        details: `Reported issue for room ${newRequest.roomNumber}`
       });
 
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -118,6 +124,11 @@ export function Maintenance() {
         resource: `Room ${newRequest.roomNumber}: ${newRequest.issue}`,
         hotelId: hotel.id,
         module: 'Maintenance'
+      }, {
+        hotelId: hotel.id,
+        module: 'Maintenance',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Maintenance request activity'
       });
 
       toast.success('Maintenance request created');
@@ -137,10 +148,15 @@ export function Maintenance() {
     if (assignedTo !== undefined) updates.assignedTo = assignedTo;
 
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'maintenance', requestId), updates);
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'maintenance', requestId), updates, {
+        hotelId: hotel.id,
+        module: 'Maintenance',
+        action: 'MAINTENANCE_STATUS_UPDATE',
+        details: `Request ${requestId} status set to ${status}`
+      });
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -149,6 +165,11 @@ export function Maintenance() {
         resource: `Request ${requestId}: ${status}${assignedTo ? ` (Assigned to: ${staff.find(s => s.uid === assignedTo)?.displayName || assignedTo})` : ''}`,
         hotelId: hotel.id,
         module: 'Maintenance'
+      }, {
+        hotelId: hotel.id,
+        module: 'Maintenance',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Maintenance status update activity'
       });
       toast.success(`Request status updated to ${status.replace('_', ' ')}`);
     } catch (err) {
@@ -165,11 +186,15 @@ export function Maintenance() {
     }
 
     try {
-      const { deleteDoc } = await import('firebase/firestore');
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'maintenance', requestId));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'maintenance', requestId), {
+        hotelId: hotel.id,
+        module: 'Maintenance',
+        action: 'MAINTENANCE_REQUEST_DELETED',
+        details: `Deleted request ${requestId}`
+      });
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -178,6 +203,11 @@ export function Maintenance() {
         resource: `Request ${requestId}`,
         hotelId: hotel.id,
         module: 'Maintenance'
+      }, {
+        hotelId: hotel.id,
+        module: 'Maintenance',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Maintenance deletion activity'
       });
       toast.success('Maintenance request deleted');
     } catch (err) {

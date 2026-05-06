@@ -12,7 +12,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../../utils';
 import { format } from 'date-fns';
 import { db, handleFirestoreError } from '../../firebase';
-import { collection, addDoc, updateDoc, doc, deleteDoc, increment } from 'firebase/firestore';
+import { database } from '../../utils/database';
+import { collection, doc, increment } from 'firebase/firestore';
 import { toast } from 'sonner';
 
 interface ProcurementProps {
@@ -52,9 +53,14 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
     if (!hotel?.id) return;
     setLoading(true);
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'inventory_vendors'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory_vendors'), {
         ...vendorForm,
         createdAt: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'INVENTORY_VENDOR_CREATE',
+        details: `Created new inventory vendor: ${vendorForm.name}`
       });
       toast.success('Vendor added successfully');
       setShowAddVendor(false);
@@ -79,7 +85,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
       const totalAmount = poForm.items.reduce((acc, item) => acc + item.total, 0);
       const poNumber = `PO-${Date.now().toString().slice(-6)}`;
 
-      await addDoc(collection(db, 'hotels', hotel.id, 'purchase_orders'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'purchase_orders'), {
         poNumber,
         supplierId: poForm.supplierId,
         items: poForm.items.map(i => ({ ...i, receivedQuantity: 0 })),
@@ -90,6 +96,11 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
         dueDate: poForm.dueDate,
         notes: poForm.notes,
         createdBy: profile.uid
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'PURCHASE_ORDER_CREATE',
+        details: `Created purchase order ${poNumber}`
       });
 
       toast.success('Purchase Order created successfully');
@@ -105,9 +116,14 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
   const updatePOStatus = async (po: PurchaseOrder, newStatus: PurchaseOrder['status']) => {
     if (!hotel?.id) return;
     try {
-      await updateDoc(doc(db, 'hotels', hotel.id, 'purchase_orders', po.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'purchase_orders', po.id), {
         status: newStatus,
         approvedBy: newStatus === 'approved' ? profile?.uid : undefined
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'PURCHASE_ORDER_STATUS_UPDATE',
+        details: `Updated PO ${po.poNumber} status to ${newStatus}`
       });
       toast.success(`PO status updated to ${newStatus}`);
     } catch (err) {
@@ -122,13 +138,18 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
       // For simplicity, we'll just update the inventory quantities directly
       for (const item of po.items) {
         const invDoc = doc(db, 'hotels', hotel.id, 'inventory', item.itemId);
-        await updateDoc(invDoc, {
+        await database.safeUpdate(invDoc, {
           quantity: increment(item.quantity),
           lastUpdated: new Date().toISOString()
+        }, {
+          hotelId: hotel.id,
+          module: 'Inventory',
+          action: 'INVENTORY_STOCK_RECEIVE',
+          details: `Received ${item.quantity} units for item ${item.itemId} from PO ${po.poNumber}`
         });
 
         // Log transaction
-        await addDoc(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'inventory_transactions'), {
           type: 'stock_in',
           itemId: item.itemId,
           quantity: item.quantity,
@@ -136,12 +157,22 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
           timestamp: new Date().toISOString(),
           referenceId: po.id,
           reason: `Received from PO: ${po.poNumber}`
+        }, {
+          hotelId: hotel.id,
+          module: 'Inventory',
+          action: 'INVENTORY_TRANSACTION_CREATE',
+          details: `Logged stock-in from PO ${po.poNumber}`
         });
       }
 
-      await updateDoc(doc(db, 'hotels', hotel.id, 'purchase_orders', po.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'purchase_orders', po.id), {
         status: 'received',
         items: po.items.map(i => ({ ...i, receivedQuantity: i.quantity }))
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'PURCHASE_ORDER_RECEIVE',
+        details: `Marked PO ${po.poNumber} as fully received`
       });
 
       toast.success('Inventory updated and PO marked as received');

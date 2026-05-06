@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -104,13 +105,18 @@ export function AuthPage() {
     setSuccess('');
 
     try {
-      await addDoc(collection(db, 'trackingCodeRequests'), {
+      await database.safeAdd(collection(db, 'trackingCodeRequests'), {
         hotelName: formData.hotelName,
         email: formData.email,
         phone: formData.phone,
         plan: formData.plan,
         status: 'pending',
         timestamp: new Date().toISOString(),
+      }, {
+        hotelId: 'SYSTEM',
+        module: 'Auth',
+        action: 'CODE_REQUEST',
+        details: `New tracking code request for ${formData.hotelName}`
       });
       showNotification('Request submitted! Our team will contact you with payment instructions shortly.');
       
@@ -154,22 +160,32 @@ export function AuthPage() {
               const newUser = userCredential.user;
               
               // Update the user document: link to real UID and remove initialPassword
-              await setDoc(doc(db, 'users', newUser.uid), {
+              await database.safeSet(doc(db, 'users', newUser.uid), {
                 ...staffData,
                 uid: newUser.uid,
                 initialPassword: null, // Remove for security
                 status: 'active',
                 updatedAt: new Date().toISOString()
+              }, {
+                hotelId: staffData.hotelId || 'SYSTEM',
+                module: 'Auth',
+                action: 'STAFF_ACTIVATION',
+                details: `Activated staff account for ${newUser.email}`
               });
               
               // Delete the temporary staff document if it had a different ID
               if (staffDoc.id !== newUser.uid) {
-                await deleteDoc(doc(db, 'users', staffDoc.id));
+                await database.safeDelete(doc(db, 'users', staffDoc.id), {
+                  hotelId: staffData.hotelId || 'SYSTEM',
+                  module: 'Auth',
+                  action: 'STAFF_TEMP_DELETE',
+                  details: `Removed temporary staff document for ${newUser.email}`
+                });
               }
               
               // Log the activation
               if (staffData.hotelId) {
-                await addDoc(collection(db, 'hotels', staffData.hotelId, 'activityLogs'), {
+                await database.safeAdd(collection(db, 'hotels', staffData.hotelId, 'activityLogs'), {
                   timestamp: new Date().toISOString(),
                   userId: newUser.uid,
                   userEmail: newUser.email,
@@ -178,6 +194,11 @@ export function AuthPage() {
                   resource: `Staff: ${newUser.email}`,
                   hotelId: staffData.hotelId,
                   module: 'Auth'
+                }, {
+                  hotelId: staffData.hotelId,
+                  module: 'Auth',
+                  action: 'ACTIVITY_LOG_CREATE',
+                  details: `Logged staff activation for ${newUser.email}`
                 });
               }
               
@@ -253,13 +274,18 @@ export function AuthPage() {
 
         // 2.5 Record Registration Attempt
         try {
-          await addDoc(collection(db, 'registration'), {
+          await database.safeAdd(collection(db, 'registration'), {
             uid: currentUser.uid,
             email: formData.email,
             hotelName: formData.hotelName || (existingStaffProfile ? 'Staff Registration' : ''),
             trackingCode: formData.trackingCode,
             timestamp: new Date().toISOString(),
             status: 'pending'
+          }, {
+            hotelId: existingStaffProfile?.hotelId || 'SYSTEM',
+            module: 'Auth',
+            action: 'REGISTRATION_START',
+            details: `Started registration for ${formData.email}`
           });
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, 'registration');
@@ -309,9 +335,19 @@ export function AuthPage() {
         try {
           // If we found an existing staff doc with a different ID (like tempUid), delete it first
           if (staffDocId && staffDocId !== currentUser.uid) {
-            await deleteDoc(doc(db, 'users', staffDocId));
+            await database.safeDelete(doc(db, 'users', staffDocId), {
+              hotelId: hotelId || 'SYSTEM',
+              module: 'Auth',
+              action: 'PROFILE_TEMP_CLEANUP',
+              details: `Cleanup of temporary profile during registration`
+            });
           }
-          await setDoc(doc(db, 'users', currentUser.uid), profileData);
+          await database.safeSet(doc(db, 'users', currentUser.uid), profileData, {
+            hotelId: hotelId || 'SYSTEM',
+            module: 'Auth',
+            action: 'PROFILE_CREATE',
+            details: `Created/Updated user profile during registration`
+          });
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
           throw err;
@@ -335,7 +371,12 @@ export function AuthPage() {
           };
 
           try {
-            await setDoc(doc(db, 'hotels', hotelId), hotelData);
+            await database.safeSet(doc(db, 'hotels', hotelId), hotelData, {
+              hotelId: hotelId,
+              module: 'Auth',
+              action: 'HOTEL_CREATE',
+              details: `Created new hotel organization: ${formData.hotelName}`
+            });
           } catch (err) {
             handleFirestoreError(err, OperationType.CREATE, `hotels/${hotelId}`);
             throw err;
@@ -343,10 +384,15 @@ export function AuthPage() {
 
           // 6. Update Tracking Code
           try {
-            await updateDoc(doc(db, 'trackingCodes', formData.trackingCode.toUpperCase()), { 
+            await database.safeUpdate(doc(db, 'trackingCodes', formData.trackingCode.toUpperCase()), { 
               status: 'used',
               usedAt: new Date().toISOString(),
               usedByHotel: hotelId
+            }, {
+              hotelId: hotelId,
+              module: 'Auth',
+              action: 'CODE_USE',
+              details: `Marked tracking code ${formData.trackingCode} as used`
             });
           } catch (err) {
             handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${formData.trackingCode}`);
@@ -356,13 +402,18 @@ export function AuthPage() {
 
         // 7. Record Registration Attempt
         try {
-          await addDoc(collection(db, 'registration'), {
+          await database.safeAdd(collection(db, 'registration'), {
             uid: currentUser.uid,
             email: formData.email,
             hotelName: formData.hotelName,
             trackingCode: formData.trackingCode,
             timestamp: new Date().toISOString(),
             status: 'completed'
+          }, {
+            hotelId: hotelId || 'SYSTEM',
+            module: 'Auth',
+            action: 'REGISTRATION_FINISH',
+            details: `Completed registration for ${formData.email}`
           });
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, 'registration');

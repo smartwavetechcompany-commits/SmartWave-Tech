@@ -1,4 +1,5 @@
 
+import { safeStringify } from '../utils';
 import { errorService, ErrorSeverity } from './errorService';
 
 interface RequestOptions extends RequestInit {
@@ -90,7 +91,7 @@ class ApiClient {
     return this.request<T>(path, { 
       ...options, 
       method: 'POST', 
-      body: body ? JSON.stringify(body) : undefined 
+      body: body ? (typeof body === 'string' ? body : safeStringify(body)) : undefined 
     });
   }
 
@@ -98,7 +99,7 @@ class ApiClient {
     return this.request<T>(path, { 
       ...options, 
       method: 'PUT', 
-      body: body ? JSON.stringify(body) : undefined 
+      body: body ? (typeof body === 'string' ? body : safeStringify(body)) : undefined 
     });
   }
 
@@ -106,7 +107,7 @@ class ApiClient {
     return this.request<T>(path, { 
       ...options, 
       method: 'PATCH', 
-      body: body ? JSON.stringify(body) : undefined 
+      body: body ? (typeof body === 'string' ? body : safeStringify(body)) : undefined 
     });
   }
 

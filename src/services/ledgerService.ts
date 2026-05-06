@@ -273,7 +273,12 @@ export const deleteLedgerEntry = async (
 
   // For backward compatibility, we still allow it but strongly discourage
   if (docId) {
-    await deleteDoc(doc(db, 'hotels', hotelId, 'ledger', docId));
+    await database.safeDelete(doc(db, 'hotels', hotelId, 'ledger', docId), {
+      hotelId,
+      module: 'Ledger',
+      action: 'DELETE_LEDGER_ENTRY',
+      details: `Permanently deleted ledger entry ${docId} (Discouraged)`
+    });
   }
 
   // 2. Synchronize Reservation

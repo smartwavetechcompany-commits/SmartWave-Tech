@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, getDoc, deleteDoc, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
@@ -254,10 +255,15 @@ export function Finance() {
     }
 
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'finance', id));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'finance', id), {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'FINANCE_RECORD_DELETED',
+        details: `Deleted transaction: ${description} (${formatCurrency(amount, currency, exchangeRate)})`
+      });
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -266,6 +272,11 @@ export function Finance() {
         resource: `${description} (${formatCurrency(amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Finance record deletion activity'
       });
       
       toast.success('Transaction deleted successfully');
@@ -351,9 +362,14 @@ export function Finance() {
     setIsSaving(true);
     console.log('Starting handleAddSupplier with data:', newSupplier);
     try {
-      const supplierRef = await addDoc(collection(db, 'hotels', hotel.id, 'suppliers'), {
+      const supplierRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'suppliers'), {
         ...newSupplier,
         createdAt: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'ADD_SUPPLIER',
+        details: `Added supplier: ${newSupplier.name}`
       });
       console.log('Supplier added with ID:', supplierRef.id);
       toast.success('Supplier added successfully');
@@ -376,18 +392,28 @@ export function Finance() {
       const amount = payData.amount;
 
       // Update supplier balance
-      await updateDoc(doc(db, 'hotels', hotel.id, 'suppliers', supplier.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'suppliers', supplier.id), {
         balance: (supplier.balance || 0) - amount
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'SUPPLIER_PAYMENT',
+        details: `Payment of ${formatCurrency(amount, currency, exchangeRate)} to ${supplier.name}`
       });
 
       // Record as expense
-      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
         type: 'expense',
         amount: amount,
         category: 'Supplies',
         description: `Supplier Payment: ${supplier.name} (${payData.notes || 'No notes'})`,
         timestamp: new Date().toISOString(),
         paymentMethod: payData.method
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'RECORD_EXPENSE',
+        details: `Recorded supplier payment expense for ${supplier.name}`
       });
 
       toast.success('Payment recorded successfully');
@@ -406,9 +432,14 @@ export function Finance() {
     setIsSaving(true);
     console.log('Starting handleCreateAccount with data:', newAccount);
     try {
-      const accountRef = await addDoc(collection(db, 'hotels', hotel.id, 'accounts'), {
+      const accountRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'accounts'), {
         ...newAccount,
         balance: Number(newAccount.balance)
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'CREATE_ACCOUNT',
+        details: `Created chart of account: ${newAccount.name} (${newAccount.code})`
       });
       console.log('Account created with ID:', accountRef.id);
       toast.success('Account created successfully');
@@ -432,15 +463,25 @@ export function Finance() {
     setIsSaving(true);
     console.log('Starting handleCreatePO with data:', newPO);
     try {
-      const poRef = await addDoc(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
+      const poRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'purchaseOrders'), {
         ...newPO,
         timestamp: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'CREATE_PO',
+        details: `Created purchase order for supplier ${newPO.supplierId}`
       });
 
       // Update supplier balance (liability)
       const supplierRef = doc(db, 'hotels', hotel.id, 'suppliers', newPO.supplierId);
-      await updateDoc(supplierRef, {
+      await database.safeUpdate(supplierRef, {
         balance: increment(newPO.totalAmount)
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'UPDATE_SUPPLIER_BALANCE',
+        details: `Increased liability by ${formatCurrency(newPO.totalAmount, currency, exchangeRate)} for PO`
       });
 
       console.log('Purchase Order created with ID:', poRef.id);
@@ -462,8 +503,13 @@ export function Finance() {
     setIsSaving(true);
     try {
       // Update PO status
-      await updateDoc(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
         status: 'received'
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'RECEIVE_PO',
+        details: `Marked PO #${po.id.slice(0, 8)} as received`
       });
 
       // Update inventory for each item
@@ -472,15 +518,20 @@ export function Finance() {
         const itemDoc = await getDoc(itemRef);
         if (itemDoc.exists()) {
           const currentQty = itemDoc.data().quantity || 0;
-          await updateDoc(itemRef, {
+          await database.safeUpdate(itemRef, {
             quantity: currentQty + item.quantity,
             lastUpdated: new Date().toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'Inventory',
+            action: 'UPDATE_STOCK_FROM_PO',
+            details: `Updated stock for item ${item.itemId} from PO`
           });
         }
       }
 
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -489,6 +540,11 @@ export function Finance() {
         resource: `PO #${po.id.slice(0, 8)} received, inventory updated`,
         hotelId: hotel.id,
         module: 'Inventory'
+      }, {
+        hotelId: hotel.id,
+        module: 'Inventory',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'PO received activity log'
       });
 
       toast.success('Purchase Order received and inventory updated');
@@ -506,19 +562,29 @@ export function Finance() {
     setIsSaving(true);
     try {
       // Update PO payment status
-      await updateDoc(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'purchaseOrders', po.id), {
         paymentStatus: 'paid'
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'PAY_PO',
+        details: `Marked PO #${po.id.slice(0, 8)} as paid`
       });
 
       // Update supplier balance
       const supplierRef = doc(db, 'hotels', hotel.id, 'suppliers', po.supplierId);
-      await updateDoc(supplierRef, {
+      await database.safeUpdate(supplierRef, {
         balance: increment(-po.totalAmount)
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'UPDATE_SUPPLIER_BALANCE',
+        details: `Reduced liability by ${formatCurrency(po.totalAmount, currency, exchangeRate)} for PO payment`
       });
 
       // Record as expense in finance
       const supplier = suppliers.find(s => s.id === po.supplierId);
-      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
         type: 'expense',
         amount: po.totalAmount,
         category: 'Supplies',
@@ -527,10 +593,15 @@ export function Finance() {
         paymentMethod: 'transfer', // Default for POs
         referenceId: po.id,
         postedBy: profile.uid
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'RECORD_EXPENSE',
+        details: `Recorded PO payment expense for ${supplier?.name || 'Supplier'}`
       });
 
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -539,6 +610,11 @@ export function Finance() {
         resource: `PO #${po.id.slice(0, 8)} paid (${formatCurrency(po.totalAmount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'PO paid activity log'
       });
 
       toast.success('Purchase Order marked as paid and finance record created');
@@ -639,13 +715,18 @@ export function Finance() {
     if (!hotel?.id) return;
 
     try {
-      await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
         ...newRecord,
         timestamp: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'CREATE_FINANCE_RECORD',
+        details: `Created ${newRecord.type} record: ${newRecord.description}`
       });
 
       // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -654,6 +735,11 @@ export function Finance() {
         resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Finance record creation activity'
       });
 
       setShowAddModal(false);

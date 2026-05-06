@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, addDoc, query, orderBy, doc, updateDoc, deleteDoc, onSnapshot, where, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, CorporateRate, Room, OperationType, RoomType, Reservation } from '../types';
 import { 
@@ -224,8 +225,8 @@ export function CorporateManagement() {
         toast.info('Daily charges for all active reservations have already been posted today.');
       }
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -234,6 +235,11 @@ export function CorporateManagement() {
         resource: `Posted daily charges for ${chargedCount} rooms`,
         hotelId: hotel.id,
         module: 'Corporate'
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Daily charges posting activity'
       });
     } catch (err) {
       console.error("Daily charge error:", err);
@@ -253,12 +259,17 @@ export function CorporateManagement() {
       
       // 1. Update account balance
       const balanceAdjustment = adjustmentData.type === 'debit' ? adjustmentData.amount : -adjustmentData.amount;
-      await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', account.id), {
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', account.id), {
         currentBalance: increment(balanceAdjustment)
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'CORPORATE_BALANCE_UPDATE',
+        details: `Adjusted balance for ${account.name} by ${balanceAdjustment}`
       });
 
       // 2. Add to Ledger
-      await addDoc(collection(db, 'hotels', hotel.id, 'ledger'), {
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
         hotelId: hotel.id,
         corporateId: account.id,
         reservationId: 'MANUAL_ADJUSTMENT',
@@ -269,11 +280,16 @@ export function CorporateManagement() {
         description: adjustmentData.description || `Manual ${adjustmentData.type} adjustment`,
         paymentMethod: adjustmentData.paymentMethod,
         postedBy: profile.uid
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'LEDGER_ENTRY_CREATE',
+        details: 'Manual balance adjustment ledger entry'
       });
 
       // 3. If it's a payment (credit), log to finance
       if (adjustmentData.type === 'credit') {
-        await addDoc(collection(db, 'hotels', hotel.id, 'finance'), {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
           type: 'income',
           amount: adjustmentData.amount,
           category: 'Corporate Payment',
@@ -281,11 +297,16 @@ export function CorporateManagement() {
           timestamp,
           paymentMethod: adjustmentData.paymentMethod,
           referenceId: account.id
+        }, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'FINANCE_ENTRY_CREATE',
+          details: 'Corporate payment finance entry'
         });
       }
 
-      // 4. Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // 4. Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp,
         userId: profile.uid,
         userEmail: profile.email,
@@ -294,6 +315,11 @@ export function CorporateManagement() {
         resource: `${account.name} adjusted by ${adjustmentData.type === 'debit' ? '+' : '-'}${formatCurrency(adjustmentData.amount, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Corporate'
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Corporate balance adjustment activity'
       });
 
       toast.success('Balance adjusted successfully');
@@ -313,18 +339,28 @@ export function CorporateManagement() {
       if (editingAccount) {
         // Exclude read-only financial fields from update to prevent clearing them
         const { currentBalance, totalDebits, createdAt, ...updateData } = newAccount as any;
-        await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', editingAccount.id), updateData);
+        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', editingAccount.id), updateData, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'CORPORATE_ACCOUNT_UPDATE',
+          details: `Updated corporate account ${newAccount.name}`
+        });
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
           ...newAccount,
           currentBalance: 0,
           totalDebits: 0,
           createdAt: new Date().toISOString()
+        }, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'CORPORATE_ACCOUNT_CREATE',
+          details: `Created new corporate account ${newAccount.name}`
         });
       }
 
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -333,6 +369,11 @@ export function CorporateManagement() {
         resource: `${newAccount.name} (${newAccount.contactPerson})`,
         hotelId: hotel.id,
         module: 'Corporate'
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Corporate account management activity'
       });
 
       setShowAddModal(false);
@@ -370,16 +411,26 @@ export function CorporateManagement() {
       };
 
       if (editingRate) {
-        await updateDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', editingRate.id), rateData);
+        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', editingRate.id), rateData, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'CORPORATE_RATE_UPDATE',
+          details: `Updated negotiated rate for ${showRatesModal.name} - ${newRate.roomType}`
+        });
       } else {
-        await addDoc(collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'), {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates'), {
           ...rateData,
           createdAt: new Date().toISOString()
+        }, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'CORPORATE_RATE_CREATE',
+          details: `Created negotiatied rate for ${showRatesModal.name} - ${newRate.roomType}`
         });
       }
 
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -388,6 +439,11 @@ export function CorporateManagement() {
         resource: `Rate for ${showRatesModal.name} - ${newRate.roomType}`,
         hotelId: hotel.id,
         module: 'Corporate'
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Negotiated rate management activity'
       });
 
       setNewRate({
@@ -412,10 +468,15 @@ export function CorporateManagement() {
     if (!hotel?.id || !profile) return;
     
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', accountId));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'corporate_accounts', accountId), {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'CORPORATE_ACCOUNT_DELETE',
+        details: `Deleted corporate account ${accountId}`
+      });
       
-      // Log action
-      await addDoc(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -424,6 +485,11 @@ export function CorporateManagement() {
         resource: `Account ID: ${accountId}`,
         hotelId: hotel.id,
         module: 'Corporate'
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Corporate account deletion activity'
       });
       
       toast.success('Corporate account deleted');
@@ -438,7 +504,12 @@ export function CorporateManagement() {
     if (!hotel?.id || !showRatesModal) return;
     
     try {
-      await deleteDoc(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', rateId));
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'corporate_accounts', showRatesModal.id, 'rates', rateId), {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'CORPORATE_RATE_DELETE',
+        details: `Deleted rate ${rateId} for account ${showRatesModal.name}`
+      });
       toast.success('Rate deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/corporate_accounts/${showRatesModal.id}/rates/${rateId}`);

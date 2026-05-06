@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, setDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { db, auth, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType } from '../types';
@@ -95,10 +96,15 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     };
 
     try {
-      await setDoc(doc(db, 'users', tempUid), staffProfile);
+      await database.safeSet(doc(db, 'users', tempUid), staffProfile, {
+        hotelId: hotelId,
+        module: 'Staff',
+        action: 'CREATE_STAFF',
+        details: `Created staff profile for ${newStaff.email}`
+      });
       
-      // Log the action
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+      // Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid || 'system',
         userEmail: profile?.email || 'system',
@@ -108,6 +114,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelId: hotelId,
         module: 'Staff',
         details: `Initial password set by admin: ${newStaff.password}`
+      }, {
+        hotelId: hotelId,
+        module: 'Staff',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Staff creation activity'
       });
 
       setIsAddingStaff(false);
@@ -124,10 +135,15 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId) return;
 
     try {
-      await deleteDoc(doc(db, 'users', staffUid));
+      await database.safeDelete(doc(db, 'users', staffUid), {
+        hotelId: hotelId,
+        module: 'Staff',
+        action: 'DELETE_STAFF',
+        details: `Deleted staff member ${staffEmail}`
+      });
       
-      // Log the action
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+      // Log the action for UI visibility
+      await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -136,6 +152,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         resource: `Staff: ${staffEmail}`,
         hotelId: hotelId,
         module: 'Staff'
+      }, {
+        hotelId: hotelId,
+        module: 'Staff',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Staff deletion activity'
       });
       toast.success('Staff member removed');
       setShowConfirmRemove(null);
@@ -152,9 +173,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     try {
       await sendPasswordResetEmail(auth, email);
       
-      // Log the action
+      // Log the action for UI visibility
       if (hotelId) {
-        await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+        await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
           timestamp: new Date().toISOString(),
           userId: profile?.uid,
           userEmail: profile?.email,
@@ -163,6 +184,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           resource: `Staff: ${email}`,
           hotelId: hotelId,
           module: 'Staff'
+        }, {
+          hotelId: hotelId,
+          module: 'Staff',
+          action: 'ACTIVITY_LOG_CREATE',
+          details: 'Staff password reset activity'
         });
       }
       
@@ -184,18 +210,23 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       : [...currentRoles, roleId];
       
     try {
-      await setDoc(doc(db, 'users', member.uid), { 
+      await database.safeUpdate(doc(db, 'users', member.uid), { 
         roles: newRoles,
         permissions: newRoles // Keep sync
-      }, { merge: true });
+      }, {
+        hotelId: hotelId,
+        module: 'Staff',
+        action: 'UPDATE_STAFF_ROLES',
+        details: `Updated roles for ${member.email} to: ${newRoles.join(', ')}`
+      });
       
       // Update local state for immediate feedback
       if (editingPermissions) {
         setEditingPermissions({ ...editingPermissions, roles: newRoles, permissions: newRoles });
       }
       
-      // Log the action (Audit Trail)
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+      // Log the action for UI visibility (Audit Trail)
+      await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -204,6 +235,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         resource: `Staff: ${member.email}, Roles: ${newRoles.join(', ')}`,
         hotelId: hotelId,
         module: 'Staff'
+      }, {
+        hotelId: hotelId,
+        module: 'Staff',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Staff roles update activity'
       });
       toast.success('Permissions updated');
     } catch (err) {

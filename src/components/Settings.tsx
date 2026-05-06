@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch, where } from 'firebase/firestore';
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
+import { database } from '../utils/database';
 import { Tax, Reservation } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 import { 
@@ -131,9 +132,14 @@ export function Settings() {
     if (!hotel?.id) return;
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
+      await database.safeSet(doc(db, 'hotels', hotel.id), {
         taxes: localTaxes
-      }, { merge: true });
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'UPDATE_TAX_SETTINGS',
+        details: 'Updated global tax configuration'
+      });
 
       // After saving taxes, update existing active reservations to reflect new tax policy
       const activeTaxes = localTaxes.filter(t => t.status === 'active' && t.category !== 'restaurant');
@@ -191,7 +197,11 @@ export function Settings() {
         }
 
         if (updateCount > 0) {
-          await batch.commit();
+          await database.commitBatch(hotel.id, batch, {
+            module: 'Settings',
+            action: 'RECALCULATE_RESERVATION_TAXES',
+            details: `Recalculated taxes for ${updateCount} active reservations`
+          });
           toast.success(`Taxes updated and ${updateCount} active reservations recalculated.`);
         } else {
           toast.success('Taxes updated successfully');
@@ -225,7 +235,7 @@ export function Settings() {
       
       // Log action
       if (profile.hotelId) {
-        await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+        await database.safeAdd(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
           timestamp: new Date().toISOString(),
           userId: profile.uid,
           userEmail: profile.email,
@@ -234,6 +244,11 @@ export function Settings() {
           resource: 'User Security',
           hotelId: profile.hotelId,
           module: 'Security'
+        }, {
+          hotelId: profile.hotelId,
+          module: 'Security',
+          action: 'ACTIVITY_LOG_CREATE',
+          details: 'Password change activity'
         });
       }
 
@@ -257,13 +272,18 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'users', profile.uid), {
+      await database.safeSet(doc(db, 'users', profile.uid), {
         displayName: formData.displayName,
-      }, { merge: true });
+      }, {
+        hotelId: profile.hotelId || 'unknown',
+        module: 'Security',
+        action: 'UPDATE_PROFILE',
+        details: 'Updated user display name'
+      });
 
       // Log action
       if (profile.hotelId) {
-        await addDoc(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
+        await database.safeAdd(collection(db, 'hotels', profile.hotelId, 'activityLogs'), {
           timestamp: new Date().toISOString(),
           userId: profile.uid,
           userEmail: profile.email,
@@ -272,6 +292,11 @@ export function Settings() {
           resource: 'User Profile',
           hotelId: profile.hotelId,
           module: 'Security'
+        }, {
+          hotelId: profile.hotelId,
+          module: 'Security',
+          action: 'ACTIVITY_LOG_CREATE',
+          details: 'Profile update activity'
         });
       }
 
@@ -297,7 +322,7 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
+      await database.safeSet(doc(db, 'hotels', hotel.id), {
         name: formData.hotelName,
         defaultCurrency: formData.defaultCurrency,
         exchangeRate: formData.exchangeRate,
@@ -305,10 +330,15 @@ export function Settings() {
         defaultCheckOutTime: formData.defaultCheckOutTime,
         overstayChargeTime: formData.overstayChargeTime,
         autoChargeOverstays: formData.autoChargeOverstays,
-      }, { merge: true });
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'UPDATE_HOTEL_SETTINGS',
+        details: `Hotel settings updated: ${formData.hotelName}`
+      });
 
       // Log action
-      await addDoc(collection(db, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -316,6 +346,11 @@ export function Settings() {
         action: 'UPDATE_HOTEL_SETTINGS',
         resource: `Hotel: ${formData.hotelName} (Currency: ${formData.defaultCurrency}, Rate: ${formData.exchangeRate})`,
         hotelId: hotel.id
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Hotel settings update activity'
       });
 
       toast.success('Hotel settings updated!');
@@ -333,12 +368,17 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'hotels', hotel.id), {
+      await database.safeSet(doc(db, 'hotels', hotel.id), {
         branding: formData.branding,
-      }, { merge: true });
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'UPDATE_HOTEL_BRANDING',
+        details: 'Updated hotel branding and visual settings'
+      });
 
       // Log action
-      await addDoc(collection(db, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -346,6 +386,11 @@ export function Settings() {
         action: 'UPDATE_HOTEL_BRANDING',
         resource: `Hotel Branding: ${hotel.name}`,
         hotelId: hotel.id
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Hotel branding update activity'
       });
 
       toast.success('Hotel branding updated!');
@@ -442,7 +487,7 @@ export function Settings() {
       await Promise.all(roomBatches);
 
       // Log the reset
-      await addDoc(collection(db, 'activityLogs'), {
+      await database.safeAdd(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -450,6 +495,11 @@ export function Settings() {
         action: 'SYSTEM_RESET',
         resource: 'All System Data',
         hotelId: hotel.id
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'SYSTEM_RESET_LOG',
+        details: 'Full system data reset execution'
       });
 
       toast.success('System data cleared successfully!');
