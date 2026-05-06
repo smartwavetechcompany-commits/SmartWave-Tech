@@ -34,9 +34,12 @@ export const syncDailyCharges = async (
     // But wait, the first night is usually charged at check-in.
     // Let's check the ledger for this reservation
     const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-    const q = query(ledgerRef, where('reservationId', '==', res.id), where('category', '==', 'room'));
+    const q = query(ledgerRef, where('reservationId', '==', res.id));
     const ledgerSnap = await getDocs(q);
-    const existingChargesCount = ledgerSnap.docs.length;
+    
+    // Client-side filter to avoid index requirement
+    const roomCharges = ledgerSnap.docs.filter(doc => doc.data().category === 'room');
+    const existingChargesCount = roomCharges.length;
 
     // If they've stayed 3 nights, they should have 3 charges.
     // If they overstay, nightsStayedSoFar will be > (checkOut - checkIn).

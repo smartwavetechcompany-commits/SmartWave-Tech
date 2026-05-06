@@ -190,14 +190,19 @@ export function CorporateManagement() {
         // 2. Check if already charged for today
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id),
-          where('category', '==', 'room'),
-          where('type', '==', 'debit'),
-          where('description', '==', `Daily Room Charge: ${res.roomNumber} (${todayFormatted})`)
+          where('reservationId', '==', res.id)
         );
         const ledgerSnap = await getDocs(ledgerQ);
         
-        if (ledgerSnap.empty) {
+        const descriptionToFind = `Daily Room Charge: ${res.roomNumber} (${todayFormatted})`;
+        const alreadyCharged = ledgerSnap.docs.some(doc => {
+          const data = doc.data();
+          return data.category === 'room' && 
+                 data.type === 'debit' && 
+                 data.description === descriptionToFind;
+        });
+        
+        if (!alreadyCharged) {
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           if (rate > 0 && res.guestId) {
             await postToLedger(hotel.id, res.guestId, res.id, {

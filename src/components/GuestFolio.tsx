@@ -221,16 +221,25 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     // Fetch other active reservations for this guest
     const qOther = query(
       collection(db, 'hotels', hotel.id, 'reservations'),
-      where('guestId', '==', reservation.guestId),
-      where('status', 'in', ['confirmed', 'checked_in']),
-      orderBy('checkIn', 'desc')
+      where('guestId', '==', reservation.guestId)
     );
 
     const unsubOther = onSnapshot(qOther, (snap) => {
-      setOtherReservations(snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
-        .filter(r => r.id !== reservation.id)
-      );
+      const allOther = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+      
+      // Client-side filtering and sorting to avoid composite indexes
+      const filtered = allOther
+        .filter(r => 
+          r.id !== reservation.id && 
+          ['confirmed', 'checked_in'].includes(r.status)
+        )
+        .sort((a, b) => {
+          const dateA = a.checkIn || '';
+          const dateB = b.checkIn || '';
+          return dateB.localeCompare(dateA); // desc
+        });
+
+      setOtherReservations(filtered);
     });
 
     return () => unsubOther();
@@ -273,13 +282,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
       where('reservationId', '==', reservation.id),
-      orderBy('timestamp', 'desc'),
       limit(1000)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
-      setLedgerEntries(entries as any);
+      
+      // Client-side sorting to avoid composite index requirements
+      const sortedEntries = [...entries].sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA; // desc
+      });
+
+      setLedgerEntries(sortedEntries as any);
       setLoading(false);
     }, (err) => {
       console.error("Ledger loading error:", err);

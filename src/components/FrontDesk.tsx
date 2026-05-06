@@ -1018,12 +1018,16 @@ export function FrontDesk() {
         // Fetch ledger entries for this reservation to see what's already charged
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id),
-          where('category', '==', 'room'),
-          where('type', '==', 'debit')
+          where('reservationId', '==', res.id)
         );
         const ledgerSnap = await getDocs(ledgerQ);
-        const existingCharges = ledgerSnap.docs.length;
+        
+        // Client-side filtering to avoid composite indexes
+        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
+          const data = doc.data();
+          return data.category === 'room' && data.type === 'debit';
+        });
+        const existingCharges = roomChargeEntries.length;
         
         if (existingCharges < targetCharges) {
           const nightsToCharge = targetCharges - existingCharges;
@@ -1175,14 +1179,18 @@ export function FrontDesk() {
         
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id),
-          where('category', '==', 'room'),
-          where('type', '==', 'debit')
+          where('reservationId', '==', res.id)
         );
         const ledgerSnap = await getDocs(ledgerQ);
-        const existingCharges = ledgerSnap.docs.length;
         
-        let finalTotalDebits = ledgerSnap.docs.reduce((acc, doc) => acc + doc.data().amount, 0);
+        // Client-side filtering to avoid composite indexes
+        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
+          const data = doc.data();
+          return data.category === 'room' && data.type === 'debit';
+        });
+        const existingCharges = roomChargeEntries.length;
+        
+        let finalTotalDebits = roomChargeEntries.reduce((acc, doc) => acc + doc.data().amount, 0);
 
         if (existingCharges < nightsStayed) {
           const nightsToCharge = nightsStayed - existingCharges;

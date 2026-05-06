@@ -69,12 +69,20 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     // Listen to ledger entries for this corporate account
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('corporateId', '==', account.id),
-      orderBy('timestamp', 'desc')
+      where('corporateId', '==', account.id)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
-      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      
+      // Client-side sorting to avoid composite index
+      const sortedEntries = [...entries].sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA; // desc
+      });
+
+      setLedgerEntries(sortedEntries);
       setLoading(false);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
@@ -83,12 +91,13 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     // Listen to individual reservations linked to this corporate account
     const qRes = query(
       collection(db, 'hotels', hotel.id, 'reservations'),
-      where('corporateId', '==', account.id),
-      where('status', '==', 'checked_in')
+      where('corporateId', '==', account.id)
     );
 
     const unsubRes = onSnapshot(qRes, (snap) => {
-      setIndividualReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      const allRes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+      // Client-side filtering to avoid composite index
+      setIndividualReservations(allRes.filter(r => r.status === 'checked_in'));
     });
 
     return () => {

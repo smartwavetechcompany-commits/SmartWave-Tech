@@ -130,11 +130,19 @@ export function GuestManagement() {
     // Fetch full ledger history for guest
     const qLedger = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('guestId', '==', viewingHistory.id),
-      orderBy('timestamp', 'desc')
+      where('guestId', '==', viewingHistory.id)
     );
     const unsubLedger = onSnapshot(qLedger, (snap) => {
-      setGuestLedger(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      
+      // Client-side sorting to avoid composite index
+      const sortedEntries = [...entries].sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA; // desc
+      });
+
+      setGuestLedger(sortedEntries);
     });
     
     return () => {
