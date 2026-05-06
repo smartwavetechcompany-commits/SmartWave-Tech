@@ -4,6 +4,7 @@ import { initializeFirestore, getDocFromServer, doc } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { OperationType, FirestoreErrorInfo } from "./types";
 import { safeStringify } from "./utils";
+import { errorService, ErrorSeverity } from "./services/errorService";
 import firebaseConfig from "../firebase-applet-config.json";
 
 const app = initializeApp(firebaseConfig);
@@ -59,11 +60,12 @@ export function handleFirestoreError(error: any, operationType: OperationType, p
   
   const stringifiedErr = safeStringify(errInfo);
   
-  if (isOfflineError) {
-    console.warn('Firestore Offline:', errorMessage, path);
-  } else {
-    console.error('Firestore Error:', stringifiedErr);
-  }
+  // Centralized logging
+  errorService.handleError(error, {
+    module: `Firestore:${operationType}`,
+    severity: isOfflineError ? ErrorSeverity.LOW : ErrorSeverity.HIGH,
+    silent: isOfflineError // Don't annoy user with toast for network drops
+  });
   
   // Create a clean error object to avoid circular references in the error itself
   const cleanError = new Error(errorMessage);

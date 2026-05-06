@@ -2,6 +2,7 @@ import { db } from '../firebase';
 import { collection, getDocs, query, where, doc, setDoc, addDoc, writeBatch, increment } from 'firebase/firestore';
 import { Reservation, Room, Guest, OperationType } from '../types';
 import { postToLedger } from './ledgerService';
+import { database } from '../utils/database';
 import { format, addDays, differenceInDays, parseISO, isBefore, startOfDay } from 'date-fns';
 
 export const syncDailyCharges = async (
@@ -71,7 +72,7 @@ export const syncDailyCharges = async (
 
   // Log the sync
   if (chargedCount > 0) {
-    await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), {
+    await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs') as any, {
       timestamp: new Date().toISOString(),
       userId: profileId,
       userEmail: profileEmail,
@@ -79,6 +80,11 @@ export const syncDailyCharges = async (
       resource: `Synced ${chargedCount} nightly charges totaling ${totalAmount}`,
       hotelId: hotelId,
       module: 'Finance'
+    }, {
+      hotelId,
+      module: 'Finance',
+      action: 'SYNC_CHARGES_LOG',
+      details: `Logged sync of ${chargedCount} charges`
     });
   }
 

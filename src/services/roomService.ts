@@ -1,17 +1,15 @@
 import { 
   collection, 
-  addDoc, 
-  updateDoc, 
   doc, 
   getDocs, 
   query, 
   where, 
   writeBatch, 
   increment,
-  Timestamp,
   getDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { database } from '../utils/database';
 import { 
   Room, 
   RoomType, 
@@ -25,17 +23,28 @@ export const roomService = {
   // Room Blocking
   async blockRoom(hotelId: string, blocking: Omit<RoomBlocking, 'id' | 'timestamp'>) {
     const blockingRef = collection(db, 'hotels', hotelId, 'room_blockings');
-    const docRef = await addDoc(blockingRef, {
+    
+    const docRef = await database.safeAdd(blockingRef as any, {
       ...blocking,
       timestamp: new Date().toISOString()
+    }, {
+      hotelId,
+      module: 'Rooms',
+      action: 'BLOCK_ROOM',
+      details: `Blocked room ${blocking.roomId} for ${blocking.reason}`
     });
     
     // Update room status if blocking is current
     const now = new Date().toISOString();
     if (blocking.startDate <= now && blocking.endDate >= now) {
       const roomRef = doc(db, 'hotels', hotelId, 'rooms', blocking.roomId);
-      await updateDoc(roomRef, { 
+      await database.safeUpdate(roomRef, { 
         status: blocking.reason === 'maintenance' ? 'maintenance' : 'out_of_order' 
+      }, {
+        hotelId,
+        module: 'Rooms',
+        action: 'UPDATE_ROOM_STATUS',
+        details: `Updated room ${blocking.roomId} status due to blocking`
       });
     }
     
@@ -44,11 +53,21 @@ export const roomService = {
 
   async unblockRoom(hotelId: string, blockingId: string, roomId: string) {
     const blockingRef = doc(db, 'hotels', hotelId, 'room_blockings', blockingId);
-    await updateDoc(blockingRef, { endDate: new Date().toISOString() });
+    await database.safeUpdate(blockingRef, { endDate: new Date().toISOString() }, {
+      hotelId,
+      module: 'Rooms',
+      action: 'UNBLOCK_ROOM',
+      details: `Ended blocking period for ${blockingId}`
+    });
     
     // Reset room status to dirty so it needs cleaning before booking
     const roomRef = doc(db, 'hotels', hotelId, 'rooms', roomId);
-    await updateDoc(roomRef, { status: 'dirty' });
+    await database.safeUpdate(roomRef, { status: 'dirty' }, {
+      hotelId,
+      module: 'Rooms',
+      action: 'RESET_ROOM_STATUS',
+      details: `Reset room ${roomId} to dirty after unblocking`
+    });
   },
 
   // Inventory Integration
@@ -86,8 +105,13 @@ export const roomService = {
       batch.set(txRef, tx);
     }
     
-    await batch.commit();
+    await database.commitBatch(hotelId, batch, {
+      module: 'Inventory',
+      action: 'AUTO_CONSUMPTION',
+      details: `Triggered ${trigger} inventory consumption for room type ${roomTypeId}`
+    });
   },
+
 
   // Rate Management
   async calculateCurrentRate(hotelId: string, roomTypeId: string, date: Date): Promise<number> {

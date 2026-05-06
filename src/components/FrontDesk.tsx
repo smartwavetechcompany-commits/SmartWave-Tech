@@ -158,31 +158,32 @@ export function FrontDesk() {
   useEffect(() => {
     if (showFolioModal) {
       const updated = reservations.find(r => r.id === showFolioModal.id);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(showFolioModal)) {
+      // Compare by relevant fields instead of JSON.stringify to avoid circular structure errors
+      if (updated && (updated.updatedAt !== showFolioModal.updatedAt || updated.status !== showFolioModal.status || updated.ledgerBalance !== showFolioModal.ledgerBalance)) {
         setShowFolioModal(updated);
       }
     }
     if (showChargeModal) {
       const updated = reservations.find(r => r.id === showChargeModal.id);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(showChargeModal)) {
+      if (updated && (updated.updatedAt !== showChargeModal.updatedAt || updated.status !== showChargeModal.status)) {
         setShowChargeModal(updated);
       }
     }
     if (showTransferModal) {
       const updated = reservations.find(r => r.id === showTransferModal.id);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(showTransferModal)) {
+      if (updated && (updated.updatedAt !== showTransferModal.updatedAt || updated.status !== showTransferModal.status)) {
         setShowTransferModal(updated);
       }
     }
     if (showPostponeModal) {
       const updated = reservations.find(r => r.id === showPostponeModal.id);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(showPostponeModal)) {
+      if (updated && (updated.updatedAt !== showPostponeModal.updatedAt || updated.status !== showPostponeModal.status)) {
         setShowPostponeModal(updated);
       }
     }
     if (showDiscountModal) {
       const updated = reservations.find(r => r.id === showDiscountModal.id);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(showDiscountModal)) {
+      if (updated && (updated.updatedAt !== showDiscountModal.updatedAt || updated.status !== showDiscountModal.status)) {
         setShowDiscountModal(updated);
       }
     }
@@ -428,7 +429,11 @@ export function FrontDesk() {
       totalAdditionalTax += stayTaxTotal;
       totalAdditionalExclusiveTax += stayExclusiveTaxTotal;
       
-      if (stayTotal + stayExclusiveTaxTotal !== stay.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(stay.taxDetails)) {
+      // Avoid JSON.stringify on potentially circular taxDetails or just compare length/total
+      const taxDetailsMatch = stay.taxDetails && stayTaxDetails.length === stay.taxDetails.length && 
+        stayTaxDetails.every((t, i) => t.amount === stay.taxDetails[i].amount);
+
+      if (stayTotal + stayExclusiveTaxTotal !== stay.totalAmount || !taxDetailsMatch) {
         additionalStaysChanged = true;
         return { ...stay, totalAmount: stayTotal + stayExclusiveTaxTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails, exclusiveTaxAmount: stayExclusiveTaxTotal };
       }

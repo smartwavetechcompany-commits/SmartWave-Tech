@@ -176,7 +176,11 @@ export function Settings() {
 
           const newTotalAmount = stayBaseAmount + stayExclusiveTaxTotal;
           
-          if (newTotalAmount !== res.totalAmount || JSON.stringify(stayTaxDetails) !== JSON.stringify(res.taxDetails)) {
+          // Avoid JSON.stringify for comparison
+          const taxDetailsMatch = res.taxDetails && stayTaxDetails.length === res.taxDetails.length && 
+            stayTaxDetails.every((t, i) => t.amount === res.taxDetails[i].amount);
+          
+          if (newTotalAmount !== res.totalAmount || !taxDetailsMatch) {
             batch.update(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
               totalAmount: newTotalAmount,
               taxAmount: stayTaxTotal,

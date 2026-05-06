@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, safeStringify } from '../utils';
+import { errorService, ErrorSeverity } from '../services/errorService';
 import { format } from 'date-fns';
 
 interface Notification {
@@ -71,7 +72,7 @@ export function Notifications() {
         updateDoc(doc(db, 'hotels', hotel.id, 'notifications', n.id), { read: true })
       ));
     } catch (err: any) {
-      console.error('Error marking all as read:', err.message || safeStringify(err));
+      errorService.handleError(err, { module: 'Notifications', severity: ErrorSeverity.MEDIUM });
     }
   };
 
@@ -190,6 +191,6 @@ export async function createNotification(hotelId: string, notification: Omit<Not
       timestamp: new Date().toISOString()
     });
   } catch (err: any) {
-    console.error('Error creating notification:', err.message || safeStringify(err));
+    errorService.handleError(err, { module: 'Notifications', severity: ErrorSeverity.MEDIUM });
   }
 }

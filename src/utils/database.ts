@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { OperationType } from '../types';
+import { errorService, ErrorSeverity } from '../services/errorService';
 
 /**
  * Audit log entry structure
@@ -59,9 +60,12 @@ export async function createAuditLog(
     // We use addDoc for append-only logging
     await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), logData);
   } catch (error) {
-    console.error('Audit logging failed:', error);
-    // We don't throw here to avoid breaking the main operation, 
-    // but in a real production system we might want higher guarantees.
+    // Log failures to create audit logs as system errors
+    await errorService.handleError(error, { 
+      module: 'AuditLog', 
+      severity: ErrorSeverity.MEDIUM, 
+      silent: true 
+    });
   }
 }
 
@@ -93,6 +97,11 @@ export const database = {
         error: String(error),
         docPath: docRef.path
       });
+      
+      await errorService.handleError(error, { 
+        module: options.module, 
+        severity: ErrorSeverity.HIGH 
+      });
       throw error;
     }
   },
@@ -118,6 +127,11 @@ export const database = {
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
+      });
+
+      await errorService.handleError(error, { 
+        module: options.module, 
+        severity: ErrorSeverity.HIGH 
       });
       throw error;
     }
@@ -147,6 +161,11 @@ export const database = {
         error: String(error),
         colPath: colRef.path
       });
+
+      await errorService.handleError(error, { 
+        module: options.module, 
+        severity: ErrorSeverity.HIGH 
+      });
       throw error;
     }
   },
@@ -165,6 +184,11 @@ export const database = {
       return { success: true };
     } catch (error) {
       await createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) });
+      
+      await errorService.handleError(error, { 
+        module: options.module, 
+        severity: ErrorSeverity.HIGH 
+      });
       throw error;
     }
   },

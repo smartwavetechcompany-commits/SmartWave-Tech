@@ -216,6 +216,7 @@ export interface Reservation {
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
   bookedBy?: string; // Added for tracking who made the reservation
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface RoomBlocking {

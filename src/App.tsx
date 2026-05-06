@@ -6,7 +6,7 @@ import { WifiOff, RefreshCw } from 'lucide-react';
 import { AuthPage } from './components/AuthPage';
 import { Dashboard } from './components/Dashboard';
 import { SuperAdmin } from './components/SuperAdmin';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { Rooms } from './components/Rooms';
 import { FrontDesk } from './components/FrontDesk';
 import { StaffManagement } from './components/StaffManagement';
@@ -117,9 +117,9 @@ function AppContent() {
             } />
             <Route path="/super-admin" element={
               <PermissionGuard permission="access_super_admin">
-                <ErrorBoundary>
+                <GlobalErrorBoundary>
                   <SuperAdmin />
-                </ErrorBoundary>
+                </GlobalErrorBoundary>
               </PermissionGuard>
             } />
             <Route path="/staff" element={
@@ -139,12 +139,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ErrorBoundary>
+    <GlobalErrorBoundary>
       <AuthProvider>
         <Router>
           <AppContent />
         </Router>
       </AuthProvider>
-    </ErrorBoundary>
+    </GlobalErrorBoundary>
   );
 }
