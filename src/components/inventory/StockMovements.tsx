@@ -210,7 +210,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2 text-xs text-zinc-400">
                         <User size={12} />
-                        {tx.userId.slice(-6)}
+                        {(tx.userId || '').slice(-6)}
                       </div>
                     </td>
                   </tr>

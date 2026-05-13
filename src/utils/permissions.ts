@@ -19,16 +19,40 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'manage_rooms', 'process_payments', 'nightly_audit', 'bypass_inventory_limits', 
     'edit_hotel_settings', 'access_super_admin'
   ],
+  'admin': [
+    'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
+    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings'
+  ],
   'hotelAdmin': [
     'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
     'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings'
   ],
   'staff': [
-    'manage_rooms', 'process_payments', 'nightly_audit'
+     'manage_rooms', 'process_payments', 'nightly_audit'
   ],
-  // You can easily add new roles here
-  // 'finance': ['view_reports', 'process_payments', 'void_transaction'],
-  // 'housekeeping': ['manage_rooms'],
+  'receptionist': [
+    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports'
+  ],
+  'frontDesk': [
+    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports'
+  ],
+  'manager': [
+    'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
+    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings'
+  ],
+  'accountant': [
+    'view_reports', 'process_payments'
+  ],
+  'housekeeper': [
+    'manage_rooms'
+  ],
+  'maintenance': [
+    'manage_rooms'
+  ],
+  'kitchen': [
+    'process_payments'
+  ],
+  'corporate': []
 };
 
 /**

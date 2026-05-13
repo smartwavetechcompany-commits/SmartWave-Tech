@@ -1601,7 +1601,7 @@ export function Rooms() {
 
                 {room.amenities && room.amenities.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {room.amenities.slice(0, 3).map(a => (
+                    {(room.amenities || []).slice(0, 3).map(a => (
                       <span key={a} className="text-[7px] px-1 bg-white/5 rounded border border-white/10 opacity-60">{a}</span>
                     ))}
                     {room.amenities.length > 3 && <span className="text-[7px] opacity-40">+{room.amenities.length - 3}</span>}

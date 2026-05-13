@@ -139,7 +139,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                       Audit: {location?.name || 'Full Inventory'}
                     </div>
                     <div className="text-sm text-zinc-500 font-medium mt-0.5">
-                      Completed by {audit.userId.slice(-6)} • {format(new Date(audit.timestamp), 'MMM d, yyyy HH:mm')}
+                      Completed by {(audit.userId || '').slice(-6)} • {audit.timestamp ? format(new Date(audit.timestamp), 'MMM d, yyyy HH:mm') : 'N/A'}
                     </div>
                   </div>
                 </div>

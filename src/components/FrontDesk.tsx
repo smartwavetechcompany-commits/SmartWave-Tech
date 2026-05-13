@@ -918,7 +918,7 @@ export function FrontDesk() {
         hotelId: hotel.id,
         module: 'Front Desk',
         action: 'RESERVATION_POSTPONED',
-        details: `Stay extension for Res #${res.id.slice(-6)} until ${newCheckOutDate}`
+        details: `Stay extension for Res #${(res.id || '').slice(-6)} until ${newCheckOutDate}`
       });
 
       // Post the extra charge to the ledger if guest is checked in
@@ -939,7 +939,7 @@ export function FrontDesk() {
         userEmail: profile?.email,
         userRole: profile?.role,
         action: 'RESERVATION_POSTPONED',
-        resource: `Res #${res.id.slice(-6)} - Extended to ${newCheckOutDate}`,
+        resource: `Res #${(res.id || '').slice(-6)} - Extended to ${newCheckOutDate}`,
         hotelId: hotel.id,
         module: 'Front Desk',
         details: `Extended by ${extraNights} nights. Added ${formatCurrency(baseExtraAmount + extraExclusiveTaxTotal, currency, exchangeRate)} to total.`
@@ -987,7 +987,7 @@ export function FrontDesk() {
         userEmail: profile.email,
         userRole: profile.role,
         action: 'DISCOUNT_APPLIED',
-        resource: `Res #${res.id.slice(-6)} - ${formatCurrency(finalAmount, currency, exchangeRate)}`,
+        resource: `Res #${(res.id || '').slice(-6)} - ${formatCurrency(finalAmount, currency, exchangeRate)}`,
         hotelId: hotel.id,
         module: 'Front Desk',
         details: `${discountData.type === 'percentage' ? discountData.amount + '%' : 'Fixed'} - ${discountData.reason}`
@@ -3069,7 +3069,7 @@ export function FrontDesk() {
                                 <div>
                                   <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Amenities</div>
                                   <div className="flex flex-wrap gap-1">
-                                    {room.amenities.slice(0, 5).map(a => (
+                                    {(room.amenities || []).slice(0, 5).map(a => (
                                       <span key={a} className="text-[8px] px-1 bg-zinc-900 text-zinc-500 rounded border border-zinc-700">{a}</span>
                                     ))}
                                     {room.amenities.length > 5 && <span className="text-[8px] text-zinc-600">+{room.amenities.length - 5} more</span>}

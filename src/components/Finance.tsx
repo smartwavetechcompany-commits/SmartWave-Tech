@@ -509,7 +509,7 @@ export function Finance() {
         hotelId: hotel.id,
         module: 'Finance',
         action: 'RECEIVE_PO',
-        details: `Marked PO #${po.id.slice(0, 8)} as received`
+        details: `Marked PO #${(po.id || '').slice(0, 8)} as received`
       });
 
       // Update inventory for each item
@@ -537,7 +537,7 @@ export function Finance() {
         userEmail: profile?.email,
         userRole: profile?.role,
         action: 'INVENTORY_PO_RECEIVED',
-        resource: `PO #${po.id.slice(0, 8)} received, inventory updated`,
+        resource: `PO #${(po.id || '').slice(0, 8)} received, inventory updated`,
         hotelId: hotel.id,
         module: 'Inventory'
       }, {
@@ -568,7 +568,7 @@ export function Finance() {
         hotelId: hotel.id,
         module: 'Finance',
         action: 'PAY_PO',
-        details: `Marked PO #${po.id.slice(0, 8)} as paid`
+        details: `Marked PO #${(po.id || '').slice(0, 8)} as paid`
       });
 
       // Update supplier balance
@@ -588,7 +588,7 @@ export function Finance() {
         type: 'expense',
         amount: po.totalAmount,
         category: 'Supplies',
-        description: `PO Payment: #${po.id.slice(0, 8)} to ${supplier?.name || 'Supplier'}`,
+        description: `PO Payment: #${(po.id || '').slice(0, 8)} to ${supplier?.name || 'Supplier'}`,
         timestamp: new Date().toISOString(),
         paymentMethod: 'transfer', // Default for POs
         referenceId: po.id,
@@ -607,7 +607,7 @@ export function Finance() {
         userEmail: profile?.email,
         userRole: profile?.role,
         action: 'FINANCE_PO_PAID',
-        resource: `PO #${po.id.slice(0, 8)} paid (${formatCurrency(po.totalAmount, currency, exchangeRate)})`,
+        resource: `PO #${(po.id || '').slice(0, 8)} paid (${formatCurrency(po.totalAmount, currency, exchangeRate)})`,
         hotelId: hotel.id,
         module: 'Finance'
       }, {
@@ -1484,7 +1484,7 @@ export function Finance() {
                     ) : (
                       purchaseOrders.map((po) => (
                         <tr key={po.id} className="hover:bg-zinc-800/50 transition-colors">
-                          <td className="px-6 py-4 text-xs text-zinc-50 font-mono">{po.id.slice(0, 8)}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-50 font-mono">{(po.id || '').slice(0, 8)}</td>
                           <td className="px-6 py-4 text-sm text-zinc-400">{suppliers.find(s => s.id === po.supplierId)?.name || 'Unknown'}</td>
                           <td className="px-6 py-4">
                             <div className="flex flex-col gap-1">

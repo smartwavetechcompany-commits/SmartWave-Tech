@@ -42,7 +42,7 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
             <Receipt size={10} /> Receipt No.
           </p>
-          <p className="font-bold text-sm">#SUB-{request.id.slice(-6).toUpperCase()}</p>
+          <p className="font-bold text-sm">#SUB-{(request.id || '').slice(-6).toUpperCase()}</p>
           <p className="text-zinc-500">{format(new Date(request.timestamp), 'MMM dd, yyyy')}</p>
         </div>
       </div>

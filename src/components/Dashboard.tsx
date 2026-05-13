@@ -125,7 +125,7 @@ export function Dashboard() {
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
-        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
+        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
         { label: 'Outstanding', value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
           const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
           if (res) {
@@ -138,11 +138,11 @@ export function Dashboard() {
       ];
 
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-  const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
+  const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
   const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
   const handleExportTransactions = () => {
-    const dataToExport = finance.slice(0, 100).map(f => ({
+    const dataToExport = (finance || []).slice(0, 100).map(f => ({
       Date: format(new Date(f.timestamp), 'MMM d, yyyy HH:mm'),
       Type: f.type.toUpperCase(),
       Category: f.category,
@@ -342,7 +342,7 @@ export function Dashboard() {
                 ) : finance.length === 0 ? (
                   <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
                 ) : (
-                  finance.slice(0, 5).map(record => (
+                  (finance || []).slice(0, 5).map(record => (
                     <div key={record.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-4">
                         <div className={cn(
@@ -353,7 +353,7 @@ export function Dashboard() {
                         </div>
                         <div>
                           <div className="text-sm font-medium text-zinc-50">{record.description}</div>
-                          <div className="text-xs text-zinc-500">{record.category} • {format(new Date(record.timestamp), 'MMM d, HH:mm')}</div>
+                          <div className="text-xs text-zinc-500">{record.category} • {record.timestamp ? format(new Date(record.timestamp), 'MMM d, HH:mm') : 'N/A'}</div>
                         </div>
                       </div>
                       <div className={cn(

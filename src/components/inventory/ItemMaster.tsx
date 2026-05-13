@@ -74,7 +74,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
   });
 
   const generateSKU = () => {
-    const prefix = formData.category.slice(0, 3).toUpperCase() || 'INV';
+    const prefix = (formData.category || '').slice(0, 3).toUpperCase() || 'INV';
     const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
     setFormData(prev => ({ ...prev, sku: `${prefix}-${random}` }));
   };

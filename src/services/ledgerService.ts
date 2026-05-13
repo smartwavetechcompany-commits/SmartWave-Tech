@@ -391,7 +391,7 @@ export const transferLedgerBalance = async (
     amount,
     type: 'credit',
     category: 'transfer',
-    description: `Balance Transfer to Res #${toReservationId.slice(-6).toUpperCase()}`,
+    description: `Balance Transfer to Res #${(toReservationId || '').slice(-6).toUpperCase()}`,
     referenceId: toReservationId,
     postedBy
   }, postedBy, corporateId);
@@ -400,7 +400,7 @@ export const transferLedgerBalance = async (
     amount,
     type: 'debit',
     category: 'transfer',
-    description: `Balance Transfer from Res #${fromReservationId.slice(-6).toUpperCase()}`,
+    description: `Balance Transfer from Res #${(fromReservationId || '').slice(-6).toUpperCase()}`,
     referenceId: fromReservationId,
     postedBy
   }, postedBy, corporateId);

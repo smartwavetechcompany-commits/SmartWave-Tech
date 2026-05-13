@@ -298,9 +298,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setLedgerEntries(sortedEntries as any);
       setLoading(false);
     }, (err) => {
+      setLoading(false);
       console.error("Ledger loading error:", err);
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
-      setLoading(false);
     });
 
     // Fetch guest details
@@ -376,7 +376,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
             <div>
               <h2 className="text-xl font-bold text-zinc-50">Guest Folio</h2>
-              <p className="text-sm text-zinc-500">Reservation #{currentReservation.id.slice(-6).toUpperCase()}</p>
+              <p className="text-sm text-zinc-500">Reservation #{(currentReservation.id || '').slice(-6).toUpperCase()}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1160,7 +1160,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-zinc-50 font-medium">{entry.description}</div>
-                          <div className="text-[10px] text-zinc-500">Ref: {entry.id.slice(-8).toUpperCase()}</div>
+                          <div className="text-[10px] text-zinc-500">Ref: {(entry.id || '').slice(-8).toUpperCase()}</div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">
@@ -1239,7 +1239,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
               link.href = URL.createObjectURL(blob);
-              link.download = `folio_${currentReservation.id.slice(-6)}.csv`;
+              link.download = `folio_${(currentReservation.id || '').slice(-6)}.csv`;
               link.click();
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"

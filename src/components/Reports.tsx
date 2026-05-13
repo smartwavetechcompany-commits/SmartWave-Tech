@@ -278,7 +278,7 @@ export function Reports() {
             return isWithinInterval(date, { start: startDate, end: endDate });
           })
           .map(res => ({
-            'Res #': res.id.slice(-6).toUpperCase(),
+            'Res #': (res.id || '').slice(-6).toUpperCase(),
             'Guest Name': res.guestName,
             Room: res.roomNumber,
             Arrival: res.checkIn,
@@ -287,7 +287,7 @@ export function Reports() {
             Total: res.totalAmount,
             _id: res.id,
             _collection: 'reservations',
-            _label: `Reservation ${res.id.slice(-6).toUpperCase()}`
+            _label: `Reservation ${(res.id || '').slice(-6).toUpperCase()}`
           }));
       }
       case 'daily_sales': {

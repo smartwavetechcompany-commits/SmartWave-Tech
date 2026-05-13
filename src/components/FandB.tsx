@@ -1050,7 +1050,7 @@ export function FandB() {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold uppercase">Order ID</p>
-                  <p className="text-sm font-bold">#{printingOrder.id.slice(-6).toUpperCase()}</p>
+                  <p className="text-sm font-bold">#{(printingOrder.id || '').slice(-6).toUpperCase()}</p>
                 </div>
               </div>
               
