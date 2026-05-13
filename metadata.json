@@ -1,5 +1,6 @@
 {
-  "name": "SmartWave PMS",
-  "description": "Commercial Multi-Tenant SaaS Hotel Property Management System with tracking code subscription logic.",
-  "requestFramePermissions": []
+  "name": "Tyyl Tech PMS",
+  "description": "Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

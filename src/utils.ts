@@ -14,11 +14,11 @@ export function deepCloneSafe(obj: any): any {
   if (obj === null) return null;
   if (typeof obj !== 'object') return obj;
 
-  const cache = new WeakSet();
+  const stack = new WeakMap();
   
   function getSafeValue(val: any, depth: number = 0): any {
     // Prevent deep recursion
-    if (depth > 8) return '[Max Depth Reached]';
+    if (depth > 12) return '[Max Depth Reached]';
     
     if (val === null || typeof val !== 'object') {
       return val;
@@ -39,49 +39,70 @@ export function deepCloneSafe(obj: any): any {
       };
     }
 
-    if (cache.has(val)) {
-      return '[Circular]';
+    // Check circular references
+    if (stack.has(val)) {
+      return '[Circular Reference]';
     }
     
-    // Only add objects/arrays to cache
+    // Add to stack before recursion
     try {
-      cache.add(val);
+      stack.set(val, true);
     } catch (e) {
+      // Some objects (like frozen ones) might fail WeakMap.set in older environments
+      // but usually this is rare for the objects we handle.
       return '[Unserializable]';
     }
 
-    // Handle Arrays
-    if (Array.isArray(val)) {
-      if (val.length > 100) {
-        return val.slice(0, 100).map(item => getSafeValue(item, depth + 1)).concat([`... and ${val.length - 100} more items`]);
-      }
-      return val.map(item => getSafeValue(item, depth + 1));
-    }
+    let result: any;
 
-    // Handle Plain Objects
-    const safeObj: any = {};
-    let count = 0;
-    const MAX_KEYS = 100;
-    
-    const keys = Object.keys(val);
-    
-    for (const key of keys) {
-      if (count++ > MAX_KEYS) {
-        safeObj['...'] = `Truncated (${keys.length} total keys)`;
-        break;
+    try {
+      // Handle Arrays
+      if (Array.isArray(val)) {
+        if (val.length > 500) {
+          result = val.slice(0, 500).map(item => getSafeValue(item, depth + 1)).concat([`... and ${val.length - 500} more items`]);
+        } else {
+          result = val.map(item => getSafeValue(item, depth + 1));
+        }
+      } else {
+        // Handle Plain Objects
+        const safeObj: any = {};
+        let count = 0;
+        const MAX_KEYS = 200;
+        
+        // Use Reflect.ownKeys or Object.getOwnPropertyNames to be more thorough
+        // but Object.keys is usually safer for generic structures
+        const keys = Object.keys(val);
+        
+        for (const key of keys) {
+          if (count++ > MAX_KEYS) {
+            safeObj['...'] = `Truncated (${keys.length} total keys)`;
+            break;
+          }
+          
+          if (key.startsWith('_') || key.startsWith('$')) continue;
+          
+          try {
+            const value = val[key];
+            if (typeof value === 'function') continue;
+            safeObj[key] = getSafeValue(value, depth + 1);
+          } catch (e) {
+            safeObj[key] = '[Property Access Error]';
+          }
+        }
+        result = safeObj;
       }
-      
-      if (key.startsWith('_') || key.startsWith('$')) continue;
-      
-      try {
-        const value = val[key];
-        safeObj[key] = getSafeValue(value, depth + 1);
-      } catch (e) {
-        safeObj[key] = '[Unserializable Property]';
-      }
+    } finally {
+      // Remove from stack after recursion to allow same object appearing in DIFFERENT branches
+      // but this is actually what causes circular structure errors in JSON.stringify if it's the SAME object
+      // wait, actually, if it's the same object twice but NOT circular, JSON.stringify IS fine.
+      // BUT if it's the same object identity multiple times, it's safer to keep it as [Circular] 
+      // if we want to BE ABSOLUTELY SURE.
+      // So we DON'T remove it from the stack if we want to avoid multiple refs to same identity.
+      // Actually, JSON.stringify doesn't care about multiple refs to same object UNLESS it's circular.
+      // But keeping it in stack is safer for performance and avoids re-processing.
     }
     
-    return safeObj;
+    return result;
   }
 
   return getSafeValue(obj);
@@ -97,16 +118,21 @@ export function safeStringify(obj: any): string {
     return JSON.stringify(safeTarget, null, 2);
   } catch (e) {
     try {
-      // Fallback: iterate top level at least
+      // Final desperation fallback: serialize top level properties as strings
       const fallback: any = {};
-      for (const key in obj) {
-        if (typeof obj[key] !== 'function' && !key.startsWith('_')) {
-          fallback[key] = String(obj[key]);
+      const keys = Object.keys(obj).slice(0, 50);
+      for (const key of keys) {
+        try {
+          const val = obj[key];
+          if (typeof val === 'function') continue;
+          fallback[key] = String(val).slice(0, 100);
+        } catch (inner) {
+          fallback[key] = '[Error]';
         }
       }
       return JSON.stringify(fallback, null, 2);
     } catch (finalError) {
-      return `[Unstringifiable Object: ${e instanceof Error ? e.message : 'Unknown Error'}]`;
+      return `[Circular or Unstringifiable Object: ${e instanceof Error ? e.message : 'Unknown'}]`;
     }
   }
 }

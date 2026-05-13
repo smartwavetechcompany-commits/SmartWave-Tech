@@ -42,6 +42,7 @@ import {
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
+import { roomService } from '../services/roomService';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
@@ -337,122 +338,154 @@ export function FrontDesk() {
 
   // Recalculate price when room, dates or corporate account changes
   useEffect(() => {
-    const selectedRoom = rooms.find(r => r.id === newBooking.roomId);
-    if (!selectedRoom) return;
+    const calculatePrices = async () => {
+      const selectedRoom = rooms.find(r => r.id === newBooking.roomId);
+      if (!selectedRoom || !hotel?.id) return;
 
-    let pricePerNight = selectedRoom.price;
-    let negotiated = false;
+      let pricePerNight = selectedRoom.price;
+      let negotiated = false;
 
-    if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-      const activeRate = activeCorporateRates.find(r => 
-        (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-        new Date(newBooking.checkIn) >= new Date(r.startDate) &&
-        new Date(newBooking.checkIn) <= new Date(r.endDate)
-      );
-
-      if (activeRate) {
-        pricePerNight = activeRate.rate;
-        negotiated = true;
-      }
-    }
-
-    const checkInDateTime = new Date(`${newBooking.checkIn}T${newBooking.checkInTime || '14:00'}`);
-    const checkOutDateTime = new Date(`${newBooking.checkOut}T${newBooking.checkOutTime || '12:00'}`);
-    const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-    const nights = Math.max(1, Math.ceil(hours / 24));
-    
-    setIsNegotiatedRate(negotiated);
-    
-    const primaryTotal = pricePerNight * nights;
-
-    const activeTaxes = (hotel?.taxes || []).filter(t => {
-      const status = (t.status || '').toLowerCase().trim();
-      const category = (t.category || '').toLowerCase().trim();
-      return status === 'active' && category !== 'restaurant';
-    });
-    
-    const primaryBaseAmount = primaryTotal;
-    
-    let primaryTaxTotal = 0;
-    let primaryExclusiveTaxTotal = 0;
-    const primaryTaxDetails = activeTaxes.map(tax => {
-      const amount = tax.isInclusive 
-        ? primaryBaseAmount - (primaryBaseAmount / (1 + (tax.percentage / 100)))
-        : primaryBaseAmount * (tax.percentage / 100);
-      
-      primaryTaxTotal += amount;
-      if (!tax.isInclusive) {
-        primaryExclusiveTaxTotal += amount;
-      }
-      return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
-    });
-
-    // Recalculate additional stays prices
-    let additionalStaysChanged = false;
-    let totalAdditionalTax = 0;
-    let totalAdditionalExclusiveTax = 0;
-    const updatedAdditionalStays = newBooking.additionalStays.map(stay => {
-      const room = rooms.find(r => r.id === stay.roomId);
-      if (!room) return stay;
-      
-      let stayPrice = room.price;
+      // 1. Check corporate negotiated rates
       if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-        const rate = activeCorporateRates.find(r => 
-          (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-          new Date(stay.checkIn) >= new Date(r.startDate) &&
-          new Date(stay.checkIn) <= new Date(r.endDate)
+        const activeRate = activeCorporateRates.find(r => 
+          (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
+          new Date(newBooking.checkIn) >= new Date(r.startDate) &&
+          new Date(newBooking.checkIn) <= new Date(r.endDate)
         );
-        if (rate) stayPrice = rate.rate;
-      }
-      
-      const sCheckInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
-      const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
-      const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
-      const sNights = Math.max(1, Math.ceil(sHours / 24));
-      const stayTotal = stayPrice * sNights;
 
-      // Calculate taxes for this additional stay
-      const stayBaseAmount = stayTotal;
-      let stayTaxTotal = 0;
-      let stayExclusiveTaxTotal = 0;
-      const stayTaxDetails = activeTaxes.map(tax => {
+        if (activeRate) {
+          pricePerNight = activeRate.rate;
+          negotiated = true;
+        }
+      }
+
+      // 2. If not negotiated, check dynamic rate configuration
+      if (!negotiated) {
+        const dynamicRate = await roomService.calculateCurrentRate(
+          hotel.id, 
+          selectedRoom.roomTypeId || '', 
+          new Date(newBooking.checkIn)
+        );
+        if (dynamicRate > 0) {
+          pricePerNight = dynamicRate;
+        }
+      }
+
+      const checkInDateTime = new Date(`${newBooking.checkIn}T${newBooking.checkInTime || '14:00'}`);
+      const checkOutDateTime = new Date(`${newBooking.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+      const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+      const nights = Math.max(1, Math.ceil(hours / 24));
+      
+      setIsNegotiatedRate(negotiated);
+      
+      const primaryTotal = pricePerNight * nights;
+
+      const activeTaxes = (hotel?.taxes || []).filter(t => {
+        const status = (t.status || '').toLowerCase().trim();
+        const category = (t.category || '').toLowerCase().trim();
+        return status === 'active' && category !== 'restaurant';
+      });
+      
+      const primaryBaseAmount = primaryTotal;
+      
+      let primaryTaxTotal = 0;
+      let primaryExclusiveTaxTotal = 0;
+      const primaryTaxDetails = activeTaxes.map(tax => {
         const amount = tax.isInclusive 
-          ? stayBaseAmount - (stayBaseAmount / (1 + (tax.percentage / 100)))
-          : stayBaseAmount * (tax.percentage / 100);
+          ? primaryBaseAmount - (primaryBaseAmount / (1 + (tax.percentage / 100)))
+          : primaryBaseAmount * (tax.percentage / 100);
         
-        stayTaxTotal += amount;
+        primaryTaxTotal += amount;
         if (!tax.isInclusive) {
-          stayExclusiveTaxTotal += amount;
+          primaryExclusiveTaxTotal += amount;
         }
         return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
       });
-      totalAdditionalTax += stayTaxTotal;
-      totalAdditionalExclusiveTax += stayExclusiveTaxTotal;
+
+      // Recalculate additional stays prices
+      let additionalStaysChanged = false;
+      let totalAdditionalTax = 0;
+      let totalAdditionalExclusiveTax = 0;
       
-      // Avoid JSON.stringify on potentially circular taxDetails or just compare length/total
-      const taxDetailsMatch = stay.taxDetails && stayTaxDetails.length === stay.taxDetails.length && 
-        stayTaxDetails.every((t, i) => t.amount === stay.taxDetails[i].amount);
+      const updatedAdditionalStays = await Promise.all(newBooking.additionalStays.map(async (stay) => {
+        const room = rooms.find(r => r.id === stay.roomId);
+        if (!room) return stay;
+        
+        let stayPrice = room.price;
+        let stayNegotiated = false;
 
-      if (stayTotal + stayExclusiveTaxTotal !== stay.totalAmount || !taxDetailsMatch) {
-        additionalStaysChanged = true;
-        return { ...stay, totalAmount: stayTotal + stayExclusiveTaxTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails, exclusiveTaxAmount: stayExclusiveTaxTotal };
-      }
-      return stay;
-    });
+        if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
+          const rate = activeCorporateRates.find(r => 
+            (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
+            new Date(stay.checkIn) >= new Date(r.startDate) &&
+            new Date(stay.checkIn) <= new Date(r.endDate)
+          );
+          if (rate) {
+            stayPrice = rate.rate;
+            stayNegotiated = true;
+          }
+        }
 
-    const additionalRoomTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0), 0);
-    const totalAmount = primaryTotal + primaryExclusiveTaxTotal + additionalRoomTotal;
-    const totalTax = primaryTaxTotal + totalAdditionalTax;
+        if (!stayNegotiated) {
+          const dynamicRate = await roomService.calculateCurrentRate(
+            hotel.id, 
+            room.roomTypeId || '', 
+            new Date(stay.checkIn)
+          );
+          if (dynamicRate > 0) stayPrice = dynamicRate;
+        }
+        
+        const sCheckInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
+        const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+        const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
+        const sNights = Math.max(1, Math.ceil(sHours / 24));
+        const stayTotal = stayPrice * sNights;
 
-    if (newBooking.totalAmount !== totalAmount || additionalStaysChanged || newBooking.taxAmount !== totalTax) {
-      setNewBooking(prev => ({
-        ...prev,
-        totalAmount,
-        taxAmount: totalTax,
-        taxDetails: primaryTaxDetails,
-        additionalStays: updatedAdditionalStays
+        // Calculate taxes for this additional stay
+        const stayBaseAmount = stayTotal;
+        let stayTaxTotal = 0;
+        let stayExclusiveTaxTotal = 0;
+        const stayTaxDetails = activeTaxes.map(tax => {
+          const amount = tax.isInclusive 
+            ? stayBaseAmount - (stayBaseAmount / (1 + (tax.percentage / 100)))
+            : stayBaseAmount * (tax.percentage / 100);
+          
+          stayTaxTotal += amount;
+          if (!tax.isInclusive) {
+            stayExclusiveTaxTotal += amount;
+          }
+          return { name: tax.name, percentage: tax.percentage, amount, isInclusive: tax.isInclusive };
+        });
+        totalAdditionalTax += stayTaxTotal;
+        totalAdditionalExclusiveTax += stayExclusiveTaxTotal;
+        
+        // Avoid comparison issues
+        const taxDetailsMatch = stay.taxDetails && stayTaxDetails.length === stay.taxDetails.length && 
+          stayTaxDetails.every((t, i) => Math.abs(t.amount - stay.taxDetails[i].amount) < 0.01);
+
+        if (Math.abs(stayTotal + stayExclusiveTaxTotal - (stay.totalAmount || 0)) > 0.01 || !taxDetailsMatch) {
+          additionalStaysChanged = true;
+          return { ...stay, totalAmount: stayTotal + stayExclusiveTaxTotal, taxAmount: stayTaxTotal, taxDetails: stayTaxDetails, exclusiveTaxAmount: stayExclusiveTaxTotal };
+        }
+        return stay;
       }));
-    }
+
+      const additionalRoomTotal = updatedAdditionalStays.reduce((acc, stay) => acc + (stay.totalAmount || 0), 0);
+      const totalAmount = primaryTotal + primaryExclusiveTaxTotal + additionalRoomTotal;
+      const totalTax = primaryTaxTotal + totalAdditionalTax;
+
+      if (Math.abs(newBooking.totalAmount - totalAmount) > 0.01 || additionalStaysChanged || Math.abs(newBooking.taxAmount - totalTax) > 0.01) {
+        setNewBooking(prev => ({
+          ...prev,
+          totalAmount,
+          taxAmount: totalTax,
+          taxDetails: primaryTaxDetails,
+          additionalStays: updatedAdditionalStays
+        }));
+      }
+    };
+
+    calculatePrices();
   }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, newBooking.additionalStays, hotel, currency, exchangeRate]);
 
   useEffect(() => {
@@ -1157,8 +1190,11 @@ export function FrontDesk() {
         });
         
         if (res.guestId) {
+          // Trigger inventory consumption based on rules
+          const roomType = roomTypes.find(t => t.id === res.roomTypeId || t.name === res.roomType);
+          await roomService.triggerInventoryConsumption(hotel.id, roomType?.id || '', 'check_in', profile.uid);
+
           // Post ONLY the first night's charge at check-in
-          // Subsequent nights will be posted by the Night Audit
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
           const checkInDate = new Date(res.checkIn);
           

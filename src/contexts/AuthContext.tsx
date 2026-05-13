@@ -6,7 +6,7 @@ import { database } from '../utils/database';
 import { UserProfile, Hotel, SystemSettings, OperationType } from '../types';
 import { safeStringify } from '../utils';
 
-const SUPER_ADMIN_EMAIL = 'smartwavetechcompany@gmail.com';
+const SUPER_ADMIN_EMAILS = ['admin@tyyltech.com', 'smartwavetechcompany@gmail.com'];
 
 interface AuthContextType {
   user: User | null;
@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = snap.data() as UserProfile;
         setProfile(data);
         setLoading(false);
-      } else if (user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      } else if (user.email && SUPER_ADMIN_EMAILS.some(email => email.toLowerCase() === user.email?.toLowerCase())) {
         // Auto-bootstrap Super Admin profile if it doesn't exist
         const bootstrapProfile: UserProfile = {
           email: user.email,
@@ -236,16 +236,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [hotel?.branding]);
 
-  const isSubscriptionActive = (profile?.role === 'superAdmin' || auth.currentUser?.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase())
+  const isSubscriptionActive = (profile?.role === 'superAdmin' || (auth.currentUser?.email && SUPER_ADMIN_EMAILS.some(email => email.toLowerCase() === auth.currentUser?.email?.toLowerCase())))
     ? true 
     : (hotel ? (
         hotel.subscriptionStatus === 'active' && 
         (() => {
           const expiryStr = hotel.subscriptionExpiry || '';
-          const expiryDate = expiryStr.includes('T') 
-            ? new Date(expiryStr) 
-            : new Date(expiryStr + 'T23:59:59');
-          return !isNaN(expiryDate.getTime()) && expiryDate.getTime() > Date.now();
+          const expiryDate = new Date(expiryStr);
+          // Add 1 hour buffer (3600000ms) to prevent issues with minor clock skew
+          return !isNaN(expiryDate.getTime()) && expiryDate.getTime() > (Date.now() - 3600000);
         })()
       ) : false);
 

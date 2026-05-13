@@ -182,8 +182,17 @@ export function AuditLogs() {
           : getTime(aValue) - getTime(bValue);
       }
 
-      const strA = String(aValue || '').toLowerCase();
-      const strB = String(bValue || '').toLowerCase();
+      // Handle actor sorting specifically since it might be a derived field
+      let valA = aValue;
+      let valB = bValue;
+      
+      if (sortConfig.key === 'actor') {
+        valA = (a as any).actor || (a as any).user || (a as any).userEmail || 'Unknown';
+        valB = (b as any).actor || (b as any).user || (b as any).userEmail || 'Unknown';
+      }
+
+      const strA = String(valA || '').toLowerCase();
+      const strB = String(valB || '').toLowerCase();
 
       if (sortConfig.direction === 'desc') {
         return strB.localeCompare(strA);
@@ -307,10 +316,12 @@ export function AuditLogs() {
                     <SortIcon column="timestamp" />
                   </div>
                 </th>
-                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('actor')}>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors group/header" onClick={() => handleSort('actor')}>
                   <div className="flex items-center gap-2">
                     Actor
-                    <SortIcon column="actor" />
+                    <div className={cn("transition-opacity", sortConfig.key === 'actor' ? "opacity-100" : "opacity-0 group-hover/header:opacity-100")}>
+                      <SortIcon column="actor" />
+                    </div>
                   </div>
                 </th>
                 <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('action')}>

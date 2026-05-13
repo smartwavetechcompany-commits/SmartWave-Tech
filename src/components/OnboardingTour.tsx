@@ -28,7 +28,7 @@ interface Step {
 
 const steps: Step[] = [
   {
-    title: "Welcome to SmartWave PMS",
+    title: "Welcome to Tyyl Tech PMS",
     description: "Your all-in-one solution for modern hotel management. Let's take a quick tour of the main features.",
     icon: <Sparkles className="text-emerald-500" size={32} />
   },
@@ -120,9 +120,9 @@ export function OnboardingTour() {
           <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black font-black text-xs">
-                SW
+                TT
               </div>
-              <span className="text-sm font-bold text-white tracking-tight">SmartWave Onboarding</span>
+              <span className="text-sm font-bold text-white tracking-tight">Tyyl Tech Onboarding</span>
             </div>
             <button 
               onClick={handleComplete}

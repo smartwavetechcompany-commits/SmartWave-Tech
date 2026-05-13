@@ -233,7 +233,8 @@ export function AuthPage() {
             throw new Error('Tracking code is required for new hotel registration');
           }
           try {
-            const tcRef = doc(db, 'trackingCodes', formData.trackingCode.toUpperCase());
+            const normalizedCode = formData.trackingCode.trim().toUpperCase();
+            const tcRef = doc(db, 'trackingCodes', normalizedCode);
             const tcDoc = await getDoc(tcRef);
             
             if (!tcDoc.exists()) {
@@ -245,7 +246,8 @@ export function AuthPage() {
               throw new Error('This tracking code has already been used to register a hotel.');
             }
 
-            if (new Date(tcData.expiryDate) < new Date() || tcData.status === 'expired') {
+            const tcExpiryTime = new Date(tcData.expiryDate).getTime();
+            if ((!isNaN(tcExpiryTime) && tcExpiryTime <= Date.now() - 3600000) || tcData.status === 'expired') {
               throw new Error('This tracking code has expired.');
             }
 
@@ -384,7 +386,8 @@ export function AuthPage() {
 
           // 6. Update Tracking Code
           try {
-            await database.safeUpdate(doc(db, 'trackingCodes', formData.trackingCode.toUpperCase()), { 
+            const normalizedCode = formData.trackingCode.trim().toUpperCase();
+            await database.safeUpdate(doc(db, 'trackingCodes', normalizedCode), { 
               status: 'used',
               usedAt: new Date().toISOString(),
               usedByHotel: hotelId
@@ -392,7 +395,7 @@ export function AuthPage() {
               hotelId: hotelId,
               module: 'Auth',
               action: 'CODE_USE',
-              details: `Marked tracking code ${formData.trackingCode} as used`
+              details: `Marked tracking code ${normalizedCode} as used`
             });
           } catch (err) {
             handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${formData.trackingCode}`);
@@ -468,10 +471,10 @@ export function AuthPage() {
         className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
       >
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-black mx-auto mb-4 font-bold text-xl">
-            SW
+          <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-black mx-auto mb-4 font-black text-xl">
+            TT
           </div>
-          <h2 className="text-2xl font-bold text-white">SmartWave PMS</h2>
+          <h2 className="text-2xl font-bold text-white">Tyyl Tech PMS</h2>
           <p className="text-zinc-400 text-sm mt-2">
             {isResetting
               ? 'Reset your password'

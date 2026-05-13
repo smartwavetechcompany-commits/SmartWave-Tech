@@ -12,9 +12,11 @@ import { toast } from 'sonner';
 
 export function TopBar() {
   const navigate = useNavigate();
-  const { hotel, profile, isOffline, setSelectedHotelId } = useAuth();
+  const { hotel, profile, isOffline, setSelectedHotelId, user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [hotels, setHotels] = useState<any[]>([]);
+  const [isSelectingHotel, setIsSelectingHotel] = useState(false);
   const [searchResults, setSearchResults] = useState<{
     hotels: any[];
     rooms: any[];
@@ -23,13 +25,32 @@ export function TopBar() {
   }>({ hotels: [], rooms: [], guests: [], reservations: [] });
   const [showResults, setShowResults] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const selectRef = useRef<HTMLDivElement>(null);
 
-  const isManaging = profile?.role === 'superAdmin' && hotel?.id;
+  const isSuperAdmin = profile?.role === 'superAdmin';
+  const isManaging = isSuperAdmin && hotel?.id;
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      const fetchHotels = async () => {
+        try {
+          const snap = await getDocs(collection(db, 'hotels'));
+          setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        } catch (error) {
+          console.error('Error fetching hotels for SuperAdmin:', error);
+        }
+      };
+      fetchHotels();
+    }
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
         setShowResults(false);
+      }
+      if (selectRef.current && !selectRef.current.contains(event.target as Node)) {
+        setIsSelectingHotel(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -105,9 +126,82 @@ export function TopBar() {
   return (
     <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 sticky top-0 z-40">
       <div className="flex items-center gap-4 flex-1">
-        <div className="flex items-center gap-2 text-zinc-400 min-w-fit">
-          <Building2 size={16} />
-          <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-zinc-400 min-w-fit">
+            <Building2 size={16} />
+            <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
+          </div>
+
+          {isSuperAdmin && (
+            <div className="relative" ref={selectRef}>
+              <button 
+                onClick={() => setIsSelectingHotel(!isSelectingHotel)}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-50"
+              >
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Switch Hotel</span>
+                <ArrowRight size={12} className={cn("transition-transform", isSelectingHotel ? "rotate-90" : "rotate-0")} />
+              </button>
+
+              <AnimatePresence>
+                {isSelectingHotel && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-full left-0 mt-2 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50 py-2"
+                  >
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-800/50 mb-1">
+                      Manage Hotel
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto">
+                      <button 
+                        onClick={() => {
+                          setSelectedHotelId(null);
+                          setIsSelectingHotel(false);
+                          navigate('/super-admin');
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-800 transition-colors",
+                          !hotel?.id && "bg-emerald-500/10 text-emerald-500"
+                        )}
+                      >
+                        <ShieldAlert size={14} />
+                        <span className="text-sm font-medium">Super Admin Dashboard</span>
+                      </button>
+                      <div className="h-px bg-zinc-800 my-1" />
+                      {hotels.map(h => (
+                        <button 
+                          key={h.id}
+                          onClick={() => {
+                            if (hotel?.id === h.id) {
+                              setIsSelectingHotel(false);
+                              return;
+                            }
+                            if (window.confirm(`Switch management context to ${h.name}?`)) {
+                              setSelectedHotelId(h.id);
+                              setIsSelectingHotel(false);
+                              navigate('/');
+                            }
+                          }}
+                          className={cn(
+                            "w-full flex items-center justify-between px-3 py-2 text-left hover:bg-zinc-800 transition-colors",
+                            hotel?.id === h.id && "bg-emerald-500/10 text-emerald-500"
+                          )}
+                        >
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium truncate">{h.name}</span>
+                            <span className="text-[10px] text-zinc-500">Plan: {h.plan}</span>
+                          </div>
+                          {hotel?.id === h.id && <CheckCircle2 size={14} />}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
 
         {/* Global Search Bar */}

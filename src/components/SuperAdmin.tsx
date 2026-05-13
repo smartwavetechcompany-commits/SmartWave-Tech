@@ -330,29 +330,87 @@ export function SuperAdmin() {
     }
   };
 
-  const extendTrackingCode = async (code: TrackingCode, months: number) => {
+  const [customExpiryDate, setCustomExpiryDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+
+  // Sync custom date when modal opens
+  useEffect(() => {
+    if (extendingCode) {
+      try {
+        const d = new Date(extendingCode.expiryDate);
+        if (isValid(d)) {
+          setCustomExpiryDate(format(d, 'yyyy-MM-dd'));
+        }
+      } catch (e) {
+        console.error("Invalid code date", e);
+      }
+    } else if (extendingHotel) {
+      try {
+        const d = new Date(extendingHotel.subscriptionExpiry);
+        if (isValid(d)) {
+          setCustomExpiryDate(format(d, 'yyyy-MM-dd'));
+        }
+      } catch (e) {
+        console.error("Invalid hotel date", e);
+      }
+    }
+  }, [extendingCode, extendingHotel]);
+
+  const extendTrackingCode = async (code: TrackingCode, months: number | 'custom') => {
     if (!auth.currentUser || profile?.role !== 'superAdmin') return;
 
     setLoading(true);
     try {
-      const currentExpiry = new Date(code.expiryDate).getTime();
-      const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
+      let newExpiry: string;
+      if (months === 'custom') {
+        newExpiry = new Date(customExpiryDate).toISOString();
+      } else {
+        const now = Date.now();
+        const currentExpiry = new Date(code.expiryDate).getTime();
+        // If code is already expired, start extension from NOW, otherwise add to current expiry
+        const baseTime = (isNaN(currentExpiry) || currentExpiry < now) ? now : currentExpiry;
+        newExpiry = new Date(baseTime + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
+      }
       
-      await database.safeUpdate(doc(db, 'trackingCodes', code.code), { 
-        expiryDate: newExpiry
+      // 2. Find all linked hotels
+      const codeId = code.code.trim().toUpperCase();
+      const linkedHotels = hotels.filter(h => 
+        (h.trackingCode?.trim().toUpperCase() === codeId) ||
+        (code.usedByHotel && h.id === code.usedByHotel)
+      );
+
+      // 1. Update Tracking Code - always use code.code as it's the primary identifier
+      await database.safeUpdate(doc(db, 'trackingCodes', codeId), { 
+        expiryDate: newExpiry,
+        status: linkedHotels.length > 0 ? 'used' : 'active'
       }, {
         hotelId: 'system',
         module: 'SuperAdmin',
         action: 'EXTEND_TRACKING_CODE',
-        details: `Extended code ${code.code} expiry to ${newExpiry}`
+        details: `Extended code ${codeId} expiry to ${newExpiry}`
       });
+      
+      for (const linkedHotel of linkedHotels) {
+        try {
+          await database.safeUpdate(doc(db, 'hotels', linkedHotel.id), {
+            subscriptionExpiry: newExpiry,
+            subscriptionStatus: 'active'
+          }, {
+            hotelId: linkedHotel.id,
+            module: 'SuperAdmin',
+            action: 'SYNC_HOTEL_EXPIRY',
+            details: `Synced hotel ${linkedHotel.name} expiry with updated tracking code ${codeId}`
+          });
+        } catch (hotelErr: any) {
+          console.error(`Failed to sync hotel ${linkedHotel.id} expiry:`, hotelErr.message);
+        }
+      }
 
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
         actor: auth.currentUser.email || auth.currentUser.uid,
         userRole: 'superAdmin',
         action: 'EXTEND_TRACKING_CODE',
-        target: `Code ${code.code}: +${months} months`
+        target: `Code ${codeId}: ${months} months extension`
       };
       await database.safeAdd(collection(db, 'activityLogs'), log, {
         hotelId: 'system',
@@ -362,7 +420,7 @@ export function SuperAdmin() {
       });
       
       setExtendingCode(null);
-      toast.success(`Code ${code.code} extended by ${months} months`);
+      toast.success(`Code ${codeId} and ${linkedHotels.length} linked hotels updated.`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `trackingCodes/${code.code}`);
       toast.error('Failed to extend code');
@@ -377,6 +435,7 @@ export function SuperAdmin() {
       const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
       const newExpiry = new Date((currentExpiry > now ? currentExpiry : now) + (30 * 24 * 60 * 60 * 1000)).toISOString();
       
+      // 1. Update Hotel
       await database.safeUpdate(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
         subscriptionStatus: 'active' 
@@ -386,6 +445,27 @@ export function SuperAdmin() {
         action: 'GIVE_LIVE_ACCESS',
         details: `Granted live access to ${hotel.name}`
       });
+
+      // 2. Sync with Tracking Code if exists
+      if (hotel.trackingCode) {
+        try {
+          const tcRef = doc(db, 'trackingCodes', hotel.trackingCode.trim().toUpperCase());
+          const tcDoc = await getDoc(tcRef);
+          if (tcDoc.exists()) {
+            await database.safeUpdate(tcRef, { 
+              expiryDate: newExpiry,
+              status: 'used' // Ensure it's marked as used if it was somehow active/expired
+            }, {
+              hotelId: 'system',
+              module: 'SuperAdmin',
+              action: 'SYNC_TRACKING_CODE_EXPIRY',
+              details: `Synced code ${hotel.trackingCode.trim().toUpperCase()} with live access grant`
+            });
+          }
+        } catch (err: any) {
+          console.error("Failed to sync tracking code:", err.message);
+        }
+      }
 
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
@@ -405,6 +485,96 @@ export function SuperAdmin() {
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}`);
       toast.error('Failed to grant live access');
+    }
+  };
+
+  const [syncingAll, setSyncingAll] = useState(false);
+
+  // Auto-sync on mount
+  useEffect(() => {
+    if (profile?.role === 'superAdmin' && hotels.length > 0 && trackingCodes.length > 0) {
+      // Small delay to ensure everything is loaded
+      const timer = setTimeout(() => {
+        syncAllCodesWithHotels();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [profile?.role, hotels.length, trackingCodes.length]);
+
+  const syncAllCodesWithHotels = async () => {
+    if (!auth.currentUser || profile?.role !== 'superAdmin') return;
+    setSyncingAll(true);
+    let syncedCount = 0;
+    try {
+      // Create a map for faster lookup
+      const hotelMapByCode = new Map<string, Hotel[]>();
+      hotels.forEach(h => {
+        if (h.trackingCode) {
+          const code = h.trackingCode.trim().toUpperCase();
+          if (!hotelMapByCode.has(code)) hotelMapByCode.set(code, []);
+          hotelMapByCode.get(code)?.push(h);
+        }
+      });
+
+      for (const code of trackingCodes) {
+        const codeKey = code.code.trim().toUpperCase();
+        const linkedHotels = hotelMapByCode.get(codeKey) || [];
+        
+        // Add by ID if possible
+        if (code.usedByHotel) {
+          const hotelById = hotels.find(h => h.id === code.usedByHotel);
+          if (hotelById && !linkedHotels.find(lh => lh.id === hotelById.id)) {
+            linkedHotels.push(hotelById);
+          }
+        }
+
+        if (linkedHotels.length > 0) {
+          // Latest expiry wins
+          const latestExpiry = [
+            code.expiryDate,
+            ...linkedHotels.map(h => h.subscriptionExpiry)
+          ].filter(Boolean).sort().pop();
+
+          if (latestExpiry) {
+            // Update Code if needed
+            if (code.expiryDate !== latestExpiry || code.status !== 'used') {
+              await database.safeUpdate(doc(db, 'trackingCodes', codeKey), { 
+                expiryDate: latestExpiry,
+                status: 'used'
+              }, {
+                hotelId: 'system',
+                module: 'SuperAdmin',
+                action: 'SYNC_AUTO',
+                details: `Sync code ${codeKey} with hotels`
+              });
+              syncedCount++;
+            }
+
+            // Update Hotels if needed
+            for (const h of linkedHotels) {
+              if (h.subscriptionExpiry !== latestExpiry || h.subscriptionStatus !== 'active') {
+                await database.safeUpdate(doc(db, 'hotels', h.id), {
+                  subscriptionExpiry: latestExpiry,
+                  subscriptionStatus: 'active'
+                }, {
+                  hotelId: h.id,
+                  module: 'SuperAdmin',
+                  action: 'SYNC_AUTO',
+                  details: `Sync hotel ${h.name} with code ${codeKey}`
+                });
+                syncedCount++;
+              }
+            }
+          }
+        }
+      }
+      if (syncedCount > 0) {
+        toast.success(`Background sync: Updated ${syncedCount} records.`);
+      }
+    } catch (err: any) {
+      console.error("Auto-sync error:", err.message);
+    } finally {
+      setSyncingAll(false);
     }
   };
 
@@ -473,11 +643,20 @@ export function SuperAdmin() {
     }
   };
 
-  const extendSubscription = async (hotel: Hotel, months: number) => {
+  const extendSubscription = async (hotel: Hotel, months: number | 'custom') => {
     try {
-      const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
-      const newExpiry = new Date(currentExpiry + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
+      let newExpiry: string;
+      if (months === 'custom') {
+        newExpiry = new Date(customExpiryDate).toISOString();
+      } else {
+        const now = Date.now();
+        const currentExpiry = new Date(hotel.subscriptionExpiry).getTime();
+        // If already expired, start extension from NOW, otherwise add to current expiry
+        const baseTime = (isNaN(currentExpiry) || currentExpiry < now) ? now : currentExpiry;
+        newExpiry = new Date(baseTime + (months * 30 * 24 * 60 * 60 * 1000)).toISOString();
+      }
       
+      // 1. Update Hotel
       await database.safeUpdate(doc(db, 'hotels', hotel.id), { 
         subscriptionExpiry: newExpiry,
         subscriptionStatus: 'active' 
@@ -485,8 +664,29 @@ export function SuperAdmin() {
         hotelId: hotel.id,
         module: 'SuperAdmin',
         action: 'EXTEND_SUBSCRIPTION',
-        details: `Extended ${hotel.name} subscription by ${months} months`
+        details: `Extended ${hotel.name} subscription by ${months} units`
       });
+
+      // 2. Sync with Tracking Code if exists
+      if (hotel.trackingCode) {
+        try {
+          const tcRef = doc(db, 'trackingCodes', hotel.trackingCode.trim().toUpperCase());
+          const tcDoc = await getDoc(tcRef);
+          if (tcDoc.exists()) {
+            await database.safeUpdate(tcRef, { 
+              expiryDate: newExpiry,
+              status: 'used'
+            }, {
+              hotelId: 'system',
+              module: 'SuperAdmin',
+              action: 'SYNC_TRACKING_CODE_EXPIRY',
+              details: `Synced code ${hotel.trackingCode.toUpperCase()} with subscription extension`
+            });
+          }
+        } catch (err: any) {
+          console.error("Failed to sync tracking code:", err.message);
+        }
+      }
 
       const log: Omit<GlobalAuditLog, 'id'> = {
         timestamp: new Date().toISOString(),
@@ -551,13 +751,14 @@ export function SuperAdmin() {
         hotelId: hotel.id,
         module: 'SuperAdmin',
         action: 'CHANGE_HOTEL_PLAN',
-        details: `Upgraded/Downgraded ${hotel.name} to ${newPlan}`
+        details: `Upgraded/Downgraded ${hotel.name} to ${newPlan} (Amount: ${planChangeAmount})`
       });
 
       // Update the tracking code associated with the hotel if it exists
       if (hotel.trackingCode) {
         try {
-          const tcRef = doc(db, 'trackingCodes', hotel.trackingCode.toUpperCase());
+          const tcKey = hotel.trackingCode.trim().toUpperCase();
+          const tcRef = doc(db, 'trackingCodes', tcKey);
           const tcDoc = await getDoc(tcRef);
           if (tcDoc.exists()) {
             await database.safeUpdate(tcRef, { 
@@ -567,12 +768,11 @@ export function SuperAdmin() {
               hotelId: 'system',
               module: 'SuperAdmin',
               action: 'UPDATE_TRACKING_CODE_PLAN',
-              details: `Syncing plan change to code ${hotel.trackingCode.toUpperCase()}`
+              details: `Syncing plan change to code ${tcKey}`
             });
           }
         } catch (err: any) {
-          console.error("Failed to update tracking code plan:", err.message || safeStringify(err));
-          // Don't fail the whole operation if tracking code update fails
+          console.error("Failed to update tracking code plan:", err.message);
         }
       }
 
@@ -619,7 +819,12 @@ export function SuperAdmin() {
     
     // Check for expired status if needed
     if (statusFilter === 'expired') {
-      return matchesSearch && new Date(hotel.subscriptionExpiry).getTime() < Date.now();
+      return matchesSearch && new Date(hotel.subscriptionExpiry).getTime() <= Date.now();
+    }
+
+    if (statusFilter === 'near_expiry') {
+      const remainingDays = (new Date(hotel.subscriptionExpiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+      return matchesSearch && hotel.subscriptionStatus === 'active' && remainingDays > 0 && remainingDays <= 7;
     }
     
     return matchesSearch && matchesStatus;
@@ -632,10 +837,14 @@ export function SuperAdmin() {
 
   const stats = {
     totalHotels: hotels.length,
-    activeHotels: hotels.filter(h => h.subscriptionStatus === 'active' && new Date(h.subscriptionExpiry).getTime() > Date.now()).length,
-    expiredHotels: hotels.filter(h => new Date(h.subscriptionExpiry).getTime() < Date.now()).length,
-    pendingRequests: requests.filter(r => r.status === 'pending').length,
+    activeHotels: hotels.filter(h => h.subscriptionStatus === 'active' && new Date(h.subscriptionExpiry).getTime() > Date.now() + 1000).length,
+    expiredHotels: hotels.filter(h => new Date(h.subscriptionExpiry).getTime() <= Date.now() + 1000).length,
+    nearExpiry: hotels.filter(h => {
+      const remainingDays = (new Date(h.subscriptionExpiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+      return h.subscriptionStatus === 'active' && remainingDays > 0 && remainingDays <= 7;
+    }).length,
     activeCodes: trackingCodes.filter(c => c.status === 'active').length,
+    pendingRequests: requests.filter(r => r.status === 'pending').length,
   };
 
   if (hasPermissionError) {
@@ -746,7 +955,7 @@ export function SuperAdmin() {
 
       {/* KPI Cards */}
       {activeTab === 'hotels' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
             <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Hotels</div>
             <div className="text-3xl font-bold text-zinc-50">{stats.totalHotels}</div>
@@ -759,11 +968,20 @@ export function SuperAdmin() {
             <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired</div>
             <div className="text-3xl font-bold text-zinc-50">{stats.expiredHotels}</div>
           </div>
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl relative overflow-hidden group cursor-pointer hover:border-amber-500/50 transition-colors" onClick={() => setStatusFilter('near_expiry')}>
+            <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Near Expiry</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.nearExpiry}</div>
+            {stats.nearExpiry > 0 && (
+              <div className="absolute top-0 right-0 p-2">
+                <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
+              </div>
+            )}
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl relative cursor-pointer hover:border-blue-500/50 transition-colors" onClick={() => setActiveTab('requests')}>
             <div className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">Pending Requests</div>
             <div className="text-3xl font-bold text-zinc-50">{stats.pendingRequests}</div>
           </div>
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl relative cursor-pointer hover:border-amber-500/50 transition-colors" onClick={() => setActiveTab('codes')}>
             <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Active Codes</div>
             <div className="text-3xl font-bold text-zinc-50">{stats.activeCodes}</div>
           </div>
@@ -880,17 +1098,57 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-zinc-50 mb-2">Extend Access Code</h3>
             <p className="text-zinc-400 text-sm mb-6">Extending code: {extendingCode.code}</p>
-            <div className="grid grid-cols-1 gap-3">
-              {[1, 3, 6, 12].map(months => (
-                <button 
-                  key={months}
-                  onClick={() => extendTrackingCode(extendingCode, months)}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-50 py-3 rounded-lg font-medium transition-all active:scale-95"
-                >
-                  Add {months} Month{months > 1 ? 's' : ''}
-                </button>
-              ))}
+            
+            <div className="space-y-4 mb-6">
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">Quick Add</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 3, 6, 12].map(months => (
+                    <button 
+                      key={months}
+                      onClick={() => extendTrackingCode(extendingCode, months)}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-50 py-2 rounded-lg font-medium text-xs transition-all active:scale-95"
+                    >
+                      +{months}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">Quick Correct (Reduce)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[-1, -3].map(months => (
+                    <button 
+                      key={months}
+                      onClick={() => extendTrackingCode(extendingCode, months)}
+                      className="bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2 rounded-lg font-medium text-xs transition-all active:scale-95 border border-red-500/20"
+                    >
+                      {months}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="pt-4 border-t border-zinc-800">
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Manually Set Expiry Date</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="date"
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm"
+                    value={customExpiryDate}
+                    onChange={(e) => setCustomExpiryDate(e.target.value)}
+                  />
+                  <button 
+                    onClick={() => extendTrackingCode(extendingCode, 'custom')}
+                    className="bg-emerald-500 text-black px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-400 transition-all active:scale-95"
+                  >
+                    Set
+                  </button>
+                </div>
+              </div>
             </div>
+
             <button 
               onClick={() => setExtendingCode(null)}
               className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
@@ -906,17 +1164,57 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
             <h3 className="text-xl font-bold text-zinc-50 mb-2">Extend Subscription</h3>
             <p className="text-zinc-400 text-sm mb-6">Extending subscription for {extendingHotel.name}</p>
-            <div className="grid grid-cols-1 gap-3">
-              {[1, 3, 6, 12].map(months => (
-                <button 
-                  key={months}
-                  onClick={() => extendSubscription(extendingHotel, months)}
-                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-50 py-3 rounded-lg font-medium transition-all active:scale-95"
-                >
-                  Add {months} Month{months > 1 ? 's' : ''}
-                </button>
-              ))}
+            
+            <div className="space-y-4 mb-6">
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">Quick Add</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 3, 6, 12].map(months => (
+                    <button 
+                      key={months}
+                      onClick={() => extendSubscription(extendingHotel, months)}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-50 py-2 rounded-lg font-medium text-xs transition-all active:scale-95"
+                    >
+                      +{months}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">Quick Correct (Reduce)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[-1, -3].map(months => (
+                    <button 
+                      key={months}
+                      onClick={() => extendSubscription(extendingHotel, months)}
+                      className="bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2 rounded-lg font-medium text-xs transition-all active:scale-95 border border-red-500/20"
+                    >
+                      {months}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="pt-4 border-t border-zinc-800">
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Manually Set Expiry Date</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="date"
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm"
+                    value={customExpiryDate}
+                    onChange={(e) => setCustomExpiryDate(e.target.value)}
+                  />
+                  <button 
+                    onClick={() => extendSubscription(extendingHotel, 'custom')}
+                    className="bg-emerald-500 text-black px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-400 transition-all active:scale-95"
+                  >
+                    Set
+                  </button>
+                </div>
+              </div>
             </div>
+
             <button 
               onClick={() => setExtendingHotel(null)}
               className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
@@ -1032,6 +1330,7 @@ export function SuperAdmin() {
                   <option value="active">Active</option>
                   <option value="suspended">Suspended</option>
                   <option value="expired">Expired</option>
+                  <option value="near_expiry">Near Expiry (7d)</option>
                 </select>
               </div>
             </div>
@@ -1055,18 +1354,27 @@ export function SuperAdmin() {
                     </tr>
                   ) : (
                     filteredHotels.map(hotel => {
-                      const isExpired = new Date(hotel.subscriptionExpiry).getTime() < Date.now();
+                      const expiryTime = new Date(hotel.subscriptionExpiry).getTime();
+                      const isExpired = !isNaN(expiryTime) && expiryTime <= Date.now();
+                      const remainingDays = !isNaN(expiryTime) ? (expiryTime - Date.now()) / (24 * 60 * 60 * 1000) : 0;
+                      const isNearExpiry = !isExpired && remainingDays > 0 && remainingDays <= 7;
+                      
                       return (
-                        <tr key={hotel.id} className="hover:bg-zinc-800/50 transition-colors">
+                        <tr key={hotel.id} className={cn("hover:bg-zinc-800/50 transition-colors", isNearExpiry && "bg-amber-500/5")}>
                           <td className="px-6 py-4">
                             <div className="text-sm font-medium text-zinc-50">{hotel.name}</div>
                             <div className="text-xs text-zinc-500">{hotel.plan}</div>
                           </td>
                           <td className="px-6 py-4 font-mono text-xs text-zinc-400">{hotel.trackingCode}</td>
-                          <td className="px-6 py-4 text-xs text-zinc-400">
-                            <div className={cn(isExpired && "text-red-400 font-medium")}>
+                          <td className="px-6 py-4 text-xs">
+                            <div className={cn(
+                              isExpired ? "text-red-400 font-bold" : 
+                              isNearExpiry ? "text-amber-400 font-bold" : 
+                              "text-zinc-400"
+                            )}>
                               {safeFormat(hotel.subscriptionExpiry, 'MMM d, yyyy')}
-                              {isExpired && <span className="ml-2 text-[10px] uppercase tracking-tighter">(Expired)</span>}
+                              {isExpired && <span className="ml-2 text-[10px] uppercase tracking-tighter bg-red-500/10 px-1 rounded">(Expired)</span>}
+                              {isNearExpiry && <span className="ml-2 text-[10px] uppercase tracking-tighter bg-amber-500/10 px-1 rounded">(Expiring Soon)</span>}
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -1275,30 +1583,72 @@ export function SuperAdmin() {
               </h3>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
-                <input 
-                  type="text" 
-                  placeholder="Search codes..."
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-                  value={codeSearchTerm}
-                  onChange={(e) => setCodeSearchTerm(e.target.value)}
-                />
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Search codes..."
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+                    value={codeSearchTerm}
+                    onChange={(e) => setCodeSearchTerm(e.target.value)}
+                  />
+                  <button
+                    onClick={syncAllCodesWithHotels}
+                    disabled={syncingAll}
+                    className="bg-zinc-800 text-zinc-300 px-3 py-1.5 rounded-lg text-[10px] font-bold hover:bg-zinc-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={cn(syncingAll && "animate-spin")} />
+                    {syncingAll ? 'Syncing...' : 'Sync with Hotels'}
+                  </button>
+                </div>
               </div>
             </div>
             <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
-              {filteredCodes.filter(c => c.status !== 'used').length === 0 ? (
-                <div className="p-8 text-center text-zinc-500 text-xs">No active codes found</div>
+              {filteredCodes.length === 0 ? (
+                <div className="p-8 text-center text-zinc-500 text-xs">No codes found</div>
               ) : (
-                filteredCodes.filter(c => c.status !== 'used').map(code => {
-                  const isCodeExpired = new Date(code.expiryDate).getTime() < Date.now();
+                filteredCodes.map(code => {
+                  const linkedHotel = hotels.find(h => 
+                    (h.trackingCode?.trim().toUpperCase() === code.code?.trim().toUpperCase()) ||
+                    (code.usedByHotel && h.id === code.usedByHotel)
+                  );
+                  
+                  // Use hotel expiry if linked, otherwise use code expiry
+                  // If both exist, show the LATEST one to avoid "Expired" confusion after extension
+                  const hotelExpiry = linkedHotel ? new Date(linkedHotel.subscriptionExpiry).getTime() : 0;
+                  const codeExpiry = new Date(code.expiryDate).getTime();
+                  
+                  const expiryTime = Math.max(hotelExpiry, codeExpiry);
+                  const expiryToUse = new Date(expiryTime).toISOString();
+                  const now = Date.now();
+                  
+                  // Determine status based on hotel if linked
+                  const isActuallyActive = linkedHotel 
+                    ? (linkedHotel.subscriptionStatus === 'active' && expiryTime > now)
+                    : (code.status === 'active' && expiryTime > now);
+                    
+                  const isCodeExpired = !isActuallyActive && expiryTime <= now;
+                  const remainingDays = !isNaN(expiryTime) ? (expiryTime - now) / (24 * 60 * 60 * 1000) : 0;
+                  const isNearExpiry = !isCodeExpired && remainingDays > 0 && remainingDays <= 7;
+                  
                   return (
-                    <div key={code.id} className="p-4 hover:bg-zinc-800/50 transition-colors group">
+                    <div key={code.id || code.code} className={cn("p-4 hover:bg-zinc-800/50 transition-colors group border-l-2 border-transparent", 
+                      isActuallyActive ? "border-l-emerald-500" : isNearExpiry ? "border-l-amber-500" : "border-l-red-500",
+                      isNearExpiry && "bg-amber-500/5"
+                    )}>
                       <div className="flex items-center justify-between mb-2">
-                        <span className={cn(
-                          "font-mono font-bold tracking-widest",
-                          isCodeExpired ? "text-red-500" : "text-emerald-500"
-                        )}>
-                          {code.code}
-                        </span>
+                        <div className="flex flex-col">
+                          <span className={cn(
+                            "font-mono font-bold tracking-widest",
+                            isActuallyActive ? "text-emerald-500" : isNearExpiry ? "text-amber-500" : "text-red-500"
+                          )}>
+                            {code.code}
+                          </span>
+                          {linkedHotel && (
+                            <span className="text-[10px] text-zinc-500 font-bold uppercase truncate max-w-[150px]">
+                              {linkedHotel.name}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
                           <button 
                             onClick={() => setExtendingCode(code)}
@@ -1338,13 +1688,17 @@ export function SuperAdmin() {
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
                         <div className="flex items-center gap-2">
-                          <span>{code.plan}</span>
-                          {code.price !== undefined && code.price > 0 && (
-                            <span className="text-emerald-500/80">({formatCurrency(code.price, currency, exchangeRate)})</span>
+                          <span>{linkedHotel?.plan || code.plan}</span>
+                          {(linkedHotel?.price || code.price) !== undefined && (linkedHotel?.price || code.price) > 0 && (
+                            <span className="text-emerald-500/80">({formatCurrency(linkedHotel?.price || code.price || 0, currency, exchangeRate)})</span>
                           )}
                         </div>
-                        <span className={isCodeExpired ? "text-red-500" : ""}>
-                          {isCodeExpired ? 'Expired' : `Exp: ${safeFormat(code.expiryDate, 'MMM d, yyyy')}`}
+                        <span className={cn(
+                          isActuallyActive ? "text-emerald-500" : isNearExpiry ? "text-amber-500" : "text-red-500"
+                        )}>
+                          {isActuallyActive ? `Active until ${safeFormat(expiryToUse, 'MMM d, yyyy')}` : 
+                           isCodeExpired ? `Expired (${safeFormat(expiryToUse, 'MMM d, yyyy')})` :
+                           `Inactive (${safeFormat(expiryToUse, 'MMM d, yyyy')})`}
                         </span>
                       </div>
                     </div>
@@ -1436,7 +1790,7 @@ export function SuperAdmin() {
                   Payment Instructions
                 </label>
                 <textarea 
-                  placeholder="Bank: Example Bank&#10;Account: 1234567890&#10;Name: SmartWave PMS"
+                  placeholder="Bank: Example Bank&#10;Account: 1234567890&#10;Name: Tyyl Tech PMS"
                   rows={4}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none resize-none"
                   value={settings.paymentInstructions}

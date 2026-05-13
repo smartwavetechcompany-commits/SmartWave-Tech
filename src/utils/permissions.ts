@@ -13,15 +13,11 @@ export type Permission =
   | 'edit_hotel_settings'
   | 'access_super_admin';
 
-const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   'superAdmin': [
     'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
     'manage_rooms', 'process_payments', 'nightly_audit', 'bypass_inventory_limits', 
     'edit_hotel_settings', 'access_super_admin'
-  ],
-  'admin': [
-    'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
-    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings'
   ],
   'hotelAdmin': [
     'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 

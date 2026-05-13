@@ -585,10 +585,32 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </div>
               </div>
               <div className="space-y-3">
-                <div className="flex justify-between text-xs pb-2 border-b border-zinc-800/50 italic opacity-80">
-                  <span className="text-zinc-500">Scheduled Stay Total</span>
-                  <span className="text-zinc-50 font-bold">{formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}</span>
+                <div className="space-y-1 pb-2 border-b border-zinc-800/50">
+                  <div className="flex justify-between text-[10px] text-zinc-500 uppercase tracking-wider font-bold">
+                    <span>Pricing Breakdown</span>
+                  </div>
+                  <div className="flex justify-between text-xs italic opacity-80">
+                    <span className="text-zinc-400">Room Base Amount</span>
+                    <span className="text-zinc-200">
+                      {formatCurrency(
+                        currentReservation.totalAmount - (currentReservation.taxDetails?.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0) || 0), 
+                        currency, 
+                        exchangeRate
+                      )}
+                    </span>
+                  </div>
+                  {currentReservation.taxDetails?.map((tax, idx) => (
+                    <div key={idx} className="flex justify-between text-[10px] italic opacity-70 pl-2">
+                      <span className="text-zinc-500">{tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}</span>
+                      <span className="text-zinc-200">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs pt-1 mt-1 border-t border-zinc-800/30">
+                    <span className="text-zinc-400 font-bold">Scheduled Stay Total</span>
+                    <span className="text-zinc-50 font-bold">{formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}</span>
+                  </div>
                 </div>
+
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Accrued Charges (Debits)</span>
                   <span className="text-zinc-50 font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>

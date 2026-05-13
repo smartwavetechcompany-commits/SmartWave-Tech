@@ -98,7 +98,8 @@ export function SubscriptionExpiredPage() {
       const tcDoc = tcSnap.docs[0];
       const tcData = tcDoc.data() as TrackingCode;
 
-      if (tcData.status !== 'active' || new Date(tcData.expiryDate) < new Date()) {
+      const tcExpiryTime = new Date(tcData.expiryDate).getTime();
+      if (tcData.status !== 'active' || (!isNaN(tcExpiryTime) && tcExpiryTime <= Date.now() - 3600000)) {
         throw new Error('Tracking code expired or inactive');
       }
 
@@ -234,7 +235,7 @@ export function SubscriptionExpiredPage() {
 
             <div className="pt-4 flex items-center justify-center gap-2 text-zinc-500 text-sm">
               <Mail size={16} />
-              <span>Need help? Contact <a href={`mailto:${settings?.supportEmail || 'support@smartwave.com'}`} className="text-emerald-500 hover:underline">{settings?.supportEmail || 'support@smartwave.com'}</a></span>
+              <span>Need help? Contact <a href={`mailto:${settings?.supportEmail || 'support@tyyltech.com'}`} className="text-emerald-500 hover:underline">{settings?.supportEmail || 'support@tyyltech.com'}</a></span>
             </div>
           </div>
         ) : isRenewing ? (

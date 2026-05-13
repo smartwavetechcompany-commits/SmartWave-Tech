@@ -78,10 +78,10 @@ export function Sidebar() {
     <div className="w-64 bg-zinc-950 text-zinc-400 flex flex-col h-screen border-r border-zinc-800">
       <div className="p-6">
         <h1 className="text-xl font-bold text-zinc-50 tracking-tighter flex items-center gap-2">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black">
-            SW
+          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black font-black text-xs">
+            TT
           </div>
-          SmartWave
+          Tyyl Tech
         </h1>
       </div>
 

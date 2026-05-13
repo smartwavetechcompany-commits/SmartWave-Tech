@@ -739,6 +739,51 @@ export function Rooms() {
         </div>
       </header>
 
+      {/* Configuration Summary - New Feature */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div 
+          onClick={() => setIsManagingBlockings(true)}
+          className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl hover:bg-zinc-800 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-2 bg-amber-500/10 rounded-xl text-amber-500 group-hover:scale-110 transition-transform">
+              <XCircle size={20} />
+            </div>
+            <span className="text-2xl font-black text-zinc-50">{blockings.length}</span>
+          </div>
+          <h4 className="text-sm font-bold text-zinc-400">Active Blockings</h4>
+          <p className="text-[10px] text-zinc-500 mt-1">Rooms temporarily out of service for maintenance or VIPs</p>
+        </div>
+
+        <div 
+          onClick={() => setIsManagingRates(true)}
+          className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl hover:bg-zinc-800 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-2 bg-blue-500/10 rounded-xl text-blue-500 group-hover:scale-110 transition-transform">
+              <TrendingUp size={20} />
+            </div>
+            <span className="text-2xl font-black text-zinc-50">{rateConfigs.length}</span>
+          </div>
+          <h4 className="text-sm font-bold text-zinc-400">Rate Configurations</h4>
+          <p className="text-[10px] text-zinc-500 mt-1">Dynamic pricing rules and seasonal rate adjustments</p>
+        </div>
+
+        <div 
+          onClick={() => setIsManagingConsumptionRules(true)}
+          className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl hover:bg-zinc-800 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-500 group-hover:scale-110 transition-transform">
+              <Package size={20} />
+            </div>
+            <span className="text-2xl font-black text-zinc-50">{consumptionRules.length}</span>
+          </div>
+          <h4 className="text-sm font-bold text-zinc-400">Inventory Sync Rules</h4>
+          <p className="text-[10px] text-zinc-500 mt-1">Automatic stock deduction rules for room operations</p>
+        </div>
+      </div>
+
       {/* Room Status Legend */}
       <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl">
         <div className="flex items-center gap-2">

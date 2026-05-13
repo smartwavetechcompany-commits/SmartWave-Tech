@@ -1409,11 +1409,11 @@ export function Settings() {
 
                 <div className="pt-4 border-t border-zinc-800">
                   <a 
-                    href={`mailto:${systemSettings?.supportEmail || 'support@smartwave.com'}`}
+                    href={`mailto:${systemSettings?.supportEmail || 'support@tyyltech.com'}`}
                     className="flex items-center justify-center gap-2 w-full bg-emerald-500 text-black font-bold py-3 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
                   >
                     <Mail size={18} />
-                    {systemSettings?.supportEmail || 'support@smartwave.com'}
+                    {systemSettings?.supportEmail || 'support@tyyltech.com'}
                   </a>
                 </div>
               </div>

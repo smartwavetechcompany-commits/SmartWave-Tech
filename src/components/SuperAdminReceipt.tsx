@@ -23,9 +23,9 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
       {/* Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         <div className="w-16 h-16 bg-emerald-500 text-black rounded-2xl flex items-center justify-center mx-auto mb-3 font-black text-2xl">
-          SW
+          TT
         </div>
-        <h1 className="text-2xl font-black uppercase tracking-tighter">SmartWave PMS</h1>
+        <h1 className="text-2xl font-black uppercase tracking-tighter">Tyyl Tech PMS</h1>
         <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Official Subscription Receipt</p>
       </div>
 
@@ -58,7 +58,7 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
         
         <div className="flex justify-between items-start">
           <div className="flex-1">
-            <p className="text-sm font-bold">SmartWave PMS - {request.plan.toUpperCase()} Plan</p>
+            <p className="text-sm font-bold">Tyyl Tech PMS - {request.plan.toUpperCase()} Plan</p>
             <p className="text-[10px] text-zinc-400">
               {request.type === 'extension' ? 'Subscription Extension' : 'New Subscription Registration'}
             </p>
@@ -105,7 +105,7 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
 
       {/* Footer */}
       <div className="mt-10 text-center">
-        <p className="text-sm font-bold mb-1 italic">Welcome to the SmartWave Family!</p>
+        <p className="text-sm font-bold mb-1 italic">Welcome to the Tyyl Tech Family!</p>
         <p className="text-[10px] text-zinc-400 leading-relaxed">
           For any support inquiries, please contact us at {settings.supportEmail}
         </p>

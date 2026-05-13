@@ -36,7 +36,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = filteredEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
-  const subtotal = totalNonTaxDebits;
+  
+  // Calculate exclusive taxes from reservation for when ledger is empty
+  const resExclusiveTaxAmount = reservation?.taxDetails?.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0) || 0;
+  const resBaseAmount = reservation ? (reservation.totalAmount - resExclusiveTaxAmount) : 0;
+
+  const subtotal = totalNonTaxDebits + (!hasRoomChargeInLedger && reservation ? resBaseAmount : 0);
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -74,7 +79,10 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       }
     } else {
       // Fallback to calculation if ledger is empty (e.g. preview before posting)
-      amount = subtotal * (tax.percentage / 100);
+      // Use reservation details if available
+      const storedTax = reservation?.taxDetails?.find(t => t.name === tax.name);
+      amount = storedTax ? storedTax.amount : (subtotal * (tax.percentage / 100));
+      
       taxTotal += amount;
       if (!tax.isInclusive) {
         exclusiveTaxTotal += amount;
@@ -83,11 +91,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     return { ...tax, amount };
   });
 
-  // Add "Other Taxes" if there are unmatched tax debits in the ledger
-  const matchedExclusiveTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
-  const otherTaxAmount = totalTaxDebits > matchedExclusiveTaxTotal ? totalTaxDebits - matchedExclusiveTaxTotal : 0;
-  if (otherTaxAmount > 0.01) {
-    exclusiveTaxTotal += otherTaxAmount;
+  // Handle other taxes in ledger
+  if (totalTaxDebits > 0) {
+    const matchedExclusiveTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
+    const otherTaxAmount = totalTaxDebits > matchedExclusiveTaxTotal ? totalTaxDebits - matchedExclusiveTaxTotal : 0;
+    if (otherTaxAmount > 0.01) {
+      exclusiveTaxTotal += otherTaxAmount;
+    }
   }
 
   const grandTotal = subtotal + exclusiveTaxTotal;
@@ -238,7 +248,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                     <p className="text-sm font-bold">Room Charges (Base)</p>
                     <p className="text-[10px] text-zinc-400">Accommodation for {reservation.roomNumber}</p>
                   </div>
-                  <span className="font-bold text-sm text-right">{formatCurrency(reservation.totalAmount, currency, exchangeRate)}</span>
+                  <span className="font-bold text-sm text-right">{formatCurrency(resBaseAmount, currency, exchangeRate)}</span>
                 </div>
               )}
               {debits.map(e => (
