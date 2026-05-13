@@ -28,6 +28,8 @@ import {
   LogOut,
   LogIn,
   FileText,
+  Tag,
+  DollarSign,
   X,
   MoreVertical,
   TrendingUp,
@@ -69,9 +71,10 @@ export function Rooms() {
   });
   const [isManagingBlockings, setIsManagingBlockings] = useState(false);
   const [isManagingRates, setIsManagingRates] = useState(false);
+  const [editingRateConfig, setEditingRateConfig] = useState<any>(null);
   const [isManagingConsumptionRules, setIsManagingConsumptionRules] = useState(false);
   const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
-  const [rateConfigs, setRateConfigs] = useState<RateConfiguration[]>([]);
+  const [rateConfigs, setRateConfigs] = useState<any[]>([]);
   const [consumptionRules, setConsumptionRules] = useState<InventoryConsumptionRule[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1124,102 +1127,321 @@ export function Rooms() {
 
       {isManagingRates && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-zinc-50">Rate Configuration</h3>
-              <button onClick={() => setIsManagingRates(false)} className="text-zinc-500 hover:text-zinc-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-500/10 rounded-lg">
+                  <Tag className="text-emerald-500" size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-zinc-50">Rate Configuration</h3>
+                  <p className="text-zinc-500 text-xs mt-0.5">Define dynamic pricing rules for each room type</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsManagingRates(false);
+                  setEditingRateConfig(null);
+                }} 
+                className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-50 transition-all"
+              >
                 <XCircle size={24} />
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto">
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto pr-2 custom-scrollbar">
               <div className="space-y-6">
-                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">New Rate Rule</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    {editingRateConfig ? <Edit2 size={14} /> : <Plus size={14} />}
+                    {editingRateConfig ? 'Edit Rate Rule' : 'New Rate Rule'}
+                  </h4>
+                  {editingRateConfig && (
+                    <button 
+                      onClick={() => setEditingRateConfig(null)}
+                      className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const formData = new FormData(e.currentTarget);
                   const roomTypeId = formData.get('roomTypeId') as string;
                   const baseRate = Number(formData.get('baseRate'));
-                  const weekendRate = Number(formData.get('weekendRate'));
-                  const weekdayRate = Number(formData.get('weekdayRate'));
+                  const weekendRate = Number(formData.get('weekendRate')) || 0;
+                  const weekdayRate = Number(formData.get('weekdayRate')) || 0;
 
                   if (!hotel?.id) return;
                   try {
-                    await database.safeAdd(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
+                    const data = {
                       roomTypeId,
                       baseRate,
                       weekendRate,
                       weekdayRate,
-                      timestamp: new Date().toISOString()
-                    }, {
-                      hotelId: hotel.id,
-                      module: 'Rooms',
-                      action: 'ADD_RATE_RULE',
-                      details: `Added rate rule for room type ${roomTypes.find(t => t.id === roomTypeId)?.name || roomTypeId}`
-                    });
-                    toast.success('Rate rule added');
+                      updatedAt: new Date().toISOString(),
+                      // Preserve seasonal rates if editing
+                      seasonalRates: editingRateConfig?.seasonalRates || []
+                    };
+
+                    if (editingRateConfig) {
+                      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'rate_configurations', editingRateConfig.id), data, {
+                        hotelId: hotel.id,
+                        module: 'Rooms',
+                        action: 'UPDATE_RATE_RULE',
+                        details: `Updated rate rule for room type ${roomTypes.find(t => t.id === roomTypeId)?.name || roomTypeId}`
+                      });
+                      toast.success('Rate rule updated');
+                      setEditingRateConfig(null);
+                    } else {
+                      // Check if rule already exists for this room type
+                      const existing = rateConfigs.find(c => c.roomTypeId === roomTypeId);
+                      if (existing) {
+                        toast.error('A rule already exists for this room type. Use edit instead.');
+                        return;
+                      }
+
+                      await database.safeAdd(collection(db, 'hotels', hotel.id, 'rate_configurations'), {
+                        ...data,
+                        createdAt: new Date().toISOString()
+                      }, {
+                        hotelId: hotel.id,
+                        module: 'Rooms',
+                        action: 'ADD_RATE_RULE',
+                        details: `Added rate rule for room type ${roomTypes.find(t => t.id === roomTypeId)?.name || roomTypeId}`
+                      });
+                      toast.success('Rate rule added');
+                    }
                     e.currentTarget.reset();
                   } catch (err) {
-                    toast.error('Failed to add rate rule');
+                    toast.error('Failed to save rate rule');
                   }
-                }} className="space-y-4">
+                }} className="space-y-4 p-6 bg-zinc-950/50 border border-zinc-800 rounded-2xl">
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room Type</label>
-                    <select name="roomTypeId" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
+                    <select 
+                      name="roomTypeId" 
+                      required 
+                      defaultValue={editingRateConfig?.roomTypeId}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    >
+                      <option value="">Select Category</option>
                       {roomTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
+                  
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Rate</label>
-                    <input name="baseRate" type="number" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Default Base Rate ({currency})</label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                      <input 
+                        name="baseRate" 
+                        type="number" 
+                        required 
+                        defaultValue={editingRateConfig ? (currency === 'USD' ? editingRateConfig.baseRate / (exchangeRate || 1) : editingRateConfig.baseRate) : ''}
+                        step="0.01"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
+                        placeholder="0.00"
+                        onChange={(e) => {
+                          if (currency === 'USD') {
+                            // We handle the currency conversion logic here if needed, but for simplicity we rely on form submit
+                          }
+                        }}
+                      />
+                    </div>
                   </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Weekend Rate</label>
-                      <input name="weekendRate" type="number" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                      <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                        <Calendar size={12} className="text-emerald-500" /> Weekend Rate
+                      </label>
+                      <input 
+                        name="weekendRate" 
+                        type="number" 
+                        defaultValue={editingRateConfig ? (currency === 'USD' ? editingRateConfig.weekendRate / (exchangeRate || 1) : editingRateConfig.weekendRate) : ''}
+                        step="0.01"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
+                        placeholder="Optional"
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Weekday Rate</label>
-                      <input name="weekdayRate" type="number" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                      <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                        <Calendar size={12} className="text-blue-500" /> Weekday Rate
+                      </label>
+                      <input 
+                        name="weekdayRate" 
+                        type="number" 
+                        defaultValue={editingRateConfig ? (currency === 'USD' ? editingRateConfig.weekdayRate / (exchangeRate || 1) : editingRateConfig.weekdayRate) : ''}
+                        step="0.01"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
+                        placeholder="Optional"
+                      />
                     </div>
                   </div>
-                  <button type="submit" className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95">
-                    Save Rate Rule
+
+                  {editingRateConfig && (
+                    <div className="pt-4 border-t border-zinc-800 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h5 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Seasonal / Special Rates</h5>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            const startDate = prompt("Start Date (YYYY-MM-DD):");
+                            const endDate = prompt("End Date (YYYY-MM-DD):");
+                            const rate = prompt(`Rate Amount (${currency}):`);
+                            const name = prompt("Season Name (e.g. Summer Holiday):");
+
+                            if (startDate && endDate && rate && !isNaN(Number(rate))) {
+                              const newRate = {
+                                id: Math.random().toString(36).substr(2, 9),
+                                startDate,
+                                endDate,
+                                rate: currency === 'USD' ? Number(rate) * (exchangeRate || 1) : Number(rate),
+                                name: name || 'Special Event'
+                              };
+                              const updatedSeasonal = [...(editingRateConfig.seasonalRates || []), newRate];
+                              setEditingRateConfig({ ...editingRateConfig, seasonalRates: updatedSeasonal });
+                            }
+                          }}
+                          className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase flex items-center gap-1"
+                        >
+                          <Plus size={12} /> Add Season
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {(editingRateConfig.seasonalRates || []).length === 0 ? (
+                          <div className="text-[10px] text-zinc-600 text-center py-2 italic">No seasonal rates defined</div>
+                        ) : (
+                          editingRateConfig.seasonalRates.map((s: any) => (
+                            <div key={s.id} className="bg-zinc-900 border border-zinc-800 p-2 rounded flex items-center justify-between group">
+                              <div className="flex items-center gap-3">
+                                <div className="p-1 px-2 bg-emerald-500/10 text-emerald-500 rounded text-[10px] font-bold">
+                                  {formatCurrency(s.rate, currency, exchangeRate)}
+                                </div>
+                                <div>
+                                  <div className="text-[10px] font-bold text-zinc-100">{s.name}</div>
+                                  <div className="text-[9px] text-zinc-500 font-medium">
+                                    {format(new Date(s.startDate), 'MMM dd')} - {format(new Date(s.endDate), 'MMM dd, yyyy')}
+                                  </div>
+                                </div>
+                              </div>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  const updated = editingRateConfig.seasonalRates.filter((r: any) => r.id !== s.id);
+                                  setEditingRateConfig({ ...editingRateConfig, seasonalRates: updated });
+                                }}
+                                className="p-1 text-zinc-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button 
+                    type="submit" 
+                    className="w-full bg-emerald-500 text-black font-bold py-3 rounded-xl hover:bg-emerald-400 transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                  >
+                    {editingRateConfig ? 'Update Rate Configuration' : 'Create Rate Configuration'}
                   </button>
                 </form>
               </div>
+
               <div className="space-y-6">
-                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Configured Rates</h4>
-                <div className="space-y-3">
-                  {rateConfigs.map(c => (
-                    <div key={c.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
-                      <div>
-                        <div className="font-bold text-zinc-50">{roomTypes.find(t => t.id === c.roomTypeId)?.name}</div>
-                        <div className="text-xs text-zinc-500">Base: {formatCurrency(c.baseRate, currency, exchangeRate)}</div>
-                        <div className="flex gap-2 mt-1">
-                          {c.weekendRate && <span className="text-[8px] px-1 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20">WE: {formatCurrency(c.weekendRate, currency, exchangeRate)}</span>}
-                          {c.weekdayRate && <span className="text-[8px] px-1 bg-blue-500/10 text-blue-500 rounded border border-blue-500/20">WD: {formatCurrency(c.weekdayRate, currency, exchangeRate)}</span>}
-                        </div>
-                      </div>
-                      <button 
-                        onClick={async () => {
-                          if (!hotel?.id) return;
-                          try {
-                            await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
-                              hotelId: hotel.id,
-                              module: 'Rooms',
-                              action: 'DELETE_RATE_RULE',
-                              details: `Deleted rate rule for room type ${roomTypes.find(t => t.id === c.roomTypeId)?.name || c.roomTypeId}`
-                            });
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
-                          }
-                        }}
-                        className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                  <LayoutGrid size={14} className="text-zinc-500" />
+                  Active Rate Rules
+                </h4>
+                <div className="space-y-4">
+                  {rateConfigs.length === 0 ? (
+                    <div className="text-center py-12 bg-zinc-950/30 rounded-2xl border border-zinc-800/50 border-dashed">
+                      <Tag size={32} className="mx-auto text-zinc-700 mb-3" />
+                      <p className="text-zinc-500 text-sm">No rate rules configured yet</p>
                     </div>
-                  ))}
+                  ) : (
+                    rateConfigs.map(c => {
+                      const type = roomTypes.find(t => t.id === c.roomTypeId);
+                      return (
+                        <div key={c.id} className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center justify-between group hover:border-emerald-500/30 transition-colors">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="font-black text-zinc-50 uppercase tracking-tighter text-lg">{type?.name || 'Unknown Type'}</span>
+                              <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[8px] font-bold uppercase">Rate Rule</span>
+                            </div>
+                            
+                            <div className="grid grid-cols-3 gap-4">
+                              <div>
+                                <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Base Rate</div>
+                                <div className="text-sm font-bold text-emerald-500">{formatCurrency(c.baseRate, currency, exchangeRate)}</div>
+                              </div>
+                              {c.weekendRate > 0 && (
+                                <div>
+                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Weekend</div>
+                                  <div className="text-sm font-bold text-amber-500">{formatCurrency(c.weekendRate, currency, exchangeRate)}</div>
+                                </div>
+                              )}
+                              {c.weekdayRate > 0 && (
+                                <div>
+                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Weekday</div>
+                                  <div className="text-sm font-bold text-blue-500">{formatCurrency(c.weekdayRate, currency, exchangeRate)}</div>
+                                </div>
+                              )}
+                            </div>
+
+                            {c.seasonalRates && c.seasonalRates.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-zinc-800 flex flex-wrap gap-2">
+                                <span className="text-[8px] font-bold text-zinc-600 uppercase w-full mb-1">Has {c.seasonalRates.length} Seasonal Rules</span>
+                                {c.seasonalRates.slice(0, 2).map((s: any) => (
+                                  <div key={s.id} className="flex items-center gap-1.5 bg-emerald-500/5 px-2 py-1 rounded text-[9px] border border-emerald-500/10">
+                                    <span className="text-emerald-500 font-bold">{s.name}:</span>
+                                    <span className="text-zinc-400 font-medium">{formatCurrency(s.rate, currency, exchangeRate)}</span>
+                                  </div>
+                                ))}
+                                {c.seasonalRates.length > 2 && <span className="text-[9px] text-zinc-600">+{c.seasonalRates.length - 2} more</span>}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all pl-4">
+                            <button 
+                              onClick={() => setEditingRateConfig(c)}
+                              className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                              title="Edit Configuration"
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                            <button 
+                              onClick={async () => {
+                                if (!hotel?.id || !confirm('Permanently delete this rate rule?')) return;
+                                try {
+                                  await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
+                                    hotelId: hotel.id,
+                                    module: 'Rooms',
+                                    action: 'DELETE_RATE_RULE',
+                                    details: `Deleted rate rule for room type ${type?.name || c.roomTypeId}`
+                                  });
+                                  toast.success('Rate rule deleted');
+                                } catch (err) {
+                                  handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
+                                }
+                              }}
+                              className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                              title="Delete Rule"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>

@@ -131,19 +131,21 @@ export const roomService = {
     
     // Check seasonal rates
     const dateStr = date.toISOString().split('T')[0];
-    const seasonal = config.seasonalRates?.find((r: any) => r.startDate <= dateStr && r.endDate >= dateStr);
-    if (seasonal) {
-      rate = seasonal.rate;
-    } else {
-      // Check weekend/weekday
-      const day = date.getDay();
-      if ((day === 0 || day === 6) && config.weekendRate) {
-        rate = config.weekendRate;
-      } else if (config.weekdayRate) {
-        rate = config.weekdayRate;
+    if (config.seasonalRates && Array.isArray(config.seasonalRates)) {
+      const seasonal = config.seasonalRates.find((r: any) => r.startDate <= dateStr && r.endDate >= dateStr);
+      if (seasonal) {
+        return seasonal.rate;
       }
     }
+
+    // Check weekend/weekday
+    const day = date.getDay();
+    if ((day === 0 || day === 6) && config.weekendRate && config.weekendRate > 0) {
+      return config.weekendRate;
+    } else if (config.weekdayRate && config.weekdayRate > 0) {
+      return config.weekdayRate;
+    }
     
-    return rate;
+    return config.baseRate;
   }
 };

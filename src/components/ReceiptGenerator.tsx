@@ -33,6 +33,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   
   const totalTaxDebits = filteredEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalNonTaxDebits = totalDebits - totalTaxDebits;
+  let otherTaxAmount = 0;
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = filteredEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
@@ -70,7 +71,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       
       // If amount is 0 in ledger, it might be an inclusive tax that was only added to description
       if (amount === 0 && tax.isInclusive) {
-        amount = subtotal * (tax.percentage / 100);
+        amount = subtotal - (subtotal / (1 + (tax.percentage / 100)));
       }
       
       taxTotal += amount;
@@ -81,7 +82,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       // Fallback to calculation if ledger is empty (e.g. preview before posting)
       // Use reservation details if available
       const storedTax = reservation?.taxDetails?.find(t => t.name === tax.name);
-      amount = storedTax ? storedTax.amount : (subtotal * (tax.percentage / 100));
+      if (storedTax) {
+        amount = storedTax.amount;
+      } else {
+        amount = tax.isInclusive 
+          ? subtotal - (subtotal / (1 + (tax.percentage / 100)))
+          : subtotal * (tax.percentage / 100);
+      }
       
       taxTotal += amount;
       if (!tax.isInclusive) {
@@ -94,7 +101,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   // Handle other taxes in ledger
   if (totalTaxDebits > 0) {
     const matchedExclusiveTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
-    const otherTaxAmount = totalTaxDebits > matchedExclusiveTaxTotal ? totalTaxDebits - matchedExclusiveTaxTotal : 0;
+    otherTaxAmount = totalTaxDebits > matchedExclusiveTaxTotal ? totalTaxDebits - matchedExclusiveTaxTotal : 0;
     if (otherTaxAmount > 0.01) {
       exclusiveTaxTotal += otherTaxAmount;
     }

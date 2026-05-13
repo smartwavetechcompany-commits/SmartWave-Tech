@@ -1689,8 +1689,8 @@ export function SuperAdmin() {
                       <div className="flex items-center justify-between text-[10px] text-zinc-500 uppercase font-bold">
                         <div className="flex items-center gap-2">
                           <span>{linkedHotel?.plan || code.plan}</span>
-                          {(linkedHotel?.price || code.price) !== undefined && (linkedHotel?.price || code.price) > 0 && (
-                            <span className="text-emerald-500/80">({formatCurrency(linkedHotel?.price || code.price || 0, currency, exchangeRate)})</span>
+                          {code.price !== undefined && code.price > 0 && (
+                            <span className="text-emerald-500/80">({formatCurrency(code.price || 0, currency, exchangeRate)})</span>
                           )}
                         </div>
                         <span className={cn(

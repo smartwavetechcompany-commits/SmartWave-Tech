@@ -342,9 +342,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     ? (activeFolio === 'company' ? companyEntries : guestEntries)
     : ledgerEntries; // Show all for regular guest bookings
 
+  const hasRoomChargeInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+
   const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const balance = totalDebits - totalCredits;
+  
+  // Projected Balance accounts for room charges not yet posted to ledger
+  const projectedRoomCharge = !hasRoomChargeInLedger ? (currentReservation.totalAmount || 0) : 0;
+  const balance = (totalDebits + projectedRoomCharge) - totalCredits;
 
   const handleVoidEntry = async () => {
     if (!hotel?.id || !confirmDelete || !profile) return;
@@ -593,7 +598,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <span className="text-zinc-400">Room Base Amount</span>
                     <span className="text-zinc-200">
                       {formatCurrency(
-                        currentReservation.totalAmount - (currentReservation.taxDetails?.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0) || 0), 
+                        currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0), 
                         currency, 
                         exchangeRate
                       )}

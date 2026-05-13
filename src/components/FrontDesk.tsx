@@ -1191,7 +1191,8 @@ export function FrontDesk() {
         
         if (res.guestId) {
           // Trigger inventory consumption based on rules
-          const roomType = roomTypes.find(t => t.id === res.roomTypeId || t.name === res.roomType);
+          const selectedRoom = rooms.find(r => r.id === res.roomId);
+          const roomType = roomTypes.find(t => t.id === selectedRoom?.roomTypeId || t.name === selectedRoom?.type);
           await roomService.triggerInventoryConsumption(hotel.id, roomType?.id || '', 'check_in', profile.uid);
 
           // Post ONLY the first night's charge at check-in
