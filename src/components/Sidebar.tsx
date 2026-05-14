@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { cn } from '../utils';
+import { isModuleEnabled } from '../utils/plans';
 import { auth } from '../firebase';
 import { toast } from 'sonner';
 
@@ -61,8 +62,8 @@ export function Sidebar() {
     }
 
     // 2. Check Module toggles for the hotel
-    if (item.module && hotel?.modulesEnabled) {
-      if (!hotel.modulesEnabled.includes(item.module)) return false;
+    if (item.module && profile?.role !== 'superAdmin') {
+      if (!isModuleEnabled(hotel, item.module)) return false;
     }
 
     // Default: allow (Super Admins pass through here for items without modules)

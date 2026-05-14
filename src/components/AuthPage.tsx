@@ -300,21 +300,21 @@ export function AuthPage() {
         
         // Define plan features
         const planFeatures = {
-          Standard: {
+          standard: {
             modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports'],
             limits: { rooms: 30, staff: 10 }
           },
-          Premium: {
+          premium: {
             modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'],
             limits: { rooms: 150, staff: 50 }
           },
-          Enterprise: {
+          enterprise: {
             modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff', 'corporate'],
             limits: { rooms: 5000, staff: 1000 }
           }
         };
 
-        const features = planFeatures[selectedPlan === 'standard' ? 'Standard' : selectedPlan === 'premium' ? 'Premium' : 'Enterprise'];
+        const features = planFeatures[selectedPlan];
 
         // 4. Create User Profile
         const profileData: UserProfile = existingStaffProfile ? {

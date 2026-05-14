@@ -23,6 +23,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify } from '../utils';
+import { isModuleEnabled } from '../utils/plans';
 import { ConfirmModal } from './ConfirmModal';
 import { deleteDoc, doc, addDoc } from 'firebase/firestore';
 import { handleFirestoreError } from '../firebase';
@@ -623,8 +624,9 @@ export function Reports() {
     { id: 'inventory_value', label: 'Inventory Value Report', icon: LayoutDashboard, enterprise: true, module: 'inventory' },
     { id: 'net_income', label: 'Net Income Report', icon: BarChart3, enterprise: true },
   ].filter(r => {
+    if (profile?.role === 'superAdmin') return true;
     if (r.enterprise && hotel?.plan !== 'enterprise') return false;
-    if (r.module && !hotel?.modulesEnabled?.includes(r.module)) return false;
+    if (r.module && !isModuleEnabled(hotel, r.module)) return false;
     return true;
   });
 

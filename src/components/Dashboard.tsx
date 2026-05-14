@@ -5,6 +5,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType } from '../types';
 import { formatCurrency, cn } from '../utils';
+import { isModuleEnabled } from '../utils/plans';
 import { 
   Users, 
   BedDouble, 
@@ -147,7 +148,7 @@ export function Dashboard() {
           module: 'frontDesk'
         },
         { label: 'Dirty Rooms', value: rooms.filter(r => r.status === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
-      ].filter(s => profile?.role === 'superAdmin' || !s.module || hotel?.modulesEnabled?.includes(s.module));
+      ].filter(s => profile?.role === 'superAdmin' || !s.module || isModuleEnabled(hotel, s.module));
 
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
   const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
@@ -235,7 +236,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           {/* Revenue Chart */}
-          {profile?.role !== 'superAdmin' && hotel?.modulesEnabled?.includes('finance') && (
+          {(profile?.role === 'superAdmin' || isModuleEnabled(hotel, 'finance')) && (
             <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -318,7 +319,7 @@ export function Dashboard() {
           </div>
 
           {/* Recent Transactions */}
-          {profile?.role !== 'superAdmin' && hotel?.modulesEnabled?.includes('finance') && (
+          {(profile?.role === 'superAdmin' || isModuleEnabled(hotel, 'finance')) && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
