@@ -59,19 +59,22 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
  * PRODUCTION-GRADE PERMISSION CHECK
  * This replaces simple 'staff' / 'admin' checks with specific capabilities.
  */
-export const hasPermission = (profile: { role?: string; permissions?: string[] } | null | undefined, permission: Permission): boolean => {
-  if (!profile) return false;
+export const hasPermission = (profileOrRole: { role?: string; permissions?: string[] } | string | null | undefined, permission: Permission): boolean => {
+  if (!profileOrRole) return false;
   
+  const role = typeof profileOrRole === 'string' ? profileOrRole : profileOrRole.role;
+  const permissions = typeof profileOrRole === 'string' ? [] : (profileOrRole.permissions || []);
+
   // Super Admins have everything
-  if (profile.role === 'superAdmin') return true;
+  if (role === 'superAdmin') return true;
 
   // Check custom permissions first (assigned via Staff Management)
-  if (profile.permissions && (profile.permissions as any[]).includes(permission)) {
+  if (permissions && (permissions as any[]).includes(permission)) {
     return true;
   }
 
   // Fallback to role-based defaults
-  const rolePermissions = ROLE_PERMISSIONS[profile.role || ''] || [];
+  const rolePermissions = ROLE_PERMISSIONS[role || ''] || [];
   return rolePermissions.includes(permission);
 };
 

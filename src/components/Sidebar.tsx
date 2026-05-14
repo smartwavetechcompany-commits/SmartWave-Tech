@@ -59,7 +59,7 @@ export function Sidebar() {
     if (profile.role === 'superAdmin') return true;
 
     // 2. Check Role-based Capability
-    if (item.capability && !hasPermission(profile.role, item.capability as any)) {
+    if (item.capability && !hasPermission(profile, item.capability as any)) {
       return false;
     }
 

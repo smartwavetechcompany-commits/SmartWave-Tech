@@ -90,7 +90,7 @@ export function SuperAdmin() {
     }
 
     // Only proceed if superAdmin
-    if (!hasPermission(profile?.role, 'access_super_admin')) {
+    if (!hasPermission(profile, 'access_super_admin')) {
       setHasPermissionError(true);
       setLoading(false);
       return;
