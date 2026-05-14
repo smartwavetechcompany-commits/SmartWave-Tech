@@ -53,11 +53,11 @@ export const roomService = {
 
   async unblockRoom(hotelId: string, blockingId: string, roomId: string) {
     const blockingRef = doc(db, 'hotels', hotelId, 'room_blockings', blockingId);
-    await database.safeUpdate(blockingRef, { endDate: new Date().toISOString() }, {
+    await database.safeDelete(blockingRef, {
       hotelId,
       module: 'Rooms',
-      action: 'UNBLOCK_ROOM',
-      details: `Ended blocking period for ${blockingId}`
+      action: 'DELETE_BLOCKING',
+      details: `Removed/Deleted blocking record for room ${roomId}`
     });
     
     // Reset room status to dirty so it needs cleaning before booking
@@ -67,6 +67,46 @@ export const roomService = {
       module: 'Rooms',
       action: 'RESET_ROOM_STATUS',
       details: `Reset room ${roomId} to dirty after unblocking`
+    });
+  },
+
+  isRoomBlocked(roomBlockings: RoomBlocking[], roomId: string, date: Date | string): boolean {
+    const selectedDate = typeof date === 'string' ? new Date(date) : date;
+    const dateStr = selectedDate.toISOString().split('T')[0];
+    const hour = selectedDate.getHours();
+    const minute = selectedDate.getMinutes();
+    const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    const dayOfWeek = selectedDate.getDay();
+
+    return roomBlockings.some(blocking => {
+      if (blocking.roomId !== roomId) return false;
+
+      const start = new Date(blocking.startDate);
+      const end = new Date(blocking.endDate);
+      const checkDate = new Date(dateStr);
+
+      // Basic date range check
+      let isInRange = checkDate >= start && checkDate <= end;
+
+      // Frequency based check
+      if (!isInRange) {
+        if (blocking.frequency === 'daily') {
+          isInRange = checkDate >= start;
+        } else if (blocking.frequency === 'weekly' && blocking.daysOfWeek) {
+          isInRange = checkDate >= start && blocking.daysOfWeek.includes(dayOfWeek);
+        } else if (blocking.frequency === 'monthly') {
+          isInRange = checkDate >= start && checkDate.getDate() === start.getDate();
+        }
+      }
+
+      if (!isInRange) return false;
+
+      // Time interval check if specified
+      if (blocking.startTime && blocking.endTime) {
+        return timeStr >= blocking.startTime && timeStr <= blocking.endTime;
+      }
+
+      return true;
     });
   },
 

@@ -224,7 +224,11 @@ export interface RoomBlocking {
   roomId: string;
   startDate: string;
   endDate: string;
-  reason: 'maintenance' | 'vip' | 'event' | 'temporary' | 'permanent';
+  startTime?: string; // e.g. "14:00"
+  endTime?: string; // e.g. "18:00"
+  frequency?: 'once' | 'daily' | 'weekly' | 'monthly';
+  daysOfWeek?: number[]; // 0-6
+  reason: 'maintenance' | 'vip' | 'event' | 'temporary' | 'permanent' | 'housekeeping' | 'seasonal';
   notes?: string;
   blockedBy: string;
   timestamp: string;

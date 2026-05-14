@@ -23,7 +23,7 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
 }) => {
   const { profile } = useAuth();
   
-  const hasAccess = hasPermission(profile?.role, permission);
+  const hasAccess = hasPermission(profile, permission);
 
   if (!hasAccess) {
     if (showError) {

@@ -61,7 +61,7 @@ service cloud.firestore {
       return data != null && data.hotelId == hotelId && (
         data.role == "hotelAdmin" || 
         data.role == "staff" ||
-        (data.roles != null && data.roles.hasAny(['frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'maintenance', 'inventory', 'corporate', 'manager', 'receptionist', 'housekeeper', 'accountant', 'admin', 'dashboard', 'rooms', 'guests']))
+        (data.roles != null && data.roles.hasAny(['frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'maintenance', 'inventory', 'corporate', 'manager', 'receptionist', 'housekeeper', 'accountant', 'admin', 'dashboard', 'rooms', 'guests', 'view_activity_logs', 'edit_reservation', 'delete_reservation']))
       );
     }
 
@@ -173,7 +173,12 @@ service cloud.firestore {
             allSubcollections[0] == 'activityLogs'
           )
         );
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow delete: if isSuperAdmin() || (
+          sameHotel(hotelId) && (
+            isHotelAdmin() || 
+            (getUserData().roles != null && getUserData().roles.hasAny(['manager', 'admin', 'delete_reservation']))
+          )
+        );
       }
     }
 

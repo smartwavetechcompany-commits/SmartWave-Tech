@@ -212,7 +212,7 @@ export function Reports() {
         case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
         case 'daily_sales': return ['Date', 'Room Revenue', 'F & B', 'Other', 'Total'];
         case 'monthly_sales': return ['Month', 'Room Revenue', 'F & B', 'Other', 'Total'];
-        case 'payments': return ['Date', 'Guest', 'Method', 'Description', 'Amount'];
+        case 'payments': return ['Date', 'Guest', 'Method', 'Description', 'Amount', 'Recorded By'];
         case 'balance': return ['Guest Name', 'Room', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
         case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Total Spent'];
@@ -319,6 +319,8 @@ export function Reports() {
             Method: e.description.split('via ')[1] || 'Cash',
             Description: e.description,
             Amount: e.amount,
+            _recordedBy: e.postedBy, // For internal sorting if needed
+            'Recorded By': e.postedBy,
             _id: e.id,
             _collection: 'ledger',
             _label: `Payment: ${e.description}`

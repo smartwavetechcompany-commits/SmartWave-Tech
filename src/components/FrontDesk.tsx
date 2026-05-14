@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -43,6 +43,7 @@ import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
 import { roomService } from '../services/roomService';
+import { hasPermission } from '../utils/permissions';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
@@ -56,6 +57,7 @@ export function FrontDesk() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
+  const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
   const [isBooking, setIsBooking] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
@@ -307,6 +309,10 @@ export function FrontDesk() {
       setStaffMembers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    const unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {
+      setRoomBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
+    });
+
     return () => {
       unsubRes();
       unsubRooms();
@@ -314,6 +320,7 @@ export function FrontDesk() {
       unsubGuests();
       unsubCorp();
       unsubStaff();
+      unsubBlockings();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -517,6 +524,16 @@ export function FrontDesk() {
       return;
     }
 
+    // Check for blocked rooms
+    for (const stay of allStays) {
+      const isBlocked = roomService.isRoomBlocked(roomBlockings, stay.roomId, stay.checkIn);
+      if (isBlocked) {
+        const room = rooms.find(r => r.id === stay.roomId);
+        toast.error(`Room ${room?.roomNumber || stay.roomId} is blocked for the selected check-in date.`);
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const batch = writeBatch(db);
@@ -654,25 +671,13 @@ export function FrontDesk() {
           discountType: createdStays.length === 0 ? newBooking.discountType : undefined,
           discountReason: createdStays.length === 0 ? newBooking.discountReason : undefined
         });
-
-        // Activity log for each booking
-        const logRef = doc(collection(db, 'hotels', hotel.id, 'activityLogs'));
-        batch.set(logRef, {
-          timestamp: new Date().toISOString(),
-          userId: profile?.uid || 'system',
-          userEmail: profile?.email || 'system',
-          userRole: profile?.role || 'staff',
-          action: 'CREATE_BOOKING',
-          resource: `Booking for ${stay.guestName} (Room ${selectedRoom.roomNumber})`,
-          hotelId: hotel.id,
-          module: 'Front Desk'
-        });
       }
 
       await database.commitBatch(hotel.id, batch, {
         module: 'Front Desk',
         action: 'CREATE_BOOKING',
-        details: `Created batch of ${allStays.length} bookings`
+        details: `Created batch of ${allStays.length} bookings for ${newBooking.guestName}`,
+        userContext: { uid: profile.uid, email: profile.email, role: profile.role }
       });
       
       // Post discounts and initial payments to ledger if any
@@ -762,22 +767,11 @@ export function FrontDesk() {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'clean' });
       }
       
-      // 3. Log action
-      batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'DELETE_RESERVATION',
-        resource: `Reservation for ${res.guestName} (Room ${res.roomNumber})`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      });
-      
       await database.commitBatch(hotel.id, batch, {
         module: 'Front Desk',
         action: 'DELETE_RESERVATION',
-        details: `Deleted reservation ${res.id} for ${res.guestName}`
+        details: `Deleted reservation ${res.id} for ${res.guestName} (Room ${res.roomNumber})`,
+        userContext: { uid: profile.uid, email: profile.email, role: profile.role }
       });
       toast.success('Reservation deleted successfully');
     } catch (err: any) {
@@ -3251,21 +3245,23 @@ export function FrontDesk() {
                         </>
                       )}
 
-                      <button 
-                        onClick={() => {
-                          setEditingReservation(res);
-                          setEditForm({
-                            checkIn: res.checkIn,
-                            checkOut: res.checkOut,
-                            totalAmount: res.totalAmount,
-                            notes: res.notes || ''
-                          });
-                        }}
-                        className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                        title="Edit Reservation"
-                      >
-                        <Edit2 size={18} />
-                      </button>
+                      {(profile && hasPermission(profile, 'edit_reservation')) && (
+                        <button 
+                          onClick={() => {
+                            setEditingReservation(res);
+                            setEditForm({
+                              checkIn: res.checkIn,
+                              checkOut: res.checkOut,
+                              totalAmount: res.totalAmount,
+                              notes: res.notes || ''
+                            });
+                          }}
+                          className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                          title="Edit Reservation"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                      )}
 
                       <button 
                         onClick={() => setShowFolioModal(res)}
@@ -3276,7 +3272,7 @@ export function FrontDesk() {
                         View Folio
                       </button>
 
-                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                      {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin' || hasPermission(profile, 'edit_reservation'))) && (
                         <button 
                           onClick={() => setShowConfirmAction({ res, action: 'delete' })}
                           className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"

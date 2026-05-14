@@ -46,15 +46,37 @@ export function Rooms() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
 
-  const isRoomBlocked = (roomId: string) => {
-    const today = startOfDay(new Date());
-    return blockings.some(b => 
-      b.roomId === roomId && 
-      isWithinInterval(today, { 
-        start: parseISO(b.startDate), 
-        end: parseISO(b.endDate) 
-      })
-    );
+  const isRoomBlocked = (roomId: string, date?: Date) => {
+    const targetDate = startOfDay(date || new Date());
+    const targetDay = targetDate.getDay();
+    
+    return blockings.some(b => {
+      if (b.roomId !== roomId) return false;
+
+      const start = startOfDay(parseISO(b.startDate));
+      const end = startOfDay(parseISO(b.endDate));
+
+      // 1. Check date range
+      const isInDateRange = targetDate >= start && targetDate <= end;
+      if (!isInDateRange) return false;
+
+      // 2. Check frequency/recurring
+      if (b.frequency === 'weekly' && b.daysOfWeek && b.daysOfWeek.length > 0) {
+        if (!b.daysOfWeek.includes(targetDay)) return false;
+      }
+
+      if (b.frequency === 'monthly') {
+        const startDayOfMonth = start.getDate();
+        if (targetDate.getDate() !== startDayOfMonth) return false;
+      }
+
+      // Note: Time-based blocking (startTime/endTime) is handled by restricting 
+      // check-in/out visibility or adding specific UI indicators, but for 
+      // daily/calendar views, any block on that day usually keeps it unavailable 
+      // unless we want to be hyper-specific.
+      
+      return true;
+    });
   };
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -1045,14 +1067,31 @@ export function Rooms() {
 
                   if (!hotel?.id || !profile?.uid) return;
                   try {
-                    await roomService.blockRoom(hotel.id, {
+                    const data: any = {
                       roomId,
                       startDate,
                       endDate,
                       reason,
                       notes,
-                      blockedBy: profile.uid
-                    });
+                      blockedBy: profile.uid,
+                      frequency: formData.get('frequency') || 'once',
+                    };
+
+                    const startTime = formData.get('startTime');
+                    if (startTime) data.startTime = startTime as string;
+                    
+                    const endTime = formData.get('endTime');
+                    if (endTime) data.endTime = endTime as string;
+
+                    if (data.frequency === 'weekly') {
+                      const days: number[] = [];
+                      [0,1,2,3,4,5,6].forEach(d => {
+                        if (formData.get(`day_${d}`) === 'on') days.push(d);
+                      });
+                      data.daysOfWeek = days;
+                    }
+
+                    await roomService.blockRoom(hotel.id, data);
                     toast.success('Room blocked successfully');
                     e.currentTarget.reset();
                   } catch (err) {
@@ -1065,7 +1104,7 @@ export function Rooms() {
                       name="roomId" 
                       required 
                       defaultValue={selectedRoomForBlocking || ""}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none cursor-pointer"
                     >
                       <option value="" disabled>Select a room</option>
                       {rooms.map(r => <option key={r.id} value={r.id}>{r.roomNumber} - {r.type}</option>)}
@@ -1081,16 +1120,54 @@ export function Rooms() {
                       <input name="endDate" type="date" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Reason</label>
-                    <select name="reason" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none">
-                      <option value="maintenance">Maintenance</option>
-                      <option value="vip">VIP Guest</option>
-                      <option value="event">Event</option>
-                      <option value="temporary">Temporary</option>
-                      <option value="permanent">Permanent</option>
-                    </select>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Frequency</label>
+                      <select name="frequency" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none cursor-pointer">
+                        <option value="once">Once</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Reason</label>
+                      <select name="reason" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none cursor-pointer">
+                        <option value="maintenance">Maintenance</option>
+                        <option value="housekeeping">Housekeeping</option>
+                        <option value="vip">VIP Guest</option>
+                        <option value="event">Event</option>
+                        <option value="seasonal">Seasonal</option>
+                        <option value="temporary">Temporary</option>
+                        <option value="permanent">Permanent</option>
+                      </select>
+                    </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Start Time (Optional)</label>
+                      <input name="startTime" type="time" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">End Time (Optional)</label>
+                      <input name="endTime" type="time" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2">
+                    <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest">Weekly Pattern (if weekly)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
+                        <label key={day} className="flex items-center gap-1.5 p-1.5 rounded-lg border border-zinc-800 hover:border-emerald-500/50 cursor-pointer transition-colors group">
+                          <input type="checkbox" name={`day_${i}`} className="w-3 h-3 rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900" />
+                          <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-50">{day}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
                     <textarea name="notes" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20" />
@@ -1111,7 +1188,16 @@ export function Rooms() {
                         <div className="text-[10px] text-emerald-500 font-bold uppercase mt-1">{b.reason}</div>
                       </div>
                       <button 
-                        onClick={() => hotel?.id && roomService.unblockRoom(hotel.id, b.id, b.roomId)}
+                        onClick={async () => {
+                          if (hotel?.id) {
+                            try {
+                              await roomService.unblockRoom(hotel.id, b.id, b.roomId);
+                              toast.success('Room unblocked successfully');
+                            } catch (err) {
+                              toast.error('Failed to unblock room');
+                            }
+                          }
+                        }}
                         className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={18} />
@@ -2090,14 +2176,22 @@ export function Rooms() {
                         isSameDay(day, parseISO(res.checkIn))
                       );
 
+                      const blocked = isRoomBlocked(room.id, day);
+
                       return (
                         <td key={day.toISOString()} className={cn(
                           "border-r border-b border-zinc-800 p-1 min-w-[80px] h-16 relative group/cell transition-colors",
                           isSameDay(day, new Date()) ? "bg-emerald-500/5" : "bg-zinc-950/20",
                           !reservation && room.status === 'dirty' && "bg-red-500/5",
-                          !reservation && room.status === 'maintenance' && "bg-amber-500/5"
+                          !reservation && room.status === 'maintenance' && "bg-amber-500/5",
+                          blocked && "bg-zinc-950"
                         )}>
-                          {reservation ? (
+                          {blocked ? (
+                            <div className="absolute inset-1 rounded-md bg-zinc-900 border border-zinc-800 flex flex-col items-center justify-center gap-1">
+                              <Wrench size={10} className="text-amber-500" />
+                              <span className="text-[6px] font-black uppercase text-zinc-500">Blocked</span>
+                            </div>
+                          ) : reservation ? (
                             <button 
                               onClick={() => {
                                 setSelectedReservation(reservation);

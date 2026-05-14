@@ -441,8 +441,24 @@ export function GuestManagement() {
           <div className="text-2xl font-bold text-blue-500">{formatCurrency(guests.reduce((acc, g) => acc + g.totalSpent, 0), currency, exchangeRate)}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Ledger Debt</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(guests.filter(g => (g.ledgerBalance || 0) > 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}</div>
+          <div className="text-zinc-400 text-sm font-medium mb-1 flex items-center gap-2">
+            <DollarSign size={14} className="text-red-500" />
+            Total Outstanding (Debts)
+          </div>
+          <div className="text-2xl font-bold text-red-500">
+            {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) > 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
+          </div>
+          <div className="text-[10px] text-zinc-600 mt-1 uppercase font-bold tracking-tight">From {guests.filter(g => (g.ledgerBalance || 0) > 0).length} guest accounts</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+          <div className="text-zinc-400 text-sm font-medium mb-1 flex items-center gap-2">
+            <CreditCard size={14} className="text-emerald-500" />
+            Total Credits (Advances)
+          </div>
+          <div className="text-2xl font-bold text-emerald-500">
+            {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + Math.abs(g.ledgerBalance || 0), 0), currency, exchangeRate)}
+          </div>
+          <div className="text-[10px] text-zinc-600 mt-1 uppercase font-bold tracking-tight">Available in {guests.filter(g => (g.ledgerBalance || 0) < 0).length} guest accounts</div>
         </div>
       </div>
 
@@ -585,7 +601,10 @@ export function GuestManagement() {
                         </div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {(guest.tags || []).map(tag => (
-                            <span key={tag} className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[8px] font-bold uppercase">
+                            <span key={tag} className={cn(
+                              "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase",
+                              tag === 'VIP' ? "bg-amber-500/10 text-amber-500" : "bg-zinc-800 text-zinc-500"
+                            )}>
                               {tag}
                             </span>
                           ))}
@@ -593,6 +612,13 @@ export function GuestManagement() {
                       </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <a 
+                        href={`mailto:${guest.email}?subject=Hotel Communication for ${guest.name}`}
+                        className="p-2 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
+                        title="Email Guest"
+                      >
+                        <Mail size={16} />
+                      </a>
                       <button 
                         type="button"
                         onClick={() => setViewingHistory(guest)}
@@ -660,28 +686,30 @@ export function GuestManagement() {
                         {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate Guest'}
                       </div>
                     )}
-                    <div className="grid grid-cols-3 gap-3 pt-4">
-                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stays</div>
-                        <div className="text-lg font-bold text-zinc-50">{guest.totalStays}</div>
-                      </div>
-                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Spent</div>
-                        <div className="text-lg font-bold text-emerald-500">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
-                      </div>
-                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Balance</div>
-                        <div className={cn(
-                          "text-lg font-bold",
-                          (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
-                        )}>
-                          {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                          <div className="text-[8px] font-black uppercase mt-0.5">
-                            {(guest.ledgerBalance || 0) > 0 ? "Debt / Owing" : (guest.ledgerBalance || 0) < 0 ? "Credit" : "Settled"}
-                          </div>
+                  <div className="grid grid-cols-3 gap-3 pt-4">
+                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stays</div>
+                      <div className="text-lg font-bold text-zinc-50">{guest.totalStays}</div>
+                      <div className="text-[8px] text-zinc-600 font-bold uppercase mt-0.5">Visits</div>
+                    </div>
+                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-right">
+                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stay Value</div>
+                      <div className="text-lg font-bold text-blue-500">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
+                      <div className="text-[8px] text-zinc-600 font-bold uppercase mt-0.5">Total Revenue</div>
+                    </div>
+                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-right">
+                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Balance</div>
+                      <div className={cn(
+                        "text-lg font-bold",
+                        (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                      )}>
+                        {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                        <div className="text-[8px] font-black uppercase mt-0.5">
+                          {(guest.ledgerBalance || 0) > 0 ? "Debt / Owing" : (guest.ledgerBalance || 0) < 0 ? "Credit" : "Settled"}
                         </div>
                       </div>
                     </div>
+                  </div>
                   </div>
 
                   {guest.preferences && guest.preferences.length > 0 && (
@@ -720,7 +748,16 @@ export function GuestManagement() {
             <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-zinc-50">Stay History</h2>
-                <p className="text-sm text-zinc-500">{viewingHistory.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-zinc-500">{viewingHistory.name}</p>
+                  <a 
+                    href={`mailto:${viewingHistory.email}?subject=Message for ${viewingHistory.name}`}
+                    className="p-1 px-2 bg-blue-500/10 text-blue-500 rounded-lg text-[10px] font-bold hover:bg-blue-500/20 flex items-center gap-1 transition-all"
+                  >
+                    <Mail size={10} />
+                    Email Guest
+                  </a>
+                </div>
               </div>
               <button 
                 onClick={() => setViewingHistory(null)}

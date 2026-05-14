@@ -43,14 +43,16 @@ export async function createAuditLog(
   action: string, 
   details: string, 
   status: 'success' | 'failure' = 'success',
-  metadata?: any
+  metadata?: any,
+  userContext?: { uid?: string; email?: string; role?: string }
 ) {
   try {
     const user = auth.currentUser;
-    const logData: AuditLogEntry = {
+    const logData: any = {
       action,
-      userId: user?.uid || 'system',
-      userEmail: user?.email || 'system',
+      userId: userContext?.uid || user?.uid || 'system',
+      userEmail: userContext?.email || user?.email || 'system',
+      userRole: userContext?.role || 'staff',
       hotelId,
       timestamp: serverTimestamp(),
       module,
@@ -62,9 +64,9 @@ export async function createAuditLog(
     // We use addDoc for append-only logging
     const isSystemLog = hotelId.toLowerCase() === 'system' || hotelId.toLowerCase() === 'global' || hotelId.toLowerCase() === 'none';
     if (isSystemLog) {
-      await addDoc(collection(db, 'auditLogs'), logData);
+      await addDoc(collection(db, 'activityLogs'), logData);
     } else {
-      await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), logData);
+      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), logData);
     }
   } catch (error) {
     // Log failures to create audit logs as system errors
@@ -86,7 +88,7 @@ export const database = {
   async safeSet<T extends DocumentData>(
     docRef: DocumentReference<T>, 
     data: Partial<T>, 
-    options: { hotelId: string; module: string; action: string; details: string }
+    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       // Production guard: Always default to merge: true to prevent accidental overwrites
@@ -99,13 +101,13 @@ export const database = {
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path,
         data: cleanedMetadata
-      });
+      }, options.userContext);
       return { success: true, id: docRef.id };
     } catch (error) {
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
-      });
+      }, options.userContext);
       
       await errorService.handleError(error, { 
         module: options.module, 
@@ -121,24 +123,37 @@ export const database = {
   async safeUpdate<T extends DocumentData>(
     docRef: DocumentReference<T>, 
     data: Partial<T>, 
-    options: { hotelId: string; module: string; action: string; details: string }
+    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
+      // Fetch old values for audit trail
+      const oldDoc = await getDoc(docRef);
+      const oldData = oldDoc.exists() ? oldDoc.data() : null;
+
       await updateDoc(docRef, {
         ...(data as any),
         updatedAt: serverTimestamp()
       });
-      const cleanedMetadata = deepCloneSafe(data);
+      const cleanedNewData = deepCloneSafe(data);
+      const cleanedOldData = oldData ? deepCloneSafe(oldData) : null;
+      
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path,
-        data: cleanedMetadata
-      });
+        newData: cleanedNewData,
+        oldData: cleanedOldData,
+        changes: oldData ? Object.keys(data).reduce((acc: any, key) => {
+          if (JSON.stringify(oldData[key]) !== JSON.stringify((data as any)[key])) {
+            acc[key] = { from: oldData[key], to: (data as any)[key] };
+          }
+          return acc;
+        }, {}) : 'New document fields'
+      }, options.userContext);
       return { success: true };
     } catch (error) {
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
-      });
+      }, options.userContext);
 
       await errorService.handleError(error, { 
         module: options.module, 
@@ -154,7 +169,7 @@ export const database = {
   async safeAdd<T extends DocumentData>(
     colRef: CollectionReference<T>, 
     data: T, 
-    options: { hotelId: string; module: string; action: string; details: string }
+    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       const docRef = await addDoc(colRef, {
@@ -167,13 +182,13 @@ export const database = {
         docId: docRef.id,
         colPath: colRef.path,
         data: cleanedMetadata
-      });
+      }, options.userContext);
       return docRef;
     } catch (error) {
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         colPath: colRef.path
-      });
+      }, options.userContext);
 
       await errorService.handleError(error, { 
         module: options.module, 
@@ -189,14 +204,14 @@ export const database = {
   async commitBatch(
     hotelId: string,
     batch: WriteBatch,
-    options: { module: string; action: string; details: string }
+    options: { module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       await batch.commit();
-      await createAuditLog(hotelId, options.module, options.action, options.details, 'success');
+      await createAuditLog(hotelId, options.module, options.action, options.details, 'success', undefined, options.userContext);
       return { success: true };
     } catch (error) {
-      await createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) });
+      await createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) }, options.userContext);
       
       await errorService.handleError(error, { 
         module: options.module, 
@@ -228,19 +243,19 @@ export const database = {
    */
   async safeDelete(
     docRef: DocumentReference<any>, 
-    options: { hotelId: string; module: string; action: string; details: string }
+    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       await deleteDoc(docRef);
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path
-      });
+      }, options.userContext);
       return { success: true };
     } catch (error) {
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
-      });
+      }, options.userContext);
 
       await errorService.handleError(error, { 
         module: options.module, 

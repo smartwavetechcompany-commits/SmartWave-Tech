@@ -33,7 +33,7 @@ export function AuditLogs() {
     start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
   });
-  const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId' | 'module'; direction: 'asc' | 'desc' }>({
+  const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId' | 'module' | 'userRole'; direction: 'asc' | 'desc' }>({
     key: 'timestamp',
     direction: 'desc'
   });
@@ -77,7 +77,8 @@ export function AuditLogs() {
             return { 
               id: doc.id, 
               ...data,
-              actor: data.actor || data.user || data.userEmail || 'Unknown',
+              actor: data.actor || data.user || data.userEmail || data.userName || 'Unknown',
+              userRole: data.userRole || 'staff',
               target: data.target || data.resource || data.module || 'System',
               hotelId: data.hotelId || (doc.ref.parent.parent?.id)
             } as any;
@@ -97,7 +98,8 @@ export function AuditLogs() {
             return { 
               id: doc.id, 
               ...data,
-              actor: data.actor || data.user || data.userEmail || 'Unknown',
+              actor: data.actor || data.user || data.userEmail || data.userName || 'Unknown',
+              userRole: data.userRole || 'staff',
               target: data.target || data.resource || data.module || 'System'
             } as any;
           });
@@ -324,6 +326,14 @@ export function AuditLogs() {
                     </div>
                   </div>
                 </th>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors group/header" onClick={() => handleSort('userRole')}>
+                  <div className="flex items-center gap-2">
+                    Role
+                    <div className={cn("transition-opacity", sortConfig.key === 'userRole' ? "opacity-100" : "opacity-0 group-hover/header:opacity-100")}>
+                      <SortIcon column="userRole" />
+                    </div>
+                  </div>
+                </th>
                 <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('action')}>
                   <div className="flex items-center gap-2">
                     Action
@@ -378,6 +388,16 @@ export function AuditLogs() {
                         </div>
                         <span className="truncate max-w-[100px] sm:max-w-none">{(log as any).actor}</span>
                       </div>
+                    </td>
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-tight",
+                        (log as any).userRole === 'superAdmin' ? "bg-purple-500/10 text-purple-400" :
+                        (log as any).userRole === 'hotelAdmin' ? "bg-blue-500/10 text-blue-400" :
+                        "bg-zinc-800 text-zinc-400"
+                      )}>
+                        {((log as any).userRole || 'staff').replace('_', ' ')}
+                      </span>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">

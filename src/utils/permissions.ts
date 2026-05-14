@@ -11,17 +11,20 @@ export type Permission =
   | 'nightly_audit'
   | 'bypass_inventory_limits'
   | 'edit_hotel_settings'
-  | 'access_super_admin';
+  | 'access_super_admin'
+  | 'view_activity_logs'
+  | 'edit_reservation';
 
 const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   'superAdmin': [
     'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
     'manage_rooms', 'process_payments', 'nightly_audit', 'bypass_inventory_limits', 
-    'edit_hotel_settings', 'access_super_admin'
+    'edit_hotel_settings', 'access_super_admin', 'view_activity_logs', 'edit_reservation'
   ],
   'hotelAdmin': [
     'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
-    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings'
+    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings', 
+    'view_activity_logs', 'edit_reservation'
   ],
   'staff': [
      'manage_rooms', 'process_payments', 'nightly_audit'
@@ -34,7 +37,8 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   ],
   'manager': [
     'view_reports', 'void_transaction', 'delete_reservation', 'manage_staff', 
-    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings'
+    'manage_rooms', 'process_payments', 'nightly_audit', 'edit_hotel_settings',
+    'view_activity_logs', 'edit_reservation'
   ],
   'accountant': [
     'view_reports', 'process_payments'
@@ -55,10 +59,20 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
  * PRODUCTION-GRADE PERMISSION CHECK
  * This replaces simple 'staff' / 'admin' checks with specific capabilities.
  */
-export const hasPermission = (role: UserRole | undefined, permission: Permission): boolean => {
-  if (!role) return false;
-  const permissions = ROLE_PERMISSIONS[role] || [];
-  return permissions.includes(permission);
+export const hasPermission = (profile: { role?: string; permissions?: string[] } | null | undefined, permission: Permission): boolean => {
+  if (!profile) return false;
+  
+  // Super Admins have everything
+  if (profile.role === 'superAdmin') return true;
+
+  // Check custom permissions first (assigned via Staff Management)
+  if (profile.permissions && (profile.permissions as any[]).includes(permission)) {
+    return true;
+  }
+
+  // Fallback to role-based defaults
+  const rolePermissions = ROLE_PERMISSIONS[profile.role || ''] || [];
+  return rolePermissions.includes(permission);
 };
 
 /**

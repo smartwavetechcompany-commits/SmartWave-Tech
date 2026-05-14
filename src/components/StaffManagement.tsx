@@ -24,20 +24,20 @@ import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
 const AVAILABLE_ROLES = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'frontDesk', label: 'Front Desk' },
-  { id: 'rooms', label: 'Rooms' },
+  { id: 'dashboard', label: 'View Dashboard' },
+  { id: 'frontDesk', label: 'Front Desk (Basic)' },
+  { id: 'frontDesk_write', label: 'Front Desk (Edit/Cancel)' },
+  { id: 'rooms', label: 'Rooms Management' },
   { id: 'housekeeping', label: 'Housekeeping' },
   { id: 'kitchen', label: 'F & B' },
   { id: 'inventory', label: 'Inventory' },
   { id: 'maintenance', label: 'Maintenance' },
-  { id: 'guests', label: 'Guests' },
-  { id: 'corporate', label: 'Corporate' },
-  { id: 'finance', label: 'Finance' },
+  { id: 'guests', label: 'Guests Management' },
+  { id: 'corporate', label: 'Corporate Management' },
+  { id: 'finance', label: 'Finance & Payments' },
   { id: 'reports', label: 'Reports' },
   { id: 'staff', label: 'Staff Management' },
   { id: 'settings', label: 'Settings' },
-  { id: 'manager', label: 'Manager' },
 ];
 
 export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) {
@@ -100,25 +100,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelId: hotelId,
         module: 'Staff',
         action: 'CREATE_STAFF',
-        details: `Created staff profile for ${newStaff.email}`
-      });
-      
-      // Log the action for UI visibility
-      await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid || 'system',
-        userEmail: profile?.email || 'system',
-        userRole: profile?.role || 'staff',
-        action: 'CREATE_STAFF',
-        resource: `Staff: ${newStaff.email} (${newStaff.roles.join(', ')})`,
-        hotelId: hotelId,
-        module: 'Staff',
-        details: `Initial password set by admin: ${newStaff.password}`
-      }, {
-        hotelId: hotelId,
-        module: 'Staff',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Staff creation activity'
+        details: `Created staff profile for ${newStaff.email} with roles: ${newStaff.roles.join(', ')}. Initial password: ${newStaff.password}`,
+        userContext: profile ? { uid: profile.uid, email: profile.email, role: profile.role } : undefined
       });
 
       setIsAddingStaff(false);
@@ -139,24 +122,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelId: hotelId,
         module: 'Staff',
         action: 'DELETE_STAFF',
-        details: `Deleted staff member ${staffEmail}`
-      });
-      
-      // Log the action for UI visibility
-      await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
-        action: 'DELETE_STAFF',
-        resource: `Staff: ${staffEmail}`,
-        hotelId: hotelId,
-        module: 'Staff'
-      }, {
-        hotelId: hotelId,
-        module: 'Staff',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Staff deletion activity'
+        details: `Deleted staff member ${staffEmail}`,
+        userContext: profile ? { uid: profile.uid, email: profile.email, role: profile.role } : undefined
       });
       toast.success('Staff member removed');
       setShowConfirmRemove(null);

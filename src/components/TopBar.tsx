@@ -17,6 +17,7 @@ export function TopBar() {
   const [isSearching, setIsSearching] = useState(false);
   const [hotels, setHotels] = useState<any[]>([]);
   const [isSelectingHotel, setIsSelectingHotel] = useState(false);
+  const [hotelFilter, setHotelFilter] = useState('');
   const [searchResults, setSearchResults] = useState<{
     hotels: any[];
     rooms: any[];
@@ -45,6 +46,19 @@ export function TopBar() {
   }, [isSuperAdmin]);
 
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowResults(false);
+        setIsSelectingHotel(false);
+        setSearchQuery('');
+        setHotelFilter('');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
         setShowResults(false);
@@ -58,13 +72,15 @@ export function TopBar() {
   }, []);
 
   useEffect(() => {
+    if (searchQuery.length < 2) {
+      setSearchResults({ hotels: [], rooms: [], guests: [], reservations: [] });
+      setShowResults(false);
+      setIsSearching(false);
+      return;
+    }
+
     const delayDebounceFn = setTimeout(() => {
-      if (searchQuery.length >= 2) {
-        handleSearch();
-      } else {
-        setSearchResults({ hotels: [], rooms: [], guests: [], reservations: [] });
-        setShowResults(false);
-      }
+      handleSearch();
     }, 300);
 
     return () => clearTimeout(delayDebounceFn);
@@ -127,20 +143,23 @@ export function TopBar() {
     <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 sticky top-0 z-40">
       <div className="flex items-center gap-4 flex-1">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-zinc-400 min-w-fit">
+          <div className="flex items-center gap-2 text-zinc-400 min-w-fit cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => navigate('/')}>
             <Building2 size={16} />
             <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
           </div>
 
           {isSuperAdmin && (
-            <div className="relative" ref={selectRef}>
+            <div className="relative border-l border-zinc-800 ml-2 pl-2" ref={selectRef}>
               <button 
                 onClick={() => setIsSelectingHotel(!isSelectingHotel)}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-50"
+                className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-zinc-800 transition-colors text-zinc-400 hover:text-zinc-50 group"
               >
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                <span className="text-[10px] font-bold uppercase tracking-wider">Switch Hotel</span>
-                <ArrowRight size={12} className={cn("transition-transform", isSelectingHotel ? "rotate-90" : "rotate-0")} />
+                <div className="w-1 h-3 bg-emerald-500 rounded-full" />
+                <div className="flex flex-col text-[10px] font-bold uppercase tracking-wider text-left leading-none">
+                  <span>Switch</span>
+                  <span>Hotel</span>
+                </div>
+                <ArrowRight size={12} className={cn("transition-all opacity-50 group-hover:opacity-100", isSelectingHotel ? "rotate-90" : "rotate-0")} />
               </button>
 
               <AnimatePresence>
@@ -151,52 +170,89 @@ export function TopBar() {
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     className="absolute top-full left-0 mt-2 w-64 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden z-50 py-2"
                   >
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-800/50 mb-1">
-                      Manage Hotel
-                    </div>
-                    <div className="max-h-[300px] overflow-y-auto">
-                      <button 
-                        onClick={() => {
-                          setSelectedHotelId(null);
-                          setIsSelectingHotel(false);
-                          navigate('/super-admin');
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-800 transition-colors",
-                          !hotel?.id && "bg-emerald-500/10 text-emerald-500"
+                      <div className="px-3 py-1.5 flex items-center justify-between border-b border-zinc-800/50 mb-1">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Manage Hotel</span>
+                        {isManaging && (
+                          <button 
+                            onClick={handleStopManaging}
+                            className="text-[9px] font-black text-emerald-500 hover:text-emerald-400 uppercase flex items-center gap-1"
+                          >
+                            Exit <XCircle size={10} />
+                          </button>
                         )}
-                      >
-                        <ShieldAlert size={14} />
-                        <span className="text-sm font-medium">Super Admin Dashboard</span>
-                      </button>
-                      <div className="h-px bg-zinc-800 my-1" />
-                      {hotels.map(h => (
+                      </div>
+                      <div className="px-2 pb-2">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-600" size={10} />
+                          <input 
+                            type="text"
+                            placeholder="Filter hotels..."
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-6 pr-6 py-1 text-[10px] text-zinc-50 outline-none focus:border-emerald-500/50"
+                            value={hotelFilter}
+                            onChange={(e) => setHotelFilter(e.target.value)}
+                            autoFocus
+                          />
+                          {hotelFilter && (
+                            <button 
+                              onClick={() => setHotelFilter('')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                            >
+                              <XCircle size={10} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
                         <button 
-                          key={h.id}
                           onClick={() => {
-                            if (hotel?.id === h.id) {
-                              setIsSelectingHotel(false);
-                              return;
-                            }
-                            if (window.confirm(`Switch management context to ${h.name}?`)) {
-                              setSelectedHotelId(h.id);
-                              setIsSelectingHotel(false);
-                              navigate('/');
-                            }
+                            setSelectedHotelId(null);
+                            setIsSelectingHotel(false);
+                            setHotelFilter('');
+                            navigate('/super-admin');
                           }}
                           className={cn(
-                            "w-full flex items-center justify-between px-3 py-2 text-left hover:bg-zinc-800 transition-colors",
-                            hotel?.id === h.id && "bg-emerald-500/10 text-emerald-500"
+                            "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-800 transition-colors",
+                            !hotel?.id && "bg-emerald-500/10 text-emerald-500"
                           )}
                         >
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium truncate">{h.name}</span>
-                            <span className="text-[10px] text-zinc-500">Plan: {h.plan}</span>
-                          </div>
-                          {hotel?.id === h.id && <CheckCircle2 size={14} />}
+                          <ShieldAlert size={14} />
+                          <span className="text-xs font-semibold">Super Admin Dashboard</span>
                         </button>
-                      ))}
-                    </div>
+                        <div className="h-px bg-zinc-800 my-1" />
+                        {hotels
+                          .filter(h => h.name?.toLowerCase().includes(hotelFilter.toLowerCase()))
+                          .map(h => (
+                          <button 
+                            key={h.id}
+                            onClick={() => {
+                              if (hotel?.id === h.id) {
+                                setIsSelectingHotel(false);
+                                return;
+                              }
+                              setSelectedHotelId(h.id);
+                              setIsSelectingHotel(false);
+                              setHotelFilter('');
+                              navigate('/');
+                            }}
+                            className={cn(
+                              "w-full flex items-center justify-between px-3 py-2 text-left hover:bg-zinc-800 transition-colors group",
+                              hotel?.id === h.id && "bg-emerald-500/10 text-emerald-500"
+                            )}
+                          >
+                            <div className="flex flex-col">
+                              <span className="text-xs font-medium truncate">{h.name}</span>
+                              <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-tight">Plan: {h.plan}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {hotel?.id === h.id ? (
+                                <CheckCircle2 size={12} className="text-emerald-500" />
+                              ) : (
+                                <ArrowRight size={12} className="text-zinc-700 opacity-0 group-hover:opacity-100 transition-all" />
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -211,11 +267,22 @@ export function TopBar() {
             <input 
               type="text"
               placeholder="Search hotels, rooms, guests..."
-              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none transition-all"
+              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-10 pr-10 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => searchQuery.length >= 2 && setShowResults(true)}
             />
+            {searchQuery && (
+              <button 
+                onClick={() => {
+                  setSearchQuery('');
+                  setShowResults(false);
+                }}
+                className="absolute right-10 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <XCircle size={14} />
+              </button>
+            )}
             {isSearching && (
               <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 animate-spin" size={14} />
             )}
@@ -348,17 +415,13 @@ export function TopBar() {
         </div>
 
         {isManaging && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-500 ml-4">
+          <button 
+            onClick={handleStopManaging}
+            className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-500 ml-4 hover:bg-emerald-500/20 transition-all group"
+          >
             <span className="text-[10px] font-bold uppercase tracking-wider">Management Mode</span>
-            <button 
-              onClick={handleStopManaging}
-              className="hover:text-emerald-400 transition-colors flex items-center gap-1"
-              title="Exit Management Mode"
-            >
-              <span className="text-[10px] font-bold">Exit</span>
-              <XCircle size={14} />
-            </button>
-          </div>
+            <XCircle size={14} className="group-hover:rotate-90 transition-transform" />
+          </button>
         )}
         {isOffline && (
           <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-full text-red-500 animate-pulse ml-4">
@@ -383,7 +446,10 @@ export function TopBar() {
               {profile?.role === 'superAdmin' ? 'Super Admin' : profile?.staffRole || profile?.role}
             </div>
           </div>
-          <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-center text-zinc-400">
+          <div 
+            onClick={() => navigate('/settings')}
+            className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 cursor-pointer hover:bg-zinc-800 transition-colors"
+          >
             <User size={20} />
           </div>
         </div>
