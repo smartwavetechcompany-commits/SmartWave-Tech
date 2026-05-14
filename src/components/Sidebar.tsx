@@ -55,22 +55,17 @@ export function Sidebar() {
   const filteredItems = menuItems.filter(item => {
     if (!profile) return false;
     
-    // 1. Super Admin sees everything
-    if (profile.role === 'superAdmin') return true;
-
-    // 2. Check Role-based Capability
+    // 1. Check Role-based Capability
     if (item.capability && !hasPermission(profile, item.capability as any)) {
       return false;
     }
 
-    // 3. Check Module toggles for the hotel
+    // 2. Check Module toggles for the hotel
     if (item.module && hotel?.modulesEnabled) {
-      if (item.module === 'corporate' && (hotel.plan === 'premium' || hotel.plan === 'enterprise')) {
-        return true;
-      }
       if (!hotel.modulesEnabled.includes(item.module)) return false;
     }
 
+    // Default: allow (Super Admins pass through here for items without modules)
     return true;
   });
 

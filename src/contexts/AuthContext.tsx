@@ -174,6 +174,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Clear current hotel state when switching to show loading/intermediate state
+    if (hotel?.id !== hotelId) {
+      setHotel(null);
+    }
+
     const hotelRef = doc(db, 'hotels', hotelId);
     const unsub = onSnapshot(hotelRef, (snap) => {
       if (snap.exists()) {
@@ -189,7 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsub();
-  }, [profile?.hotelId, profile?.role, hasHotelError]);
+  }, [profile?.hotelId, profile?.role, selectedHotelId, hasHotelError]);
 
   // 4. System Settings Fetcher (with retry)
   useEffect(() => {

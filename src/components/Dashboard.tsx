@@ -125,17 +125,29 @@ export function Dashboard() {
     : [
         { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
-        { label: 'Today Revenue', value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), icon: TrendingUp, color: 'text-amber-500' },
-        { label: 'Outstanding', value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
-          const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
-          if (res) {
-            const balance = res.totalAmount - (res.paidAmount || 0);
-            return acc + Math.max(0, balance);
-          }
-          return acc;
-        }, 0), currency, exchangeRate), icon: DollarSign, color: 'text-red-500' },
+        { 
+          label: 'Today Revenue', 
+          value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), 
+          icon: TrendingUp, 
+          color: 'text-amber-500',
+          module: 'finance'
+        },
+        { 
+          label: 'Outstanding', 
+          value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
+            const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
+            if (res) {
+              const balance = res.totalAmount - (res.paidAmount || 0);
+              return acc + Math.max(0, balance);
+            }
+            return acc;
+          }, 0), currency, exchangeRate), 
+          icon: DollarSign, 
+          color: 'text-red-500',
+          module: 'frontDesk'
+        },
         { label: 'Dirty Rooms', value: rooms.filter(r => r.status === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
-      ];
+      ].filter(s => profile?.role === 'superAdmin' || !s.module || hotel?.modulesEnabled?.includes(s.module));
 
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
   const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
@@ -223,7 +235,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           {/* Revenue Chart */}
-          {profile?.role !== 'superAdmin' && (
+          {profile?.role !== 'superAdmin' && hotel?.modulesEnabled?.includes('finance') && (
             <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -306,7 +318,7 @@ export function Dashboard() {
           </div>
 
           {/* Recent Transactions */}
-          {profile?.role !== 'superAdmin' && (
+          {profile?.role !== 'superAdmin' && hotel?.modulesEnabled?.includes('finance') && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">

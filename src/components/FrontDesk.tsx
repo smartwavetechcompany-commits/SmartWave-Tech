@@ -2843,10 +2843,10 @@ export function FrontDesk() {
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center gap-6">
+        <div className="p-4 md:p-6 border-b border-zinc-800 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
+          <div className="flex flex-wrap items-center gap-4 md:gap-6">
             <h3 className="font-bold text-zinc-50">Reservations</h3>
-            <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+            <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 overflow-x-auto no-scrollbar">
               {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
                 <button
                   key={tab}
@@ -2866,24 +2866,24 @@ export function FrontDesk() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 w-full xl:w-auto">
             {selectedReservations.length > 0 && (
               <button
                 onClick={handleBulkCheckIn}
                 disabled={loading}
-                className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all flex items-center gap-2"
+                className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
                 Check In Selected ({selectedReservations.length})
               </button>
             )}
-            <div className="flex items-center gap-2">
-              <div className="relative">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 md:flex-none">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
                 <input 
                   type="text" 
                   placeholder="Search guests or rooms..."
-                  className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
+                  className="w-full md:w-64 bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />

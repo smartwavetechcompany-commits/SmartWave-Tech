@@ -301,16 +301,16 @@ export function AuthPage() {
         // Define plan features
         const planFeatures = {
           Standard: {
-            modules: ['dashboard', 'rooms', 'frontDesk', 'settings'],
-            limits: { rooms: 30, staff: 5 }
+            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports'],
+            limits: { rooms: 30, staff: 10 }
           },
           Premium: {
-            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings', 'guests', 'maintenance', 'corporate'],
-            limits: { rooms: 100, staff: 20 }
+            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'],
+            limits: { rooms: 150, staff: 50 }
           },
           Enterprise: {
-            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'guests', 'maintenance', 'inventory', 'corporate'],
-            limits: { rooms: 1000, staff: 100 }
+            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff', 'corporate'],
+            limits: { rooms: 5000, staff: 1000 }
           }
         };
 

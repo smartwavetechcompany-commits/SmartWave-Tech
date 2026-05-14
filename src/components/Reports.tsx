@@ -74,6 +74,9 @@ export function Reports() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<{ id: string; collection: string; label: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -98,11 +101,14 @@ export function Reports() {
         const allEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
         
         // Fetch all other data needed for reports
-        const [rSnap, gSnap, cSnap, fSnap] = await Promise.all([
+        const [rSnap, gSnap, cSnap, fSnap, iSnap, aSnap, sSnap] = await Promise.all([
           getDocs(collection(db, 'hotels', hotel.id, 'reservations')),
           getDocs(collection(db, 'hotels', hotel.id, 'guests')),
           getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts')),
-          getDocs(collection(db, 'hotels', hotel.id, 'finance'))
+          getDocs(collection(db, 'hotels', hotel.id, 'finance')),
+          getDocs(collection(db, 'hotels', hotel.id, 'inventory')),
+          getDocs(collection(db, 'hotels', hotel.id, 'accounts')),
+          getDocs(collection(db, 'hotels', hotel.id, 'suppliers'))
         ]);
 
         const allReservations = rSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
@@ -110,12 +116,18 @@ export function Reports() {
         const allGuests = gSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
         const allCorps = cSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount));
         const allFinance = fSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
+        const allInventory = iSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const allAccounts = aSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const allSuppliers = sSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         setReservations(allReservations);
         setRooms(allRooms);
         setGuests(allGuests);
         setCorporateAccounts(allCorps);
         setFinanceRecords(allFinance);
+        setInventory(allInventory);
+        setAccounts(allAccounts);
+        setSuppliers(allSuppliers);
 
         const filteredEntries = allEntries.filter(entry => {
           const entryDate = new Date(entry.timestamp);
@@ -219,6 +231,13 @@ export function Reports() {
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
         case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
+        case 'profit_loss': return ['Description', 'Income', 'Expense', 'Net'];
+        case 'expenses_detail': return ['Date', 'Category', 'Description', 'Amount', 'Method'];
+        case 'supplier_balances': return ['Supplier', 'Category', 'Phone', 'Balance'];
+        case 'trial_balance': return ['Code', 'Account Name', 'Type', 'Balance'];
+        case 'balance_sheet': return ['Code', 'Account', 'Type', 'Balance'];
+        case 'inventory_value': return ['Item', 'Category', 'Quantity', 'Unit', 'Price', 'Total Value'];
+        case 'net_income': return ['Period', 'Total Income', 'Total Expense', 'Net Income'];
         default: return ['Date', 'Description', 'Category', 'Amount'];
       }
     })();
@@ -407,6 +426,70 @@ export function Reports() {
           Count: s.count
         }));
       }
+      case 'profit_loss': {
+        const income = financeRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+        const expense = financeRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+        return [
+          { Description: 'Total Operating Income', Income: income, Expense: 0, Net: income },
+          { Description: 'Total Operating Expense', Income: 0, Expense: expense, Net: -expense },
+          { Description: 'Net Profit/Loss', Income: income, Expense: expense, Net: income - expense }
+        ];
+      }
+      case 'expenses_detail': {
+        return financeRecords
+          .filter(r => r.type === 'expense')
+          .map(r => ({
+            Date: format(new Date(r.timestamp), 'yyyy-MM-dd'),
+            Category: r.category,
+            Description: r.description,
+            Amount: r.amount,
+            Method: r.paymentMethod
+          }));
+      }
+      case 'supplier_balances': {
+        return suppliers.map((s: any) => ({
+          Supplier: s.name,
+          Category: s.category,
+          Phone: s.phone,
+          Balance: s.balance
+        }));
+      }
+      case 'trial_balance': {
+        return accounts.map((a: any) => ({
+          Code: a.code,
+          'Account Name': a.name,
+          Type: a.type,
+          Balance: a.balance
+        }));
+      }
+      case 'balance_sheet': {
+        return accounts.map((a: any) => ({
+          Code: a.code,
+          Account: a.name,
+          Type: a.type,
+          Balance: a.balance
+        }));
+      }
+      case 'inventory_value': {
+        return inventory.map((item: any) => ({
+          Item: item.name,
+          Category: item.category,
+          Quantity: item.quantity,
+          Unit: item.unit,
+          Price: item.price || 0,
+          'Total Value': (item.quantity || 0) * (item.price || 0)
+        }));
+      }
+      case 'net_income': {
+        const income = financeRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+        const expense = financeRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+        return [{
+          Period: `${dateRange.start} to ${dateRange.end}`,
+          'Total Income': income,
+          'Total Expense': expense,
+          'Net Income': income - expense
+        }];
+      }
       default: return [];
     }
   };
@@ -532,7 +615,18 @@ export function Reports() {
     { id: 'staff_sales', label: 'Staff Sale Report', icon: Users },
     { id: 'staff_payments', label: 'Staff Payment Report', icon: CreditCard },
     { id: 'taxation', label: 'Taxation Report', icon: Receipt },
-  ];
+    { id: 'profit_loss', label: 'Profit & Loss', icon: TrendingUp, enterprise: true },
+    { id: 'expenses_detail', label: 'Expense Detail', icon: TrendingUp, enterprise: true },
+    { id: 'supplier_balances', label: 'Supplier Balances', icon: Building2, enterprise: true },
+    { id: 'trial_balance', label: 'Trial Balance', icon: BarChart3, enterprise: true },
+    { id: 'balance_sheet', label: 'Balance Sheet', icon: Wallet, enterprise: true },
+    { id: 'inventory_value', label: 'Inventory Value Report', icon: LayoutDashboard, enterprise: true, module: 'inventory' },
+    { id: 'net_income', label: 'Net Income Report', icon: BarChart3, enterprise: true },
+  ].filter(r => {
+    if (r.enterprise && hotel?.plan !== 'enterprise') return false;
+    if (r.module && !hotel?.modulesEnabled?.includes(r.module)) return false;
+    return true;
+  });
 
   return (
     <div className="p-8 space-y-8">

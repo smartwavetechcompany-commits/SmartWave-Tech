@@ -26,6 +26,7 @@ import {
   Users,
   Building2,
   ClipboardList,
+  LayoutDashboard,
   ArrowRight
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
@@ -61,6 +62,7 @@ export function SuperAdmin() {
   const [filterStatus, setFilterStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [changingPlanHotel, setChangingPlanHotel] = useState<Hotel | null>(null);
   const [managingStaffHotel, setManagingStaffHotel] = useState<Hotel | null>(null);
+  const [togglingFeaturesHotel, setTogglingFeaturesHotel] = useState<Hotel | null>(null);
   const [showHistoryHotel, setShowHistoryHotel] = useState<Hotel | null>(null);
   const [planChangeAmount, setPlanChangeAmount] = useState<number>(0);
   const [planChangeReason, setPlanChangeReason] = useState<string>('');
@@ -717,16 +719,16 @@ export function SuperAdmin() {
     try {
       const planFeatures = {
         standard: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'settings'],
-          limits: { rooms: 30, staff: 5 }
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports'],
+          limits: { rooms: 30, staff: 10 }
         },
         premium: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings', 'guests', 'maintenance', 'corporate'],
-          limits: { rooms: 100, staff: 20 }
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'],
+          limits: { rooms: 150, staff: 50 }
         },
         enterprise: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'guests', 'maintenance', 'inventory', 'corporate'],
-          limits: { rooms: 1000, staff: 100 }
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff', 'corporate'],
+          limits: { rooms: 5000, staff: 1000 }
         }
       };
 
@@ -1305,6 +1307,79 @@ export function SuperAdmin() {
         </div>
       )}
 
+      {/* Manage Features Modal */}
+      {togglingFeaturesHotel && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-zinc-50">Manage Modules</h3>
+                <p className="text-sm text-zinc-400">{togglingFeaturesHotel.name}</p>
+              </div>
+              <button 
+                onClick={() => setTogglingFeaturesHotel(null)}
+                className="p-2 text-zinc-500 hover:text-white transition-colors"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <p className="text-sm text-zinc-400">Manually enable or disable modules for this hotel. This overrides the default plan settings.</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  'dashboard', 'frontDesk', 'rooms', 'housekeeping', 'kitchen', 'inventory', 'maintenance', 
+                  'guests', 'corporate', 'finance', 'reports', 'staff', 'settings'
+                ].map((mod) => {
+                  const isEnabled = togglingFeaturesHotel.modulesEnabled?.includes(mod);
+                  return (
+                    <button
+                      key={mod}
+                      onClick={async () => {
+                        const newModules = isEnabled
+                          ? togglingFeaturesHotel.modulesEnabled.filter(m => m !== mod)
+                          : [...(togglingFeaturesHotel.modulesEnabled || []), mod];
+                        
+                        try {
+                          await database.safeUpdate(doc(db, 'hotels', togglingFeaturesHotel.id), {
+                            modulesEnabled: newModules
+                          }, {
+                            hotelId: togglingFeaturesHotel.id,
+                            module: 'SuperAdmin',
+                            action: 'TOGGLE_MODULE',
+                            details: `${isEnabled ? 'Disabled' : 'Enabled'} module: ${mod}`
+                          });
+                          setTogglingFeaturesHotel({ ...togglingFeaturesHotel, modulesEnabled: newModules });
+                          toast.success(`Module ${mod} ${isEnabled ? 'disabled' : 'enabled'}`);
+                        } catch (err) {
+                          toast.error('Failed to update module');
+                        }
+                      }}
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-xl border transition-all text-left",
+                        isEnabled 
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" 
+                          : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      )}
+                    >
+                      <span className="text-xs font-bold capitalize">{mod.replace(/([A-Z])/g, ' $1')}</span>
+                      {isEnabled ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="p-6 border-t border-zinc-800">
+              <button
+                onClick={() => setTogglingFeaturesHotel(null)}
+                className="w-full py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-8">
         {activeTab === 'hotels' && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -1397,6 +1472,13 @@ export function SuperAdmin() {
                                 title="Manage Hotel Inventory & Accounts"
                               >
                                 <ArrowRight size={18} />
+                              </button>
+                              <button 
+                                onClick={() => setTogglingFeaturesHotel(hotel)}
+                                className="p-2 text-zinc-500 hover:text-blue-500 rounded-lg transition-all active:scale-90"
+                                title="Manage Features/Modules"
+                              >
+                                <LayoutDashboard size={18} />
                               </button>
                               <button 
                                 onClick={() => setManagingStaffHotel(hotel)}

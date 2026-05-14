@@ -81,7 +81,7 @@ export function TopBar() {
 
     const delayDebounceFn = setTimeout(() => {
       handleSearch();
-    }, 300);
+    }, 150);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
