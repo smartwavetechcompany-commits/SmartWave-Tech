@@ -26,6 +26,7 @@ interface AuditLogEntry {
   action: string;
   userId: string;
   userEmail: string;
+  userName?: string;
   hotelId: string;
   timestamp: any;
   module: string;
@@ -44,7 +45,7 @@ export async function createAuditLog(
   details: string, 
   status: 'success' | 'failure' = 'success',
   metadata?: any,
-  userContext?: { uid?: string; email?: string; role?: string }
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) {
   try {
     const user = auth.currentUser;
@@ -52,6 +53,7 @@ export async function createAuditLog(
       action,
       userId: userContext?.uid || user?.uid || 'system',
       userEmail: userContext?.email || user?.email || 'system',
+      userName: userContext?.displayName || user?.displayName || userContext?.email || user?.email || 'System',
       userRole: userContext?.role || 'staff',
       hotelId,
       timestamp: serverTimestamp(),

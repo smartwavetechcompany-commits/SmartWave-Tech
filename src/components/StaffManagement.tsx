@@ -24,20 +24,28 @@ import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
 const AVAILABLE_ROLES = [
-  { id: 'dashboard', label: 'View Dashboard' },
-  { id: 'frontDesk', label: 'Front Desk (Basic)' },
-  { id: 'frontDesk_write', label: 'Front Desk (Edit/Cancel)' },
-  { id: 'rooms', label: 'Rooms Management' },
-  { id: 'housekeeping', label: 'Housekeeping' },
-  { id: 'kitchen', label: 'F & B' },
-  { id: 'inventory', label: 'Inventory' },
+  { id: 'view_reports', label: 'View Reports' },
+  { id: 'export_reports', label: 'Export Reports' },
+  { id: 'manage_staff', label: 'Manage Staff' },
+  { id: 'manage_rooms', label: 'Manage Rooms' },
+  { id: 'create_room_blocks', label: 'Block Rooms' },
+  { id: 'remove_room_blocks', label: 'Unblock Rooms' },
+  { id: 'edit_guest_profiles', label: 'Guest Profiles' },
+  { id: 'process_payments', label: 'Payments' },
+  { id: 'view_financial_records', label: 'Finance Records' },
+  { id: 'view_activity_logs', label: 'Activity Logs' },
+  { id: 'manage_roles', label: 'Roles/Permissions' },
+  { id: 'edit_hotel_settings', label: 'Hotel Settings' },
+  { id: 'nightly_audit', label: 'Nightly Audit' },
+];
+
+const BASE_ROLES = [
+  { id: 'hotelAdmin', label: 'Admin (Full Access)' },
+  { id: 'manager', label: 'Manager' },
+  { id: 'frontDesk', label: 'Front Desk' },
+  { id: 'housekeeper', label: 'Housekeeper' },
   { id: 'maintenance', label: 'Maintenance' },
-  { id: 'guests', label: 'Guests Management' },
-  { id: 'corporate', label: 'Corporate Management' },
-  { id: 'finance', label: 'Finance & Payments' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'staff', label: 'Staff Management' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'accountant', label: 'Accountant' },
 ];
 
 export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) {
@@ -50,8 +58,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     email: '',
     displayName: '',
     password: '',
-    role: 'staff' as const,
-    roles: ['frontDesk'] as StaffRole[],
+    role: 'frontDesk' as any,
+    roles: [] as string[],
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -86,7 +94,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       uid: tempUid,
       email: newStaff.email.toLowerCase(),
       hotelId: hotelId,
-      role: 'staff',
+      role: newStaff.role,
       createdAt: new Date().toISOString(),
       roles: newStaff.roles,
       permissions: newStaff.roles, // Keep for backward compatibility
@@ -320,21 +328,35 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 <p className="text-[10px] text-zinc-500 mt-1 italic">Tell the staff member this password so they can login.</p>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Primary Roles</label>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Access Role</label>
+                <select
+                  required
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                  value={newStaff.role}
+                  onChange={(e) => setNewStaff({ ...newStaff, role: e.target.value })}
+                >
+                  {BASE_ROLES.map(role => (
+                    <option key={role.id} value={role.id}>{role.label}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-zinc-500 mt-1 italic">Determines base permissions. Use "Additional Overrides" for fine-tuning.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Additional Overrides</label>
                 <div className="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
                   {AVAILABLE_ROLES.map(role => (
                     <button
                       key={role.id}
                       type="button"
                       onClick={() => {
-                        const roles = newStaff.roles.includes(role.id as StaffRole)
+                        const roles = newStaff.roles.includes(role.id)
                           ? newStaff.roles.filter(r => r !== role.id)
-                          : [...newStaff.roles, role.id as StaffRole];
+                          : [...newStaff.roles, role.id];
                         setNewStaff({ ...newStaff, roles });
                       }}
                       className={cn(
                         "px-2 py-1.5 rounded text-[10px] font-bold uppercase transition-all",
-                        newStaff.roles.includes(role.id as StaffRole)
+                        newStaff.roles.includes(role.id)
                           ? "bg-emerald-500 text-black"
                           : "bg-zinc-800 text-zinc-500 hover:text-zinc-50"
                       )}
@@ -343,6 +365,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                     </button>
                   ))}
                 </div>
+                <p className="text-[10px] text-zinc-500 mt-1 italic italic">Permissions added on top of the base role.</p>
               </div>
               <div className="flex gap-4 mt-8">
                 <button 

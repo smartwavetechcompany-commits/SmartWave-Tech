@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, Reservation, FinanceRecord, Hotel, OperationType } from '../types';
+import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
+import { getRoomDisplayStatus } from '../utils/roomUtils';
 import { 
   Users, 
   BedDouble, 
@@ -40,6 +41,8 @@ export function Dashboard() {
   const { hotel, profile, isSubscriptionActive, currency, exchangeRate } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [activeReservations, setActiveReservations] = useState<Reservation[]>([]);
+  const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
 
@@ -54,6 +57,8 @@ export function Dashboard() {
     let unsubHotels = () => {};
     let unsubRooms = () => {};
     let unsubRes = () => {};
+    let unsubActiveRes = () => {};
+    let unsubBlockings = () => {};
     let unsubFinance = () => {};
 
     if (profile.role === 'superAdmin') {
@@ -72,10 +77,18 @@ export function Dashboard() {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
       });
  
-      unsubRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), limit(5)), (snap) => {
+      unsubRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), orderBy('createdAt', 'desc'), limit(5)), (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+      });
+
+      unsubActiveRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), where('status', 'in', ['confirmed', 'checked_in'])), (snap) => {
+        setActiveReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      });
+
+      unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {
+        setBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
       });
  
       unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
@@ -108,6 +121,8 @@ export function Dashboard() {
       unsubHotels();
       unsubRooms();
       unsubRes();
+      unsubActiveRes();
+      unsubBlockings();
       unsubFinance();
     };
   }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError]);
@@ -124,8 +139,18 @@ export function Dashboard() {
         { label: 'Expired', value: allHotels.filter(h => h.subscriptionStatus === 'expired').length, icon: Clock, color: 'text-amber-500' },
       ]
     : [
-        { label: 'Occupancy', value: `${rooms.length ? Math.round((rooms.filter(r => r.status === 'occupied').length / rooms.length) * 100) : 0}%`, icon: BedDouble, color: 'text-blue-500' },
-        { label: 'Active Guests', value: rooms.filter(r => r.status === 'occupied').length, icon: Users, color: 'text-emerald-500' },
+        { 
+          label: 'Occupancy', 
+          value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
+          icon: BedDouble, 
+          color: 'text-blue-500' 
+        },
+        { 
+          label: 'Active Guests', 
+          value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, 
+          icon: Users, 
+          color: 'text-emerald-500' 
+        },
         { 
           label: 'Today Revenue', 
           value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), 
@@ -135,8 +160,8 @@ export function Dashboard() {
         },
         { 
           label: 'Outstanding', 
-          value: formatCurrency(rooms.filter(r => r.status === 'occupied').reduce((acc, r) => {
-            const res = reservations.find(res => res.roomId === r.id && res.status === 'checked_in');
+          value: formatCurrency(rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').reduce((acc, r) => {
+            const res = activeReservations.find(res => res.roomId === r.id && res.status === 'checked_in');
             if (res) {
               const balance = res.totalAmount - (res.paidAmount || 0);
               return acc + Math.max(0, balance);
@@ -147,7 +172,7 @@ export function Dashboard() {
           color: 'text-red-500',
           module: 'frontDesk'
         },
-        { label: 'Dirty Rooms', value: rooms.filter(r => r.status === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
+        { label: 'Dirty Rooms', value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
       ].filter(s => profile?.role === 'superAdmin' || !s.module || isModuleEnabled(hotel, s.module));
 
   const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
@@ -402,10 +427,10 @@ export function Dashboard() {
             <h3 className="font-bold text-zinc-50 mb-6">Room Status</h3>
             <div className="space-y-4">
               {[
-                { label: 'Vacant Clean', count: rooms.filter(r => r.status === 'clean').length, color: 'bg-emerald-500' },
-                { label: 'Occupied', count: rooms.filter(r => r.status === 'occupied').length, color: 'bg-blue-500' },
-                { label: 'Dirty', count: rooms.filter(r => r.status === 'dirty').length, color: 'bg-red-500' },
-                { label: 'Maintenance', count: rooms.filter(r => r.status === 'maintenance').length, color: 'bg-amber-500' },
+                { label: 'Vacant Clean', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'clean').length, color: 'bg-emerald-500' },
+                { label: 'Occupied', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, color: 'bg-blue-500' },
+                { label: 'Dirty', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, color: 'bg-red-500' },
+                { label: 'Maintenance', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'maintenance').length, color: 'bg-amber-500' },
               ].map(item => (
                 <div key={item.label} className="space-y-2">
                   <div className="flex items-center justify-between text-sm">

@@ -132,13 +132,24 @@ export function Settings() {
     if (!hotel?.id) return;
     setIsSaving(true);
     try {
+      const oldTaxes = hotel.taxes || [];
+      const newTaxes = localTaxes;
+
       await database.safeSet(doc(db, 'hotels', hotel.id), {
         taxes: localTaxes
       }, {
         hotelId: hotel.id,
         module: 'Settings',
         action: 'UPDATE_TAX_SETTINGS',
-        details: 'Updated global tax configuration'
+        details: 'Updated global tax configuration',
+        metadata: {
+          changes: {
+            taxes: {
+              from: oldTaxes.map(t => ({ name: t.name, percentage: t.percentage })),
+              to: newTaxes.map(t => ({ name: t.name, percentage: t.percentage }))
+            }
+          }
+        }
       });
 
       // After saving taxes, update existing active reservations to reflect new tax policy
@@ -322,7 +333,7 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await database.safeSet(doc(db, 'hotels', hotel.id), {
+      const updates = {
         name: formData.hotelName,
         defaultCurrency: formData.defaultCurrency,
         exchangeRate: formData.exchangeRate,
@@ -330,27 +341,23 @@ export function Settings() {
         defaultCheckOutTime: formData.defaultCheckOutTime,
         overstayChargeTime: formData.overstayChargeTime,
         autoChargeOverstays: formData.autoChargeOverstays,
-      }, {
-        hotelId: hotel.id,
-        module: 'Settings',
-        action: 'UPDATE_HOTEL_SETTINGS',
-        details: `Hotel settings updated: ${formData.hotelName}`
+      };
+
+      // Calculate changed fields for better logging
+      const changes: Record<string, { from: any, to: any }> = {};
+      Object.entries(updates).forEach(([key, value]) => {
+        const oldValue = (hotel as any)[key];
+        if (oldValue !== value) {
+          changes[key] = { from: oldValue, to: value };
+        }
       });
 
-      // Log action
-      await database.safeAdd(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'UPDATE_HOTEL_SETTINGS',
-        resource: `Hotel: ${formData.hotelName} (Currency: ${formData.defaultCurrency}, Rate: ${formData.exchangeRate})`,
-        hotelId: hotel.id
-      }, {
+      await database.safeSet(doc(db, 'hotels', hotel.id), updates, {
         hotelId: hotel.id,
         module: 'Settings',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Hotel settings update activity'
+        action: 'UPDATE_HOTEL_SETTINGS',
+        details: `Hotel settings updated: ${formData.hotelName}`,
+        metadata: { changes }
       });
 
       toast.success('Hotel settings updated!');
@@ -368,29 +375,29 @@ export function Settings() {
 
     setIsSaving(true);
     try {
-      await database.safeSet(doc(db, 'hotels', hotel.id), {
+      const updates = {
         branding: formData.branding,
-      }, {
-        hotelId: hotel.id,
-        module: 'Settings',
-        action: 'UPDATE_HOTEL_BRANDING',
-        details: 'Updated hotel branding and visual settings'
+      };
+
+      // Calculate changed fields
+      const changes: Record<string, { from: any, to: any }> = {};
+      const oldBranding = hotel.branding || {};
+      const newBranding = formData.branding;
+
+      Object.keys(newBranding).forEach(key => {
+        const newVal = (newBranding as any)[key];
+        const oldVal = (oldBranding as any)[key];
+        if (JSON.stringify(newVal) !== JSON.stringify(oldVal)) {
+          changes[`branding.${key}`] = { from: oldVal, to: newVal };
+        }
       });
 
-      // Log action
-      await database.safeAdd(collection(db, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'UPDATE_HOTEL_BRANDING',
-        resource: `Hotel Branding: ${hotel.name}`,
-        hotelId: hotel.id
-      }, {
+      await database.safeSet(doc(db, 'hotels', hotel.id), updates, {
         hotelId: hotel.id,
         module: 'Settings',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Hotel branding update activity'
+        action: 'UPDATE_HOTEL_BRANDING',
+        details: 'Updated hotel branding and visual settings',
+        metadata: { changes }
       });
 
       toast.success('Hotel branding updated!');

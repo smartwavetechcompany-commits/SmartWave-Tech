@@ -44,6 +44,8 @@ import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
 import { roomService } from '../services/roomService';
 import { hasPermission } from '../utils/permissions';
+import { logActivity } from '../utils/activityLogger';
+import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
@@ -524,12 +526,11 @@ export function FrontDesk() {
       return;
     }
 
-    // Check for blocked rooms
+    // Check for blocked rooms and occupancy
     for (const stay of allStays) {
-      const isBlocked = roomService.isRoomBlocked(roomBlockings, stay.roomId, stay.checkIn);
-      if (isBlocked) {
+      if (!isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings)) {
         const room = rooms.find(r => r.id === stay.roomId);
-        toast.error(`Room ${room?.roomNumber || stay.roomId} is blocked for the selected check-in date.`);
+        toast.error(`Room ${room?.roomNumber || stay.roomId} is not available for the selected dates.`);
         return;
       }
     }
@@ -679,6 +680,18 @@ export function FrontDesk() {
         details: `Created batch of ${allStays.length} bookings for ${newBooking.guestName}`,
         userContext: { uid: profile.uid, email: profile.email, role: profile.role }
       });
+
+      // logActivity
+      await logActivity(
+        hotel.id,
+        profile,
+        'CREATE_BOOKING',
+        'Front Desk',
+        `Created batch of ${allStays.length} bookings for ${newBooking.guestName}`,
+        undefined,
+        null,
+        allStays
+      );
       
       // Post discounts and initial payments to ledger if any
       for (const stay of createdStays) {
@@ -750,8 +763,8 @@ export function FrontDesk() {
 
   const deleteReservation = async (res: Reservation) => {
     if (!hotel?.id || !profile) return;
-    if (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
-      toast.error('Only administrators can delete reservations');
+    if (!hasPermission(profile, 'delete_reservation')) {
+      toast.error('You do not have permission to delete reservations');
       return;
     }
 
@@ -773,6 +786,17 @@ export function FrontDesk() {
         details: `Deleted reservation ${res.id} for ${res.guestName} (Room ${res.roomNumber})`,
         userContext: { uid: profile.uid, email: profile.email, role: profile.role }
       });
+
+      await logActivity(
+        hotel.id,
+        profile,
+        'DELETE_RESERVATION',
+        'Front Desk',
+        `Deleted reservation for ${res.guestName} (Room ${res.roomNumber})`,
+        res.id,
+        res,
+        null
+      );
       toast.success('Reservation deleted successfully');
     } catch (err: any) {
       console.error("Delete reservation error:", err.message || safeStringify(err));
@@ -785,39 +809,39 @@ export function FrontDesk() {
   const handleEditReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !editingReservation || !profile) return;
+    if (!hasPermission(profile, 'edit_reservation')) {
+      toast.error('You do not have permission to edit reservations');
+      return;
+    }
 
     try {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', editingReservation.id);
       
-      await database.safeUpdate(resRef, {
+      const newValues = {
         checkIn: editForm.checkIn,
         checkOut: editForm.checkOut,
         totalAmount: editForm.totalAmount,
         notes: editForm.notes
-      }, {
+      };
+
+      await database.safeUpdate(resRef, newValues, {
         hotelId: hotel.id,
         module: 'Front Desk',
         action: 'EDIT_RESERVATION',
         details: `Reservation ${editingReservation.id} updated (Dates: ${editForm.checkIn} to ${editForm.checkOut}, Total: ${editForm.totalAmount})`
       });
 
-      // Also add to their activityLogs for UI compatibility
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'EDIT_RESERVATION',
-        resource: `Reservation ${editingReservation.id} updated (Dates: ${editForm.checkIn} to ${editForm.checkOut}, Total: ${editForm.totalAmount})`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Internal activity log for UI'
-      });
+      await logActivity(
+        hotel.id,
+        profile,
+        'EDIT_RESERVATION',
+        'Front Desk',
+        `Reservation ${editingReservation.id} updated`,
+        editingReservation.id,
+        editingReservation,
+        { ...editingReservation, ...newValues }
+      );
 
       toast.success('Reservation updated successfully');
       setEditingReservation(null);
@@ -903,7 +927,11 @@ export function FrontDesk() {
   };
 
   const handlePostponeStay = async () => {
-    if (!showPostponeModal || !hotel?.id || !newCheckOutDate) return;
+    if (!showPostponeModal || !hotel?.id || !newCheckOutDate || !profile) return;
+    if (!hasPermission(profile, 'edit_reservation')) {
+      toast.error('You do not have permission to edit reservations');
+      return;
+    }
     
     try {
       setLoading(true);
@@ -960,22 +988,16 @@ export function FrontDesk() {
         }, profile?.uid || 'system', res.corporateId);
       }
 
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
-        action: 'RESERVATION_POSTPONED',
-        resource: `Res #${(res.id || '').slice(-6)} - Extended to ${newCheckOutDate}`,
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        details: `Extended by ${extraNights} nights. Added ${formatCurrency(baseExtraAmount + extraExclusiveTaxTotal, currency, exchangeRate)} to total.`
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Internal activity log for UI'
-      });
+      await logActivity(
+        hotel.id,
+        profile,
+        'RESERVATION_POSTPONED',
+        'Front Desk',
+        `Reservation ${res.id} postponed to ${newCheckOutDate}`,
+        res.id,
+        { checkOut: res.checkOut, totalAmount: res.totalAmount },
+        { checkOut: newCheckOutDate, totalAmount: newTotalAmount }
+      );
 
       toast.success('Stay postponed successfully');
       setShowPostponeModal(null);
@@ -989,6 +1011,10 @@ export function FrontDesk() {
 
   const handleApplyDiscount = async () => {
     if (!showDiscountModal || !hotel?.id || !discountData.amount || !profile) return;
+    if (!hasPermission(profile, 'edit_reservation')) {
+      toast.error('You do not have permission to apply discounts');
+      return;
+    }
     
     try {
       setLoading(true);
@@ -1008,22 +1034,16 @@ export function FrontDesk() {
         postedBy: profile.uid
       }, profile.uid);
 
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'DISCOUNT_APPLIED',
-        resource: `Res #${(res.id || '').slice(-6)} - ${formatCurrency(finalAmount, currency, exchangeRate)}`,
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        details: `${discountData.type === 'percentage' ? discountData.amount + '%' : 'Fixed'} - ${discountData.reason}`
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Internal activity log for UI'
-      });
+      await logActivity(
+        hotel.id,
+        profile,
+        'DISCOUNT_APPLIED',
+        'Front Desk',
+        `Discount applied to reservation ${res.id}`,
+        res.id,
+        null,
+        { amount: finalAmount, reason: discountData.reason }
+      );
 
       toast.success('Discount applied successfully');
       setShowDiscountModal(null);
@@ -1133,21 +1153,16 @@ export function FrontDesk() {
       });
 
       // Log audit action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'NIGHTLY_AUDIT_RUN',
-        resource: `Audit processed ${querySnapshot.docs.length} active stays.`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Internal activity log for UI'
-      });
+      await logActivity(
+        hotel.id,
+        profile,
+        'NIGHTLY_AUDIT_RUN',
+        'Finance',
+        `Nightly audit processed ${querySnapshot.docs.length} stays`,
+        undefined,
+        null,
+        { auditCount, totalCharged }
+      );
 
     } catch (err: any) {
       console.error("Audit error:", err.message || safeStringify(err));
@@ -1160,6 +1175,21 @@ export function FrontDesk() {
 
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
     if (!hotel?.id || !profile) return;
+    
+    // Permission checks
+    if (status === 'checked_in' && !hasPermission(profile, 'manage_rooms')) {
+      toast.error('Permission denied: Check-in');
+      return;
+    }
+    if (status === 'checked_out' && !hasPermission(profile, 'manage_rooms')) {
+      toast.error('Permission denied: Check-out');
+      return;
+    }
+    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'delete_reservation')) {
+      toast.error('Permission denied: Cancellation');
+      return;
+    }
+
     try {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
@@ -1171,6 +1201,17 @@ export function FrontDesk() {
         action: 'UPDATE_RESERVATION_STATUS',
         details: `Reservation ${res.id} status changed to ${status}`
       });
+
+      await logActivity(
+        hotel.id,
+        profile,
+        'UPDATE_RESERVATION_STATUS',
+        'Front Desk',
+        `Reservation status changed to ${status}`,
+        res.id,
+        { status: res.status },
+        { status }
+      );
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
@@ -1382,23 +1423,7 @@ export function FrontDesk() {
         });
       }
 
-      // 3. Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'UPDATE_BOOKING_STATUS',
-        resource: `Booking ${res.id}: ${status}`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: `Booking ${res.id} status updated to ${status}`
-      });
-
+      // 3. Log action is handled by safeUpdate calls above
       toast.success(`Reservation status updated to ${status.replace('_', ' ')}`);
     } catch (err: any) {
       console.error("Update status error:", err.message || safeStringify(err));
@@ -1410,6 +1435,10 @@ export function FrontDesk() {
 
   const updatePayment = async (res: Reservation, amount: number) => {
     if (!hotel?.id || !profile) return;
+    if (!hasPermission(profile, 'process_payments')) {
+      toast.error('You do not have permission to process payments');
+      return;
+    }
     
     try {
       setLoading(true);
@@ -1427,22 +1456,7 @@ export function FrontDesk() {
         );
       }
 
-      // Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'UPDATE_PAYMENT',
-        resource: `Payment for ${res.guestName}: ${formatCurrency(amount, currency, exchangeRate)}`,
-        hotelId: hotel.id,
-        module: 'Finance'
-      }, {
-        hotelId: hotel.id,
-        module: 'Finance',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: `Payment update activity for reservation ${res.id}`
-      });
+      // Log action handled by settleLedger internals
       toast.success('Payment recorded successfully');
     } catch (err: any) {
       console.error("Payment update error:", err.message || safeStringify(err));
@@ -1537,23 +1551,7 @@ export function FrontDesk() {
         postedBy: profile.uid
       }, profile.uid, res.corporateId);
 
-      // 5. Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'ROOM_TRANSFER',
-        resource: `Transferred ${res.guestName} to Room ${newRoom.roomNumber}. Balance adjusted by ${formatCurrency(priceDifference, currency, exchangeRate)}`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: `Room transfer activity for guest ${res.guestName}`
-      });
-
+      // 5. Log action is handled by safeUpdate/postToLedger internals
       toast.success(`Transferred to Room ${newRoom.roomNumber}`);
       setShowTransferModal(null);
     } catch (err: any) {
@@ -1593,23 +1591,7 @@ export function FrontDesk() {
         postedBy: profile.uid
       }, profile.uid, res.corporateId);
 
-      // 2. Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'POST_CHARGE',
-        resource: `Posted ${chargeDetails.category} charge of ${formatCurrency(finalAmount, currency, exchangeRate)} to ${res.guestName}`,
-        hotelId: hotel.id,
-        module: 'Front Desk'
-      }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: `Posted ${chargeDetails.category} charge to reservation ${res.id}`
-      });
-
+      // 2. Log action is handled by postToLedger internals
       setShowChargeModal(null);
       setChargeDetails({ 
         amount: 0, 
@@ -2151,7 +2133,9 @@ export function FrontDesk() {
                     }}
                   >
                     <option value="">Select a room</option>
-                    {rooms.filter(r => r.status === 'clean').map(room => {
+                    {rooms.filter(r => 
+                      isRoomAvailable(r.id, newBooking.checkIn, newBooking.checkOut, reservations, roomBlockings) || r.id === newBooking.roomId
+                    ).map(room => {
                       let displayPrice = room.price;
                       let isNegotiated = false;
 
@@ -2704,7 +2688,9 @@ export function FrontDesk() {
                           }}
                         >
                           <option value="">Select Room</option>
-                          {rooms.filter(r => r.status === 'clean' || r.id === stay.roomId).map(room => {
+                          {rooms.filter(r => 
+                            isRoomAvailable(r.id, stay.checkIn, stay.checkOut, reservations, roomBlockings) || r.id === stay.roomId
+                          ).map(room => {
                             let displayPrice = room.price;
                             let isNegotiated = false;
 
@@ -2792,7 +2778,7 @@ export function FrontDesk() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         {roomTypes.map(type => {
           const totalRooms = rooms.filter(r => r.type === type.name).length;
-          const availableRooms = rooms.filter(r => r.type === type.name && r.status === 'clean').length;
+          const availableRooms = rooms.filter(r => r.type === type.name && isRoomAvailable(r.id, format(new Date(), 'yyyy-MM-dd'), format(addDays(new Date(), 1), 'yyyy-MM-dd'), reservations, roomBlockings)).length;
           return (
             <div key={type.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
               <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">{type.name}</div>

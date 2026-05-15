@@ -14,6 +14,15 @@ export interface Tax {
   category: 'all' | 'room' | 'restaurant' | 'service';
 }
 
+export interface CustomRole {
+  id: string;
+  name: string;
+  description?: string;
+  permissions: string[];
+  inheritsFrom?: StaffRole;
+  hotelId: string;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -22,8 +31,9 @@ export interface UserProfile {
   createdAt: string;
   status: 'active' | 'inactive';
   displayName?: string;
-  permissions?: string[]; // For staff module access
+  permissions?: string[]; // Granular permissions
   staffRole?: StaffRole;
+  customRoleId?: string; // Link to CustomRole
   roles?: StaffRole[]; // Multi-role support
   subscriptionExpiry?: string;
   hasCompletedOnboarding?: boolean;
@@ -138,10 +148,16 @@ export interface AuditLog {
   action: string;
   userId: string;
   userEmail: string;
-  userRole?: UserRole;
+  userName?: string;
+  userRole?: string;
   hotelId: string;
   timestamp: string;
   details: string;
+  module?: string;
+  oldValue?: any;
+  newValue?: any;
+  metadata?: any;
+  targetId?: string;
 }
 
 export interface RoomType {
@@ -215,6 +231,11 @@ export interface Reservation {
   autoNightDeduction: boolean; // Mandatory toggle for automatic nightly charges
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
   bookedBy?: string; // Added for tracking who made the reservation
+  processedBy?: {
+    uid: string;
+    name: string;
+    role: string;
+  };
   createdAt: string;
   updatedAt?: string;
 }
@@ -311,6 +332,11 @@ export interface FinanceRecord {
   supplierId?: string;
   guestId?: string;
   referenceId?: string;
+  processedBy?: {
+    uid: string;
+    name: string;
+    role: string;
+  };
   status?: 'pending' | 'completed' | 'cancelled';
 }
 

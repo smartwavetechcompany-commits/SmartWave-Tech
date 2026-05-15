@@ -427,38 +427,59 @@ export function GuestManagement() {
       </div>
     </div>
 
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Guests</div>
-          <div className="text-2xl font-bold text-zinc-50">{guests.length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Repeat Guests</div>
-          <div className="text-2xl font-bold text-emerald-500">{guests.filter(g => g.totalStays > 1).length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Revenue</div>
-          <div className="text-2xl font-bold text-blue-500">{formatCurrency(guests.reduce((acc, g) => acc + g.totalSpent, 0), currency, exchangeRate)}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1 flex items-center gap-2">
-            <DollarSign size={14} className="text-red-500" />
-            Total Outstanding (Debts)
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="p-2 bg-zinc-800 rounded-xl text-zinc-400 group-hover:text-zinc-50 transition-colors">
+              <Users size={20} />
+            </div>
+            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Database</div>
           </div>
-          <div className="text-2xl font-bold text-red-500">
-            {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) > 0).reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
-          </div>
-          <div className="text-[10px] text-zinc-600 mt-1 uppercase font-bold tracking-tight">From {guests.filter(g => (g.ledgerBalance || 0) > 0).length} guest accounts</div>
+          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Total Guests</div>
+          <div className="text-3xl font-black text-zinc-50 font-mono tracking-tighter leading-none">{guests.length}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1 flex items-center gap-2">
-            <CreditCard size={14} className="text-emerald-500" />
-            Total Credits (Advances)
+
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-500">
+              <Star size={20} />
+            </div>
+            <div className="text-emerald-500 text-[10px] font-black uppercase tracking-tighter">
+              {Math.round((guests.filter(g => g.totalStays > 1).length / (guests.length || 1)) * 100)}% Retention
+            </div>
           </div>
-          <div className="text-2xl font-bold text-emerald-500">
-            {formatCurrency(guests.filter(g => (g.ledgerBalance || 0) < 0).reduce((acc, g) => acc + Math.abs(g.ledgerBalance || 0), 0), currency, exchangeRate)}
+          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Repeat Guests</div>
+          <div className="text-3xl font-black text-emerald-500 font-mono tracking-tighter leading-none">{guests.filter(g => g.totalStays > 1).length}</div>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-blue-500/30 transition-all shadow-lg hover:shadow-blue-500/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="p-2 bg-blue-500/10 rounded-xl text-blue-500">
+              <DollarSign size={20} />
+            </div>
+            <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest leading-none">Net Growth</div>
           </div>
-          <div className="text-[10px] text-zinc-600 mt-1 uppercase font-bold tracking-tight">Available in {guests.filter(g => (g.ledgerBalance || 0) < 0).length} guest accounts</div>
+          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Lifetime Revenue</div>
+          <div className="text-3xl font-black text-blue-500 font-mono tracking-tighter leading-none truncate">
+            {formatCurrency(guests.reduce((acc, g) => acc + (g.totalSpent || 0), 0), currency, exchangeRate)}
+          </div>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-red-500/30 transition-all shadow-lg hover:shadow-red-500/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="p-2 bg-red-500/10 rounded-xl text-red-500">
+              <CreditCard size={20} />
+            </div>
+            {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
+              <div className="p-1 bg-red-500 text-white rounded text-[8px] font-black px-2 uppercase shadow-sm">
+                {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
+              </div>
+            )}
+          </div>
+          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Net Outstanding</div>
+          <div className="text-3xl font-black text-red-500 font-mono tracking-tighter leading-none truncate">
+            {formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
+          </div>
         </div>
       </div>
 

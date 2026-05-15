@@ -29,7 +29,9 @@ import {
   LayoutDashboard,
   ArrowRight
 } from 'lucide-react';
-import { format, isValid } from 'date-fns';
+import { format, isValid, startOfDay } from 'date-fns';
+import { logActivity } from '../utils/activityLogger';
+import { getRoomDisplayStatus } from '../utils/roomUtils';
 import { cn, formatCurrency, safeStringify } from '../utils';
 
 import { useNavigate } from 'react-router-dom';
@@ -845,8 +847,37 @@ export function SuperAdmin() {
       const remainingDays = (new Date(h.subscriptionExpiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
       return h.subscriptionStatus === 'active' && remainingDays > 0 && remainingDays <= 7;
     }).length,
-    activeCodes: trackingCodes.filter(c => c.status === 'active').length,
     pendingRequests: requests.filter(r => r.status === 'pending').length,
+    activeCodes: trackingCodes.filter(c => {
+      const linkedHotel = hotels.find(h => 
+        (h.trackingCode?.trim().toUpperCase() === c.code?.trim().toUpperCase()) ||
+        (c.usedByHotel && h.id === c.usedByHotel)
+      );
+      const hotelExpiry = linkedHotel ? new Date(linkedHotel.subscriptionExpiry).getTime() : 0;
+      const codeExpiry = c.expiryDate ? new Date(c.expiryDate).getTime() : 0;
+      const latestExpiry = Math.max(hotelExpiry, codeExpiry);
+      const now = Date.now();
+      
+      const isActiveStatus = (c.status || '').toLowerCase() === 'active';
+      const isNotExpired = latestExpiry >= startOfDay(new Date()).getTime();
+      return isActiveStatus && (latestExpiry === 0 || isNotExpired);
+    }).length,
+    expiredCodes: trackingCodes.filter(c => {
+      const linkedHotel = hotels.find(h => 
+        (h.trackingCode?.trim().toUpperCase() === c.code?.trim().toUpperCase()) ||
+        (c.usedByHotel && h.id === c.usedByHotel)
+      );
+      const hotelExpiry = linkedHotel ? new Date(linkedHotel.subscriptionExpiry).getTime() : 0;
+      const codeExpiry = c.expiryDate ? new Date(c.expiryDate).getTime() : 0;
+      const latestExpiry = Math.max(hotelExpiry, codeExpiry);
+      const now = Date.now();
+      
+      const isExpiredStatus = (c.status || '').toLowerCase() === 'expired';
+      const isPastDate = latestExpiry > 0 && latestExpiry < startOfDay(new Date()).getTime();
+      return isExpiredStatus || isPastDate;
+    }).length,
+    usedCodes: trackingCodes.filter(c => (c.status || '').toLowerCase() === 'used').length,
+    totalIssuedCodes: trackingCodes.length
   };
 
   if (hasPermissionError) {
@@ -963,12 +994,8 @@ export function SuperAdmin() {
             <div className="text-3xl font-bold text-zinc-50">{stats.totalHotels}</div>
           </div>
           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-            <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active</div>
+            <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active Hotels</div>
             <div className="text-3xl font-bold text-zinc-50">{stats.activeHotels}</div>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-            <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired</div>
-            <div className="text-3xl font-bold text-zinc-50">{stats.expiredHotels}</div>
           </div>
           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl relative overflow-hidden group cursor-pointer hover:border-amber-500/50 transition-colors" onClick={() => setStatusFilter('near_expiry')}>
             <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Near Expiry</div>
@@ -986,6 +1013,31 @@ export function SuperAdmin() {
           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl relative cursor-pointer hover:border-amber-500/50 transition-colors" onClick={() => setActiveTab('codes')}>
             <div className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">Active Codes</div>
             <div className="text-3xl font-bold text-zinc-50">{stats.activeCodes}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Issued Codes</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.totalIssuedCodes}</div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'codes' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-1">Active Codes</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.activeCodes}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">Expired Codes</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.expiredCodes}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-1">Used Codes</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.usedCodes}</div>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <div className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">Grand Total</div>
+            <div className="text-3xl font-bold text-zinc-50">{stats.totalIssuedCodes}</div>
           </div>
         </div>
       )}

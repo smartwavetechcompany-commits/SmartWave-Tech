@@ -17,10 +17,14 @@ import {
   ChevronDown,
   Filter,
   Download,
-  Calendar
+  Calendar,
+  Eye,
+  X,
+  ArrowRight
 } from 'lucide-react';
-import { cn, exportToCSV } from '../utils';
+import { cn, exportToCSV, formatCurrency } from '../utils';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -29,6 +33,9 @@ export function AuditLogs() {
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState<string>('all');
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [logsPerPage] = useState(50);
   const [dateRange, setDateRange] = useState({
     start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
@@ -49,6 +56,10 @@ export function AuditLogs() {
       return 'N/A';
     }
   };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, moduleFilter, dateRange]);
 
   useEffect(() => {
     if (!profile || hasPermissionError) return;
@@ -138,12 +149,15 @@ export function AuditLogs() {
     }
 
     if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
       result = result.filter(log => 
-        (log as any).actor?.toLowerCase().includes(query) ||
-        log.action?.toLowerCase().includes(query) ||
-        (log as any).target?.toLowerCase().includes(query) ||
-        log.details?.toLowerCase().includes(query)
+        (log as any).actor?.toLowerCase().includes(q) ||
+        (log.action || '').toLowerCase().includes(q) ||
+        (log as any).target?.toLowerCase().includes(q) ||
+        (log.details || '').toLowerCase().includes(q) ||
+        (log.module || '').toLowerCase().includes(q) ||
+        (log.hotelId || '').toLowerCase().includes(q) ||
+        ((log as any).userRole || '').toLowerCase().includes(q)
       );
     }
 
@@ -203,7 +217,13 @@ export function AuditLogs() {
     });
 
     return result;
-  }, [logs, searchQuery, sortConfig]);
+  }, [logs, searchQuery, sortConfig, moduleFilter, dateRange, profile?.role]);
+
+  const totalPages = Math.ceil(filteredAndSortedLogs.length / logsPerPage);
+  const paginatedLogs = useMemo(() => {
+    const startIndex = (currentPage - 1) * logsPerPage;
+    return filteredAndSortedLogs.slice(startIndex, startIndex + logsPerPage);
+  }, [filteredAndSortedLogs, currentPage, logsPerPage]);
 
   if (profile?.role !== 'superAdmin' && profile?.role !== 'hotelAdmin') {
     return (
@@ -361,19 +381,20 @@ export function AuditLogs() {
                   </th>
                 )}
                 <th className="px-4 sm:px-6 py-3 sm:py-4">Details</th>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 text-right">View</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {loading && filteredAndSortedLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 sm:p-12 text-center text-zinc-500 text-xs sm:text-sm italic">Loading activity logs...</td>
+                  <td colSpan={7} className="p-8 sm:p-12 text-center text-zinc-500 text-xs sm:text-sm italic">Loading activity logs...</td>
                 </tr>
-              ) : filteredAndSortedLogs.length === 0 ? (
+              ) : paginatedLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 sm:p-12 text-center text-zinc-500 text-xs sm:text-sm italic">No activity logs found matching your search</td>
+                  <td colSpan={7} className="p-8 sm:p-12 text-center text-zinc-500 text-xs sm:text-sm italic">No activity logs found matching your search</td>
                 </tr>
               ) : (
-                filteredAndSortedLogs.map(log => (
+                paginatedLogs.map(log => (
                   <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors group">
                     <td className="px-4 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                       <div className="flex flex-col">
@@ -433,6 +454,15 @@ export function AuditLogs() {
                         {log.details || 'No additional details'}
                       </p>
                     </td>
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">
+                      <button 
+                        onClick={() => setSelectedLog(log)}
+                        className="p-1 px-2 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all active:scale-95 flex items-center justify-center ml-auto"
+                        title="View Metadata"
+                      >
+                        <Eye size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -441,10 +471,209 @@ export function AuditLogs() {
         </div>
       </div>
       
-      <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
-        <span>Showing {filteredAndSortedLogs.length} logs</span>
-        {logs.length >= 100 && <span>Limited to latest 100 entries</span>}
+      <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest flex items-center gap-4">
+          <span>Showing {paginatedLogs.length} of {filteredAndSortedLogs.length} logs</span>
+          {logs.length >= 500 && <span>Limited to latest 500 entries</span>}
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-50 disabled:opacity-50 transition-all"
+            >
+              <ChevronUp className="-rotate-90" size={16} />
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                let pageNum = currentPage;
+                if (totalPages <= 5) pageNum = i + 1;
+                else if (currentPage <= 3) pageNum = i + 1;
+                else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                else pageNum = currentPage - 2 + i;
+
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={cn(
+                      "w-8 h-8 rounded-lg text-xs font-bold transition-all",
+                      currentPage === pageNum ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-400 hover:text-zinc-50"
+                    )}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+              className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-50 disabled:opacity-50 transition-all"
+            >
+              <ChevronDown className="-rotate-90" size={16} />
+            </button>
+          </div>
+        )}
       </div>
+
+      <AnimatePresence>
+        {selectedLog && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-2xl bg-emerald-500/10 text-emerald-500">
+                    <ClipboardList size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-zinc-50">Log Metadata</h3>
+                    <p className="text-sm text-zinc-400">Detailed data changes and context</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedLog(null)}
+                  className="p-2 hover:bg-zinc-800 rounded-xl transition-all text-zinc-400 hover:text-zinc-50"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Basic Context</h4>
+                    <div className="grid grid-cols-1 gap-3">
+                      <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Timestamp</span>
+                        <span className="text-sm text-zinc-300 font-mono">{safeFormat(selectedLog.timestamp, 'yyyy-MM-dd HH:mm:ss.SSS')}</span>
+                      </div>
+                      <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Action</span>
+                        <span className="text-sm text-emerald-500 font-bold uppercase tracking-wider">{selectedLog.action}</span>
+                      </div>
+                      <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Actor</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-zinc-50 font-bold">{(selectedLog as any).actor}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-zinc-800 text-zinc-500">{(selectedLog as any).userRole}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Technical details</h4>
+                    <div className="grid grid-cols-1 gap-3">
+                      <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Resource Target</span>
+                        <span className="text-sm text-zinc-400 font-mono">{(selectedLog as any).target}</span>
+                      </div>
+                      <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Module Path</span>
+                        <span className="text-sm text-zinc-400">{(selectedLog as any).module}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedLog.metadata && (
+                  <div className="space-y-6">
+                    <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Data Change Tracking</h4>
+                    
+                    {/* Diff View */}
+                    {(selectedLog.metadata.oldData || selectedLog.metadata.newData || selectedLog.metadata.changes) ? (
+                      <div className="space-y-6">
+                        {selectedLog.metadata.changes && typeof selectedLog.metadata.changes === 'object' && (
+                          <div className="grid grid-cols-1 gap-4">
+                            {Object.entries(selectedLog.metadata.changes).map(([key, value]: [string, any]) => (
+                                <div key={key} className="bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-sm">
+                                  <div className="bg-zinc-900/50 px-6 py-3 border-b border-zinc-800 flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">{key}</span>
+                                    <span className="text-[8px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase">Modified</span>
+                                  </div>
+                                  <div className="p-6 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-6">
+                                    <div className="flex flex-col gap-2">
+                                      <span className="text-[9px] text-red-500 font-bold uppercase tracking-tight">Previous Value</span>
+                                      <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-2xl text-xs text-red-400 font-mono break-all line-clamp-6">
+                                        {typeof value.from === 'object' ? JSON.stringify(value.from, null, 2) : String(value.from ?? 'None')}
+                                      </div>
+                                    </div>
+                                    <ArrowRight className="text-zinc-700 hidden md:block" />
+                                    <div className="flex flex-col gap-2">
+                                      <span className="text-[9px] text-emerald-500 font-bold uppercase tracking-tight">New Value</span>
+                                      <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl text-xs text-emerald-400 font-mono break-all line-clamp-6">
+                                        {typeof value.to === 'object' ? JSON.stringify(value.to, null, 2) : String(value.to ?? 'None')}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {!selectedLog.metadata.changes && (selectedLog.metadata.oldData || selectedLog.metadata.newData) && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {selectedLog.metadata.oldData && (
+                              <div className="space-y-2">
+                                <span className="text-[10px] text-red-500 font-bold uppercase tracking-tight">Original Data</span>
+                                <pre className="bg-zinc-950 p-6 rounded-3xl text-[10px] text-red-400 font-mono overflow-auto border border-zinc-800">
+                                  {JSON.stringify(selectedLog.metadata.oldData, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {selectedLog.metadata.newData && (
+                              <div className="space-y-2">
+                                <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-tight">Replacement Data</span>
+                                <pre className="bg-zinc-950 p-6 rounded-3xl text-[10px] text-emerald-400 font-mono overflow-auto border border-zinc-800">
+                                  {JSON.stringify(selectedLog.metadata.newData, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-3xl">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight mb-2 block">Raw Metadata</span>
+                        <pre className="text-[10px] text-zinc-400 font-mono overflow-auto">
+                          {JSON.stringify(selectedLog.metadata, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="bg-emerald-500/5 border border-emerald-500/10 p-6 rounded-3xl flex items-start gap-4">
+                  <div className="p-2 rounded-2xl bg-emerald-500/10 text-emerald-500">
+                    <Tag size={18} />
+                  </div>
+                  <div>
+                    <h5 className="text-zinc-50 font-bold text-sm">Action Description</h5>
+                    <p className="text-sm text-zinc-400 italic">"{selectedLog.details}"</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-zinc-800 bg-zinc-900/50 flex justify-end">
+                <button 
+                  onClick={() => setSelectedLog(null)}
+                  className="px-8 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 rounded-2xl font-bold transition-all active:scale-95 shadow-lg"
+                >
+                  Close Details
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

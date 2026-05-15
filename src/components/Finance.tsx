@@ -262,23 +262,6 @@ export function Finance() {
         details: `Deleted transaction: ${description} (${formatCurrency(amount, currency, exchangeRate)})`
       });
       
-      // Log action for UI visibility
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: 'FINANCE_RECORD_DELETED',
-        resource: `${description} (${formatCurrency(amount, currency, exchangeRate)})`,
-        hotelId: hotel.id,
-        module: 'Finance'
-      }, {
-        hotelId: hotel.id,
-        module: 'Finance',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Finance record deletion activity'
-      });
-      
       toast.success('Transaction deleted successfully');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/finance/${id}`);
@@ -509,7 +492,7 @@ export function Finance() {
         hotelId: hotel.id,
         module: 'Finance',
         action: 'RECEIVE_PO',
-        details: `Marked PO #${(po.id || '').slice(0, 8)} as received`
+        details: `Marked PO #${(po.id || '').slice(0, 8)} as received and updated inventory`
       });
 
       // Update inventory for each item
@@ -529,23 +512,6 @@ export function Finance() {
           });
         }
       }
-
-      // Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
-        action: 'INVENTORY_PO_RECEIVED',
-        resource: `PO #${(po.id || '').slice(0, 8)} received, inventory updated`,
-        hotelId: hotel.id,
-        module: 'Inventory'
-      }, {
-        hotelId: hotel.id,
-        module: 'Inventory',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'PO received activity log'
-      });
 
       toast.success('Purchase Order received and inventory updated');
     } catch (err) {
@@ -596,25 +562,8 @@ export function Finance() {
       }, {
         hotelId: hotel.id,
         module: 'Finance',
-        action: 'RECORD_EXPENSE',
-        details: `Recorded PO payment expense for ${supplier?.name || 'Supplier'}`
-      });
-
-      // Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
         action: 'FINANCE_PO_PAID',
-        resource: `PO #${(po.id || '').slice(0, 8)} paid (${formatCurrency(po.totalAmount, currency, exchangeRate)})`,
-        hotelId: hotel.id,
-        module: 'Finance'
-      }, {
-        hotelId: hotel.id,
-        module: 'Finance',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'PO paid activity log'
+        details: `Recorded payment for PO #${(po.id || '').slice(0, 8)} to ${supplier?.name || 'Supplier'}`
       });
 
       toast.success('Purchase Order marked as paid and finance record created');
@@ -721,25 +670,8 @@ export function Finance() {
       }, {
         hotelId: hotel.id,
         module: 'Finance',
-        action: 'CREATE_FINANCE_RECORD',
-        details: `Created ${newRecord.type} record: ${newRecord.description}`
-      });
-
-      // Log action
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
         action: 'FINANCE_RECORD_CREATED',
-        resource: `${newRecord.type.toUpperCase()}: ${newRecord.description} (${formatCurrency(newRecord.amount, currency, exchangeRate)})`,
-        hotelId: hotel.id,
-        module: 'Finance'
-      }, {
-        hotelId: hotel.id,
-        module: 'Finance',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Finance record creation activity'
+        details: `Created ${newRecord.type} record: ${newRecord.description} (${formatCurrency(newRecord.amount, currency, exchangeRate)})`
       });
 
       setShowAddModal(false);

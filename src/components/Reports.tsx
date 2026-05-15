@@ -78,6 +78,7 @@ export function Reports() {
   const [inventory, setInventory] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<{ id: string; collection: string; label: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -102,14 +103,15 @@ export function Reports() {
         const allEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
         
         // Fetch all other data needed for reports
-        const [rSnap, gSnap, cSnap, fSnap, iSnap, aSnap, sSnap] = await Promise.all([
+        const [rSnap, gSnap, cSnap, fSnap, iSnap, aSnap, sSnap, staffSnap] = await Promise.all([
           getDocs(collection(db, 'hotels', hotel.id, 'reservations')),
           getDocs(collection(db, 'hotels', hotel.id, 'guests')),
           getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts')),
           getDocs(collection(db, 'hotels', hotel.id, 'finance')),
           getDocs(collection(db, 'hotels', hotel.id, 'inventory')),
           getDocs(collection(db, 'hotels', hotel.id, 'accounts')),
-          getDocs(collection(db, 'hotels', hotel.id, 'suppliers'))
+          getDocs(collection(db, 'hotels', hotel.id, 'suppliers')),
+          getDocs(collection(db, 'hotels', hotel.id, 'staff'))
         ]);
 
         const allReservations = rSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
@@ -120,6 +122,7 @@ export function Reports() {
         const allInventory = iSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const allAccounts = aSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const allSuppliers = sSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const allStaff = staffSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         setReservations(allReservations);
         setRooms(allRooms);
@@ -129,6 +132,7 @@ export function Reports() {
         setInventory(allInventory);
         setAccounts(allAccounts);
         setSuppliers(allSuppliers);
+        setStaff(allStaff);
 
         const filteredEntries = allEntries.filter(entry => {
           const entryDate = new Date(entry.timestamp);
@@ -225,8 +229,9 @@ export function Reports() {
         case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
         case 'daily_sales': return ['Date', 'Room Revenue', 'F & B', 'Other', 'Total'];
         case 'monthly_sales': return ['Month', 'Room Revenue', 'F & B', 'Other', 'Total'];
-        case 'payments': return ['Date', 'Guest', 'Method', 'Description', 'Amount', 'Recorded By'];
-        case 'balance': return ['Guest Name', 'Room', 'Total Charges', 'Total Paid', 'Balance'];
+        case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
+        case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Transaction ID'];
+        case 'balance': return ['Guest Name', 'Room', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
         case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Total Spent'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
@@ -333,32 +338,60 @@ export function Reports() {
       case 'payments': {
         return ledgerEntries
           .filter(e => e.category === 'payment' && e.type === 'credit')
-          .map(e => ({
-            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
-            Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
-            Method: e.description.split('via ')[1] || 'Cash',
-            Description: e.description,
-            Amount: e.amount,
-            _recordedBy: e.postedBy, // For internal sorting if needed
-            'Recorded By': e.postedBy,
-            _id: e.id,
-            _collection: 'ledger',
-            _label: `Payment: ${e.description}`
-          }));
+          .map(e => {
+            const res = reservations.find(r => r.id === e.reservationId);
+            const staffMember = staff.find(s => s.id === e.postedBy);
+            return {
+              Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+              Guest: res?.guestName || 'Unknown',
+              Room: res?.roomNumber || 'N/A',
+              Method: e.description.split('via ')[1] || 'Cash',
+              Reference: (res?.id || '').slice(-6).toUpperCase(),
+              Amount: e.amount,
+              'Recorded By': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
+              'User Role': staffMember?.role || 'Staff',
+              'Transaction ID': e.id,
+              _id: e.id,
+              _collection: 'ledger',
+              _label: `Payment: ${e.description}`
+            };
+          });
+      }
+      case 'staff_payments': {
+        return ledgerEntries
+          .filter(e => e.category === 'payment' && e.type === 'credit')
+          .map(e => {
+            const res = reservations.find(r => r.id === e.reservationId);
+            const staffMember = staff.find(s => s.id === e.postedBy);
+            return {
+              'Staff Name': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
+              'User Role': staffMember?.role || 'Staff',
+              Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+              Guest: res?.guestName || 'Unknown',
+              Room: res?.roomNumber || 'N/A',
+              Amount: e.amount,
+              Method: e.description.split('via ')[1] || 'Cash',
+              'Transaction ID': e.id,
+            };
+          });
       }
       case 'balance': {
         return reservations
           .filter(res => res.status === 'checked_in')
-          .map(res => ({
-            'Guest Name': res.guestName,
-            Room: res.roomNumber,
-            'Total Charges': res.totalAmount,
-            'Total Paid': res.paidAmount || 0,
-            Balance: res.totalAmount - (res.paidAmount || 0),
-            _id: res.id,
-            _collection: 'reservations',
-            _label: `Balance Record: ${res.guestName}`
-          }));
+          .map(res => {
+            const guest = guests.find(g => g.id === res.guestId);
+            return {
+              'Guest Name': res.guestName,
+              Room: res.roomNumber,
+              Phone: guest?.phone || 'N/A',
+              'Total Charges': res.totalAmount,
+              'Total Paid': res.paidAmount || 0,
+              Balance: res.totalAmount - (res.paidAmount || 0),
+              _id: res.id,
+              _collection: 'reservations',
+              _label: `Balance Record: ${res.guestName}`
+            };
+          });
       }
       case 'rooms': {
         return rooms.map(room => {

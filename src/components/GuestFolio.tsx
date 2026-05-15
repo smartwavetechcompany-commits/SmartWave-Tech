@@ -516,6 +516,54 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
           </div>
 
+          {/* Financial Summary Breakdown */}
+          <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
+            <div className="flex items-center gap-3 mb-6">
+              <History size={18} className="text-emerald-500" />
+              <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {Object.entries(
+                displayedEntries.reduce((acc: any, entry) => {
+                  const cat = entry.category || 'Other';
+                  if (!acc[cat]) acc[cat] = { debit: 0, credit: 0 };
+                  if (entry.type === 'debit') acc[cat].debit += entry.amount;
+                  else acc[cat].credit += entry.amount;
+                  return acc;
+                }, {
+                  room: !hasRoomChargeInLedger ? { debit: currentReservation.totalAmount || 0, credit: 0 } : { debit: 0, credit: 0 }
+                })
+              ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
+                <div key={cat} className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-2">{cat.replace('_', ' ')}</p>
+                  <div className="space-y-1">
+                    {totals.debit > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-500">Charges</span>
+                        <span className="text-red-400 font-bold">{formatCurrency(totals.debit, currency, exchangeRate)}</span>
+                      </div>
+                    )}
+                    {totals.credit > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-500">Paid/Restored</span>
+                        <span className="text-emerald-400 font-bold">{formatCurrency(totals.credit, currency, exchangeRate)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-xs pt-1 mt-1 border-t border-zinc-800/50">
+                      <span className="text-zinc-400 font-medium">Net</span>
+                      <span className={cn(
+                        "font-black",
+                        (totals.debit - totals.credit) > 0 ? "text-zinc-50" : "text-emerald-400"
+                      )}>
+                        {formatCurrency(Math.abs(totals.debit - totals.credit), currency, exchangeRate)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Guest & Stay Info */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">

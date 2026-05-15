@@ -40,6 +40,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
 import { roomService } from '../services/roomService';
+import { getRoomDisplayStatus } from '../utils/roomUtils';
 
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1870,87 +1871,89 @@ export function Rooms() {
               <p>No rooms found matching your filters</p>
             </div>
           ) : (
-            filteredRooms.map((room) => (
-            <motion.div
-              layout
-              key={room.id}
-              onClick={() => toggleRoomSelection(room.id)}
-              className={cn(
-                "aspect-square rounded-xl border-2 p-4 flex flex-col justify-between transition-all group relative overflow-hidden cursor-pointer",
-                room.status ? statusColors[room.status] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5',
-                selectedRooms.includes(room.id) && "ring-2 ring-emerald-500 ring-offset-4 ring-offset-zinc-950 scale-[0.98]"
-              )}
-            >
-              {selectedRooms.includes(room.id) && (
-                <div className="absolute top-2 right-2 bg-emerald-500 text-black rounded-full p-0.5 z-10">
-                  <CheckCircle2 size={12} />
-                </div>
-              )}
-              <div className="flex justify-between items-start">
-                <div className="flex flex-col">
-                  <span className="text-xl font-bold font-mono tracking-tight">{room.roomNumber}</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 truncate max-w-[100px]">{room.type}</span>
-                </div>
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
-                    <div className="flex gap-1">
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
-                        className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/5"
-                        title="Edit Room Details"
-                      >
-                        <Edit2 size={12} />
-                      </button>
-                      <button 
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setSelectedRoomForBlocking(room.id);
-                          setIsManagingBlockings(true);
-                        }} 
-                        className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400 border border-white/5"
-                        title="Block Room / Maintenance"
-                      >
-                        <Wrench size={12} />
-                      </button>
+            filteredRooms.map((room) => {
+              const displayStatus = getRoomDisplayStatus(room, reservations, blockings);
+              return (
+                <motion.div
+                  layout
+                  key={room.id}
+                  onClick={() => toggleRoomSelection(room.id)}
+                  className={cn(
+                    "aspect-square rounded-xl border-2 p-4 flex flex-col justify-between transition-all group relative overflow-hidden cursor-pointer",
+                    displayStatus ? statusColors[displayStatus] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5',
+                    selectedRooms.includes(room.id) && "ring-2 ring-emerald-500 ring-offset-4 ring-offset-zinc-950 scale-[0.98]"
+                  )}
+                >
+                  {selectedRooms.includes(room.id) && (
+                    <div className="absolute top-2 right-2 bg-emerald-500 text-black rounded-full p-0.5 z-10">
+                      <CheckCircle2 size={12} />
                     </div>
-                    
-                    <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                      {(['clean', 'dirty', 'maintenance'] as const).map(s => (
-                        <button
-                          key={s}
-                          onClick={(e) => { e.stopPropagation(); updateStatus(room.id, s); }}
-                          className={cn(
-                            "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter transition-all border",
-                            room.status === s ? "bg-white/20 border-white/20" : "bg-white/5 border-transparent opacity-40 hover:opacity-100"
-                          )}
-                        >
-                          {s[0]}
-                        </button>
-                      ))}
+                  )}
+                  <div className="flex justify-between items-start">
+                    <div className="flex flex-col">
+                      <span className="text-xl font-bold font-mono tracking-tight">{room.roomNumber}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 truncate max-w-[100px]">{room.type}</span>
                     </div>
-                  </div>
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <div className={cn(
-                      "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border shadow-sm",
-                      room.status === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
-                      room.status === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
-                      room.status === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
-                      room.status === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
-                      "bg-zinc-800 border-zinc-700 text-zinc-400"
-                    )}>
-                      {room.status.replace('_', ' ')}
-                    </div>
-                    {isRoomBlocked(room.id) && (
-                      <div className="bg-red-500 text-white rounded px-1.5 py-0.5 text-[8px] font-black tracking-tighter flex items-center gap-1 shadow-lg animate-pulse" title="Room IS BLOCKED FOR MAINTENANCE">
-                        <AlertCircle size={8} /> BLOCKED
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
+                        <div className="flex gap-1">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
+                            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/5"
+                            title="Edit Room Details"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setSelectedRoomForBlocking(room.id);
+                              setIsManagingBlockings(true);
+                            }} 
+                            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400 border border-white/5"
+                            title="Block Room / Maintenance"
+                          >
+                            <Wrench size={12} />
+                          </button>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-1 mt-1 justify-end">
+                          {(['clean', 'dirty', 'maintenance'] as const).map(s => (
+                            <button
+                              key={s}
+                              onClick={(e) => { e.stopPropagation(); updateStatus(room.id, s); }}
+                              className={cn(
+                                "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter transition-all border",
+                                room.status === s ? "bg-white/20 border-white/20" : "bg-white/5 border-transparent opacity-40 hover:opacity-100"
+                              )}
+                            >
+                              {s[0]}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    )}
                   </div>
-                  <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
-                </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <div className={cn(
+                          "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border shadow-sm",
+                          displayStatus === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
+                          displayStatus === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
+                          displayStatus === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
+                          displayStatus === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
+                          "bg-zinc-800 border-zinc-700 text-zinc-400"
+                        )}>
+                          {displayStatus.replace('_', ' ')}
+                        </div>
+                        {isRoomBlocked(room.id) && (
+                          <div className="bg-red-500 text-white rounded px-1.5 py-0.5 text-[8px] font-black tracking-tighter flex items-center gap-1 shadow-lg animate-pulse" title="Room IS BLOCKED FOR MAINTENANCE">
+                            <AlertCircle size={8} /> BLOCKED
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
+                    </div>
 
                 {room.amenities && room.amenities.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
@@ -1974,8 +1977,10 @@ export function Rooms() {
                 )}
               </div>
             </motion.div>
-          )))}
-        </div>
+          );
+        })
+      )}
+    </div>
       ) : view === 'list' ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <table className="w-full text-left">
@@ -2002,7 +2007,9 @@ export function Rooms() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredRooms.map((room) => (
+              {filteredRooms.map((room) => {
+                const displayStatus = getRoomDisplayStatus(room, reservations, blockings);
+              return (
                 <tr key={room.id} className="hover:bg-zinc-800/50 transition-colors group">
                   <td className="px-6 py-4">
                     <input 
@@ -2018,11 +2025,11 @@ export function Rooms() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <select 
-                        value={room.status}
+                        value={displayStatus}
                         onChange={(e) => updateStatus(room.id, e.target.value as any)}
                         className={cn(
                           "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border bg-transparent focus:outline-none cursor-pointer",
-                          statusColors[room.status]
+                          statusColors[displayStatus]
                         )}
                       >
                         <option value="clean" className="bg-zinc-900">Clean</option>
@@ -2083,7 +2090,8 @@ export function Rooms() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
         </div>
