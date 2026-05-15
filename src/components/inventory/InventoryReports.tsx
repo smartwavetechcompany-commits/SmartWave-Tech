@@ -82,19 +82,27 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-zinc-900/50 p-6 rounded-3xl border border-zinc-800">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 p-1 rounded-xl">
-            <input
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="bg-transparent text-xs text-zinc-400 font-bold px-3 py-2 focus:outline-none"
-            />
+            <div className="relative flex items-center gap-1">
+              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <input
+                type="date"
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-2 focus:outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
             <span className="text-zinc-600 text-xs">to</span>
-            <input
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="bg-transparent text-xs text-zinc-400 font-bold px-3 py-2 focus:outline-none"
-            />
+            <div className="relative flex items-center gap-1">
+              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <input
+                type="date"
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-2 focus:outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
           </div>
         </div>
         <div className="flex gap-3">

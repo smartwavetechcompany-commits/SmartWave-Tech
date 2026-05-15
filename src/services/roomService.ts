@@ -24,6 +24,7 @@ export const roomService = {
   async blockRoom(hotelId: string, blocking: Omit<RoomBlocking, 'id' | 'timestamp'>) {
     const blockingRef = collection(db, 'hotels', hotelId, 'room_blockings');
     
+    // Create the blocking record
     const docRef = await database.safeAdd(blockingRef as any, {
       ...blocking,
       timestamp: new Date().toISOString()
@@ -35,17 +36,25 @@ export const roomService = {
     });
     
     // Update room status if blocking is current
-    const now = new Date().toISOString();
-    if (blocking.startDate <= now && blocking.endDate >= now) {
-      const roomRef = doc(db, 'hotels', hotelId, 'rooms', blocking.roomId);
-      await database.safeUpdate(roomRef, { 
-        status: blocking.reason === 'maintenance' ? 'maintenance' : 'out_of_order' 
-      }, {
-        hotelId,
-        module: 'Rooms',
-        action: 'UPDATE_ROOM_STATUS',
-        details: `Updated room ${blocking.roomId} status due to blocking`
-      });
+    // Use date strings for comparison to avoid time-of-day issues
+    const today = new Date().toISOString().split('T')[0];
+    const isCurrent = blocking.startDate <= today && blocking.endDate >= today;
+    
+    if (isCurrent) {
+      try {
+        const roomRef = doc(db, 'hotels', hotelId, 'rooms', blocking.roomId);
+        await database.safeUpdate(roomRef, { 
+          status: blocking.reason === 'maintenance' ? 'maintenance' : 'out_of_order' 
+        }, {
+          hotelId,
+          module: 'Rooms',
+          action: 'UPDATE_ROOM_STATUS',
+          details: `Updated room ${blocking.roomId} status due to active blocking`
+        });
+      } catch (statusError) {
+        // Log but don't fail the whole block operation if only status update fails
+        console.error("Failed to update room status for blocking:", statusError);
+      }
     }
     
     return docRef.id;
@@ -61,13 +70,17 @@ export const roomService = {
     });
     
     // Reset room status to dirty so it needs cleaning before booking
-    const roomRef = doc(db, 'hotels', hotelId, 'rooms', roomId);
-    await database.safeUpdate(roomRef, { status: 'dirty' }, {
-      hotelId,
-      module: 'Rooms',
-      action: 'RESET_ROOM_STATUS',
-      details: `Reset room ${roomId} to dirty after unblocking`
-    });
+    try {
+      const roomRef = doc(db, 'hotels', hotelId, 'rooms', roomId);
+      await database.safeUpdate(roomRef, { status: 'dirty' }, {
+        hotelId,
+        module: 'Rooms',
+        action: 'RESET_ROOM_STATUS',
+        details: `Reset room ${roomId} to dirty after unblocking`
+      });
+    } catch (statusError) {
+      console.error("Failed to reset room status after unblocking:", statusError);
+    }
   },
 
   isRoomBlocked(roomBlockings: RoomBlocking[], roomId: string, date: Date | string): boolean {

@@ -2922,20 +2922,27 @@ export function FrontDesk() {
               </select>
 
               <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
-                <Calendar size={14} className="text-zinc-500" />
-                <input 
-                  type="date"
-                  className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
-                  value={dateRange.start}
-                  onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                />
+                <div className="flex items-center gap-1">
+                  <Calendar size={14} className="text-emerald-500" />
+                  <input 
+                    type="date"
+                    className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
+                    style={{ colorScheme: 'dark' }}
+                    value={dateRange.start}
+                    onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                  />
+                </div>
                 <span className="text-zinc-500 text-[10px]">-</span>
-                <input 
-                  type="date"
-                  className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
-                  value={dateRange.end}
-                  onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                />
+                <div className="flex items-center gap-1">
+                  <Calendar size={14} className="text-emerald-500" />
+                  <input 
+                    type="date"
+                    className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
+                    style={{ colorScheme: 'dark' }}
+                    value={dateRange.end}
+                    onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 h-full">

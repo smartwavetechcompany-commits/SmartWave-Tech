@@ -297,19 +297,27 @@ export function Maintenance() {
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
-            <input
-              type="date"
-              value={reportFilter.startDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            />
+            <div className="relative flex items-center gap-1">
+              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <input
+                type="date"
+                value={reportFilter.startDate}
+                onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+                className="bg-transparent text-[10px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
             <span className="text-zinc-600 text-[10px]">to</span>
-            <input
-              type="date"
-              value={reportFilter.endDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            />
+            <div className="relative flex items-center gap-1">
+              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <input
+                type="date"
+                value={reportFilter.endDate}
+                onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+                className="bg-transparent text-[10px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
             <div className="w-px h-4 bg-zinc-800" />
             <select
               value={reportFilter.status}

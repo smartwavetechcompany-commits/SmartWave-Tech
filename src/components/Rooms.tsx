@@ -96,6 +96,7 @@ export function Rooms() {
   const [isManagingRates, setIsManagingRates] = useState(false);
   const [editingRateConfig, setEditingRateConfig] = useState<any>(null);
   const [isManagingConsumptionRules, setIsManagingConsumptionRules] = useState(false);
+  const [isBlockingRoom, setIsBlockingRoom] = useState(false);
   const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
   const [rateConfigs, setRateConfigs] = useState<any[]>([]);
   const [consumptionRules, setConsumptionRules] = useState<InventoryConsumptionRule[]>([]);
@@ -1059,6 +1060,8 @@ export function Rooms() {
                 <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">New Blocking</h4>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
+                  if (isBlockingRoom) return;
+                  
                   const formData = new FormData(e.currentTarget);
                   const roomId = formData.get('roomId') as string;
                   const startDate = formData.get('startDate') as string;
@@ -1067,13 +1070,15 @@ export function Rooms() {
                   const notes = formData.get('notes') as string;
 
                   if (!hotel?.id || !profile?.uid) return;
+                  setIsBlockingRoom(true);
+                  
                   try {
                     const data: any = {
                       roomId,
                       startDate,
                       endDate,
                       reason,
-                      notes,
+                      notes: notes || '',
                       blockedBy: profile.uid,
                       frequency: formData.get('frequency') || 'once',
                     };
@@ -1095,8 +1100,12 @@ export function Rooms() {
                     await roomService.blockRoom(hotel.id, data);
                     toast.success('Room blocked successfully');
                     e.currentTarget.reset();
-                  } catch (err) {
+                  } catch (err: any) {
+                    console.error("Room blocking error:", err);
+                    handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/room_blockings`);
                     toast.error('Failed to block room');
+                  } finally {
+                    setIsBlockingRoom(false);
                   }
                 }} className="space-y-4">
                   <div>
@@ -1114,11 +1123,29 @@ export function Rooms() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Start Date</label>
-                      <input name="startDate" type="date" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                      <div className="relative">
+                        <input 
+                          name="startDate" 
+                          type="date" 
+                          required 
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
+                          style={{ colorScheme: 'dark' }}
+                        />
+                        <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
+                      </div>
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">End Date</label>
-                      <input name="endDate" type="date" required className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none" />
+                      <div className="relative">
+                        <input 
+                          name="endDate" 
+                          type="date" 
+                          required 
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
+                          style={{ colorScheme: 'dark' }}
+                        />
+                        <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
+                      </div>
                     </div>
                   </div>
 
@@ -1173,8 +1200,19 @@ export function Rooms() {
                     <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
                     <textarea name="notes" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20" />
                   </div>
-                  <button type="submit" className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95">
-                    Block Room
+                  <button 
+                    type="submit" 
+                    disabled={isBlockingRoom}
+                    className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {isBlockingRoom ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                        <span>Blocking...</span>
+                      </>
+                    ) : (
+                      'Block Room'
+                    )}
                   </button>
                 </form>
               </div>
@@ -1194,7 +1232,9 @@ export function Rooms() {
                             try {
                               await roomService.unblockRoom(hotel.id, b.id, b.roomId);
                               toast.success('Room unblocked successfully');
-                            } catch (err) {
+                            } catch (err: any) {
+                              console.error("Unblock error:", err);
+                              handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/room_blockings/${b.id}`);
                               toast.error('Failed to unblock room');
                             }
                           }

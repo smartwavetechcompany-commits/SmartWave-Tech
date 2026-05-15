@@ -1187,15 +1187,19 @@ export function SuperAdmin() {
               <div className="pt-4 border-t border-zinc-800">
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Manually Set Expiry Date</label>
                 <div className="flex gap-2">
-                  <input 
-                    type="date"
-                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm"
-                    value={customExpiryDate}
-                    onChange={(e) => setCustomExpiryDate(e.target.value)}
-                  />
+                  <div className="relative flex-1">
+                    <input 
+                      type="date"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-3 pr-10 py-2 text-zinc-50 text-sm appearance-none"
+                      style={{ colorScheme: 'dark' }}
+                      value={customExpiryDate}
+                      onChange={(e) => setCustomExpiryDate(e.target.value)}
+                    />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
+                  </div>
                   <button 
                     onClick={() => extendTrackingCode(extendingCode, 'custom')}
-                    className="bg-emerald-500 text-black px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-400 transition-all active:scale-95"
+                    className="bg-emerald-500 text-black px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-400 transition-all active:scale-95 whitespace-nowrap"
                   >
                     Set
                   </button>

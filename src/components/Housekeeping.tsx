@@ -403,24 +403,30 @@ export function Housekeeping() {
             ))}
           </select>
 
-          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 relative">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">From:</span>
-            <input 
-              type="date"
-              className="bg-transparent text-xs text-white outline-none appearance-none"
-              style={{ colorScheme: 'dark' }}
-              value={dateRange.start}
-              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-            />
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">To:</span>
-            <input 
-              type="date"
-              className="bg-transparent text-xs text-white outline-none appearance-none"
-              style={{ colorScheme: 'dark' }}
-              value={dateRange.end}
-              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-            />
-            <Calendar size={16} className="text-emerald-500 pointer-events-none" />
+          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+            <div className="flex items-center gap-1.5">
+              <Calendar size={14} className="text-emerald-500" />
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">From:</span>
+              <input 
+                type="date"
+                className="bg-transparent text-xs text-white outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+                value={dateRange.start}
+                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+              />
+            </div>
+            <div className="w-px h-3 bg-zinc-800" />
+            <div className="flex items-center gap-1.5">
+              <Calendar size={14} className="text-emerald-500" />
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">To:</span>
+              <input 
+                type="date"
+                className="bg-transparent text-xs text-white outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+                value={dateRange.end}
+                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+              />
+            </div>
             {(dateRange.start || dateRange.end) && (
               <button 
                 onClick={() => setDateRange({ start: '', end: '' })}

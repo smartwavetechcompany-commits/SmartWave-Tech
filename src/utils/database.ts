@@ -90,7 +90,7 @@ export const database = {
   async safeSet<T extends DocumentData>(
     docRef: DocumentReference<T>, 
     data: Partial<T>, 
-    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
+    options: { hotelId: string; module: string; action: string; details: string; metadata?: any; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       // Production guard: Always default to merge: true to prevent accidental overwrites
@@ -99,10 +99,11 @@ export const database = {
         updatedAt: serverTimestamp()
       }, { merge: true });
       
-      const cleanedMetadata = deepCloneSafe(data);
+      const cleanedData = deepCloneSafe(data);
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path,
-        data: cleanedMetadata
+        data: cleanedData,
+        ...(options.metadata || {})
       }, options.userContext);
       return { success: true, id: docRef.id };
     } catch (error) {
@@ -125,7 +126,7 @@ export const database = {
   async safeUpdate<T extends DocumentData>(
     docRef: DocumentReference<T>, 
     data: Partial<T>, 
-    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
+    options: { hotelId: string; module: string; action: string; details: string; metadata?: any; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       // Fetch old values for audit trail
@@ -143,12 +144,13 @@ export const database = {
         docPath: docRef.path,
         newData: cleanedNewData,
         oldData: cleanedOldData,
-        changes: oldData ? Object.keys(data).reduce((acc: any, key) => {
+        ...(options.metadata || {}),
+        changes: oldData && !options.metadata?.changes ? Object.keys(data).reduce((acc: any, key) => {
           if (JSON.stringify(oldData[key]) !== JSON.stringify((data as any)[key])) {
             acc[key] = { from: oldData[key], to: (data as any)[key] };
           }
           return acc;
-        }, {}) : 'New document fields'
+        }, {}) : (options.metadata?.changes || 'New document fields')
       }, options.userContext);
       return { success: true };
     } catch (error) {
@@ -171,7 +173,7 @@ export const database = {
   async safeAdd<T extends DocumentData>(
     colRef: CollectionReference<T>, 
     data: T, 
-    options: { hotelId: string; module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
+    options: { hotelId: string; module: string; action: string; details: string; metadata?: any; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       const docRef = await addDoc(colRef, {
@@ -179,11 +181,12 @@ export const database = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      const cleanedMetadata = deepCloneSafe(data);
+      const cleanedData = deepCloneSafe(data);
       await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docId: docRef.id,
         colPath: colRef.path,
-        data: cleanedMetadata
+        data: cleanedData,
+        ...(options.metadata || {})
       }, options.userContext);
       return docRef;
     } catch (error) {

@@ -28,11 +28,14 @@ import {
   XCircle,
   ShoppingCart,
   PlusCircle,
+  Calendar,
   Trash2,
   Minus,
   Edit2,
   DollarSign,
-  X
+  X,
+  AlertTriangle,
+  ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
@@ -641,19 +644,27 @@ export function FandB() {
               <option value="other">Other Only</option>
             </select>
             <div className="w-px h-4 bg-zinc-800" />
-            <input
-              type="date"
-              value={reportFilter.startDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
-              className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            />
+            <div className="relative flex items-center gap-1">
+              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <input
+                type="date"
+                value={reportFilter.startDate}
+                onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+                className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
             <span className="text-zinc-600 text-xs">-</span>
-            <input
-              type="date"
-              value={reportFilter.endDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
-              className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            />
+            <div className="relative flex items-center gap-1">
+              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <input
+                type="date"
+                value={reportFilter.endDate}
+                onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+                className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
           </div>
           <button 
             onClick={handleExport}

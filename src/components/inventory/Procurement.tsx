@@ -462,13 +462,17 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Expected Delivery Date</label>
-                    <input
-                      required
-                      type="date"
-                      value={poForm.dueDate}
-                      onChange={(e) => setPoForm({ ...poForm, dueDate: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
-                    />
+                    <div className="relative">
+                      <input
+                        required
+                        type="date"
+                        value={poForm.dueDate}
+                        onChange={(e) => setPoForm({ ...poForm, dueDate: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-4 pr-10 py-3 text-white focus:outline-none focus:border-emerald-500/50 appearance-none"
+                        style={{ colorScheme: 'dark' }}
+                      />
+                      <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
+                    </div>
                   </div>
                 </div>
 

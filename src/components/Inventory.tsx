@@ -4,7 +4,8 @@ import {
   Edit2, Trash2, AlertTriangle, CheckCircle2, 
   TrendingUp, TrendingDown, History, ShoppingCart,
   Users, ClipboardCheck, BarChart3, LayoutDashboard,
-  Box, Layers, ArrowRight, Download, Building2
+  Box, Layers, ArrowRight, Download, Building2,
+  Calendar
 } from 'lucide-react';
 import { 
   InventoryItem, InventoryTransaction, InventoryCategory, 
@@ -149,9 +150,15 @@ export function Inventory() {
         
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400">
-            <input type="date" className="bg-transparent outline-none" defaultValue="2026-04-01" />
+            <div className="flex items-center gap-1.5">
+              <Calendar size={14} className="text-emerald-500" />
+              <input type="date" className="bg-transparent outline-none appearance-none" style={{ colorScheme: 'dark' }} defaultValue="2026-04-01" />
+            </div>
             <span>to</span>
-            <input type="date" className="bg-transparent outline-none" defaultValue="2026-04-12" />
+            <div className="flex items-center gap-1.5">
+              <Calendar size={14} className="text-emerald-500" />
+              <input type="date" className="bg-transparent outline-none appearance-none" style={{ colorScheme: 'dark' }} defaultValue="2026-04-12" />
+            </div>
           </div>
           <select className="bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400 outline-none">
             <option>All Categories</option>
