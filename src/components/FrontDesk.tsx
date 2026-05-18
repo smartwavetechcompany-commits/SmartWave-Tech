@@ -35,6 +35,7 @@ import {
   PlusCircle,
   Banknote,
   X,
+  MoreVertical,
   Filter,
   TrendingUp,
   ArrowDownRight
@@ -2970,46 +2971,47 @@ export function FrontDesk() {
                       </td>
                       <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {res.status === 'pending' && (
+                            <button 
+                              onClick={() => updateReservationStatus(res, 'checked_in')}
+                              className="px-2 py-1 bg-emerald-500 text-black rounded-lg text-[10px] font-black uppercase tracking-tighter hover:bg-emerald-400 transition-all active:scale-95"
+                            >
+                              Check In
+                            </button>
+                          )}
+                          {res.status === 'checked_in' && (
+                            <button 
+                              onClick={() => updateReservationStatus(res, 'checked_out')}
+                              className="px-2 py-1 bg-amber-500 text-black rounded-lg text-[10px] font-black uppercase tracking-tighter hover:bg-amber-400 transition-all active:scale-95"
+                            >
+                              Check Out
+                            </button>
+                          )}
+
                           <button 
                             onClick={() => setShowFolioModal(res)}
-                            className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
+                            className="p-1.5 sm:p-2 text-zinc-500 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
                             title="Folio"
                           >
                             <Receipt size={14} className="sm:size-18" />
                           </button>
                           
-                          <div className="relative group/actions inline-block">
+                          <div className="relative group inline-block text-left">
                             <button className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all">
-                              <Info size={14} className="sm:size-18" />
+                              <MoreVertical size={14} className="sm:size-18" />
                             </button>
-                            <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl opacity-0 invisible group-hover/actions:opacity-100 group-hover/actions:visible transition-all z-[100] overflow-hidden divide-y divide-zinc-800">
-                              {res.status === 'pending' && (
-                                <button 
-                                  onClick={() => updateReservationStatus(res, 'checked_in')}
-                                  className="w-full text-left px-4 py-3 text-xs font-bold text-emerald-500 hover:bg-emerald-500/10 transition-all flex items-center gap-2"
-                                >
-                                  <CheckCircle2 size={14} /> Check In
-                                </button>
-                              )}
-                              {res.status === 'checked_in' && (
-                                <button 
-                                  onClick={() => updateReservationStatus(res, 'checked_out')}
-                                  className="w-full text-left px-4 py-2 text-xs font-bold text-amber-500 hover:bg-amber-500/10 transition-all flex items-center gap-2"
-                                >
-                                  <LogOut size={14} /> Check Out
-                                </button>
-                              )}
+                            <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-[100] overflow-hidden divide-y divide-zinc-800">
                               <button 
                                 onClick={() => setShowChargeModal(res)}
-                                className="w-full text-left px-4 py-2 text-xs font-bold text-blue-500 hover:bg-blue-500/10 transition-all flex items-center gap-2"
+                                className="w-full text-left px-4 py-2.5 text-[10px] font-bold text-blue-400 hover:bg-blue-500/10 transition-all flex items-center gap-2 uppercase tracking-wider"
                               >
                                 <Plus size={14} /> Charge Room
                               </button>
                               <button 
                                 onClick={() => setShowTransferModal(res)}
-                                className="w-full text-left px-4 py-2 text-xs font-bold text-zinc-400 hover:bg-zinc-800 transition-all flex items-center gap-2"
+                                className="w-full text-left px-4 py-2.5 text-[10px] font-bold text-zinc-400 hover:bg-zinc-800 transition-all flex items-center gap-2 uppercase tracking-wider"
                               >
-                                <RefreshCw size={14} /> Transfer Room
+                                <RefreshCw size={14} /> Move Guest
                               </button>
                               <button 
                                 onClick={() => {
@@ -3021,9 +3023,15 @@ export function FrontDesk() {
                                     notes: res.notes || ''
                                   });
                                 }}
-                                className="w-full text-left px-4 py-2 text-xs font-bold text-zinc-400 hover:bg-zinc-800 transition-all flex items-center gap-2"
+                                className="w-full text-left px-4 py-2.5 text-[10px] font-bold text-zinc-400 hover:bg-zinc-800 transition-all flex items-center gap-2 uppercase tracking-wider"
                               >
                                 <Edit2 size={14} /> Edit Booking
+                              </button>
+                              <button 
+                                onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
+                                className="w-full text-left px-4 py-2.5 text-[10px] font-bold text-red-500 hover:bg-red-500/10 transition-all flex items-center gap-2 uppercase tracking-wider"
+                              >
+                                <XCircle size={14} /> Cancel
                               </button>
                             </div>
                           </div>
