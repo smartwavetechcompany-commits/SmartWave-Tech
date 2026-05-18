@@ -727,7 +727,7 @@ export function GuestManagement() {
                       </div>
                       <div className="text-right">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
-                        <div className="text-sm font-bold text-amber-500">{(guest as any).totalNights || 0}</div>
+                        <div className="text-sm font-bold text-amber-500">{((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
                       </div>
                     </div>
                   </div>
@@ -853,7 +853,11 @@ export function GuestManagement() {
                               <div className="text-[10px] text-zinc-500 flex items-center gap-1.5">
                                 {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
                                 <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded lowercase">
-                                  {differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn))} {differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn)) === 1 ? 'day' : 'days'}
+                                  {(() => {
+                                    const n = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
+                                    const d = n + 1;
+                                    return `${d} ${d === 1 ? 'day' : 'days'}`;
+                                  })()}
                                 </span>
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">

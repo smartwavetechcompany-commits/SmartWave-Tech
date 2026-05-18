@@ -3094,27 +3094,49 @@ export function FrontDesk() {
               <Clock size={10} className="text-zinc-600" />
               <span className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter">
                 {(() => {
-                  const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
-                  return `${nights} ${nights === 1 ? 'day' : 'days'}`;
+                  const checkIn = parseISO(res.checkIn);
+                  const checkOut = parseISO(res.checkOut);
+                  const today = startOfDay(new Date());
+                  
+                  let nights = differenceInDays(checkOut, checkIn);
+                  
+                  if (res.status === 'checked_in') {
+                    const nightsSoFar = differenceInDays(today, checkIn);
+                    if (nightsSoFar > nights) {
+                      nights = nightsSoFar;
+                    }
+                  }
+                  
+                  const days = nights + 1;
+                  return `${days} ${days === 1 ? 'day' : 'days'}`;
                 })()}
               </span>
             </div>
           </td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">
-                    <div>{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex flex-col">
+                      <span className="font-bold text-zinc-50">
+                        {formatCurrency(Math.max(res.totalAmount || 0, (res.ledgerBalance || 0) + (res.paidAmount || 0)), currency, exchangeRate)}
+                      </span>
+                      {res.status === 'checked_in' && (
+                        <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter mt-0.5">
+                          Daily Rate: {formatCurrency(res.nightlyRate || ((res.totalAmount || 0) / (differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn)) || 1)), currency, exchangeRate)}
+                        </span>
+                      )}
+                    </div>
                     <div className={cn(
-                      "text-[10px] font-bold uppercase flex items-center gap-1",
+                      "text-[10px] font-bold uppercase flex items-center gap-1 mt-1",
                       res.paymentStatus === 'paid' ? "text-emerald-500" :
                       res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
                     )}>
                       {res.paymentStatus} ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)})
-                      {res.status === 'pending' && res.paidAmount > 0 && (
-                        <span className="px-1 bg-emerald-500/20 text-emerald-500 rounded-[4px] text-[8px]">Deposit</span>
-                      )}
                     </div>
                     {res.guestId && (
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
+                      <div className={cn(
+                        "text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded border inline-block",
+                        (res.ledgerBalance || 0) > 0 ? "text-red-400 bg-red-500/5 border-red-500/10" : "text-emerald-400 bg-emerald-500/5 border-emerald-500/10"
+                      )}>
+                        Owed: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
                       </div>
                     )}
                   </td>

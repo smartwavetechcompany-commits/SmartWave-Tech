@@ -29,7 +29,7 @@ import {
   X
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify } from '../utils';
-import { format, addDays, startOfDay, isAfter } from 'date-fns';
+import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 
 interface GuestFolioProps {
@@ -711,6 +711,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
                     <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkOut), 'MMM d, yyyy')}</p>
                   </div>
+                </div>
+                <div className="pt-2 mt-2 border-t border-zinc-800/50">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1 flex items-center gap-1.5">
+                    <Clock size={10} />
+                    Current Duration
+                  </p>
+                  <p className="text-sm font-black text-amber-500 italic tracking-widest bg-amber-500/5 px-2 py-1 rounded inline-block border border-amber-500/10">
+                    {(() => {
+                      const checkIn = parseISO(currentReservation.checkIn);
+                      const checkOut = parseISO(currentReservation.checkOut);
+                      const today = startOfDay(new Date());
+                      
+                      let nights = differenceInDays(checkOut, checkIn);
+                      
+                      if (currentReservation.status === 'checked_in') {
+                        const nightsSoFar = differenceInDays(today, checkIn);
+                        if (nightsSoFar > nights) {
+                          nights = nightsSoFar;
+                        }
+                      }
+                      
+                      const days = nights + 1;
+                      return `${days} ${days === 1 ? 'DAY' : 'DAYS'} (${nights} ${nights === 1 ? 'NIGHT' : 'NIGHTS'})`;
+                    })()}
+                  </p>
                 </div>
               </div>
             </div>
