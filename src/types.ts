@@ -581,6 +581,7 @@ export interface Guest {
   creditLimit?: number;
   paymentTerms?: string;
   totalStays: number;
+  totalNights: number;
   totalSpent: number;
   lastStay?: string;
   stayHistory?: string[]; // Reservation IDs

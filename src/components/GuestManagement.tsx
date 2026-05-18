@@ -33,7 +33,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import Fuse from 'fuse.js';
-import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
+import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenceInDays, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -181,6 +181,7 @@ export function GuestManagement() {
         await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,
           totalStays: 0,
+          totalNights: 0,
           totalSpent: 0,
           ledgerBalance: 0,
           stayHistory: [],
@@ -705,22 +706,28 @@ export function GuestManagement() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Stays</div>
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Stay Count</div>
                       <div className="text-sm font-bold text-zinc-100">{guest.totalStays || 0}</div>
                     </div>
                     <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 text-right">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Value</div>
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Value</div>
                       <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
                     </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 text-right">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Balance</div>
-                      <div className={cn(
-                        "text-sm font-bold",
-                        (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
-                      )}>
-                        {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 col-span-2 flex justify-between items-center">
+                      <div>
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Outstanding</div>
+                        <div className={cn(
+                          "text-sm font-bold",
+                          (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                        )}>
+                          {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
+                        <div className="text-sm font-bold text-amber-500">{(guest as any).totalNights || 0}</div>
                       </div>
                     </div>
                   </div>
@@ -843,8 +850,11 @@ export function GuestManagement() {
                             </div>
                             <div>
                               <div className="text-xs font-bold text-zinc-50 leading-tight">Room {res.roomNumber}</div>
-                              <div className="text-[10px] text-zinc-500">
+                              <div className="text-[10px] text-zinc-500 flex items-center gap-1.5">
                                 {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
+                                <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded lowercase">
+                                  {differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn))} {differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn)) === 1 ? 'day' : 'days'}
+                                </span>
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <div className={cn(

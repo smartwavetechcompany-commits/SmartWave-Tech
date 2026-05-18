@@ -606,6 +606,7 @@ export function FrontDesk() {
             corporateId: newBooking.corporateId,
             ledgerBalance: 0,
             totalStays: 0,
+            totalNights: 0,
             totalSpent: 0,
             createdAt: new Date().toISOString()
           });
@@ -1390,8 +1391,10 @@ export function FrontDesk() {
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
+          const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
           await database.safeUpdate(guestRef, {
             totalStays: increment(1),
+            totalNights: increment(nights || 0),
             stayHistory: arrayUnion({
               reservationId: res.id,
               roomNumber: res.roomNumber,
@@ -3078,10 +3081,25 @@ export function FrontDesk() {
                       })()}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-xs text-zinc-400">
-                    <div className="flex items-center gap-1"><Clock size={12} /> {res.checkIn}</div>
-                    <div className="flex items-center gap-1 opacity-50"><Clock size={12} /> {res.checkOut}</div>
-                  </td>
+          <td className="px-6 py-4 text-xs text-zinc-400">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Calendar size={12} className="text-emerald-500" /> 
+              <span className="font-bold text-zinc-200">{res.checkIn}</span>
+            </div>
+            <div className="flex items-center gap-1.5 opacity-60">
+              <Calendar size={12} className="text-zinc-600" /> 
+              <span>{res.checkOut}</span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-1">
+              <Clock size={10} className="text-zinc-600" />
+              <span className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter">
+                {(() => {
+                  const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
+                  return `${nights} ${nights === 1 ? 'day' : 'days'}`;
+                })()}
+              </span>
+            </div>
+          </td>
                   <td className="px-6 py-4 text-sm text-zinc-400">
                     <div>{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
                     <div className={cn(
