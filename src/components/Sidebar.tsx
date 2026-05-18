@@ -6,6 +6,7 @@ import {
   CalendarDays, 
   Users, 
   ClipboardList, 
+  CheckCircle,
   ChefHat, 
   Settings, 
   LogOut,
@@ -18,7 +19,8 @@ import {
   Building2,
   Activity,
   Mail,
-  XCircle
+  XCircle,
+  X
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -29,7 +31,7 @@ import { toast } from 'sonner';
 
 import { useTranslation } from 'react-i18next';
 
-export function Sidebar() {
+export function Sidebar({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { profile, hotel, isSubscriptionActive, systemSettings, setSelectedHotelId } = useAuth();
@@ -44,11 +46,13 @@ export function Sidebar() {
     { icon: ChefHat, label: 'F & B', path: '/f-and-b', capability: null, module: 'kitchen' },
     { icon: Package, label: t('sidebar.inventory'), path: '/inventory', capability: null, module: 'inventory' },
     { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', capability: null, module: 'maintenance' },
+    { icon: CheckCircle, label: 'Tasks', path: '/tasks', capability: null, module: 'dashboard' },
     { icon: Users, label: t('sidebar.guests'), path: '/guests', capability: null, module: 'guests' },
     { icon: Building2, label: 'Corporate', path: '/corporate', capability: null, module: 'corporate' },
     { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'process_payments', module: 'finance' },
     { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports' },
     { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff' },
+    { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', capability: 'access_super_admin' },
     { icon: Settings, label: t('sidebar.settings'), path: '/settings', capability: null, module: 'settings' },
   ];
@@ -71,14 +75,22 @@ export function Sidebar() {
   });
 
   return (
-    <div className="w-64 bg-zinc-950 text-zinc-400 flex flex-col h-screen border-r border-zinc-800">
-      <div className="p-6">
+    <div className="w-60 bg-zinc-950 text-zinc-400 flex flex-col h-screen border-r border-zinc-800">
+      <div className="p-6 flex items-center justify-between">
         <h1 className="text-xl font-bold text-zinc-50 tracking-tighter flex items-center gap-2">
           <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black font-black text-xs">
             TT
           </div>
           Tyyl Tech
         </h1>
+        {onClose && (
+          <button 
+            onClick={onClose}
+            className="lg:hidden p-1 text-zinc-500 hover:text-zinc-50"
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto">

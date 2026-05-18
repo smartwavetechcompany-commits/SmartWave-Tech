@@ -361,14 +361,14 @@ export function GuestManagement() {
   }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder]);
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 sm:mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Guest Management</h1>
-          <p className="text-zinc-400">Manage guest profiles, history, and loyalty</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-1 sm:mb-2 tracking-tight">Guest Management</h1>
+          <p className="text-sm text-zinc-400">Manage guest profiles, history, and loyalty</p>
         </div>
-        <div className="flex gap-3">
-          <div className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+        <div className="flex flex-wrap gap-2 sm:gap-3">
+          <div className="hidden xl:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
             <div className="relative flex items-center gap-1">
               <Calendar size={12} className="text-emerald-500 ml-1" />
               <input
@@ -403,9 +403,9 @@ export function GuestManagement() {
           </div>
           <button
             onClick={exportGuests}
-            className="flex items-center gap-2 bg-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-50 px-3 sm:px-4 py-2 rounded-xl text-sm font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >
-            <Download size={18} />
+            <Download size={16} />
             <span className="hidden sm:inline">Export Report</span>
             <span className="sm:hidden">Export</span>
           </button>
@@ -427,112 +427,112 @@ export function GuestManagement() {
             });
             setShowAddModal(true);
           }}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-3 sm:px-4 py-2 rounded-xl text-sm font-medium transition-all active:scale-95"
         >
-          <Plus size={18} />
+          <Plus size={16} />
           Add Guest
         </button>
       </div>
     </div>
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 bg-zinc-800 rounded-xl text-zinc-400 group-hover:text-zinc-50 transition-colors">
-              <Users size={20} />
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <div className="p-1.5 sm:p-2 bg-zinc-800 rounded-xl text-zinc-400 group-hover:text-zinc-50 transition-colors">
+              <Users size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Database</div>
+            <div className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-widest hidden xs:block">Database</div>
           </div>
-          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Total Guests</div>
-          <div className="text-3xl font-black text-zinc-50 font-mono tracking-tighter leading-none">{guests.length}</div>
+          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Total Guests</div>
+          <div className="text-xl sm:text-3xl font-black text-zinc-50 font-mono tracking-tighter leading-none">{guests.length}</div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-500">
-              <Star size={20} />
+        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <div className="p-1.5 sm:p-2 bg-emerald-500/10 rounded-xl text-emerald-500">
+              <Star size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <div className="text-emerald-500 text-[10px] font-black uppercase tracking-tighter">
+            <div className="text-emerald-500 text-[8px] sm:text-[10px] font-black uppercase tracking-tighter hidden xs:block">
               {Math.round((guests.filter(g => g.totalStays > 1).length / (guests.length || 1)) * 100)}% Retention
             </div>
           </div>
-          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Repeat Guests</div>
-          <div className="text-3xl font-black text-emerald-500 font-mono tracking-tighter leading-none">{guests.filter(g => g.totalStays > 1).length}</div>
+          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Repeat Guests</div>
+          <div className="text-xl sm:text-3xl font-black text-emerald-500 font-mono tracking-tighter leading-none">{guests.filter(g => g.totalStays > 1).length}</div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-blue-500/30 transition-all shadow-lg hover:shadow-blue-500/5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 bg-blue-500/10 rounded-xl text-blue-500">
-              <DollarSign size={20} />
+        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-blue-500/30 transition-all shadow-lg hover:shadow-blue-500/5">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <div className="p-1.5 sm:p-2 bg-blue-500/10 rounded-xl text-blue-500">
+              <DollarSign size={16} className="sm:w-5 sm:h-5" />
             </div>
-            <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest leading-none">Net Growth</div>
+            <div className="text-zinc-500 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest leading-none hidden xs:block">Net Growth</div>
           </div>
-          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Lifetime Revenue</div>
-          <div className="text-3xl font-black text-blue-500 font-mono tracking-tighter leading-none truncate">
+          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Lifetime Revenue</div>
+          <div className="text-xl sm:text-3xl font-black text-blue-500 font-mono tracking-tighter leading-none truncate">
             {formatCurrency(guests.reduce((acc, g) => acc + (g.totalSpent || 0), 0), currency, exchangeRate)}
           </div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl group hover:border-red-500/30 transition-all shadow-lg hover:shadow-red-500/5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-2 bg-red-500/10 rounded-xl text-red-500">
-              <CreditCard size={20} />
+        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-red-500/30 transition-all shadow-lg hover:shadow-red-500/5">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <div className="p-1.5 sm:p-2 bg-red-500/10 rounded-xl text-red-500">
+              <CreditCard size={16} className="sm:w-5 sm:h-5" />
             </div>
             {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
-              <div className="p-1 bg-red-500 text-white rounded text-[8px] font-black px-2 uppercase shadow-sm">
+              <div className="p-0.5 sm:p-1 bg-red-500 text-white rounded text-[7px] sm:text-[8px] font-black px-1.5 sm:px-2 uppercase shadow-sm">
                 {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
               </div>
             )}
           </div>
-          <div className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-1">Net Outstanding</div>
-          <div className="text-3xl font-black text-red-500 font-mono tracking-tighter leading-none truncate">
+          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Net Outstanding</div>
+          <div className="text-xl sm:text-3xl font-black text-red-500 font-mono tracking-tighter leading-none truncate">
             {formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+      <div className="flex flex-col gap-4 mb-6">
+        <div className="relative w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
           <input
             type="text"
             placeholder="Search by name, email, or phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
-            <Filter size={16} className="text-zinc-500" />
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
+            <Filter size={14} className="text-zinc-500" />
             <select
               value={guestTypeFilter}
               onChange={(e) => setGuestTypeFilter(e.target.value as any)}
-              className="bg-transparent text-sm text-zinc-400 focus:outline-none"
+              className="bg-transparent text-xs text-zinc-400 focus:outline-none"
             >
               <option value="all">All Types</option>
               <option value="individual">Individual</option>
               <option value="corporate">Corporate</option>
             </select>
           </div>
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
-            <DollarSign size={16} className="text-zinc-500" />
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
+            <DollarSign size={14} className="text-zinc-500" />
             <select
               value={balanceFilter}
               onChange={(e) => setBalanceFilter(e.target.value as any)}
-              className="bg-transparent text-sm text-zinc-400 focus:outline-none"
+              className="bg-transparent text-xs text-zinc-400 focus:outline-none"
             >
               <option value="all">All Balances</option>
               <option value="yes">Has Balance</option>
               <option value="no">No Balance</option>
             </select>
           </div>
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
-            <Star size={16} className="text-zinc-500" />
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
+            <Star size={14} className="text-zinc-500" />
             <select
               value={vipFilter}
               onChange={(e) => setVipFilter(e.target.value as any)}
-              className="bg-transparent text-sm text-zinc-400 focus:outline-none"
+              className="bg-transparent text-xs text-zinc-400 focus:outline-none"
             >
               <option value="all">All Status</option>
               <option value="vip">VIP Only</option>
@@ -540,12 +540,12 @@ export function GuestManagement() {
             </select>
           </div>
           
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase px-2 border-r border-zinc-800">Sort</span>
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
+            <span className="text-[9px] font-bold text-zinc-500 uppercase px-1.5 border-r border-zinc-800">Sort</span>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent text-xs text-zinc-400 focus:outline-none cursor-pointer"
+              className="bg-transparent text-[11px] text-zinc-400 focus:outline-none cursor-pointer"
             >
               <option value="name">Name</option>
               <option value="ledgerBalance">Balance</option>
@@ -556,22 +556,22 @@ export function GuestManagement() {
               onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
               className="text-zinc-500 hover:text-emerald-500 transition-colors"
             >
-              {sortOrder === 'asc' ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
+              {sortOrder === 'asc' ? <TrendingUp size={12} /> : <ArrowDownRight size={12} />}
             </button>
           </div>
 
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1">
-            <Calendar size={14} className="text-zinc-500" />
+          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1.5">
+            <Calendar size={12} className="text-zinc-500" />
             <input 
               type="date"
-              className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[90px]"
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
             />
-            <span className="text-zinc-500 text-[10px]">-</span>
+            <span className="text-zinc-500 text-[9px]">-</span>
             <input 
               type="date"
-              className="bg-transparent text-[10px] text-zinc-50 focus:outline-none"
+              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[90px]"
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
             />

@@ -21,8 +21,11 @@ import { OperationsDashboard } from './components/OperationsDashboard';
 import { Finance } from './components/Finance';
 import { Reports } from './components/Reports';
 import { Notifications } from './components/Notifications';
+import { AuditLogs } from './components/AuditLogs';
+import { Tasks } from './components/Tasks';
 import { TopBar } from './components/TopBar';
 import { PermissionGuard } from './components/PermissionGuard';
+import { cn } from './utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { Toaster } from 'sonner';
@@ -32,7 +35,13 @@ import { OnboardingTour } from './components/OnboardingTour';
 
 function AppContent() {
   const { user, loading, profile, isSubscriptionActive, isOffline, retryConnection } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const location = useLocation();
+
+  // Close sidebar on route change (mobile)
+  React.useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
 
   if (loading) {
     return (
@@ -73,7 +82,7 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen bg-zinc-950 overflow-hidden">
+    <div className="flex h-screen bg-zinc-950 overflow-hidden relative">
       <Toaster position="top-right" theme="dark" richColors />
       
       {isOffline && (
@@ -93,9 +102,29 @@ function AppContent() {
       )}
 
       <OnboardingTour />
-      <Sidebar />
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <TopBar />
+      
+      {/* Overlay for mobile sidebar */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[50] lg:hidden"
+          />
+        )}
+      </AnimatePresence>
+
+      <div className={cn(
+        "fixed inset-y-0 left-0 z-[60] lg:static lg:block transition-transform duration-300 transform",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+      )}>
+        <Sidebar onClose={() => setSidebarOpen(false)} />
+      </div>
+
+      <main className="flex-1 flex flex-col overflow-hidden w-full">
+        <TopBar onMenuClick={() => setSidebarOpen(true)} />
         <div className="flex-1 overflow-y-auto relative">
           <AnimatePresence mode="wait">
           <Routes location={location} key={location.pathname}>
@@ -127,6 +156,14 @@ function AppContent() {
                 <StaffManagement />
               </PermissionGuard>
             } />
+            <Route path="/activity-logs" element={
+              <PermissionGuard permission="view_activity_logs" showError>
+                <div className="p-4 sm:p-8 h-full">
+                  <AuditLogs />
+                </div>
+              </PermissionGuard>
+            } />
+            <Route path="/tasks" element={<Tasks />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>

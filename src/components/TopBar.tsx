@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { CurrencyToggle } from './CurrencyToggle';
 import { Notifications } from './Notifications';
-import { User, Building2, WifiOff, XCircle, LogOut, Search, Bed, Users, Calendar, ArrowRight, Loader2, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { User, Building2, WifiOff, XCircle, LogOut, Search, Bed, Users, Calendar, ArrowRight, Loader2, ShieldAlert, CheckCircle2, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, or } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../utils';
 import { toast } from 'sonner';
 
-export function TopBar() {
+export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const navigate = useNavigate();
   const { hotel, profile, isOffline, setSelectedHotelId, user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
@@ -141,7 +141,14 @@ export function TopBar() {
 
   return (
     <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 sticky top-0 z-40">
-      <div className="flex items-center gap-4 flex-1">
+      <div className="flex items-center gap-2 sm:gap-4 flex-1">
+        <button 
+          onClick={onMenuClick}
+          className="lg:hidden p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
+          title="Toggle Menu"
+        >
+          <Menu size={20} />
+        </button>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-zinc-400 min-w-fit cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => navigate('/')}>
             <Building2 size={16} />

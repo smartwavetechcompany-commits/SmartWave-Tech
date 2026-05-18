@@ -1689,11 +1689,11 @@ export function FrontDesk() {
   };
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Front Desk</h1>
-          <p className="text-zinc-400">Manage bookings and guest check-ins</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Front Desk</h1>
+          <p className="text-xs sm:text-sm text-zinc-500">Manage bookings and guest check-ins</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative group">
@@ -1801,26 +1801,26 @@ export function FrontDesk() {
       </header>
 
       {/* Room Status Legend */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Rooms</div>
-          <div className="text-xl font-bold text-zinc-50">{roomStats.total}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
+          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Rooms</div>
+          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.total}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Available</div>
-          <div className="text-xl font-bold text-zinc-50">{roomStats.available}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
+          <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Available</div>
+          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.available}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Occupied</div>
-          <div className="text-xl font-bold text-zinc-50">{roomStats.occupied}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
+          <div className="text-[9px] font-bold text-blue-500 uppercase tracking-wider mb-1">Occupied</div>
+          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.occupied}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1">Dirty</div>
-          <div className="text-xl font-bold text-zinc-50">{roomStats.dirty}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
+          <div className="text-[9px] font-bold text-amber-500 uppercase tracking-wider mb-1">Dirty</div>
+          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.dirty}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-1">Maintenance</div>
-          <div className="text-xl font-bold text-zinc-50">{roomStats.maintenance}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
+          <div className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-1">Maintenance</div>
+          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.maintenance}</div>
         </div>
       </div>
 
@@ -3184,6 +3184,14 @@ export function FrontDesk() {
                             title="Post Charge to Room"
                           >
                             <Plus size={18} />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => setShowFolioModal(res)}
+                            className="p-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                            title="Guest Folio"
+                          >
+                            <FileText size={18} />
                           </button>
                           <button 
                             type="button"

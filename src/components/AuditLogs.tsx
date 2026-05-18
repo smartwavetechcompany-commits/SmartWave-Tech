@@ -37,8 +37,8 @@ export function AuditLogs() {
   const [currentPage, setCurrentPage] = useState(1);
   const [logsPerPage] = useState(50);
   const [dateRange, setDateRange] = useState({
-    start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
-    end: format(new Date(), 'yyyy-MM-dd')
+    start: format(subDays(new Date(), 7), "yyyy-MM-dd'T'00:00"),
+    end: format(new Date(), "yyyy-MM-dd'T'23:59")
   });
   const [sortConfig, setSortConfig] = useState<{ key: keyof AuditLog | 'actor' | 'target' | 'hotelId' | 'module' | 'userRole'; direction: 'asc' | 'desc' }>({
     key: 'timestamp',
@@ -166,8 +166,8 @@ export function AuditLogs() {
     }
 
     if (dateRange.start && dateRange.end) {
-      const start = startOfDay(new Date(dateRange.start)).getTime();
-      const end = endOfDay(new Date(dateRange.end)).getTime();
+      const start = new Date(dateRange.start).getTime();
+      const end = new Date(dateRange.end).getTime();
       
       result = result.filter(log => {
         const ts = (log as any).timestamp;
@@ -253,81 +253,118 @@ export function AuditLogs() {
   };
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col h-full">
-      <div className="p-3 sm:p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-center gap-2">
-          <ClipboardList size={16} className="text-emerald-500 sm:size-[18px]" />
-          <h3 className="font-bold text-zinc-50 text-xs sm:text-base">System Activity Logs</h3>
-        </div>
-        
-        <div className="flex items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 px-3 py-1.5 rounded-xl">
-            <Calendar size={14} className="text-emerald-500" />
-            <input 
-              type="date" 
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none"
-              style={{ colorScheme: 'dark' }}
-            />
-            <span className="text-zinc-600 text-[10px]">to</span>
-            <input 
-              type="date" 
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none"
-              style={{ colorScheme: 'dark' }}
-            />
-          </div>
-
-          <select
-            value={moduleFilter}
-            onChange={(e) => setModuleFilter(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-[10px] sm:text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-          >
-            <option value="all">All Modules</option>
-            <option value="Front Desk">Front Desk</option>
-            <option value="Guests">Guests</option>
-            <option value="Corporate">Corporate</option>
-            <option value="F & B">F & B</option>
-            <option value="Rooms">Rooms</option>
-            <option value="Finance">Finance</option>
-            <option value="Settings">Settings</option>
-            <option value="Housekeeping">Housekeeping</option>
-            <option value="Staff">Staff</option>
-            <option value="Maintenance">Maintenance</option>
-            <option value="Inventory">Inventory</option>
-          </select>
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95"
-          >
-            <Download size={12} className="sm:size-[18px]" />
-            <span className="hidden xs:inline">Export CSV</span>
-            <span className="xs:hidden">Export</span>
-          </button>
-          <div className="relative flex-1 sm:flex-none">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
-            <input 
-              type="text"
-              placeholder="Search..."
-              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-[10px] sm:text-sm text-zinc-50 focus:border-emerald-500 outline-none transition-all w-full sm:w-48 md:w-64"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 flex flex-col h-full animate-in fade-in duration-500">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ClipboardList size={16} className="text-emerald-500 sm:size-[18px]" />
+            <h3 className="font-bold text-zinc-50 text-xs sm:text-base">System Activity Logs</h3>
           </div>
           <button 
-            onClick={() => {}}
+            onClick={() => window.location.reload()}
             disabled={loading}
             className="p-1.5 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
             title="Refresh Logs"
           >
-            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
-      </div>
+        
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+          <div className="flex flex-wrap items-center gap-2 bg-zinc-800 border border-zinc-700 px-2 sm:px-3 py-1.5 rounded-xl flex-1 sm:flex-none">
+            <Clock size={14} className="text-emerald-500" />
+            <input 
+              type="datetime-local" 
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none min-w-[130px]"
+              style={{ colorScheme: 'dark' }}
+            />
+            <span className="text-zinc-600 text-[10px]">to</span>
+            <input 
+              type="datetime-local" 
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none min-w-[130px]"
+              style={{ colorScheme: 'dark' }}
+            />
+            {(dateRange.start || dateRange.end || moduleFilter !== 'all' || searchQuery) && (
+              <div className="flex items-center gap-1 ml-1 border-l border-zinc-700 pl-2">
+                <button
+                  onClick={() => {
+                    setDateRange({
+                      start: format(new Date(Date.now() - 24 * 60 * 60 * 1000), "yyyy-MM-dd'T'HH:mm"),
+                      end: format(new Date(), "yyyy-MM-dd'T'HH:mm")
+                    });
+                  }}
+                  className="px-1.5 py-0.5 hover:bg-emerald-500/10 text-emerald-500 rounded text-[9px] font-bold uppercase transition-all"
+                  title="Last 24 Hours"
+                >
+                  24h
+                </button>
+                <button
+                  onClick={() => {
+                    setDateRange({
+                      start: format(subDays(new Date(), 7), "yyyy-MM-dd'T'00:00"),
+                      end: format(new Date(), "yyyy-MM-dd'T'23:59")
+                    });
+                    setModuleFilter('all');
+                    setSearchQuery('');
+                  }}
+                  className="p-1 hover:bg-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-50 transition-all"
+                  title="Reset Filters"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+          </div>
 
-      <div className="flex-1 overflow-auto">
+          <div className="flex items-center gap-2 flex-1 sm:flex-none">
+            <select
+              value={moduleFilter}
+              onChange={(e) => setModuleFilter(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-[10px] sm:text-xs text-zinc-50 focus:border-emerald-500 outline-none flex-1 sm:flex-none"
+            >
+              <option value="all">All Modules</option>
+              {/* ... module options ... */}
+              <option value="Front Desk">Front Desk</option>
+              <option value="Guests">Guests</option>
+              <option value="Corporate">Corporate</option>
+              <option value="F & B">F & B</option>
+              <option value="Rooms">Rooms</option>
+              <option value="Finance">Finance</option>
+              <option value="Settings">Settings</option>
+              <option value="Housekeeping">Housekeeping</option>
+              <option value="Staff">Staff</option>
+              <option value="Maintenance">Maintenance</option>
+              <option value="Inventory">Inventory</option>
+            </select>
+            
+            <button 
+              onClick={handleExport}
+              className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[10px] sm:text-xs font-medium transition-all active:scale-95"
+            >
+              <Download size={14} />
+              <span className="hidden xs:inline">Export CSV</span>
+              <span className="xs:hidden">Export</span>
+            </button>
+          </div>
+
+          <div className="relative flex-1 w-full sm:max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+            <input 
+              type="text"
+              placeholder="Search logs..."
+              className="bg-zinc-950 border border-zinc-800 rounded-xl pl-8 pr-3 py-1.5 text-[10px] sm:text-xs text-zinc-50 focus:border-emerald-500 outline-none transition-all w-full"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-auto bg-zinc-900/30 border border-zinc-800/80 rounded-2xl shadow-2xl">
         <div className="min-w-[600px]">
           <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 bg-zinc-900 z-10 shadow-sm">

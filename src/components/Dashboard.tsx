@@ -210,31 +210,31 @@ export function Dashboard() {
   }
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Overview</h1>
-          <p className="text-zinc-400">
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Overview</h1>
+          <p className="text-sm text-zinc-400">
             {profile?.role === 'superAdmin' ? 'System-wide analytics and control' : `Welcome back to ${hotel?.name}`}
           </p>
         </div>
         <button 
           onClick={() => window.location.reload()}
           disabled={loading}
-          className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
+          className="p-1.5 sm:p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
           title="Refresh Page"
         >
-          <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
         </button>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl animate-pulse">
-              <div className="w-10 h-10 bg-zinc-800 rounded-lg mb-4" />
-              <div className="w-24 h-6 bg-zinc-800 rounded mb-2" />
-              <div className="w-16 h-3 bg-zinc-800 rounded opacity-50" />
+            <div key={i} className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl animate-pulse">
+              <div className="w-8 h-8 bg-zinc-800 rounded-lg mb-4" />
+              <div className="w-20 h-5 bg-zinc-800 rounded mb-2" />
+              <div className="w-12 h-2.5 bg-zinc-800 rounded opacity-50" />
             </div>
           ))
         ) : (
@@ -244,36 +244,36 @@ export function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.1 }}
               key={stat.label}
-              className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
+              className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
             >
-              <div className="flex items-center justify-between mb-4">
-                <div className={cn("p-2 rounded-lg bg-zinc-950", stat.color)}>
-                  <stat.icon size={20} />
+              <div className="flex items-center justify-between mb-2 sm:mb-4">
+                <div className={cn("p-1.5 sm:p-2 rounded-lg bg-zinc-950", stat.color)}>
+                  <stat.icon size={18} />
                 </div>
               </div>
-              <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.value}</div>
-              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
+              <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1 truncate">{stat.value}</div>
+              <div className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
             </motion.div>
           ))
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+        <div className="lg:col-span-2 space-y-6 sm:space-y-8">
           {/* Revenue Chart */}
           {(profile?.role === 'superAdmin' || isModuleEnabled(hotel, 'finance')) && (
-            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-              <div className="flex items-center justify-between mb-6">
+            <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
                 <div>
-                  <h3 className="font-bold text-zinc-50">Revenue Overview</h3>
-                  <p className="text-xs text-zinc-500">Last 7 days performance</p>
+                  <h3 className="font-bold text-zinc-50 text-sm sm:text-base">Revenue Overview</h3>
+                  <p className="text-[10px] text-zinc-500">Last 7 days performance</p>
                 </div>
-                <div className="flex items-center gap-2 text-emerald-500 text-sm font-bold">
-                  {revenueGrowth >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
+                <div className="flex items-center gap-1.5 text-emerald-500 text-xs sm:text-sm font-bold">
+                  {revenueGrowth >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
                   {Math.abs(Math.round(revenueGrowth))}%
                 </div>
               </div>
-              <div className="h-[240px]">
+              <div className="h-[200px] sm:h-[240px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={revenueChartData}>
                     <defs>
@@ -283,10 +283,10 @@ export function Dashboard() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
+                    <XAxis dataKey="name" stroke="#71717a" fontSize={9} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#71717a" fontSize={9} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', fontSize: '10px' }}
                       itemStyle={{ color: '#10b981' }}
                     />
                     <Area type="monotone" dataKey="amount" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
@@ -298,40 +298,40 @@ export function Dashboard() {
 
           {/* Recent Reservations */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="font-bold text-zinc-50">Recent Reservations</h3>
-              <Link to="/front-desk" target="_self" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-800 flex items-center justify-between">
+              <h3 className="font-bold text-zinc-50 text-sm sm:text-base">Recent Reservations</h3>
+              <Link to="/front-desk" target="_self" className="text-emerald-500 text-xs sm:text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
             </div>
             <div className="divide-y divide-zinc-800">
               {loading ? (
                 Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="p-4 flex items-center justify-between animate-pulse">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-full" />
-                      <div className="space-y-2">
-                        <div className="w-24 h-3 bg-zinc-800 rounded" />
-                        <div className="w-32 h-2 bg-zinc-800 rounded opacity-50" />
+                  <div key={i} className="p-3 sm:p-4 flex items-center justify-between animate-pulse">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full" />
+                      <div className="space-y-1.5">
+                        <div className="w-20 h-2.5 bg-zinc-800 rounded" />
+                        <div className="w-28 h-2 bg-zinc-800 rounded opacity-50" />
                       </div>
                     </div>
-                    <div className="w-16 h-4 bg-zinc-800 rounded" />
+                    <div className="w-12 h-3 bg-zinc-800 rounded" />
                   </div>
                 ))
               ) : reservations.length === 0 ? (
-                <div className="p-8 text-center text-zinc-500 text-sm">No recent reservations</div>
+                <div className="p-6 sm:p-8 text-center text-zinc-500 text-xs">No recent reservations</div>
               ) : (
                 reservations.map(res => (
-                  <div key={res.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                        <Users size={18} />
+                  <div key={res.id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
+                        <Users size={16} />
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
-                        <div className="text-xs text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
+                        <div className="text-xs sm:text-sm font-medium text-zinc-50">{res.guestName}</div>
+                        <div className="text-[10px] sm:text-xs text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
                       </div>
                     </div>
                     <div className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                      "px-1.5 py-0.5 rounded text-[8px] sm:text-[10px] font-bold uppercase tracking-wider",
                       res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
                       res.status === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
                     )}>
@@ -346,56 +346,56 @@ export function Dashboard() {
           {/* Recent Transactions */}
           {(profile?.role === 'superAdmin' || isModuleEnabled(hotel, 'finance')) && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <DollarSign size={18} className="text-emerald-500" />
-                  <h3 className="font-bold text-zinc-50">Recent Transactions</h3>
+                  <DollarSign size={16} className="text-emerald-500" />
+                  <h3 className="font-bold text-zinc-50 text-sm sm:text-base">Recent Transactions</h3>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3 sm:gap-4">
                   <button 
                     type="button"
                     onClick={handleExportTransactions}
                     className="text-zinc-400 hover:text-zinc-50 transition-colors"
                     title="Download Transactions"
                   >
-                    <Download size={18} />
+                    <Download size={16} />
                   </button>
-                  <Link to="/finance" target="_self" className="text-emerald-500 text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
+                  <Link to="/finance" target="_self" className="text-emerald-500 text-xs sm:text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
                 </div>
               </div>
               <div className="divide-y divide-zinc-800">
                 {loading ? (
                   Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="p-4 flex items-center justify-between animate-pulse">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-zinc-800 rounded-full" />
-                        <div className="space-y-2">
-                          <div className="w-24 h-3 bg-zinc-800 rounded" />
-                          <div className="w-32 h-2 bg-zinc-800 rounded opacity-50" />
+                    <div key={i} className="p-3 sm:p-4 flex items-center justify-between animate-pulse">
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full" />
+                        <div className="space-y-1.5">
+                          <div className="w-20 h-2.5 bg-zinc-800 rounded" />
+                          <div className="w-28 h-2 bg-zinc-800 rounded opacity-50" />
                         </div>
                       </div>
-                      <div className="w-16 h-4 bg-zinc-800 rounded" />
+                      <div className="w-12 h-3 bg-zinc-800 rounded" />
                     </div>
                   ))
                 ) : finance.length === 0 ? (
-                  <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
+                  <div className="p-6 sm:p-8 text-center text-zinc-500 text-xs">No recent transactions</div>
                 ) : (
                   (finance || []).slice(0, 5).map(record => (
-                    <div key={record.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
-                      <div className="flex items-center gap-4">
+                    <div key={record.id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3 sm:gap-4">
                         <div className={cn(
-                          "w-10 h-10 rounded-full flex items-center justify-center",
+                          "w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center",
                           record.type === 'income' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
                         )}>
-                          {record.type === 'income' ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
+                          {record.type === 'income' ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
                         </div>
                         <div>
-                          <div className="text-sm font-medium text-zinc-50">{record.description}</div>
-                          <div className="text-xs text-zinc-500">{record.category} • {record.timestamp ? format(new Date(record.timestamp), 'MMM d, HH:mm') : 'N/A'}</div>
+                          <div className="text-xs sm:text-sm font-medium text-zinc-50">{record.description}</div>
+                          <div className="text-[10px] text-zinc-500">{record.category} • {record.timestamp ? format(new Date(record.timestamp), 'MMM d, HH:mm') : 'N/A'}</div>
                         </div>
                       </div>
                       <div className={cn(
-                        "text-sm font-bold",
+                        "text-xs sm:text-sm font-bold",
                         record.type === 'income' ? "text-emerald-500" : "text-red-500"
                       )}>
                         {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
@@ -408,15 +408,24 @@ export function Dashboard() {
           )}
 
           {/* Audit Logs Section */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Activity size={18} className="text-emerald-500" />
-                <h3 className="font-bold text-zinc-50">Recent Activity</h3>
+                <h3 className="font-bold text-zinc-50 text-sm">Action Stream</h3>
               </div>
+              <Link to="/activity-logs" className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest hover:underline">View Audit logs</Link>
             </div>
-            <div className="max-h-[400px] overflow-y-auto">
-              <AuditLogs />
+            <div className="max-h-[500px] overflow-y-auto bg-zinc-950/20">
+              <div className="divide-y divide-zinc-800/50">
+                {finance.length === 0 && (
+                   <div className="p-8 text-center text-zinc-600 text-xs italic">Awaiting activity...</div>
+                )}
+                {/* We use a simplified mini-logger for the dashboard */}
+                <div className="p-2">
+                   <AuditLogs />
+                </div>
+              </div>
             </div>
           </div>
         </div>

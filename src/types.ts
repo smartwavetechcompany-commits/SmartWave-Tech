@@ -549,6 +549,22 @@ export interface MaintenanceRequest {
   notes?: string;
 }
 
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  category: 'frontDesk' | 'housekeeping' | 'finance' | 'general' | 'f&b' | 'other';
+  assignedTo?: string;
+  dueDate?: string;
+  reminderAt?: string;
+  timestamp: string;
+  completedAt?: string;
+  createdBy: string;
+  hotelId: string;
+}
+
 export interface Guest {
   id: string;
   name: string;

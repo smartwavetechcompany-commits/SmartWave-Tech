@@ -17,7 +17,7 @@ import {
 import { db, auth } from '../firebase';
 import { OperationType } from '../types';
 import { errorService, ErrorSeverity } from '../services/errorService';
-import { deepCloneSafe } from '../utils';
+import { deepCloneSafe, safeStringify } from '../utils';
 
 /**
  * Audit log entry structure
@@ -149,7 +149,7 @@ export const database = {
           const oldVal = oldData[key];
           const newVal = (data as any)[key];
           // Use safeStringify for comparison to handle circular structures
-          if (JSON.stringify(deepCloneSafe(oldVal)) !== JSON.stringify(deepCloneSafe(newVal))) {
+          if (safeStringify(oldVal) !== safeStringify(newVal)) {
             acc[key] = { from: oldVal, to: newVal };
           }
           return acc;

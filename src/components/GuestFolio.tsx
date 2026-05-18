@@ -439,45 +439,47 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]"
       >
         {/* Header */}
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500">
-              <Receipt size={24} />
+        <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-emerald-500/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-500">
+              <Receipt size={20} className="sm:size-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-zinc-50">Guest Folio</h2>
-              <p className="text-sm text-zinc-500">Reservation #{(currentReservation.id || '').slice(-6).toUpperCase()}</p>
+              <h2 className="text-lg sm:text-xl font-bold text-zinc-50 truncate max-w-[150px] sm:max-w-none">Guest Folio</h2>
+              <p className="text-[10px] sm:text-sm text-zinc-500 font-mono italic">Res #{(currentReservation.id || '').slice(-6).toUpperCase()}</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button 
               type="button"
               onClick={() => setShowSettlePayment(true)}
-              className="px-4 py-2 bg-emerald-500 text-black rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-400 transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95"
+              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-emerald-500 text-black rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider hover:bg-emerald-400 transition-all flex items-center gap-1.5 sm:gap-2 shadow-lg shadow-emerald-500/20 active:scale-95"
             >
-              <DollarSign size={18} />
-              Settle / Pay
+              <DollarSign size={16} className="sm:size-[18px]" />
+              <span className="hidden xs:inline">Settle / Pay</span>
+              <span className="xs:hidden">Pay</span>
             </button>
             <button 
               type="button"
               onClick={() => setShowReceipt(true)}
-              className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all flex items-center gap-2"
+              className="p-1.5 sm:p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg sm:rounded-xl transition-all flex items-center gap-2"
               title="Print Receipt"
             >
-              <Printer size={20} />
-              <span className="text-xs font-bold">Print Receipt</span>
+              <Printer size={18} className="sm:size-5" />
+              <span className="hidden md:inline text-xs font-bold">Print Receipt</span>
             </button>
             <button 
               type="button"
               onClick={onClose}
-              className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
+              className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
+              title="Close"
             >
-              <XCircle size={24} />
+              <XCircle size={20} className="sm:size-6" />
             </button>
           </div>
         </div>
@@ -502,14 +504,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8 custom-scrollbar">
           {/* Folio Tabs for Corporate Stays */}
           {currentReservation.corporateId && (
-            <div className="flex items-center bg-zinc-950 p-1 rounded-2xl border border-zinc-800 w-fit mx-auto">
+            <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-fit mx-auto shadow-sm">
               <button
                 onClick={() => setActiveFolio('guest')}
                 className={cn(
-                  "px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                  "px-4 sm:px-6 py-1.5 sm:py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
                   activeFolio === 'guest' ? "bg-emerald-500 text-black shadow-lg" : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
@@ -518,7 +520,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <button
                 onClick={() => setActiveFolio('company')}
                 className={cn(
-                  "px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all",
+                  "px-4 sm:px-6 py-1.5 sm:py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
                   activeFolio === 'company' ? "bg-blue-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
@@ -528,85 +530,85 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {/* Quick Actions Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
             <button
               type="button"
               onClick={() => setShowSettlePayment(true)}
-              className="flex items-center justify-center gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl sm:rounded-2xl text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
             >
-              <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
-                <DollarSign size={20} />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <DollarSign size={16} className="sm:size-5" />
               </div>
               <div className="text-left">
-                <p className="text-xs font-bold uppercase tracking-wider">Settle</p>
-                <p className="text-sm font-bold">Payment</p>
+                <p className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-wider leading-tight">Settle</p>
+                <p className="text-xs sm:text-sm font-bold">Payment</p>
               </div>
             </button>
 
             <button
               type="button"
               onClick={() => setShowTransferBalanceModal(true)}
-              className="flex items-center justify-center gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-500 hover:bg-blue-500 hover:text-white transition-all group active:scale-95"
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl sm:rounded-2xl text-blue-500 hover:bg-blue-500 hover:text-white transition-all group active:scale-95"
             >
-              <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
-                <RefreshCw size={20} />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <RefreshCw size={16} className="sm:size-5" />
               </div>
               <div className="text-left">
-                <p className="text-xs font-bold uppercase tracking-wider">Transfer</p>
-                <p className="text-sm font-bold">Balance</p>
+                <p className="text-[10px] font-bold text-blue-500/70 uppercase tracking-wider leading-tight">Transfer</p>
+                <p className="text-xs sm:text-sm font-bold">Balance</p>
               </div>
             </button>
 
             <button
               type="button"
               onClick={() => setShowPostChargeModal(true)}
-              className="flex items-center justify-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl sm:rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
             >
-              <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
-                <Plus size={20} />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Plus size={16} className="sm:size-5" />
               </div>
               <div className="text-left">
-                <p className="text-xs font-bold uppercase tracking-wider">Post</p>
-                <p className="text-sm font-bold">Charge</p>
+                <p className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider leading-tight">Post</p>
+                <p className="text-xs sm:text-sm font-bold">Charge</p>
               </div>
             </button>
 
             <button
               type="button"
               onClick={() => setShowGuestHistory(true)}
-              className="flex items-center justify-center gap-3 p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl text-purple-500 hover:bg-purple-500 hover:text-white transition-all group active:scale-95"
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl sm:rounded-2xl text-purple-500 hover:bg-purple-500 hover:text-white transition-all group active:scale-95"
             >
-              <div className="w-10 h-10 bg-purple-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
-                <History size={20} />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-purple-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <History size={16} className="sm:size-5" />
               </div>
               <div className="text-left">
-                <p className="text-xs font-bold uppercase tracking-wider">Guest</p>
-                <p className="text-sm font-bold">History</p>
+                <p className="text-[10px] font-bold text-purple-500/70 uppercase tracking-wider leading-tight">Guest</p>
+                <p className="text-xs sm:text-sm font-bold">History</p>
               </div>
             </button>
 
             <button
               type="button"
               onClick={() => setShowReceipt(true)}
-              className="flex items-center justify-center gap-3 p-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-zinc-800 border border-zinc-700 rounded-xl sm:rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
             >
-              <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center group-hover:bg-black/20">
-                <Printer size={20} />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-900 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Printer size={16} className="sm:size-5" />
               </div>
               <div className="text-left">
-                <p className="text-xs font-bold uppercase tracking-wider">Print</p>
-                <p className="text-sm font-bold">Receipt</p>
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider leading-tight">Print</p>
+                <p className="text-xs sm:text-sm font-bold">Receipt</p>
               </div>
             </button>
           </div>
 
           {/* Financial Summary Breakdown */}
-          <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
-            <div className="flex items-center gap-3 mb-6">
-              <History size={18} className="text-emerald-500" />
-              <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
+          <div className="bg-zinc-950 p-4 sm:p-6 rounded-2xl border border-zinc-800 shadow-sm">
+            <div className="flex items-center gap-3 mb-4 sm:mb-6">
+              <History size={16} className="text-emerald-500" />
+              <h3 className="text-[10px] sm:text-xs font-bold text-zinc-50 uppercase tracking-widest">Financial Summary</h3>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {Object.entries(
                 displayedEntries.reduce((acc: any, entry) => {
                   const cat = entry.category || 'Other';
@@ -618,22 +620,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   room: !hasRoomChargeInLedger ? { debit: currentReservation.totalAmount || 0, credit: 0 } : { debit: 0, credit: 0 }
                 })
               ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
-                <div key={cat} className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-2">{cat.replace('_', ' ')}</p>
+                <div key={cat} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase mb-1.5 sm:mb-2">{cat.replace('_', ' ')}</p>
                   <div className="space-y-1">
                     {totals.debit > 0 && (
-                      <div className="flex justify-between text-xs">
+                      <div className="flex justify-between text-[10px] sm:text-xs">
                         <span className="text-zinc-500">Charges</span>
                         <span className="text-red-400 font-bold">{formatCurrency(totals.debit, currency, exchangeRate)}</span>
                       </div>
                     )}
                     {totals.credit > 0 && (
-                      <div className="flex justify-between text-xs">
-                        <span className="text-zinc-500">Paid/Restored</span>
+                      <div className="flex justify-between text-[10px] sm:text-xs">
+                        <span className="text-zinc-500">Payments</span>
                         <span className="text-emerald-400 font-bold">{formatCurrency(totals.credit, currency, exchangeRate)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between text-xs pt-1 mt-1 border-t border-zinc-800/50">
+                    <div className="flex justify-between text-[10px] sm:text-xs pt-1 mt-1 border-t border-zinc-800/50">
                       <span className="text-zinc-400 font-medium">Net</span>
                       <span className={cn(
                         "font-black",

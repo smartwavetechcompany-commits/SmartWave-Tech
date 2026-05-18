@@ -29,6 +29,17 @@ export function deepCloneSafe(obj: any): any {
       return val.toISOString();
     }
 
+    // Handle Firestore-like objects (e.g. Timestamp, DocumentReference)
+    if (val && typeof val === 'object' && val.constructor) {
+      const className = val.constructor.name;
+      if (className === 'Timestamp') {
+        return val.toDate?.()?.toISOString() || String(val);
+      }
+      if (className === 'DocumentReference' || className === 'CollectionReference' || className === 'Query') {
+        return `[Firestore ${className}: ${val.path || 'unknown'}]`;
+      }
+    }
+
     // Handle Errors
     if (val instanceof Error || (val.message && val.stack)) {
       return {
