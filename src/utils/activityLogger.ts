@@ -1,6 +1,7 @@
 import { collection, doc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AuditLog } from '../types';
+import { deepCloneSafe } from '../utils';
 
 export const logActivity = async (
   hotelId: string,
@@ -24,8 +25,8 @@ export const logActivity = async (
       details,
       timestamp: new Date().toISOString(),
       targetId,
-      oldValue: oldValue ? JSON.parse(JSON.stringify(oldValue)) : null,
-      newValue: newValue ? JSON.parse(JSON.stringify(newValue)) : null,
+      oldValue: oldValue ? deepCloneSafe(oldValue) : null,
+      newValue: newValue ? deepCloneSafe(newValue) : null,
     };
 
     // Log to hotel-specific audit logs

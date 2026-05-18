@@ -146,8 +146,11 @@ export const database = {
         oldData: cleanedOldData,
         ...(options.metadata || {}),
         changes: oldData && !options.metadata?.changes ? Object.keys(data).reduce((acc: any, key) => {
-          if (JSON.stringify(oldData[key]) !== JSON.stringify((data as any)[key])) {
-            acc[key] = { from: oldData[key], to: (data as any)[key] };
+          const oldVal = oldData[key];
+          const newVal = (data as any)[key];
+          // Use safeStringify for comparison to handle circular structures
+          if (JSON.stringify(deepCloneSafe(oldVal)) !== JSON.stringify(deepCloneSafe(newVal))) {
+            acc[key] = { from: oldVal, to: newVal };
           }
           return acc;
         }, {}) : (options.metadata?.changes || 'New document fields')

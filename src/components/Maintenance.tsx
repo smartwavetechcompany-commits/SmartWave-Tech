@@ -19,12 +19,14 @@ import {
   AlertCircle,
   Download,
   UserPlus,
-  Trash2
+  Trash2,
+  Bell
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
-import { format, isWithinInterval, startOfDay, endOfDay, startOfMonth } from 'date-fns';
+import { format, isWithinInterval, startOfDay, endOfDay, startOfMonth, addDays } from 'date-fns';
 import { toast } from 'sonner';
+import { ConfirmModal } from './ConfirmModal';
 
 export function Maintenance() {
   const { hotel, profile } = useAuth();
@@ -44,13 +46,15 @@ export function Maintenance() {
   const [sortBy, setSortBy] = useState<'dueDate' | 'priority' | 'timestamp'>('timestamp');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [isLoading, setIsLoading] = useState(true);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; requestId: string }>({ isOpen: false, requestId: '' });
   const [newRequest, setNewRequest] = useState({
     roomNumber: '',
     issue: '',
     priority: 'medium' as MaintenanceRequest['priority'],
     notes: '',
     assignedTo: '',
-    dueDate: format(new Date(), 'yyyy-MM-dd')
+    dueDate: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+    reminderAt: ''
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -134,7 +138,7 @@ export function Maintenance() {
       toast.success('Maintenance request created');
       setShowAddModal(false);
       setFormErrors({});
-      setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '', dueDate: format(new Date(), 'yyyy-MM-dd') });
+      setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '', dueDate: format(addDays(new Date(), 1), 'yyyy-MM-dd'), reminderAt: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/maintenance`);
       toast.error('Failed to create request');
@@ -181,10 +185,6 @@ export function Maintenance() {
   const handleDeleteRequest = async (requestId: string) => {
     if (!hotel?.id || !profile) return;
     
-    if (!window.confirm('Are you sure you want to delete this maintenance request? This action cannot be undone.')) {
-      return;
-    }
-
     try {
       await database.safeDelete(doc(db, 'hotels', hotel.id, 'maintenance', requestId), {
         hotelId: hotel.id,
@@ -486,8 +486,8 @@ export function Maintenance() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className={cn(
-                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                        request.priority === 'urgent' ? "bg-red-500 text-zinc-50" :
+                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all",
+                        request.priority === 'urgent' ? "bg-red-500 text-zinc-50 shadow-lg shadow-red-500/20" :
                         request.priority === 'high' ? "bg-orange-500/10 text-orange-500" :
                         request.priority === 'medium' ? "bg-blue-500/10 text-blue-500" :
                         "bg-zinc-800 text-zinc-500"
@@ -495,7 +495,7 @@ export function Maintenance() {
                         {request.priority}
                       </div>
                       <button 
-                        onClick={() => handleDeleteRequest(request.id)}
+                        onClick={() => setDeleteConfirm({ isOpen: true, requestId: request.id })}
                         className="p-1.5 hover:bg-red-500/10 text-zinc-600 hover:text-red-500 rounded-lg transition-colors"
                       >
                         <Trash2 size={14} />
@@ -509,15 +509,24 @@ export function Maintenance() {
                       request.status === 'completed' ? "text-zinc-500 line-through" : "text-zinc-50"
                     )}>{request.issue}</h3>
                     
-                    {request.dueDate && (
-                      <div className={cn(
-                        "flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider",
-                        new Date(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
-                      )}>
-                        <Clock size={10} />
-                        Due: {format(new Date(request.dueDate), 'MMM d, yyyy')}
-                      </div>
-                    )}
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
+                      {request.dueDate && (
+                        <div className={cn(
+                          "flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider",
+                          new Date(request.dueDate) < new Date() && request.status !== 'completed' ? "text-red-500" : "text-zinc-500"
+                        )}>
+                          <Clock size={10} />
+                          Due: {format(new Date(request.dueDate), 'MMM d')}
+                        </div>
+                      )}
+
+                      {request.reminderAt && request.status !== 'completed' && (
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-emerald-500 animate-pulse">
+                          <Bell size={10} />
+                          Reminder: {format(new Date(request.reminderAt), 'MMM d, HH:mm')}
+                        </div>
+                      )}
+                    </div>
 
                     {request.notes && (
                       <p className="text-xs text-zinc-400 italic bg-zinc-950 p-2 rounded-lg border border-zinc-800">
@@ -686,6 +695,19 @@ export function Maintenance() {
                     placeholder="Any extra details..."
                   />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Set Reminder (Optional)</label>
+                  <div className="relative">
+                    <Bell className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                    <input
+                      type="datetime-local"
+                      value={newRequest.reminderAt}
+                      onChange={(e) => setNewRequest({ ...newRequest, reminderAt: e.target.value })}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      style={{ colorScheme: 'dark' }}
+                    />
+                  </div>
+                </div>
               </div>
               <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
                 <button
@@ -706,6 +728,16 @@ export function Maintenance() {
           </motion.div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deleteConfirm.isOpen}
+        title="Delete Maintenance Request"
+        message="Are you sure you want to delete this maintenance request? This action cannot be undone."
+        type="danger"
+        confirmText="Delete Request"
+        onConfirm={() => handleDeleteRequest(deleteConfirm.requestId)}
+        onCancel={() => setDeleteConfirm({ isOpen: false, requestId: '' })}
+      />
     </div>
   );
 }

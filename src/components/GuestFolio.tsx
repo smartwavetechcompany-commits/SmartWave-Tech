@@ -4,8 +4,8 @@ import { collection, query, where, onSnapshot, orderBy, doc, addDoc, limit } fro
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
-import { Reservation, LedgerEntry, OperationType, Guest, Room } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment } from '../services/ledgerService';
+import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount } from '../types';
+import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger } from '../services/ledgerService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { ConfirmModal } from './ConfirmModal';
 import { 
@@ -57,7 +57,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [loading, setLoading] = useState(true);
   const [showTransferBalanceModal, setShowTransferBalanceModal] = useState(false);
   const [otherReservations, setOtherReservations] = useState<Reservation[]>([]);
+  const [activeReservationsForSearch, setActiveReservationsForSearch] = useState<Reservation[]>([]);
+  const [corporateAccountsList, setCorporateAccountsList] = useState<CorporateAccount[]>([]);
+  const [transferType, setTransferType] = useState<'guest' | 'corporate'>('guest');
   const [transferTargetId, setTransferTargetId] = useState('');
+  const [showGuestHistory, setShowGuestHistory] = useState(false);
+  const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
   const [showReceipt, setShowReceipt] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<LedgerEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -66,7 +71,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showPostChargeModal, setShowPostChargeModal] = useState(false);
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
-    category: 'restaurant' as 'restaurant' | 'service' | 'other',
+    price: 0,
+    quantity: 1,
+    type: 'debit' as 'debit' | 'credit',
+    category: 'restaurant' as 'restaurant' | 'service' | 'other' | 'laundry' | 'discount',
     description: '',
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
@@ -191,25 +199,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     try {
       setIsSaving(true);
+      
+      // Calculate amount if price/quantity set
+      const baseAmount = chargeDetails.price > 0 ? chargeDetails.price * chargeDetails.quantity : chargeDetails.amount;
+      
       const amountAfterDiscount = chargeDetails.discountType === 'fixed' 
-        ? chargeDetails.amount - chargeDetails.discount
-        : chargeDetails.amount * (1 - chargeDetails.discount / 100);
+        ? baseAmount - chargeDetails.discount
+        : baseAmount * (1 - chargeDetails.discount / 100);
 
       await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
         amount: amountAfterDiscount,
-        type: 'debit',
+        type: chargeDetails.type,
         category: chargeDetails.category,
-        description: chargeDetails.description || `Charge: ${chargeDetails.category}`,
+        description: chargeDetails.description || `${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}: ${chargeDetails.category}`,
         referenceId: currentReservation.id,
-        postedBy: profile.uid
+        postedBy: profile.uid,
+        quantity: chargeDetails.quantity,
+        price: chargeDetails.price
       }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
 
-      toast.success('Charge posted successfully');
+      toast.success(`${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'} posted successfully`);
       setShowPostChargeModal(false);
-      setChargeDetails({ amount: 0, category: 'restaurant', description: '', discount: 0, discountType: 'fixed' });
+      setChargeDetails({ amount: 0, price: 0, quantity: 1, type: 'debit', category: 'restaurant', description: '', discount: 0, discountType: 'fixed' });
     } catch (err: any) {
       console.error("Post charge error:", err.message || safeStringify(err));
-      toast.error('Failed to post charge');
+      toast.error('Failed to post entry');
     } finally {
       setIsSaving(false);
     }
@@ -245,21 +259,77 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     return () => unsubOther();
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
+  // Fetch ALL active reservations for transfer (any guest)
+  useEffect(() => {
+    if (!hotel?.id || !showTransferBalanceModal) return;
+
+    const qActive = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('status', 'in', ['confirmed', 'checked_in'])
+    );
+
+    const unsub = onSnapshot(qActive, (snap) => {
+      const active = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
+        .filter(r => r.id !== reservation.id);
+      setActiveReservationsForSearch(active);
+    });
+
+    const unsubCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), (snap) => {
+      setCorporateAccountsList(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    });
+
+    return () => {
+      unsub();
+      unsubCorp();
+    };
+  }, [hotel?.id, showTransferBalanceModal, reservation.id]);
+
+  // Fetch guest history
+  useEffect(() => {
+    if (!hotel?.id || !reservation.guestId || !showGuestHistory) return;
+
+    const qHistory = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('guestId', '==', reservation.guestId),
+      orderBy('checkIn', 'desc')
+    );
+
+    const unsub = onSnapshot(qHistory, (snap) => {
+      setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    });
+
+    return () => unsub();
+  }, [hotel?.id, reservation.guestId, showGuestHistory]);
+
   const handleTransferBalance = async () => {
     if (!hotel?.id || !profile || !transferTargetId || balance === 0) return;
     try {
       setLoading(true);
-      await transferLedgerBalance(
-        hotel.id,
-        currentReservation.guestId!,
-        currentReservation.id,
-        transferTargetId,
-        balance,
-        profile.uid,
-        activeFolio === 'company' ? currentReservation.corporateId : undefined
-      );
+      if (transferType === 'guest') {
+        await transferLedgerBalance(
+          hotel.id,
+          currentReservation.guestId!,
+          currentReservation.id,
+          transferTargetId,
+          balance,
+          profile.uid,
+          activeFolio === 'company' ? currentReservation.corporateId : undefined
+        );
+      } else {
+        // Corporate transfer (City Ledger)
+        await transferToCityLedger(
+          hotel.id,
+          currentReservation.guestId!,
+          currentReservation.id,
+          balance,
+          profile.uid,
+          transferTargetId // This is the corporateId in this case
+        );
+      }
       toast.success('Balance transferred successfully');
       setShowTransferBalanceModal(false);
+      setTransferTargetId('');
     } catch (err: any) {
       console.error("Transfer error:", err.message || safeStringify(err));
       toast.error('Failed to transfer balance');
@@ -498,6 +568,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <div className="text-left">
                 <p className="text-xs font-bold uppercase tracking-wider">Post</p>
                 <p className="text-sm font-bold">Charge</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowGuestHistory(true)}
+              className="flex items-center justify-center gap-3 p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl text-purple-500 hover:bg-purple-500 hover:text-white transition-all group active:scale-95"
+            >
+              <div className="w-10 h-10 bg-purple-500/20 rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <History size={20} />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold uppercase tracking-wider">Guest</p>
+                <p className="text-sm font-bold">History</p>
               </div>
             </button>
 
@@ -747,23 +831,61 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-md">
                 <h3 className="text-lg font-bold text-zinc-50 mb-4">Transfer Balance</h3>
+                
+                <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 mb-6">
+                  <button
+                    onClick={() => {
+                      setTransferType('guest');
+                      setTransferTargetId('');
+                    }}
+                    className={cn(
+                      "flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                      transferType === 'guest' ? "bg-emerald-500 text-black shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    To Another Guest
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTransferType('corporate');
+                      setTransferTargetId('');
+                    }}
+                    className={cn(
+                      "flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                      transferType === 'corporate' ? "bg-blue-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    To Corporate Account
+                  </button>
+                </div>
+
                 <p className="text-sm text-zinc-400 mb-6">
-                  Select another active reservation for {currentReservation.guestName} to transfer the current balance of {formatCurrency(balance, currency, exchangeRate)}.
+                  Select {transferType === 'guest' ? 'another active reservation' : 'a corporate account'} to transfer the current balance of {formatCurrency(balance, currency, exchangeRate)}.
                 </p>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Target Reservation</label>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">
+                      {transferType === 'guest' ? 'Target Reservation' : 'Target Corporate Account'}
+                    </label>
                     <select 
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                       value={transferTargetId}
                       onChange={(e) => setTransferTargetId(e.target.value)}
                     >
-                      <option value="">Select Stay</option>
-                      {otherReservations.map(r => (
-                        <option key={r.id} value={r.id}>
-                          Room {r.roomNumber} ({format(new Date(r.checkIn), 'MMM d')} - {format(new Date(r.checkOut), 'MMM d')})
-                        </option>
-                      ))}
+                      <option value="">Select Target</option>
+                      {transferType === 'guest' ? (
+                        activeReservationsForSearch.map(r => (
+                          <option key={r.id} value={r.id}>
+                            {r.guestName} - Room {r.roomNumber} ({format(new Date(r.checkIn), 'MMM d')} - {format(new Date(r.checkOut), 'MMM d')})
+                          </option>
+                        ))
+                      ) : (
+                        corporateAccountsList.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} (Ref: {c.taxId || c.id.slice(-4)})
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
                   <div className="flex gap-3 pt-4">
@@ -873,6 +995,71 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
           )}
 
+          {showGuestHistory && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]"
+              >
+                <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-purple-500/10 rounded-xl flex items-center justify-center text-purple-500">
+                      <History size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-zinc-50">Reservation History</h3>
+                      <p className="text-xs text-zinc-500">Previous stays for {currentReservation.guestName}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowGuestHistory(false)} className="text-zinc-500 hover:text-white">
+                    <XCircle size={24} />
+                  </button>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-4">
+                  {guestHistory.length === 0 ? (
+                    <div className="text-center py-12">
+                      <p className="text-zinc-500">No previous reservations found.</p>
+                    </div>
+                  ) : (
+                    guestHistory.map(res => (
+                      <div key={res.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between hover:border-zinc-700 transition-all">
+                        <div className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold",
+                            res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" :
+                            res.status === 'cancelled' ? "bg-red-500/10 text-red-500" :
+                            "bg-blue-500/10 text-blue-500"
+                          )}>
+                            {res.status === 'checked_out' ? 'CO' : res.status.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</p>
+                            <p className="text-xs text-zinc-500">
+                              {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</p>
+                          <p className="text-[10px] font-bold uppercase text-zinc-600">{res.status.replace('_', ' ')}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="p-6 bg-zinc-950 border-t border-zinc-800">
+                  <button 
+                    onClick={() => setShowGuestHistory(false)}
+                    className="w-full py-2 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
           {showPostChargeModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
               <motion.div
@@ -881,11 +1068,34 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
               >
                 <div className="p-6 border-b border-zinc-800">
-                  <h2 className="text-xl font-bold text-zinc-50">Post Charge</h2>
-                  <p className="text-sm text-zinc-500 mt-1">Post a new charge for {currentReservation.guestName}</p>
+                  <h2 className="text-xl font-bold text-zinc-50">Post Entry</h2>
+                  <p className="text-sm text-zinc-500 mt-1">Add charge or manual adjustment for {currentReservation.guestName}</p>
                 </div>
                 <form onSubmit={handlePostCharge}>
                   <div className="p-6 space-y-4">
+                    <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setChargeDetails({ ...chargeDetails, type: 'debit' })}
+                        className={cn(
+                          "flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                          chargeDetails.type === 'debit' ? "bg-red-500 text-white" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        Charge (Debit)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChargeDetails({ ...chargeDetails, type: 'credit' })}
+                        className={cn(
+                          "flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                          chargeDetails.type === 'credit' ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        Adjustment (Credit)
+                      </button>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-xs font-bold text-zinc-500 uppercase">Category</label>
@@ -897,110 +1107,55 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <option value="restaurant">Restaurant</option>
                           <option value="service">Room Service</option>
                           <option value="laundry">Laundry</option>
+                          <option value="discount">Discount</option>
                           <option value="other">Other</option>
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-500 uppercase">Amount ({currency})</label>
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Unit Price ({currency})</label>
                         <input
                           required
                           type="number"
-                          value={currency === 'USD' ? (chargeDetails.amount / exchangeRate) || '' : chargeDetails.amount || ''}
+                          value={currency === 'USD' ? (chargeDetails.price / exchangeRate) || '' : chargeDetails.price || ''}
                           onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            setChargeDetails({ ...chargeDetails, amount: currency === 'USD' ? val * exchangeRate : val });
+                            const val = parseFloat(e.target.value) || 0;
+                            const finalPrice = currency === 'USD' ? val * exchangeRate : val;
+                            setChargeDetails({ ...chargeDetails, price: finalPrice });
                           }}
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                          step="0.01"
                         />
                       </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Description</label>
-                      <input
-                        required
-                        type="text"
-                        value={chargeDetails.description}
-                        onChange={(e) => setChargeDetails({ ...chargeDetails, description: e.target.value })}
-                        placeholder="e.g. Dinner at Rooftop, Laundry service..."
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                      />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-500 uppercase">Discount Type</label>
-                        <select
-                          value={chargeDetails.discountType}
-                          onChange={(e) => setChargeDetails({ ...chargeDetails, discountType: e.target.value as any })}
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Quantity</label>
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          value={chargeDetails.quantity}
+                          onChange={(e) => setChargeDetails({ ...chargeDetails, quantity: parseInt(e.target.value) || 1 })}
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                        >
-                          <option value="fixed">Fixed Amount</option>
-                          <option value="percentage">Percentage (%)</option>
-                        </select>
+                        />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-500 uppercase">Discount</label>
-                        <input
-                          type="number"
-                          value={chargeDetails.discount || ''}
-                          onChange={(e) => setChargeDetails({ ...chargeDetails, discount: parseFloat(e.target.value) || 0 })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                          step="0.01"
-                        />
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Total Amount</label>
+                        <div className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-400 font-bold">
+                          {formatCurrency(chargeDetails.price * chargeDetails.quantity, currency, exchangeRate)}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Tax Summary in Post Charge */}
-                    <div className="pt-4 border-t border-zinc-800 space-y-2">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-zinc-500">Subtotal</span>
-                        <span className="text-zinc-50">{formatCurrency(chargeDetails.amount, currency, exchangeRate)}</span>
-                      </div>
-                      {(() => {
-                        const amountAfterDiscount = chargeDetails.discountType === 'fixed' 
-                          ? chargeDetails.amount - chargeDetails.discount
-                          : chargeDetails.amount * (1 - chargeDetails.discount / 100);
-
-                        const activeTaxes = (hotel?.taxes || []).filter(t => {
-                          const status = (t.status || '').toLowerCase().trim();
-                          const category = (t.category || '').toLowerCase().trim();
-                          const entryCategory = (chargeDetails.category || '').toLowerCase().trim();
-                          return status === 'active' && 
-                            (category === 'all' || 
-                             category === entryCategory || 
-                             ((entryCategory === 'f & b' || entryCategory === 'restaurant') && (category === 'f & b' || category === 'restaurant'))
-                            );
-                        });
-                        
-                        const totalExclusiveTax = activeTaxes
-                          .filter(t => !t.isInclusive)
-                          .reduce((acc, t) => acc + (amountAfterDiscount * (t.percentage / 100)), 0);
-
-                        return (
-                          <>
-                            {activeTaxes.map(tax => (
-                              <div key={tax.id} className="flex justify-between text-[10px]">
-                                <span className={cn(tax.isInclusive ? "text-blue-400" : "text-emerald-400")}>
-                                  {tax.name} ({tax.percentage}%){tax.isInclusive ? " [Incl.]" : ""}
-                                </span>
-                                <span className="text-zinc-400">
-                                  {formatCurrency(tax.isInclusive 
-                                    ? amountAfterDiscount - (amountAfterDiscount / (1 + (tax.percentage / 100)))
-                                    : (amountAfterDiscount * (tax.percentage / 100)), currency, exchangeRate)}
-                                </span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between items-center pt-2 border-t border-zinc-800 mt-2">
-                              <span className="text-sm font-bold text-zinc-50">Total Charge</span>
-                              <span className="text-lg font-black text-emerald-500">
-                                {formatCurrency(amountAfterDiscount + totalExclusiveTax, currency, exchangeRate)}
-                              </span>
-                            </div>
-                          </>
-                        );
-                      })()}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Description / Reason</label>
+                      <input
+                        type="text"
+                        value={chargeDetails.description}
+                        onChange={(e) => setChargeDetails({ ...chargeDetails, description: e.target.value })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                        placeholder="Item name or reason for adjustment"
+                      />
                     </div>
                   </div>
                   <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
@@ -1013,10 +1168,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </button>
                     <button
                       type="submit"
-                      disabled={!chargeDetails.amount || isSaving}
-                      className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
+                      disabled={(chargeDetails.price <= 0 && chargeDetails.amount <= 0) || isSaving}
+                      className={cn(
+                        "flex-1 px-4 py-2 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
+                        chargeDetails.type === 'debit' ? "bg-red-500 text-white" : "bg-emerald-500 text-black"
+                      )}
                     >
-                      {isSaving ? 'Posting...' : 'Post Charge'}
+                      {isSaving ? 'Processing...' : `Post ${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}`}
                     </button>
                   </div>
                 </form>

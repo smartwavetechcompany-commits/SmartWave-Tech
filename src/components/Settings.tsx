@@ -387,7 +387,8 @@ export function Settings() {
       Object.keys(newBranding).forEach(key => {
         const newVal = (newBranding as any)[key];
         const oldVal = (oldBranding as any)[key];
-        if (JSON.stringify(newVal) !== JSON.stringify(oldVal)) {
+        // Use safeStringify for comparison to handle circular structures
+        if (safeStringify(newVal) !== safeStringify(oldVal)) {
           changes[`branding.${key}`] = { from: oldVal, to: newVal };
         }
       });

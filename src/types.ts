@@ -544,6 +544,8 @@ export interface MaintenanceRequest {
   timestamp: string;
   completedAt?: string;
   dueDate?: string;
+  reminderAt?: string;
+  tags?: string[];
   notes?: string;
 }
 
@@ -583,6 +585,8 @@ export interface LedgerEntry {
   category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax' | 'other';
   postedBy: string;
   paymentMethod?: 'cash' | 'card' | 'transfer';
+  quantity?: number;
+  price?: number;
 }
 
 export interface CorporateAccount {

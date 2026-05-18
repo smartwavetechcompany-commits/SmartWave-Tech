@@ -22,7 +22,7 @@ import {
   X,
   ArrowRight
 } from 'lucide-react';
-import { cn, exportToCSV, formatCurrency } from '../utils';
+import { cn, exportToCSV, formatCurrency, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -603,14 +603,14 @@ export function AuditLogs() {
                                     <div className="flex flex-col gap-2">
                                       <span className="text-[9px] text-red-500 font-bold uppercase tracking-tight">Previous Value</span>
                                       <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-2xl text-xs text-red-400 font-mono break-all line-clamp-6">
-                                        {typeof value.from === 'object' ? JSON.stringify(value.from, null, 2) : String(value.from ?? 'None')}
+                                        {typeof value.from === 'object' ? safeStringify(value.from) : String(value.from ?? 'None')}
                                       </div>
                                     </div>
                                     <ArrowRight className="text-zinc-700 hidden md:block" />
                                     <div className="flex flex-col gap-2">
                                       <span className="text-[9px] text-emerald-500 font-bold uppercase tracking-tight">New Value</span>
                                       <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl text-xs text-emerald-400 font-mono break-all line-clamp-6">
-                                        {typeof value.to === 'object' ? JSON.stringify(value.to, null, 2) : String(value.to ?? 'None')}
+                                        {typeof value.to === 'object' ? safeStringify(value.to) : String(value.to ?? 'None')}
                                       </div>
                                     </div>
                                   </div>
@@ -625,7 +625,7 @@ export function AuditLogs() {
                               <div className="space-y-2">
                                 <span className="text-[10px] text-red-500 font-bold uppercase tracking-tight">Original Data</span>
                                 <pre className="bg-zinc-950 p-6 rounded-3xl text-[10px] text-red-400 font-mono overflow-auto border border-zinc-800">
-                                  {JSON.stringify(selectedLog.metadata.oldData, null, 2)}
+                                  {safeStringify(selectedLog.metadata.oldData)}
                                 </pre>
                               </div>
                             )}
@@ -633,7 +633,7 @@ export function AuditLogs() {
                               <div className="space-y-2">
                                 <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-tight">Replacement Data</span>
                                 <pre className="bg-zinc-950 p-6 rounded-3xl text-[10px] text-emerald-400 font-mono overflow-auto border border-zinc-800">
-                                  {JSON.stringify(selectedLog.metadata.newData, null, 2)}
+                                  {safeStringify(selectedLog.metadata.newData)}
                                 </pre>
                               </div>
                             )}
@@ -644,7 +644,7 @@ export function AuditLogs() {
                       <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-3xl">
                         <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight mb-2 block">Raw Metadata</span>
                         <pre className="text-[10px] text-zinc-400 font-mono overflow-auto">
-                          {JSON.stringify(selectedLog.metadata, null, 2)}
+                          {safeStringify(selectedLog.metadata)}
                         </pre>
                       </div>
                     )}
