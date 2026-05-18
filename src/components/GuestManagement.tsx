@@ -623,21 +623,26 @@ export function GuestManagement() {
                       <div className="w-12 h-12 bg-zinc-800 rounded-full flex items-center justify-center text-emerald-500 font-bold text-lg">
                         {guest.name.charAt(0)}
                       </div>
-                      <div>
-                        <h3 className="text-zinc-50 font-bold">{guest.name}</h3>
-                        <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                      <div className="min-w-0">
+                        <h3 className="text-zinc-50 font-bold truncate">{guest.name}</h3>
+                        <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider truncate">
                           <Star size={10} className={cn(guest.totalStays > 5 || guest.tags?.includes('VIP') ? "text-amber-500" : "text-zinc-600")} />
                           {guest.totalStays > 5 || guest.tags?.includes('VIP') ? 'VIP Guest' : 'Standard'}
                         </div>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {(guest.tags || []).map(tag => (
+                          {(guest.tags || []).slice(0, 3).map(tag => (
                             <span key={tag} className={cn(
-                              "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase",
+                              "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase whitespace-nowrap",
                               tag === 'VIP' ? "bg-amber-500/10 text-amber-500" : "bg-zinc-800 text-zinc-500"
                             )}>
                               {tag}
                             </span>
                           ))}
+                          {(guest.tags || []).length > 3 && (
+                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-zinc-800 text-zinc-600">
+                              +{(guest.tags || []).length - 3}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -701,42 +706,42 @@ export function GuestManagement() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm text-zinc-400">
-                      <Mail size={14} className="text-zinc-600" />
-                      {guest.email}
+                  <div className="space-y-3 min-w-0">
+                    <div className="flex items-center gap-2 text-sm text-zinc-400 min-w-0">
+                      <Mail size={14} className="text-zinc-600 shrink-0" />
+                      <span className="truncate">{guest.email}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-zinc-400">
-                      <Phone size={14} className="text-zinc-600" />
-                      {guest.phone}
+                    <div className="flex items-center gap-2 text-sm text-zinc-400 min-w-0">
+                      <Phone size={14} className="text-zinc-600 shrink-0" />
+                      <span className="truncate">{guest.phone}</span>
                     </div>
                     {guest.corporateId && (
-                      <div className="flex items-center gap-2 text-sm text-emerald-500 font-medium">
-                        <Building2 size={14} />
-                        {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate Guest'}
+                      <div className="flex items-center gap-2 text-sm text-emerald-500 font-medium min-w-0">
+                        <Building2 size={14} className="shrink-0" />
+                        <span className="truncate">{corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate Guest'}</span>
                       </div>
                     )}
-                  <div className="grid grid-cols-3 gap-3 pt-4">
-                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stays</div>
-                      <div className="text-lg font-bold text-zinc-50">{guest.totalStays}</div>
-                      <div className="text-[8px] text-zinc-600 font-bold uppercase mt-0.5">Visits</div>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-4">
+                    <div className="bg-zinc-950 p-2 sm:p-3 rounded-xl border border-zinc-800 flex flex-col justify-between overflow-hidden">
+                      <div className="text-[8px] sm:text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1 truncate">Stays</div>
+                      <div className="text-sm sm:text-lg font-bold text-zinc-50 truncate">{guest.totalStays}</div>
+                      <div className="text-[7px] sm:text-[8px] text-zinc-600 font-bold uppercase mt-0.5 truncate">Visits</div>
                     </div>
-                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-right">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stay Value</div>
-                      <div className="text-lg font-bold text-blue-500">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
-                      <div className="text-[8px] text-zinc-600 font-bold uppercase mt-0.5">Total Revenue</div>
+                    <div className="bg-zinc-950 p-2 sm:p-3 rounded-xl border border-zinc-800 text-right flex flex-col justify-between overflow-hidden">
+                      <div className="text-[8px] sm:text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1 truncate">Stay Value</div>
+                      <div className="text-sm sm:text-lg font-bold text-blue-500 truncate">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
+                      <div className="text-[7px] sm:text-[8px] text-zinc-600 font-bold uppercase mt-0.5 truncate">Total Revenue</div>
                     </div>
-                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-right">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Balance</div>
+                    <div className="bg-zinc-950 p-2 sm:p-3 rounded-xl border border-zinc-800 text-right flex flex-col justify-between overflow-hidden">
+                      <div className="text-[8px] sm:text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1 truncate">Balance</div>
                       <div className={cn(
-                        "text-lg font-bold",
+                        "text-sm sm:text-lg font-bold truncate",
                         (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                       )}>
                         {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                        <div className="text-[8px] font-black uppercase mt-0.5">
-                          {(guest.ledgerBalance || 0) > 0 ? "Debt / Owing" : (guest.ledgerBalance || 0) < 0 ? "Credit" : "Settled"}
-                        </div>
+                      </div>
+                      <div className="text-[7px] sm:text-[8px] font-black uppercase mt-0.5 truncate text-zinc-600">
+                        {(guest.ledgerBalance || 0) > 0 ? "Debt / Owing" : (guest.ledgerBalance || 0) < 0 ? "Credit" : "Settled"}
                       </div>
                     </div>
                   </div>

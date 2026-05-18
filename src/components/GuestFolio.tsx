@@ -657,16 +657,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <User size={18} className="text-emerald-500" />
                 <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Guest Details</h3>
               </div>
-              <div className="space-y-2">
-                <p className="text-lg font-bold text-zinc-50">{currentReservation.guestName}</p>
-                <p className="text-sm text-zinc-400">{currentReservation.guestEmail}</p>
-                <p className="text-sm text-zinc-400">{currentReservation.guestPhone}</p>
+              <div className="space-y-2 min-w-0">
+                <p className="text-lg font-bold text-zinc-50 truncate">{currentReservation.guestName}</p>
+                <p className="text-sm text-zinc-400 truncate">{currentReservation.guestEmail}</p>
+                <p className="text-sm text-zinc-400 truncate">{currentReservation.guestPhone}</p>
                 {guest && (
                   <p className={cn(
-                    "text-xs font-bold mt-1",
+                    "text-xs font-bold mt-1 truncate",
                     (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                   )}>
-                    Guest Ledger Balance: {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                    Bal: {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
                     {(guest.ledgerBalance || 0) > 0 ? " (Debt)" : (guest.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                   </p>
                 )}
