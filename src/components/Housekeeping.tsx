@@ -316,42 +316,42 @@ export function Housekeeping() {
   };
 
   return (
-    <div className="p-8 space-y-8">
-      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+    <div className="p-4 sm:p-8 space-y-4 sm:space-y-8">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Housekeeping</h1>
-          <p className="text-zinc-400">Manage room cleaning and maintenance status</p>
+          <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Housekeeping</h1>
+          <p className="text-xs sm:text-sm text-zinc-400">Manage room cleaning and maintenance status</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="relative flex-1 lg:min-w-[240px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 sm:size-18" size={14} />
             <input 
               type="text"
-              placeholder="Search rooms, status, or notes..."
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all"
+              placeholder="Search..."
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg sm:rounded-xl pl-9 sm:pl-10 pr-3 sm:pr-4 py-1.5 sm:py-2 text-[10px] sm:text-sm text-zinc-50 focus:border-emerald-500 outline-none transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95"
           >
-            <Download size={18} />
-            Export
+            <Download size={14} className="sm:size-[18px]" />
+            <span>Export</span>
           </button>
         </div>
       </header>
 
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <Filter size={16} className="text-zinc-500" />
-          <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Filters:</span>
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl sm:rounded-2xl p-2 sm:p-4 flex flex-wrap items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <Filter size={12} className="sm:size-16 text-zinc-500" />
+          <span className="text-[9px] sm:text-xs font-bold text-zinc-500 uppercase tracking-wider">Filters:</span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <select 
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 text-[9px] sm:text-xs text-white outline-none focus:border-emerald-500"
             value={`${sortBy}-${sortOrder}`}
             onChange={(e) => {
               const [newSort, newOrder] = e.target.value.split('-') as [any, any];
@@ -359,16 +359,16 @@ export function Housekeeping() {
               setSortOrder(newOrder);
             }}
           >
-            <option value="roomNumber-asc">Room Number (Asc)</option>
-            <option value="roomNumber-desc">Room Number (Desc)</option>
+            <option value="roomNumber-asc">Room # (Asc)</option>
+            <option value="roomNumber-desc">Room # (Desc)</option>
             <option value="status-asc">Status (A-Z)</option>
             <option value="status-desc">Status (Z-A)</option>
-            <option value="floor-asc">Floor (Low-High)</option>
-            <option value="floor-desc">Floor (High-Low)</option>
+            <option value="floor-asc">Floor (L-H)</option>
+            <option value="floor-desc">Floor (H-L)</option>
           </select>
 
           <select 
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 text-[9px] sm:text-xs text-white outline-none focus:border-emerald-500"
             value={filter}
             onChange={(e) => setFilter(e.target.value as any)}
           >
@@ -376,52 +376,50 @@ export function Housekeeping() {
             <option value="clean">Clean</option>
             <option value="cleaning">Cleaning</option>
             <option value="dirty">Dirty</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="out_of_service">Out of Service</option>
+            <option value="maintenance">Maint.</option>
+            <option value="out_of_service">OOS</option>
           </select>
 
           <select 
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 text-[9px] sm:text-xs text-white outline-none focus:border-emerald-500"
             value={roomTypeFilter}
             onChange={(e) => setRoomTypeFilter(e.target.value)}
           >
-            <option value="all">All Room Types</option>
+            <option value="all">All Types</option>
             {roomTypes.map(type => (
               <option key={type} value={type}>{type}</option>
             ))}
           </select>
 
           <select 
-            className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 text-[9px] sm:text-xs text-white outline-none focus:border-emerald-500"
             value={staffFilter}
             onChange={(e) => setStaffFilter(e.target.value)}
           >
-            <option value="all">All Staff</option>
+            <option value="all">Staff</option>
             <option value="">Unassigned</option>
             {staff.map(s => (
               <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
             ))}
           </select>
 
-          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
-            <div className="flex items-center gap-1.5">
-              <Calendar size={14} className="text-emerald-500" />
-              <span className="text-[10px] font-bold text-zinc-500 uppercase">From:</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <Calendar size={12} className="sm:size-14 text-emerald-500" />
               <input 
                 type="date"
-                className="bg-transparent text-xs text-white outline-none appearance-none"
+                className="bg-transparent text-[9px] sm:text-xs text-white outline-none appearance-none"
                 style={{ colorScheme: 'dark' }}
                 value={dateRange.start}
                 onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
               />
             </div>
             <div className="w-px h-3 bg-zinc-800" />
-            <div className="flex items-center gap-1.5">
-              <Calendar size={14} className="text-emerald-500" />
-              <span className="text-[10px] font-bold text-zinc-500 uppercase">To:</span>
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <Calendar size={12} className="sm:size-14 text-emerald-500" />
               <input 
                 type="date"
-                className="bg-transparent text-xs text-white outline-none appearance-none"
+                className="bg-transparent text-[9px] sm:text-xs text-white outline-none appearance-none"
                 style={{ colorScheme: 'dark' }}
                 value={dateRange.end}
                 onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
@@ -432,7 +430,7 @@ export function Housekeeping() {
                 onClick={() => setDateRange({ start: '', end: '' })}
                 className="text-zinc-500 hover:text-zinc-50 transition-colors"
               >
-                <X size={14} />
+                <X size={12} className="sm:size-14" />
               </button>
             )}
           </div>
@@ -476,57 +474,57 @@ export function Housekeeping() {
             <div 
               key={room.id} 
               className={cn(
-                "bg-zinc-900 border rounded-2xl p-6 space-y-4 flex flex-col transition-all relative group",
+                "bg-zinc-900 border rounded-xl sm:rounded-2xl p-3 sm:p-6 space-y-3 sm:space-y-4 flex flex-col transition-all relative group",
                 isSelected ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-zinc-800"
               )}
             >
               <button 
                 onClick={() => toggleRoomSelection(room.id)}
-                className="absolute top-4 right-4 text-zinc-600 hover:text-emerald-500 transition-colors"
+                className="absolute top-3 sm:top-4 right-3 sm:right-4 text-zinc-600 hover:text-emerald-500 transition-colors"
               >
-                {isSelected ? <CheckSquare size={20} className="text-emerald-500" /> : <Square size={20} />}
+                {isSelected ? <CheckSquare size={16} className="sm:size-20 text-emerald-500" /> : <Square size={16} className="sm:size-20" />}
               </button>
 
-          <div className="flex items-center justify-between pr-8">
-            <span className="text-2xl font-bold text-zinc-50">Room {room.roomNumber}</span>
-            <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center justify-between pr-6 sm:pr-8">
+            <span className="text-lg sm:text-2xl font-bold text-zinc-50">Room {room.roomNumber}</span>
+            <div className="flex flex-col items-end gap-0.5 sm:gap-1">
               <span 
                 style={{ 
                   backgroundColor: `${statusColor}1a`,
                   color: statusColor
                 }}
-                className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider"
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[8px] sm:text-[10px] font-bold uppercase tracking-wider"
               >
                 {room.status.replace(/_/g, ' ')}
               </span>
               {room.assignedTo && (
-                <div className="flex items-center gap-1 text-[9px] text-emerald-500 font-bold uppercase tracking-tighter">
-                  <UserIcon size={10} />
+                <div className="flex items-center gap-1 text-[8px] sm:text-[9px] text-emerald-500 font-bold uppercase tracking-tighter">
+                  <UserIcon size={9} className="sm:size-10" />
                   {staff.find(s => s.uid === room.assignedTo)?.displayName?.split(' ')[0] || 'Assigned'}
                 </div>
               )}
             </div>
           </div>
               
-              <div className="text-xs text-zinc-500 uppercase font-bold tracking-widest">
+              <div className="text-[9px] sm:text-xs text-zinc-500 uppercase font-bold tracking-widest leading-none">
                 {room.type} • Floor {room.floor}
               </div>
 
               {activeReservation && (
-                <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-3 space-y-1">
-                  <div className="flex items-center gap-2 text-[10px] text-blue-500 font-bold uppercase tracking-wider">
-                    <UserIcon size={12} />
-                    Current Guest
+                <div className="bg-blue-500/5 border border-blue-500/10 rounded-lg sm:rounded-xl p-2 sm:p-3 space-y-0.5 sm:space-y-1">
+                  <div className="flex items-center gap-1 sm:gap-2 text-[8px] sm:text-[10px] text-blue-500 font-bold uppercase tracking-wider">
+                    <UserIcon size={10} className="sm:size-12" />
+                    Guest
                   </div>
-                  <p className="text-sm font-bold text-zinc-50">{activeReservation.guestName}</p>
-                  <p className="text-[10px] text-zinc-500">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
+                  <p className="text-xs sm:text-sm font-bold text-zinc-50 truncate">{activeReservation.guestName}</p>
+                  <p className="text-[9px] sm:text-[10px] text-zinc-500 truncate">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
                 </div>
               )}
 
-              <div className="space-y-2">
-                <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Assigned To</label>
+              <div className="space-y-1 sm:space-y-2">
+                <label className="text-[9px] sm:text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Assigned To</label>
                 <select
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none transition-all"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg sm:rounded-xl px-2 sm:px-3 py-1.5 sm:py-2 text-[9px] sm:text-xs text-zinc-50 focus:border-emerald-500 outline-none transition-all"
                   value={room.assignedTo || ''}
                   onChange={(e) => updateRoomStatus(room.id, room.status, e.target.value)}
                 >
@@ -537,11 +535,11 @@ export function Housekeeping() {
                 </select>
               </div>
 
-              <div className="flex-1 space-y-2">
-                <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Housekeeping Notes</label>
+              <div className="flex-1 space-y-1 sm:space-y-2">
+                <label className="text-[9px] sm:text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Notes</label>
                 <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20 transition-all"
-                  placeholder="Add notes (e.g. broken bulb, needs deep clean...)"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg sm:rounded-xl p-2 sm:p-3 text-[9px] sm:text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none h-16 sm:h-20 transition-all font-mono"
+                  placeholder="Notes..."
                   value={roomNotes[room.id] ?? room.notes ?? ''}
                   onChange={(e) => setRoomNotes(prev => ({ ...prev, [room.id]: e.target.value }))}
                   onBlur={() => {
@@ -553,43 +551,43 @@ export function Housekeeping() {
                 />
               </div>
 
-              <div className="pt-4 border-t border-zinc-800 grid grid-cols-2 gap-2">
+              <div className="pt-3 sm:pt-4 border-t border-zinc-800 grid grid-cols-2 gap-1.5 sm:gap-2">
                 <button 
                   onClick={() => updateRoomStatus(room.id, 'clean')}
                   disabled={room.status === 'clean'}
-                  className="flex items-center justify-center gap-2 bg-emerald-500/10 text-emerald-500 py-2 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
+                  className="flex items-center justify-center gap-1 sm:gap-2 bg-emerald-500/10 text-emerald-500 py-1.5 sm:py-2 rounded-lg text-[9px] sm:text-xs font-bold hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
                 >
-                  <CheckCircle2 size={14} />
-                  Mark Clean
+                  <CheckCircle2 size={12} className="sm:size-14" />
+                  Clean
                 </button>
                 <button 
                   onClick={() => updateRoomStatus(room.id, 'cleaning')}
                   disabled={room.status === 'cleaning'}
-                  className="flex items-center justify-center gap-2 bg-purple-500/10 text-purple-500 py-2 rounded-lg text-xs font-bold hover:bg-purple-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
+                  className="flex items-center justify-center gap-1 sm:gap-2 bg-purple-500/10 text-purple-500 py-1.5 sm:py-2 rounded-lg text-[9px] sm:text-xs font-bold hover:bg-purple-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
                 >
-                  <Clock size={14} />
+                  <Clock size={12} className="sm:size-14" />
                   Cleaning
                 </button>
                 <button 
                   onClick={() => updateRoomStatus(room.id, 'dirty')}
                   disabled={room.status === 'dirty'}
-                  className="flex items-center justify-center gap-2 bg-red-500/10 text-red-500 py-2 rounded-lg text-xs font-bold hover:bg-red-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
+                  className="flex items-center justify-center gap-1 sm:gap-2 bg-red-500/10 text-red-500 py-1.5 sm:py-2 rounded-lg text-[9px] sm:text-xs font-bold hover:bg-red-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
                 >
-                  <AlertCircle size={14} />
-                  Mark Dirty
+                  <AlertCircle size={12} className="sm:size-14" />
+                  Dirty
                 </button>
                 <button 
                   onClick={() => updateRoomStatus(room.id, 'maintenance')}
                   disabled={room.status === 'maintenance'}
-                  className="flex items-center justify-center gap-2 bg-amber-500/10 text-amber-500 py-2 rounded-lg text-xs font-bold hover:bg-amber-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
+                  className="flex items-center justify-center gap-1 sm:gap-2 bg-amber-500/10 text-amber-500 py-1.5 sm:py-2 rounded-lg text-[9px] sm:text-xs font-bold hover:bg-amber-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
                 >
-                  <RefreshCw size={14} />
-                  Maintenance
+                  <RefreshCw size={12} className="sm:size-14" />
+                  Maint.
                 </button>
                 <button 
                   onClick={() => updateRoomStatus(room.id, 'out_of_service')}
                   disabled={room.status === 'out_of_service'}
-                  className="flex items-center justify-center gap-2 bg-zinc-800 text-zinc-400 py-2 rounded-lg text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
+                  className="hidden sm:flex items-center justify-center gap-2 bg-zinc-800 text-zinc-400 py-2 rounded-lg text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100 col-span-2"
                 >
                   <AlertCircle size={14} />
                   Out of Service

@@ -140,16 +140,16 @@ export function Inventory() {
   }
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-8 space-y-4 sm:space-y-8">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Inventory Management</h1>
-          <p className="text-zinc-500">Manage supplies, food, and beverage stock</p>
+          <h1 className="text-xl sm:text-3xl font-bold text-white tracking-tight">Inventory</h1>
+          <p className="text-xs sm:text-sm text-zinc-500">Manage supplies and stock</p>
         </div>
         
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400">
             <div className="flex items-center gap-1.5">
               <Calendar size={14} className="text-emerald-500" />
               <input type="date" className="bg-transparent outline-none appearance-none" style={{ colorScheme: 'dark' }} defaultValue="2026-04-01" />
@@ -160,67 +160,52 @@ export function Inventory() {
               <input type="date" className="bg-transparent outline-none appearance-none" style={{ colorScheme: 'dark' }} defaultValue="2026-04-12" />
             </div>
           </div>
-          <select className="bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400 outline-none">
-            <option>All Categories</option>
-          </select>
-          <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all">
-            <Download size={16} />
-            Export Report
+          <button className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all">
+            <Download size={14} className="sm:size-16" />
+            <span className="hidden sm:inline">Export Repo</span><span className="sm:hidden">Export</span>
           </button>
           <button 
             onClick={() => {
               setActiveTab('items');
               setShouldOpenAddModal(true);
             }}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-lg text-sm font-bold transition-all"
+            className="flex items-center gap-1.5 sm:gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-bold transition-all"
           >
-            <Plus size={16} />
+            <Plus size={14} className="sm:size-16" />
             Add Item
-          </button>
-          <button 
-            onClick={() => {
-              setActiveTab('items');
-              // We need a way to open the category modal in ItemMaster
-              // I'll add a prop to ItemMaster for this
-              setShouldOpenCategoryModal(true);
-            }}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all"
-          >
-            <Layers size={16} />
-            Categories
           </button>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="flex overflow-x-auto pb-4 lg:grid lg:grid-cols-4 gap-4 no-scrollbar">
+      <div className="flex overflow-x-auto pb-2 sm:pb-4 lg:grid lg:grid-cols-4 gap-3 sm:gap-4 no-scrollbar">
         {stats.map((stat, i) => (
-          <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl min-w-[200px] lg:min-w-0">
-            <div className="text-zinc-500 text-xs font-bold uppercase mb-2">{stat.label}</div>
-            <div className={cn("text-2xl font-bold", stat.color)}>{stat.value}</div>
+          <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-3 sm:p-6 rounded-xl sm:rounded-2xl min-w-[140px] sm:min-w-[200px] lg:min-w-0">
+            <div className="text-zinc-500 text-[8px] sm:text-xs font-bold uppercase mb-1 sm:mb-2 leading-tight">{stat.label}</div>
+            <div className={cn("text-base sm:text-2xl font-bold truncate", stat.color)}>{stat.value}</div>
           </div>
         ))}
       </div>
 
       {/* Search & Filter */}
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center justify-between">
         <div className="relative flex-1 w-full">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+          <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-zinc-500 sm:size-18" size={14} />
           <input
             type="text"
-            placeholder="Search inventory..."
+            placeholder="Search..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-lg sm:rounded-xl pl-9 sm:pl-12 pr-3 sm:pr-4 py-1.5 sm:py-3 text-[10px] sm:text-sm text-white focus:outline-none focus:border-emerald-500/50"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto w-full sm:w-auto no-scrollbar">
           {['All', 'Food', 'Drink', 'Cleaning', 'Other'].map(cat => (
             <button
               key={cat}
               onClick={() => setFilterCategory(cat)}
               className={cn(
-                "px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                "px-3 sm:px-4 py-1 sm:py-2 rounded-lg text-[9px] sm:text-xs font-bold transition-all whitespace-nowrap",
                 filterCategory === cat ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white"
               )}
             >
@@ -231,38 +216,38 @@ export function Inventory() {
       </div>
 
       {/* Table */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
-        <table className="w-full text-left">
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl sm:rounded-2xl overflow-x-auto">
+        <table className="w-full text-left min-w-[600px]">
           <thead>
-            <tr className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-800">
-              <th className="px-6 py-4">Item Name</th>
-              <th className="px-6 py-4">Category</th>
-              <th className="px-6 py-4 text-center">Quantity</th>
-              <th className="px-6 py-4 text-center">Status</th>
-              <th className="px-6 py-4">Last Updated</th>
-              <th className="px-6 py-4 text-right">Actions</th>
+            <tr className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-zinc-800">
+              <th className="px-3 sm:px-6 py-2 sm:py-4">Item Name</th>
+              <th className="px-3 sm:px-6 py-2 sm:py-4">Category</th>
+              <th className="px-3 sm:px-6 py-2 sm:py-4 text-center">Qty</th>
+              <th className="px-3 sm:px-6 py-2 sm:py-4 text-center">Status</th>
+              <th className="px-3 sm:px-6 py-2 sm:py-4">Updated</th>
+              <th className="px-3 sm:px-6 py-2 sm:py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {filteredItems.map(item => (
               <tr key={item.id} className="hover:bg-zinc-800/30 transition-colors">
-                <td className="px-6 py-4 font-bold text-white text-sm">{item.name}</td>
-                <td className="px-6 py-4 text-zinc-400 text-sm">{item.category}</td>
-                <td className="px-6 py-4 text-center text-white text-sm font-bold">{item.quantity}</td>
-                <td className="px-6 py-4 text-center">
+                <td className="px-3 sm:px-6 py-2 sm:py-4 font-bold text-white text-[10px] sm:text-sm">{item.name}</td>
+                <td className="px-3 sm:px-6 py-2 sm:py-4 text-zinc-400 text-[10px] sm:text-sm">{item.category}</td>
+                <td className="px-3 sm:px-6 py-2 sm:py-4 text-center text-white text-[10px] sm:text-sm font-bold">{item.quantity}</td>
+                <td className="px-3 sm:px-6 py-2 sm:py-4 text-center">
                   <span className={cn(
-                    "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
+                    "px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full text-[7px] sm:text-[10px] font-bold uppercase",
                     item.quantity <= item.minThreshold ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
                   )}>
-                    {item.quantity <= item.minThreshold ? 'Low Stock' : 'In Stock'}
+                    {item.quantity <= item.minThreshold ? 'Low' : 'Stock'}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-zinc-500 text-sm">
-                  {item.lastUpdated ? format(new Date(item.lastUpdated), 'dd/MM/yyyy') : '-'}
+                <td className="px-3 sm:px-6 py-2 sm:py-4 text-zinc-500 text-[10px] sm:text-sm whitespace-nowrap">
+                  {item.lastUpdated ? format(new Date(item.lastUpdated), 'dd/MM/yy') : '-'}
                 </td>
-                <td className="px-6 py-4 text-right">
+                <td className="px-3 sm:px-6 py-2 sm:py-4 text-right">
                   <button className="text-zinc-500 hover:text-white transition-colors">
-                    <MoreHorizontal size={18} />
+                    <MoreHorizontal size={14} className="sm:size-18" />
                   </button>
                 </td>
               </tr>

@@ -361,40 +361,40 @@ export function GuestManagement() {
   }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder]);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 sm:mb-8">
+    <div className="p-3 sm:p-6 lg:p-8 space-y-4 sm:space-y-8">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 sm:mb-8">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-1 sm:mb-2 tracking-tight">Guest Management</h1>
-          <p className="text-sm text-zinc-400">Manage guest profiles, history, and loyalty</p>
+          <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 mb-0.5 sm:mb-2 tracking-tight">Guest Management</h1>
+          <p className="text-[10px] sm:text-sm text-zinc-400 font-medium">Manage guest profiles, history, and loyalty</p>
         </div>
-        <div className="flex flex-wrap gap-2 sm:gap-3">
+        <div className="flex flex-wrap gap-2">
           <div className="hidden xl:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
             <div className="relative flex items-center gap-1">
-              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <Calendar size={10} className="text-emerald-500 ml-1" />
               <input
                 type="date"
                 value={reportFilter.startDate}
                 onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
-                className="bg-transparent text-[10px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                className="bg-transparent text-[9px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
                 style={{ colorScheme: 'dark' }}
               />
             </div>
-            <span className="text-zinc-600 text-[10px]">to</span>
+            <span className="text-zinc-600 text-[9px]">to</span>
             <div className="relative flex items-center gap-1">
-              <Calendar size={12} className="text-emerald-500 ml-1" />
+              <Calendar size={10} className="text-emerald-500 ml-1" />
               <input
                 type="date"
                 value={reportFilter.endDate}
                 onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
-                className="bg-transparent text-[10px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                className="bg-transparent text-[9px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
                 style={{ colorScheme: 'dark' }}
               />
             </div>
-            <div className="w-px h-4 bg-zinc-800" />
+            <div className="w-px h-3 bg-zinc-800" />
             <select
               value={reportFilter.type}
               onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+              className="bg-transparent text-[9px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
             >
               <option value="all">All Types</option>
               <option value="individual">Individual</option>
@@ -403,11 +403,11 @@ export function GuestManagement() {
           </div>
           <button
             onClick={exportGuests}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-50 px-3 sm:px-4 py-2 rounded-xl text-sm font-bold hover:bg-zinc-700 transition-all active:scale-95"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-zinc-800 text-zinc-50 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-sm font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700/50"
           >
-            <Download size={16} />
+            <Download size={14} className="sm:size-4" />
             <span className="hidden sm:inline">Export Report</span>
-            <span className="sm:hidden">Export</span>
+            <span className="sm:hidden text-[9px] uppercase tracking-wider">Export</span>
           </button>
           <button
             onClick={() => {
@@ -427,65 +427,66 @@ export function GuestManagement() {
             });
             setShowAddModal(true);
           }}
-          className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-3 sm:px-4 py-2 rounded-xl text-sm font-medium transition-all active:scale-95"
+          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-sm font-bold transition-all active:scale-95 shadow-lg shadow-emerald-500/10"
         >
-          <Plus size={16} />
-          Add Guest
+          <Plus size={14} className="sm:size-4" />
+          <span className="hidden sm:inline">Add Guest</span>
+          <span className="sm:hidden text-[9px] uppercase tracking-wider">Add Guest</span>
         </button>
       </div>
     </div>
 
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-zinc-800 rounded-xl text-zinc-400 group-hover:text-zinc-50 transition-colors">
-              <Users size={16} className="sm:w-5 sm:h-5" />
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-8">
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
+          <div className="flex items-center justify-between mb-1.5 sm:mb-4">
+            <div className="p-1 sm:p-2 bg-zinc-800 rounded-lg text-zinc-400 group-hover:text-zinc-50 transition-colors">
+              <Users size={14} className="sm:size-5" />
             </div>
-            <div className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-widest hidden xs:block">Database</div>
+            <div className="text-[6px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-widest hidden xs:block">Database</div>
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Total Guests</div>
-          <div className="text-xl sm:text-3xl font-black text-zinc-50 font-mono tracking-tighter leading-none">{guests.length}</div>
+          <div className="text-zinc-400 text-[6px] sm:text-[10px] font-bold uppercase tracking-widest mb-0.5 sm:mb-1">Total Guests</div>
+          <div className="text-lg sm:text-3xl font-black text-zinc-50 font-mono tracking-tighter leading-none">{guests.length}</div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-emerald-500/10 rounded-xl text-emerald-500">
-              <Star size={16} className="sm:w-5 sm:h-5" />
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
+          <div className="flex items-center justify-between mb-1.5 sm:mb-4">
+            <div className="p-1 sm:p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+              <Star size={14} className="sm:size-5" />
             </div>
-            <div className="text-emerald-500 text-[8px] sm:text-[10px] font-black uppercase tracking-tighter hidden xs:block">
+            <div className="text-emerald-500 text-[6px] sm:text-[10px] font-black uppercase tracking-tighter hidden xs:block">
               {Math.round((guests.filter(g => g.totalStays > 1).length / (guests.length || 1)) * 100)}% Retention
             </div>
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Repeat Guests</div>
-          <div className="text-xl sm:text-3xl font-black text-emerald-500 font-mono tracking-tighter leading-none">{guests.filter(g => g.totalStays > 1).length}</div>
+          <div className="text-zinc-400 text-[6px] sm:text-[10px] font-bold uppercase tracking-widest mb-0.5 sm:mb-1">Repeat Guests</div>
+          <div className="text-lg sm:text-3xl font-black text-emerald-500 font-mono tracking-tighter leading-none">{guests.filter(g => g.totalStays > 1).length}</div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-blue-500/30 transition-all shadow-lg hover:shadow-blue-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-blue-500/10 rounded-xl text-blue-500">
-              <DollarSign size={16} className="sm:w-5 sm:h-5" />
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-2xl group hover:border-blue-500/30 transition-all shadow-lg hover:shadow-blue-500/5">
+          <div className="flex items-center justify-between mb-1.5 sm:mb-4">
+            <div className="p-1 sm:p-2 bg-blue-500/10 rounded-lg text-blue-500">
+              <DollarSign size={14} className="sm:size-5" />
             </div>
-            <div className="text-zinc-500 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest leading-none hidden xs:block">Net Growth</div>
+            <div className="text-zinc-500 text-[6px] sm:text-[10px] font-bold uppercase tracking-widest leading-none hidden xs:block">Net Growth</div>
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Lifetime Revenue</div>
-          <div className="text-xl sm:text-3xl font-black text-blue-500 font-mono tracking-tighter leading-none truncate">
+          <div className="text-zinc-400 text-[6px] sm:text-[10px] font-bold uppercase tracking-widest mb-0.5 sm:mb-1">Lifetime Revenue</div>
+          <div className="text-lg sm:text-3xl font-black text-blue-500 font-mono tracking-tighter leading-none truncate">
             {formatCurrency(guests.reduce((acc, g) => acc + (g.totalSpent || 0), 0), currency, exchangeRate)}
           </div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-red-500/30 transition-all shadow-lg hover:shadow-red-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-red-500/10 rounded-xl text-red-500">
-              <CreditCard size={16} className="sm:w-5 sm:h-5" />
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-2xl group hover:border-red-500/30 transition-all shadow-lg hover:shadow-red-500/5">
+          <div className="flex items-center justify-between mb-1.5 sm:mb-4">
+            <div className="p-1 sm:p-2 bg-red-500/10 rounded-lg text-red-500">
+              <CreditCard size={14} className="sm:size-5" />
             </div>
             {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
-              <div className="p-0.5 sm:p-1 bg-red-500 text-white rounded text-[7px] sm:text-[8px] font-black px-1.5 sm:px-2 uppercase shadow-sm">
+              <div className="p-0.5 bg-red-500 text-white rounded text-[5px] sm:text-[8px] font-black px-1 sm:px-2 uppercase shadow-sm">
                 {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
               </div>
             )}
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Net Outstanding</div>
-          <div className="text-xl sm:text-3xl font-black text-red-500 font-mono tracking-tighter leading-none truncate">
+          <div className="text-zinc-400 text-[6px] sm:text-[10px] font-bold uppercase tracking-widest mb-0.5 sm:mb-1">Net Outstanding</div>
+          <div className="text-lg sm:text-3xl font-black text-red-500 font-mono tracking-tighter leading-none truncate">
             {formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
           </div>
         </div>

@@ -1689,155 +1689,190 @@ export function FrontDesk() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="p-4 sm:p-8 space-y-4 sm:space-y-8">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Front Desk</h1>
-          <p className="text-xs sm:text-sm text-zinc-500">Manage bookings and guest check-ins</p>
+          <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Front Desk</h1>
+          <p className="text-xs sm:text-sm text-zinc-400">Manage reservations and guest services</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative group">
-            <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
-              <Download size={18} />
-              Export
-            </button>
-            <div className="absolute right-0 mt-2 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
-              <button onClick={() => handleExport('rooms')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Room Status</button>
-              <button onClick={() => handleExport('arrivals')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Arrivals</button>
-              <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-ins</button>
-              <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-outs</button>
-              <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">In-House Guests</button>
+        
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+          <div className="grid grid-cols-2 sm:flex sm:flex-row items-center gap-2 sm:gap-4 w-full sm:w-auto">
+            <div className="bg-zinc-900 border border-zinc-800 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl">
+              <div className="text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Arrivals</div>
+              <div className="text-base sm:text-2xl font-bold text-emerald-500">
+                {reservations.filter(r => r.checkIn === format(new Date(), 'yyyy-MM-dd') && r.status === 'pending').length}
+              </div>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl">
+              <div className="text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Departures</div>
+              <div className="text-base sm:text-2xl font-bold text-amber-500">
+                {reservations.filter(r => r.checkOut === format(new Date(), 'yyyy-MM-dd') && r.status === 'checked_in').length}
+              </div>
             </div>
           </div>
-          <button 
-            onClick={() => setShowNightAuditModal(true)}
-            disabled={isAuditing}
-            className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
-            title="Run Nightly Audit"
-          >
-            <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
-          </button>
-          <button 
-            onClick={() => {
-              setNewBooking({
-                guestName: '',
-                guestEmail: '',
-                guestPhone: '',
-                idType: '',
-                idNumber: '',
-                address: '',
-                roomId: '',
-                checkIn: format(new Date(), 'yyyy-MM-dd'),
-                checkInTime: hotel?.defaultCheckInTime || '14:00',
-                checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                checkOutTime: hotel?.defaultCheckOutTime || '12:00',
-                guestType: 'corporate',
-                corporateId: '',
-                guestId: '',
-                totalAmount: 0,
-                paidAmount: 0,
-                paymentStatus: 'unpaid' as const,
-                notes: '',
-                corporateReference: '',
-                discountAmount: 0,
-                discountType: 'fixed',
-                discountReason: '',
-                taxAmount: 0,
-                taxDetails: [],
-                initialPayment: 0,
-                paymentMethod: 'cash',
-                payments: [{ amount: 0, method: 'cash' }],
-                autoNightDeduction: true,
-                additionalStays: [] as any[],
-              });
-              setIsBooking(true);
-            }}
-            className="hidden sm:flex bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold items-center justify-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-          >
-            <Building2 size={18} className="text-emerald-500" />
-            Corporate Booking
-          </button>
-                <button 
-                  onClick={() => {
-                    setNewBooking({
-                      guestName: '',
-                      guestEmail: '',
-                      guestPhone: '',
-                      idType: '',
-                      idNumber: '',
-                      address: '',
-                      roomId: '',
-                      checkIn: format(new Date(), 'yyyy-MM-dd'),
-                      checkInTime: hotel?.defaultCheckInTime || '14:00',
-                      checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                      checkOutTime: hotel?.defaultCheckOutTime || '12:00',
-                      guestType: 'individual',
-                      corporateId: '',
-                      guestId: '',
-                      totalAmount: 0,
-                      paidAmount: 0,
-                      paymentStatus: 'unpaid' as const,
-                      notes: '',
-                      corporateReference: '',
-                      discountAmount: 0,
-                      discountType: 'fixed',
-                      discountReason: '',
-                      taxAmount: 0,
-                      taxDetails: [],
-                      initialPayment: 0,
-                      paymentMethod: 'cash',
-                      payments: [{ amount: 0, method: 'cash' }],
-                      autoNightDeduction: true,
-                      additionalStays: [] as any[]
-                    });
-                    setIsBooking(true);
-                  }}
-                  className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-                >
-            <Plus size={18} />
-            New Booking
-          </button>
+
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button 
+              onClick={() => {
+                setNewBooking({
+                  guestName: '',
+                  guestEmail: '',
+                  guestPhone: '',
+                  idType: '',
+                  idNumber: '',
+                  address: '',
+                  roomId: '',
+                  checkIn: format(new Date(), 'yyyy-MM-dd'),
+                  checkInTime: hotel?.defaultCheckInTime || '14:00',
+                  checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+                  checkOutTime: hotel?.defaultCheckOutTime || '12:00',
+                  guestType: 'individual',
+                  corporateId: '',
+                  guestId: '',
+                  totalAmount: 0,
+                  paidAmount: 0,
+                  paymentStatus: 'unpaid' as const,
+                  notes: '',
+                  corporateReference: '',
+                  discountAmount: 0,
+                  discountType: 'fixed',
+                  discountReason: '',
+                  taxAmount: 0,
+                  taxDetails: [],
+                  initialPayment: 0,
+                  paymentMethod: 'cash',
+                  payments: [{ amount: 0, method: 'cash' }],
+                  autoNightDeduction: true,
+                  additionalStays: [] as any[]
+                });
+                setIsBooking(true);
+              }}
+              className="flex-1 sm:flex-none bg-emerald-500 text-black px-4 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 text-xs sm:text-sm"
+            >
+              <PlusCircle size={16} />
+              Book Stay
+            </button>
+            <button 
+              onClick={() => {
+                const today = format(new Date(), 'yyyy-MM-dd');
+                const checkedIn = reservations.filter(r => r.status === 'checked_in');
+                const arrivalCount = reservations.filter(r => r.checkIn === today && r.status === 'pending').length;
+                const departureCount = reservations.filter(r => r.checkOut === today && r.status === 'checked_in').length;
+                
+                toast.info(`Status Check: ${checkedIn.length} Checked In | ${arrivalCount} arrivals today | ${departureCount} departures today`);
+              }}
+              className="bg-zinc-900 border border-zinc-800 text-zinc-50 p-2 sm:p-3 rounded-lg sm:rounded-xl hover:bg-zinc-800 transition-all active:scale-95"
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
         </div>
       </header>
 
+      {/* Tabs and Filters */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto pb-2 no-scrollbar">
+          {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "flex-none px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-bold transition-all whitespace-nowrap capitalize",
+                activeTab === tab 
+                  ? "bg-zinc-50 text-black" 
+                  : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+              )}
+            >
+              {tab.replace('_', ' ')}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 sm:gap-4">
+          <div className="relative md:col-span-2">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+            <input 
+              type="text" 
+              placeholder="Search guests, rooms..."
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg sm:rounded-xl pl-9 sm:pl-10 pr-4 py-2 sm:py-3 text-[10px] sm:text-sm text-zinc-50 outline-none focus:border-emerald-500 transition-all font-medium"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-2 sm:gap-4 md:col-span-2">
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
+              <select
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg sm:rounded-xl pl-8 sm:pl-10 pr-2 sm:pr-4 py-2 sm:py-3 text-[10px] sm:text-sm text-zinc-50 outline-none focus:border-emerald-500 transition-all appearance-none font-medium"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+              >
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="checked_in">Checked In</option>
+                <option value="checked_out">Checked Out</option>
+                <option value="no_show">No Show</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+            
+            <div className="relative">
+              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
+              <select
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg sm:rounded-xl pl-8 sm:pl-10 pr-2 sm:pr-4 py-2 sm:py-3 text-[10px] sm:text-sm text-zinc-50 outline-none focus:border-emerald-500 transition-all appearance-none font-medium"
+                value={paymentStatusFilter}
+                onChange={(e) => setPaymentStatusFilter(e.target.value)}
+              >
+                <option value="all">All Payments</option>
+                <option value="paid">Paid</option>
+                <option value="partial">Partial</option>
+                <option value="unpaid">Unpaid</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Room Status Legend */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
-          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Rooms</div>
-          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.total}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+        <div className="bg-zinc-900 border border-zinc-800 p-2 sm:p-3 rounded-lg sm:rounded-xl">
+          <div className="text-[7px] sm:text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-0.5">Total Rooms</div>
+          <div className="text-sm sm:text-xl font-bold text-zinc-50">{roomStats.total}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
-          <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Available</div>
-          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.available}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-2 sm:p-3 rounded-lg sm:rounded-xl">
+          <div className="text-[7px] sm:text-[9px] font-bold text-emerald-500 uppercase tracking-wider mb-0.5">Available</div>
+          <div className="text-sm sm:text-xl font-bold text-zinc-50">{roomStats.available}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
-          <div className="text-[9px] font-bold text-blue-500 uppercase tracking-wider mb-1">Occupied</div>
-          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.occupied}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-2 sm:p-3 rounded-lg sm:rounded-xl">
+          <div className="text-[7px] sm:text-[9px] font-bold text-blue-500 uppercase tracking-wider mb-0.5">Occupied</div>
+          <div className="text-sm sm:text-xl font-bold text-zinc-50">{roomStats.occupied}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
-          <div className="text-[9px] font-bold text-amber-500 uppercase tracking-wider mb-1">Dirty</div>
-          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.dirty}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-2 sm:p-3 rounded-lg sm:rounded-xl">
+          <div className="text-[7px] sm:text-[9px] font-bold text-amber-500 uppercase tracking-wider mb-0.5">Dirty</div>
+          <div className="text-sm sm:text-xl font-bold text-zinc-50">{roomStats.dirty}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
-          <div className="text-[9px] font-bold text-red-500 uppercase tracking-wider mb-1">Maintenance</div>
-          <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.maintenance}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-2 sm:p-3 rounded-lg sm:rounded-xl">
+          <div className="text-[7px] sm:text-[9px] font-bold text-red-500 uppercase tracking-wider mb-0.5">Maintenance</div>
+          <div className="text-sm sm:text-xl font-bold text-zinc-50">{roomStats.maintenance}</div>
         </div>
       </div>
 
       {/* Alerts Section */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         {reservations.filter(r => {
           if (r.status !== 'checked_in') return false;
           const today = format(new Date(), 'yyyy-MM-dd');
           return r.checkOut < today;
         }).length > 0 && (
-          <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-center gap-4">
-            <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center text-red-500">
-              <AlertCircle size={20} />
+          <div className="bg-red-500/10 border border-red-500/20 p-3 sm:p-4 rounded-lg sm:rounded-xl flex items-center gap-3 sm:gap-4">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-red-500/20 rounded-full flex items-center justify-center text-red-500">
+              <AlertCircle size={16} className="sm:size-20" />
             </div>
             <div>
-              <div className="text-xs font-bold text-red-500 uppercase tracking-wider">Overstay Alert</div>
-              <div className="text-lg font-bold text-zinc-50">
+              <div className="text-[10px] sm:text-xs font-bold text-red-500 uppercase tracking-wider">Overstay Alert</div>
+              <div className="text-sm sm:text-lg font-bold text-zinc-50">
                 {reservations.filter(r => r.status === 'checked_in' && r.checkOut < format(new Date(), 'yyyy-MM-dd')).length} Guests
               </div>
             </div>
@@ -1849,18 +1884,18 @@ export function FrontDesk() {
           const guest = guests.find(g => g.id === r.guestId);
           return guest && guest.ledgerBalance > 0;
         }).length > 0 && (
-          <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-4">
-            <div className="w-10 h-10 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500">
-              <DollarSign size={20} />
+          <div className="bg-amber-500/10 border border-amber-500/20 p-3 sm:p-4 rounded-lg sm:rounded-xl flex items-center gap-3 sm:gap-4">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500">
+              <DollarSign size={16} className="sm:size-20" />
             </div>
             <div>
-              <div className="text-xs font-bold text-amber-500 uppercase tracking-wider">Outstanding Payments</div>
-              <div className="text-lg font-bold text-zinc-50">
+              <div className="text-[10px] sm:text-xs font-bold text-amber-500 uppercase tracking-wider">Outstanding</div>
+              <div className="text-sm sm:text-lg font-bold text-zinc-50">
                 {reservations.filter(r => {
                   if (r.status !== 'checked_in' || !r.guestId) return false;
                   const guest = guests.find(g => g.id === r.guestId);
                   return guest && guest.ledgerBalance > 0;
-                }).length} Guests Owing
+                }).length} Guests
               </div>
             </div>
           </div>
@@ -1873,13 +1908,13 @@ export function FrontDesk() {
           // Low balance = credit is less than one night's rate
           return guest && guest.ledgerBalance < 0 && Math.abs(guest.ledgerBalance) <= rate;
         }).length > 0 && (
-          <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl flex items-center gap-4">
-            <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-500">
-              <Clock size={20} />
+          <div className="bg-blue-500/10 border border-blue-500/20 p-3 sm:p-4 rounded-lg sm:rounded-xl flex items-center gap-3 sm:gap-4">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-500">
+              <Clock size={18} />
             </div>
             <div>
-              <div className="text-xs font-bold text-blue-500 uppercase tracking-wider">Low Balance Warning</div>
-              <div className="text-lg font-bold text-zinc-50">
+              <div className="text-[10px] sm:text-xs font-bold text-blue-500 uppercase tracking-wider">Low Balance</div>
+              <div className="text-sm sm:text-lg font-bold text-zinc-50">
                 {reservations.filter(r => {
                   if (r.status !== 'checked_in' || !r.guestId) return false;
                   const guest = guests.find(g => g.id === r.guestId);
@@ -1901,7 +1936,7 @@ export function FrontDesk() {
             className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md text-center"
           >
             <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
-              <RefreshCw size={32} className={cn("text-emerald-500", isAuditing && "animate-spin")} />
+              <RefreshCw size={24} className={cn("text-emerald-500", isAuditing && "animate-spin")} />
             </div>
             <h3 className="text-xl font-bold text-zinc-50 mb-2">Run Nightly Audit</h3>
             <p className="text-zinc-400 text-sm mb-8">
@@ -2828,465 +2863,176 @@ export function FrontDesk() {
         </div>
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-4 md:p-6 border-b border-zinc-800 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-          <div className="flex flex-wrap items-center gap-4 md:gap-6">
-            <h3 className="font-bold text-zinc-50">Reservations</h3>
-            <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 overflow-x-auto no-scrollbar">
-              {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => {
-                    setActiveTab(tab);
-                    setSelectedReservations([]);
-                  }}
-                  className={cn(
-                    "px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                    activeTab === tab 
-                      ? "bg-emerald-500 text-black" 
-                      : "text-zinc-500 hover:text-zinc-300"
-                  )}
-                >
-                  {tab === 'checked_in' ? 'In-House' : tab}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex flex-col md:flex-row md:items-center gap-4 w-full xl:w-auto">
-            {selectedReservations.length > 0 && (
-              <button
-                onClick={handleBulkCheckIn}
-                disabled={loading}
-                className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
-              >
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                Check In Selected ({selectedReservations.length})
-              </button>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 md:flex-none">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Search guests or rooms..."
-                  className="w-full md:w-64 bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Status</option>
-                <option value="pending">Pending</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="checked_in">Checked In</option>
-                <option value="checked_out">Checked Out</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="no_show">No Show</option>
-              </select>
-
-              <select
-                value={paymentStatusFilter}
-                onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Payments</option>
-                <option value="unpaid">Unpaid</option>
-                <option value="partial">Partial</option>
-                <option value="paid">Paid</option>
-              </select>
-
-              <select
-                value={roomTypeFilter}
-                onChange={(e) => setRoomTypeFilter(e.target.value)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Room Types</option>
-                {roomTypes.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={staffFilter}
-                onChange={(e) => setStaffFilter(e.target.value)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Staff</option>
-                {staffMembers.map(staff => (
-                  <option key={staff.id} value={staff.id}>{staff.name}</option>
-                ))}
-              </select>
-
-              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
-                <div className="flex items-center gap-1">
-                  <Calendar size={14} className="text-emerald-500" />
-                  <input 
-                    type="date"
-                    className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
-                    style={{ colorScheme: 'dark' }}
-                    value={dateRange.start}
-                    onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                  />
-                </div>
-                <span className="text-zinc-500 text-[10px]">-</span>
-                <div className="flex items-center gap-1">
-                  <Calendar size={14} className="text-emerald-500" />
-                  <input 
-                    type="date"
-                    className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
-                    style={{ colorScheme: 'dark' }}
-                    value={dateRange.end}
-                    onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 h-full">
-                <Filter size={14} className="text-zinc-500" />
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
-                  className="bg-transparent text-xs text-zinc-50 focus:outline-none cursor-pointer"
-                >
-                  <option value="checkIn">Sort: Check In</option>
-                  <option value="guestName">Sort: Name</option>
-                  <option value="roomNumber">Sort: Room</option>
-                  <option value="status">Sort: Status</option>
-                </select>
-                <button
-                  onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className="text-zinc-500 hover:text-emerald-500 transition-colors"
-                >
-                  {sortOrder === 'asc' ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
-                </button>
-              </div>
-
-              {selectedReservations.length > 0 && activeTab === 'arrivals' && (
-                <button
-                  onClick={handleBulkCheckIn}
-                  disabled={loading}
-                  className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
-                >
-                  <CheckCircle2 size={14} />
-                  Check In ({selectedReservations.length})
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
-                <th className="px-6 py-4 w-10">
-                  <input 
-                    type="checkbox"
-                    className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                    checked={selectedReservations.length === filteredReservations.length && filteredReservations.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedReservations(filteredReservations.map(r => r.id));
-                      } else {
-                        setSelectedReservations([]);
-                      }
-                    }}
-                  />
-                </th>
-                <th className="px-6 py-4">Guest</th>
-                <th className="px-6 py-4">Room</th>
-                <th className="px-6 py-4">Dates</th>
-                <th className="px-6 py-4">Amount</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl shadow-black/50">
+        <div className="overflow-x-auto sm:overflow-visible">
+          <table className="w-full text-left min-w-[800px]">
+            <thead className="bg-zinc-950 border-b border-zinc-800">
+              <tr className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">
+                <th className="px-4 sm:px-6 py-4 sm:py-5">Guest</th>
+                <th className="px-4 sm:px-6 py-4 sm:py-5">Room</th>
+                <th className="px-4 sm:px-6 py-4 sm:py-5">Dates/Amount</th>
+                <th className="px-4 sm:px-6 py-4 sm:py-5">Status</th>
+                <th className="px-4 sm:px-6 py-4 sm:py-5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {isFetching ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="animate-pulse">
-                    <td className="px-6 py-4"><div className="w-4 h-4 bg-zinc-800 rounded" /></td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-zinc-800 rounded-full" />
-                        <div className="space-y-2">
-                          <div className="w-24 h-3 bg-zinc-800 rounded" />
-                          <div className="w-16 h-2 bg-zinc-800 rounded opacity-50" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4"><div className="w-20 h-3 bg-zinc-800 rounded" /></td>
-                    <td className="px-6 py-4"><div className="w-24 h-3 bg-zinc-800 rounded" /></td>
-                    <td className="px-6 py-4"><div className="w-24 h-4 bg-zinc-800 rounded" /></td>
-                    <td className="px-6 py-4"><div className="w-16 h-4 bg-zinc-800 rounded" /></td>
-                    <td className="px-6 py-4"><div className="w-20 h-8 bg-zinc-800 rounded ml-auto" /></td>
-                  </tr>
-                ))
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center">
+                    <Loader2 className="w-6 h-6 animate-spin text-emerald-500 mx-auto" />
+                  </td>
+                </tr>
               ) : filteredReservations.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-zinc-500">
+                  <td colSpan={5} className="px-6 py-12 text-center text-zinc-500 font-medium italic text-xs sm:text-sm">
                     No reservations found matching your criteria.
                   </td>
                 </tr>
               ) : (
-                filteredReservations.map(res => (
-                  <tr key={res.id} className={cn(
-                  "hover:bg-zinc-800/50 transition-colors",
-                  selectedReservations.includes(res.id) && "bg-emerald-500/5"
-                )}>
-                  <td className="px-6 py-4">
-                    <input 
-                      type="checkbox"
-                      className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                      checked={selectedReservations.includes(res.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedReservations([...selectedReservations, res.id]);
-                        } else {
-                          setSelectedReservations(selectedReservations.filter(id => id !== res.id));
-                        }
-                      }}
-                    />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-500">
-                        {res.corporateId ? <Building2 size={14} /> : <User size={14} />}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
-                        {res.corporateId && (
-                          <div className="text-[10px] text-emerald-500 font-bold flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1">
-                              <Building2 size={10} />
-                              {corporateAccounts.find(a => a.id === res.corporateId)?.name || 'Corporate'}
-                            </div>
-                            {res.corporateReference && (
-                              <div className="text-zinc-400 font-normal">Ref: {res.corporateReference}</div>
-                            )}
+                filteredReservations.map((res) => {
+                  const guest = guests.find(g => g.id === res.guestId);
+                  const balance = guest?.ledgerBalance || 0;
+                  const isCheckedIn = res.status === 'checked_in';
+                  const isOverstay = isCheckedIn && new Date() > new Date(res.checkOut);
+                  
+                  return (
+                    <motion.tr 
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      key={res.id} 
+                      className={cn(
+                        "hover:bg-zinc-800/50 transition-all border-l-4 border-l-transparent",
+                        isCheckedIn && "border-l-emerald-500",
+                        isOverstay && "border-l-red-500 bg-red-500/5"
+                      )}
+                    >
+                      <td className="px-4 sm:px-6 py-3 sm:py-4">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <div className={cn(
+                            "w-7 h-7 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center text-zinc-50 uppercase font-black text-xs sm:text-base",
+                            res.corporateId ? "bg-purple-500/20 text-purple-500" : "bg-zinc-800"
+                          )}>
+                            {res.guestName?.charAt(0) || <User size={14} />}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="font-bold text-zinc-50 flex items-center gap-2 group/roomrelative text-sm">
-                      Room {res.roomNumber}
-                      {(() => {
-                        const room = rooms.find(r => r.id === res.roomId);
-                        if (!room) return null;
-                        if (!room.notes && (!room.amenities || room.amenities.length === 0)) return null;
-                        return (
-                          <div className="group relative">
-                            <Info size={12} className="text-zinc-500 cursor-help" />
-                            <div className="absolute left-0 bottom-full mb-2 w-48 p-3 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl opacity-0 scale-95 group-hover/roomrelative:opacity-100 group-hover/roomrelative:scale-100 pointer-events-none transition-all z-50 origin-bottom-left">
-                              {room.notes && (
-                                <div className="mb-2">
-                                  <div className="text-[8px] font-bold text-amber-500 uppercase mb-0.5">Room Notes</div>
-                                  <p className="text-[10px] text-zinc-400 italic leading-tight">{room.notes}</p>
-                                </div>
-                              )}
-                              {room.amenities && room.amenities.length > 0 && (
-                                <div>
-                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Amenities</div>
-                                  <div className="flex flex-wrap gap-1">
-                                    {(room.amenities || []).slice(0, 5).map(a => (
-                                      <span key={a} className="text-[8px] px-1 bg-zinc-900 text-zinc-500 rounded border border-zinc-700">{a}</span>
-                                    ))}
-                                    {room.amenities.length > 5 && <span className="text-[8px] text-zinc-600">+{room.amenities.length - 5} more</span>}
-                                  </div>
-                                </div>
+                          <div className="min-w-0">
+                            <div className="text-[11px] sm:text-sm font-bold text-zinc-50 truncate">
+                              {res.guestName}
+                              {res.corporateId && (
+                                <Building2 size={10} className="sm:size-12 inline ml-1 text-purple-400" />
                               )}
                             </div>
+                            <div className="text-[9px] sm:text-xs text-zinc-500 font-medium truncate">{res.guestPhone}</div>
                           </div>
-                        );
-                      })()}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-xs text-zinc-400">
-                    <div className="flex items-center gap-1"><Clock size={12} /> {res.checkIn}</div>
-                    <div className="flex items-center gap-1 opacity-50"><Clock size={12} /> {res.checkOut}</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-zinc-400">
-                    <div>{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
-                    <div className={cn(
-                      "text-[10px] font-bold uppercase flex items-center gap-1",
-                      res.paymentStatus === 'paid' ? "text-emerald-500" :
-                      res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
-                    )}>
-                      {res.paymentStatus} ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)})
-                      {res.status === 'pending' && res.paidAmount > 0 && (
-                        <span className="px-1 bg-emerald-500/20 text-emerald-500 rounded-[4px] text-[8px]">Deposit</span>
-                      )}
-                    </div>
-                    {res.guestId && (
-                      <div className="text-[10px] text-zinc-500 mt-1">
-                        Ledger: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col gap-1">
-                      <span className={cn(
-                        "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider w-fit",
-                        res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                        res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
-                        res.status === 'no_show' ? "bg-amber-500/10 text-amber-500" :
-                        res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
-                      )}>
-                        {res.status.replace('_', ' ')}
-                      </span>
-                      {res.status === 'checked_in' && new Date() > new Date(res.checkOut) && (
-                        <span className="px-2 py-0.5 bg-red-500/10 text-red-500 text-[8px] font-bold uppercase rounded w-fit animate-pulse">
-                          Overstay
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      {res.status === 'checked_in' && (
-                        <>
+                        </div>
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 sm:py-4">
+                        <div className="text-[11px] sm:text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
+                        <div className="text-[9px] sm:text-xs text-zinc-500 truncate max-w-[60px] sm:max-w-none">{rooms.find(r => r.id === res.roomId)?.type}</div>
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 sm:py-4 min-w-[120px]">
+                        <div className="text-[10px] sm:text-xs font-medium text-zinc-50">
+                          {format(new Date(res.checkIn), 'MMM d')} - {format(new Date(res.checkOut), 'MMM d')}
+                        </div>
+                        <div className={cn(
+                          "text-[9px] sm:text-xs font-bold",
+                          res.paymentStatus === 'paid' ? "text-emerald-500" :
+                          res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
+                        )}>
+                          {formatCurrency(res.totalAmount, currency, exchangeRate)}
+                        </div>
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 sm:py-4">
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded text-[8px] sm:text-[10px] font-black uppercase tracking-wider",
+                            res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
+                            res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
+                            res.status === 'no_show' ? "bg-amber-500/10 text-amber-500" :
+                            res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
+                          )}>
+                            {res.status.replace('_', ' ')}
+                          </span>
+                          {isOverstay && (
+                            <span className="px-1 py-0.5 bg-red-500 text-black text-[7px] font-black uppercase rounded animate-pulse">
+                              Overstay
+                            </span>
+                          )}
+                          {balance !== 0 && (
+                             <span className={cn(
+                               "text-[8px] font-bold px-1 rounded border",
+                               balance > 0 ? "border-amber-500/30 text-amber-500 bg-amber-500/5" : "border-emerald-500/30 text-emerald-500 bg-emerald-500/5"
+                             )}>
+                               Bal: {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+                             </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
                           <button 
-                            type="button"
-                            onClick={() => setShowTransferModal(res)}
-                            className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                            title="Transfer Room"
-                          >
-                            <RefreshCw size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              setNewCheckOutDate(res.checkOut);
-                              setShowPostponeModal(res);
-                            }}
-                            className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
-                            title="Postpone Stay / Extend"
-                          >
-                            <Calendar size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setShowDiscountModal(res)}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                            title="Apply Discount"
-                          >
-                            <Tag size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setShowChargeModal(res)}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
-                            title="Post Charge to Room"
-                          >
-                            <Plus size={18} />
-                          </button>
-                          <button 
-                            type="button"
                             onClick={() => setShowFolioModal(res)}
-                            className="p-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                            title="Guest Folio"
+                            className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
+                            title="Folio"
                           >
-                            <FileText size={18} />
+                            <Receipt size={14} className="sm:size-18" />
                           </button>
-                          <button 
-                            type="button"
-                            onClick={() => updateReservationStatus(res, 'checked_out')}
-                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Check Out"
-                            disabled={loading}
-                          >
-                            <LogOut size={18} />
-                          </button>
-                        </>
-                      )}
-                      
-                      {res.status === 'pending' && (
-                        <>
-                          <button 
-                            onClick={() => {
-                              const amount = prompt("Enter payment amount:");
-                              if (amount && !isNaN(Number(amount))) {
-                                updatePayment(res, Number(amount));
-                              }
-                            }}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                            title="Take Prepayment / Deposit"
-                          >
-                            <DollarSign size={18} />
-                          </button>
-                          <button 
-                            onClick={() => updateReservationStatus(res, 'checked_in')}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Check In"
-                            disabled={loading}
-                          >
-                            <CheckCircle2 size={18} />
-                          </button>
-                          <button 
-                            onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Mark No-Show"
-                            disabled={loading}
-                          >
-                            <UserX size={18} />
-                          </button>
-                          <button 
-                            onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
-                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Cancel"
-                            disabled={loading}
-                          >
-                            <XCircle size={18} />
-                          </button>
-                        </>
-                      )}
-
-                      {(profile && hasPermission(profile, 'edit_reservation')) && (
-                        <button 
-                          onClick={() => {
-                            setEditingReservation(res);
-                            setEditForm({
-                              checkIn: res.checkIn,
-                              checkOut: res.checkOut,
-                              totalAmount: res.totalAmount,
-                              notes: res.notes || ''
-                            });
-                          }}
-                          className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                          title="Edit Reservation"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                      )}
-
-                      <button 
-                        onClick={() => setShowFolioModal(res)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
-                        title="View Guest Folio"
-                      >
-                        <Receipt size={14} />
-                        View Folio
-                      </button>
-
-                      {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin' || hasPermission(profile, 'edit_reservation'))) && (
-                        <button 
-                          onClick={() => setShowConfirmAction({ res, action: 'delete' })}
-                          className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                          title="Delete Reservation"
-                          disabled={loading}
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )))}
+                          
+                          <div className="relative group/actions inline-block">
+                            <button className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all">
+                              <Info size={14} className="sm:size-18" />
+                            </button>
+                            <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl opacity-0 invisible group-hover/actions:opacity-100 group-hover/actions:visible transition-all z-[100] overflow-hidden divide-y divide-zinc-800">
+                              {res.status === 'pending' && (
+                                <button 
+                                  onClick={() => updateReservationStatus(res, 'checked_in')}
+                                  className="w-full text-left px-4 py-3 text-xs font-bold text-emerald-500 hover:bg-emerald-500/10 transition-all flex items-center gap-2"
+                                >
+                                  <CheckCircle2 size={14} /> Check In
+                                </button>
+                              )}
+                              {res.status === 'checked_in' && (
+                                <button 
+                                  onClick={() => updateReservationStatus(res, 'checked_out')}
+                                  className="w-full text-left px-4 py-2 text-xs font-bold text-amber-500 hover:bg-amber-500/10 transition-all flex items-center gap-2"
+                                >
+                                  <LogOut size={14} /> Check Out
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => setShowChargeModal(res)}
+                                className="w-full text-left px-4 py-2 text-xs font-bold text-blue-500 hover:bg-blue-500/10 transition-all flex items-center gap-2"
+                              >
+                                <Plus size={14} /> Charge Room
+                              </button>
+                              <button 
+                                onClick={() => setShowTransferModal(res)}
+                                className="w-full text-left px-4 py-2 text-xs font-bold text-zinc-400 hover:bg-zinc-800 transition-all flex items-center gap-2"
+                              >
+                                <RefreshCw size={14} /> Transfer Room
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setEditingReservation(res);
+                                  setEditForm({
+                                    checkIn: res.checkIn,
+                                    checkOut: res.checkOut,
+                                    totalAmount: res.totalAmount,
+                                    notes: res.notes || ''
+                                  });
+                                }}
+                                className="w-full text-left px-4 py-2 text-xs font-bold text-zinc-400 hover:bg-zinc-800 transition-all flex items-center gap-2"
+                              >
+                                <Edit2 size={14} /> Edit Booking
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

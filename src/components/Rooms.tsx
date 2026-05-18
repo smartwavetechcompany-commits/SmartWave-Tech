@@ -581,14 +581,14 @@ export function Rooms() {
   };
 
   return (
-    <div className="p-8 space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="p-4 sm:p-8 space-y-4 sm:space-y-8">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Rooms</h1>
-          <p className="text-zinc-400">Manage room inventory and status</p>
+          <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Rooms</h1>
+          <p className="text-xs sm:text-sm text-zinc-400">Manage room inventory and status</p>
         </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1 sm:gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-lg sm:rounded-xl">
             <select
               value={reportFilter.status}
               onChange={(e) => setReportFilter({ ...reportFilter, status: e.target.value })}
@@ -627,52 +627,52 @@ export function Rooms() {
               <option value="5">5+ Pax</option>
             </select>
           </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="relative flex-1 sm:min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2 w-full lg:w-auto">
+            <div className="relative flex-1 lg:min-w-[150px]">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 sm:size-18" size={14} />
               <input 
                 type="text"
-                placeholder="Search number, type..."
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-10 pr-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all text-sm"
+                placeholder="Search..."
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 sm:pl-10 pr-3 sm:pr-4 py-1.5 sm:py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all text-xs sm:text-sm"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <select 
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm outline-none focus:border-emerald-500"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All Statuses</option>
-              <option value="clean">Clean</option>
-              <option value="dirty">Dirty</option>
-              <option value="occupied">Occupied</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="vacant">Vacant</option>
-              <option value="out_of_service">Out of Service</option>
-            </select>
-            <select 
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm outline-none focus:border-emerald-500"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-            >
-              <option value="all">All Types</option>
-              {roomTypes.map(type => (
-                <option key={type.id} value={type.name}>{type.name}</option>
-              ))}
-            </select>
-            <select 
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm outline-none focus:border-emerald-500"
-              value={capacityFilter}
-              onChange={(e) => setCapacityFilter(e.target.value)}
-            >
-              <option value="all">All Capacities</option>
-              <option value="1">1 Person</option>
-              <option value="2">2 Persons</option>
-              <option value="3">3 Persons</option>
-              <option value="4">4 Persons</option>
-              <option value="5">5+ Persons</option>
-            </select>
+            <div className="grid grid-cols-3 sm:flex gap-1.5 sm:gap-2">
+              <select 
+                className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 text-zinc-50 text-[10px] sm:text-sm outline-none focus:border-emerald-500"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="all">Status</option>
+                <option value="clean">Clean</option>
+                <option value="dirty">Dirty</option>
+                <option value="occupied">Occupied</option>
+                <option value="maintenance">Maint.</option>
+              </select>
+              <select 
+                className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 text-zinc-50 text-[10px] sm:text-sm outline-none focus:border-emerald-500"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+              >
+                <option value="all">Type</option>
+                {roomTypes.map(type => (
+                  <option key={type.id} value={type.name}>{type.name}</option>
+                ))}
+              </select>
+              <select 
+                className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 text-zinc-50 text-[10px] sm:text-sm outline-none focus:border-emerald-500"
+                value={capacityFilter}
+                onChange={(e) => setCapacityFilter(e.target.value)}
+              >
+                <option value="all">Cap.</option>
+                <option value="1">1 Pax</option>
+                <option value="2">2 Pax</option>
+                <option value="3">3 Pax</option>
+                <option value="4">4 Pax</option>
+                <option value="5">5+ Pax</option>
+              </select>
+            </div>
           </div>
           <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg p-1 justify-center">
             <button 
@@ -812,30 +812,26 @@ export function Rooms() {
       </div>
 
       {/* Room Status Legend */}
-      <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Clean / Vacant</span>
+      <div className="flex flex-wrap items-center gap-y-2 gap-x-3 sm:gap-6 px-3 sm:px-6 py-2 sm:py-4 bg-zinc-900/30 border border-zinc-800/50 rounded-xl sm:rounded-2xl">
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
+          <span className="text-[8px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vacant</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Occupied</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
+          <span className="text-[8px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Occupied</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maintenance</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
+          <span className="text-[8px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maint.</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Dirty</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" />
+          <span className="text-[8px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Dirty</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vacant (Unready)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-zinc-800" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Out of Service</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-zinc-800" />
+          <span className="text-[8px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-wider">OOS</span>
         </div>
       </div>
 
@@ -1904,11 +1900,11 @@ export function Rooms() {
       />
 
       {view === 'grid' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-4">
           {filteredRooms.length === 0 ? (
-            <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
-              <Bed size={48} className="mx-auto text-zinc-700 mb-4" />
-              <p>No rooms found matching your filters</p>
+            <div className="col-span-full py-10 sm:py-20 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
+              <Bed size={32} className="sm:size-48 mx-auto text-zinc-700 mb-2 sm:mb-4" />
+              <p className="text-xs sm:text-base">No rooms found matching your filters</p>
             </div>
           ) : (
             filteredRooms.map((room) => {
