@@ -444,42 +444,41 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]"
       >
         {/* Header */}
-        <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-emerald-500/10 rounded-xl sm:rounded-2xl flex items-center justify-center text-emerald-500">
-              <Receipt size={20} className="sm:size-6" />
+        <div className="p-4 sm:p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+          <div className="flex items-center gap-3 block">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500 border border-emerald-500/10">
+              <Receipt size={18} />
             </div>
             <div>
-              <h2 className="text-lg sm:text-xl font-bold text-zinc-50 truncate max-w-[150px] sm:max-w-none">Guest Folio</h2>
-              <p className="text-[10px] sm:text-sm text-zinc-500 font-mono italic">Res #{(currentReservation.id || '').slice(-6).toUpperCase()}</p>
+              <h2 className="text-base sm:text-lg font-bold text-zinc-50 truncate max-w-[120px] sm:max-w-none tracking-tight">Guest Folio</h2>
+              <p className="text-[9px] sm:text-xs text-zinc-500 font-mono">Res #{(currentReservation.id || '').slice(-6).toUpperCase()}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button 
               type="button"
               onClick={() => setShowSettlePayment(true)}
-              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-emerald-500 text-black rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider hover:bg-emerald-400 transition-all flex items-center gap-1.5 sm:gap-2 shadow-lg shadow-emerald-500/20 active:scale-95"
+              className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 bg-emerald-500 text-black rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/10 active:scale-95 border border-emerald-500/20"
             >
-              <DollarSign size={16} className="sm:size-[18px]" />
-              <span className="hidden xs:inline">Settle / Pay</span>
-              <span className="xs:hidden">Pay</span>
+              <DollarSign size={14} />
+              <span>Settle</span>
             </button>
             <button 
               type="button"
               onClick={() => setShowReceipt(true)}
-              className="p-1.5 sm:p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg sm:rounded-xl transition-all flex items-center gap-2"
+              className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all flex items-center gap-1.5"
               title="Print Receipt"
             >
-              <Printer size={18} className="sm:size-5" />
-              <span className="hidden md:inline text-xs font-bold">Print Receipt</span>
+              <Printer size={16} />
+              <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wider">Print</span>
             </button>
             <button 
               type="button"
               onClick={onClose}
-              className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
+              className="p-1.5 text-zinc-500 hover:text-zinc-50 transition-colors"
               title="Close"
             >
-              <XCircle size={20} className="sm:size-6" />
+              <X size={20} />
             </button>
           </div>
         </div>

@@ -361,13 +361,13 @@ export function GuestManagement() {
   }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder]);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 sm:mb-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2 sm:mb-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 mb-1 sm:mb-2 tracking-tight">Guest Management</h1>
-          <p className="text-sm text-zinc-400">Manage guest profiles, history, and loyalty</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Guest Management</h1>
+          <p className="text-xs text-zinc-400">Manage guest profiles, history, and loyalty</p>
         </div>
-        <div className="flex flex-wrap gap-2 sm:gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="hidden xl:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
             <div className="relative flex items-center gap-1">
               <Calendar size={12} className="text-emerald-500 ml-1" />
@@ -390,7 +390,7 @@ export function GuestManagement() {
                 style={{ colorScheme: 'dark' }}
               />
             </div>
-            <div className="w-px h-4 bg-zinc-800" />
+            <div className="w-px h-4 bg-zinc-800 mx-1" />
             <select
               value={reportFilter.type}
               onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
@@ -403,10 +403,10 @@ export function GuestManagement() {
           </div>
           <button
             onClick={exportGuests}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-50 px-3 sm:px-4 py-2 rounded-xl text-sm font-bold hover:bg-zinc-700 transition-all active:scale-95"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-100 px-3 py-2 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700"
           >
-            <Download size={16} />
-            <span className="hidden sm:inline">Export Report</span>
+            <Download size={14} />
+            <span className="hidden sm:inline">Export</span>
             <span className="sm:hidden">Export</span>
           </button>
           <button
@@ -427,121 +427,111 @@ export function GuestManagement() {
             });
             setShowAddModal(true);
           }}
-          className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-3 sm:px-4 py-2 rounded-xl text-sm font-medium transition-all active:scale-95"
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
         >
-          <Plus size={16} />
+          <Plus size={14} />
           Add Guest
         </button>
       </div>
     </div>
 
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-zinc-800 rounded-xl text-zinc-400 group-hover:text-zinc-50 transition-colors">
-              <Users size={16} className="sm:w-5 sm:h-5" />
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-emerald-500/30 transition-all shadow-md">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-1.5 bg-zinc-800 rounded-lg text-zinc-400 group-hover:text-zinc-50 transition-colors">
+              <Users size={14} />
             </div>
-            <div className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-widest hidden xs:block">Database</div>
+            <div className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest">Database</div>
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Total Guests</div>
-          <div className="text-xl sm:text-3xl font-black text-zinc-50 font-mono tracking-tighter leading-none">{guests.length}</div>
+          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Total Guests</div>
+          <div className="text-lg sm:text-xl font-bold text-zinc-50 font-mono tracking-tight">{guests.length}</div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-emerald-500/30 transition-all shadow-lg hover:shadow-emerald-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-emerald-500/10 rounded-xl text-emerald-500">
-              <Star size={16} className="sm:w-5 sm:h-5" />
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-emerald-500/30 transition-all shadow-md">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-1.5 bg-emerald-500/10 rounded-lg text-emerald-500">
+              <Star size={14} />
             </div>
-            <div className="text-emerald-500 text-[8px] sm:text-[10px] font-black uppercase tracking-tighter hidden xs:block">
-              {Math.round((guests.filter(g => g.totalStays > 1).length / (guests.length || 1)) * 100)}% Retention
+            <div className="text-emerald-500 text-[7px] font-black uppercase tracking-tight">
+              {Math.round((guests.filter(g => (g.totalStays || 0) > 1).length / (guests.length || 1)) * 100)}% Retention
             </div>
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Repeat Guests</div>
-          <div className="text-xl sm:text-3xl font-black text-emerald-500 font-mono tracking-tighter leading-none">{guests.filter(g => g.totalStays > 1).length}</div>
+          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Repeat Guests</div>
+          <div className="text-lg sm:text-xl font-bold text-emerald-500 font-mono tracking-tight">{guests.filter(g => (g.totalStays || 0) > 1).length}</div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-blue-500/30 transition-all shadow-lg hover:shadow-blue-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-blue-500/10 rounded-xl text-blue-500">
-              <DollarSign size={16} className="sm:w-5 sm:h-5" />
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-blue-500/30 transition-all shadow-md">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-1.5 bg-blue-500/10 rounded-lg text-blue-500">
+              <DollarSign size={14} />
             </div>
-            <div className="text-zinc-500 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest leading-none hidden xs:block">Net Growth</div>
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Lifetime Revenue</div>
-          <div className="text-xl sm:text-3xl font-black text-blue-500 font-mono tracking-tighter leading-none truncate">
+          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Lifetime Revenue</div>
+          <div className="text-lg sm:text-xl font-bold text-blue-500 font-mono tracking-tight truncate">
             {formatCurrency(guests.reduce((acc, g) => acc + (g.totalSpent || 0), 0), currency, exchangeRate)}
           </div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl group hover:border-red-500/30 transition-all shadow-lg hover:shadow-red-500/5">
-          <div className="flex items-center justify-between mb-2 sm:mb-4">
-            <div className="p-1.5 sm:p-2 bg-red-500/10 rounded-xl text-red-500">
-              <CreditCard size={16} className="sm:w-5 sm:h-5" />
+        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-red-500/30 transition-all shadow-md">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1 sm:p-1.5 bg-red-500/10 rounded-lg text-red-500">
+              <CreditCard size={14} />
             </div>
             {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
-              <div className="p-0.5 sm:p-1 bg-red-500 text-white rounded text-[7px] sm:text-[8px] font-black px-1.5 sm:px-2 uppercase shadow-sm">
+              <div className="p-0.5 bg-red-500 text-white rounded text-[7px] font-black px-1.5 uppercase shadow-sm">
                 {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
               </div>
             )}
           </div>
-          <div className="text-zinc-400 text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mb-1">Net Outstanding</div>
-          <div className="text-xl sm:text-3xl font-black text-red-500 font-mono tracking-tighter leading-none truncate">
+          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Net Outstanding</div>
+          <div className="text-lg sm:text-xl font-bold text-red-500 font-mono tracking-tight truncate">
             {formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 mb-6">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+      <div className="flex flex-col lg:flex-row gap-3 mb-4 sm:mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
           <input
             type="text"
             placeholder="Search by name, email, or phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-            <Filter size={14} className="text-zinc-500" />
-            <select
-              value={guestTypeFilter}
-              onChange={(e) => setGuestTypeFilter(e.target.value as any)}
-              className="bg-transparent text-xs text-zinc-400 focus:outline-none"
-            >
-              <option value="all">All Types</option>
-              <option value="individual">Individual</option>
-              <option value="corporate">Corporate</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-            <DollarSign size={14} className="text-zinc-500" />
-            <select
-              value={balanceFilter}
-              onChange={(e) => setBalanceFilter(e.target.value as any)}
-              className="bg-transparent text-xs text-zinc-400 focus:outline-none"
-            >
-              <option value="all">All Balances</option>
-              <option value="yes">Has Balance</option>
-              <option value="no">No Balance</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-            <Star size={14} className="text-zinc-500" />
-            <select
-              value={vipFilter}
-              onChange={(e) => setVipFilter(e.target.value as any)}
-              className="bg-transparent text-xs text-zinc-400 focus:outline-none"
-            >
-              <option value="all">All Status</option>
-              <option value="vip">VIP Only</option>
-              <option value="regular">Regular Only</option>
-            </select>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={guestTypeFilter}
+            onChange={(e) => setGuestTypeFilter(e.target.value as any)}
+            className="bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none"
+          >
+            <option value="all">All Types</option>
+            <option value="individual">Individual</option>
+            <option value="corporate">Corporate</option>
+          </select>
+          <select
+            value={balanceFilter}
+            onChange={(e) => setBalanceFilter(e.target.value as any)}
+            className="bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none"
+          >
+            <option value="all">All Balances</option>
+            <option value="yes">Has Balance</option>
+            <option value="no">No Balance</option>
+          </select>
+          <select
+            value={vipFilter}
+            onChange={(e) => setVipFilter(e.target.value as any)}
+            className="bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none"
+          >
+            <option value="all">All Status</option>
+            <option value="vip">VIP Only</option>
+            <option value="regular">Regular Only</option>
+          </select>
           
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-            <span className="text-[9px] font-bold text-zinc-500 uppercase px-1.5 border-r border-zinc-800">Sort</span>
+          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
+            <span className="text-[9px] font-bold text-zinc-500 uppercase pr-1.5 border-r border-zinc-800">Sort</span>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
@@ -564,14 +554,14 @@ export function GuestManagement() {
             <Calendar size={12} className="text-zinc-500" />
             <input 
               type="date"
-              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[90px]"
+              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[85px]"
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
             />
             <span className="text-zinc-500 text-[9px]">-</span>
             <input 
               type="date"
-              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[90px]"
+              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[85px]"
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
             />
@@ -579,7 +569,7 @@ export function GuestManagement() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
         <AnimatePresence mode="popLayout">
           {isLoading ? (
             Array.from({ length: 9 }).map((_, i) => (
@@ -616,23 +606,19 @@ export function GuestManagement() {
                 exit={{ opacity: 0, scale: 0.9 }}
                 className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col group"
               >
-                <div className="p-6 flex-1">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-zinc-800 rounded-full flex items-center justify-center text-emerald-500 font-bold text-lg">
+                <div className="p-4 flex-1">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 bg-zinc-800 rounded-full flex items-center justify-center text-emerald-500 font-bold text-base border border-zinc-700">
                         {guest.name.charAt(0)}
                       </div>
                       <div>
-                        <h3 className="text-zinc-50 font-bold">{guest.name}</h3>
-                        <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                          <Star size={10} className={cn(guest.totalStays > 5 || guest.tags?.includes('VIP') ? "text-amber-500" : "text-zinc-600")} />
-                          {guest.totalStays > 5 || guest.tags?.includes('VIP') ? 'VIP Guest' : 'Standard'}
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1">
+                        <h3 className="text-zinc-50 text-sm font-bold leading-tight truncate max-w-[120px]">{guest.name}</h3>
+                        <div className="flex items-center gap-1">
                           {(guest.tags || []).map(tag => (
                             <span key={tag} className={cn(
-                              "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase",
-                              tag === 'VIP' ? "bg-amber-500/10 text-amber-500" : "bg-zinc-800 text-zinc-500"
+                              "px-1 py-0.5 rounded-[4px] text-[7px] font-black uppercase tracking-tighter",
+                              tag === 'VIP' ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-zinc-800 text-zinc-500"
                             )}>
                               {tag}
                             </span>
@@ -640,21 +626,21 @@ export function GuestManagement() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-0.5">
                       <a 
                         href={`mailto:${guest.email}?subject=Hotel Communication for ${guest.name}`}
-                        className="p-2 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
+                        className="p-1.5 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
                         title="Email Guest"
                       >
-                        <Mail size={16} />
+                        <Mail size={14} />
                       </a>
                       <button 
                         type="button"
                         onClick={() => setViewingHistory(guest)}
-                        className="p-2 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
+                        className="p-1.5 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
                         title="View History"
                       >
-                        <History size={16} />
+                        <History size={14} />
                       </button>
                       <button 
                         type="button"
@@ -675,9 +661,9 @@ export function GuestManagement() {
                           });
                           setShowAddModal(true);
                         }}
-                        className="p-2 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
+                        className="p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
                       >
-                        <Edit2 size={16} />
+                        <Edit2 size={14} />
                       </button>
                       <button 
                         type="button"
@@ -689,76 +675,76 @@ export function GuestManagement() {
                           setConfirmDelete(guest.id);
                         }}
                         className={cn(
-                          "p-2 rounded-lg transition-all",
+                          "p-1.5 rounded-lg transition-all",
                           (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') 
                             ? "text-zinc-500 hover:text-red-500" 
-                            : "text-zinc-700 cursor-not-allowed"
+                            : "text-zinc-800 cursor-not-allowed"
                         )}
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm text-zinc-400">
-                      <Mail size={14} className="text-zinc-600" />
-                      {guest.email}
+                  <div className="space-y-1.5 mb-4">
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                      <Mail size={12} className="text-zinc-600" />
+                      <span className="truncate">{guest.email}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-zinc-400">
-                      <Phone size={14} className="text-zinc-600" />
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                      <Phone size={12} className="text-zinc-600" />
                       {guest.phone}
                     </div>
                     {guest.corporateId && (
-                      <div className="flex items-center gap-2 text-sm text-emerald-500 font-medium">
-                        <Building2 size={14} />
-                        {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate Guest'}
+                      <div className="flex items-center gap-2 text-[10px] text-emerald-500 font-bold uppercase tracking-wider">
+                        <Building2 size={12} />
+                        <span className="truncate max-w-[150px]">
+                          {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate'}
+                        </span>
                       </div>
                     )}
-                  <div className="grid grid-cols-3 gap-3 pt-4">
-                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stays</div>
-                      <div className="text-lg font-bold text-zinc-50">{guest.totalStays}</div>
-                      <div className="text-[8px] text-zinc-600 font-bold uppercase mt-0.5">Visits</div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Stays</div>
+                      <div className="text-sm font-bold text-zinc-100">{guest.totalStays || 0}</div>
                     </div>
-                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-right">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Stay Value</div>
-                      <div className="text-lg font-bold text-blue-500">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
-                      <div className="text-[8px] text-zinc-600 font-bold uppercase mt-0.5">Total Revenue</div>
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 text-right">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Value</div>
+                      <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
                     </div>
-                    <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-right">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Balance</div>
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 text-right">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Balance</div>
                       <div className={cn(
-                        "text-lg font-bold",
+                        "text-sm font-bold",
                         (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                       )}>
                         {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                        <div className="text-[8px] font-black uppercase mt-0.5">
-                          {(guest.ledgerBalance || 0) > 0 ? "Debt / Owing" : (guest.ledgerBalance || 0) < 0 ? "Credit" : "Settled"}
-                        </div>
                       </div>
                     </div>
                   </div>
-                  </div>
 
                   {guest.preferences && guest.preferences.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-zinc-800/50">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Preferences</div>
+                    <div className="mt-3 pt-2 border-t border-zinc-800/50">
                       <div className="flex flex-wrap gap-1">
-                        {guest.preferences.map(pref => (
-                          <span key={pref} className="px-1.5 py-0.5 bg-blue-500/5 text-blue-400 rounded text-[9px]">
+                        {guest.preferences.slice(0, 3).map(pref => (
+                          <span key={pref} className="px-1.5 py-0.5 bg-blue-500/5 text-blue-400 rounded text-[8px] border border-blue-500/10">
                             {pref}
                           </span>
                         ))}
+                        {guest.preferences.length > 3 && (
+                          <span className="text-[8px] text-zinc-600 font-bold ml-1">+{guest.preferences.length - 3}</span>
+                        )}
                       </div>
                     </div>
                   )}
                 </div>
-                <div className="px-6 py-3 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
-                  <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                    Last Stay: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yyyy') : 'Never'}
+                <div className="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
+                  <div className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">
+                    Last: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yy') : 'Never'}
                   </div>
-                  <ChevronRight size={14} className="text-zinc-700" />
+                  <ChevronRight size={12} className="text-zinc-800" />
                 </div>
               </motion.div>
             ))
@@ -796,34 +782,33 @@ export function GuestManagement() {
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
-                  <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Stays</div>
-                  <div className="text-2xl font-bold text-zinc-50">{viewingHistory.totalStays || 0}</div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Stays</div>
+                  <div className="text-lg font-bold text-zinc-50 leading-tight">{viewingHistory.totalStays || 0}</div>
                 </div>
-                <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
-                  <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Total Spent</div>
-                  <div className="text-2xl font-bold text-emerald-500">{formatCurrency(viewingHistory.totalSpent || 0, currency, exchangeRate)}</div>
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Spent</div>
+                  <div className="text-lg font-bold text-emerald-500 leading-tight">{formatCurrency(viewingHistory.totalSpent || 0, currency, exchangeRate)}</div>
                 </div>
-                <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800">
-                  <div className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Ledger Balance</div>
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Account Balance</div>
                   <div className={cn(
-                    "text-2xl font-bold",
+                    "text-lg font-bold leading-tight",
                     (viewingHistory.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
                   )}>
                     {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
-                    {(viewingHistory.ledgerBalance || 0) > 0 ? " (Debt)" : (viewingHistory.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
                   </div>
                 </div>
               </div>
 
               {/* Tabs */}
-              <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl border border-zinc-800 mb-6">
+              <div className="flex gap-2 p-1 bg-zinc-950 rounded-lg border border-zinc-800 mb-4">
                 <button
                   onClick={() => setHistoryTab('reservations')}
                   className={cn(
-                    "flex-1 py-2 rounded-lg text-xs font-bold transition-all",
+                    "flex-1 py-1.5 rounded-md text-[10px] font-bold transition-all",
                     historyTab === 'reservations' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
                   )}
                 >
@@ -832,7 +817,7 @@ export function GuestManagement() {
                 <button
                   onClick={() => setHistoryTab('ledger')}
                   className={cn(
-                    "flex-1 py-2 rounded-lg text-xs font-bold transition-all",
+                    "flex-1 py-1.5 rounded-md text-[10px] font-bold transition-all",
                     historyTab === 'ledger' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
                   )}
                 >
@@ -842,28 +827,28 @@ export function GuestManagement() {
 
               {historyTab === 'reservations' ? (
                 <>
-                  <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Recent Reservations</h3>
+                  <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Recent Reservations</h3>
                   {guestHistory.length === 0 ? (
-                    <div className="text-center py-12 text-zinc-500 bg-zinc-950 rounded-2xl border border-dashed border-zinc-800">
-                      <Clock size={32} className="mx-auto mb-2 opacity-20" />
-                      <p>No reservation history found</p>
+                    <div className="text-center py-10 text-zinc-500 bg-zinc-950 rounded-xl border border-dashed border-zinc-800">
+                      <Clock size={24} className="mx-auto mb-2 opacity-20" />
+                      <p className="text-xs">No reservation history found</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
-                        <div key={res.id} className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center text-emerald-500">
-                              <Calendar size={20} />
+                        <div key={res.id} className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-zinc-900 rounded-lg flex items-center justify-center text-emerald-500 border border-zinc-800">
+                              <Calendar size={16} />
                             </div>
                             <div>
-                              <div className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</div>
-                              <div className="text-xs text-zinc-500">
-                                {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                              <div className="text-xs font-bold text-zinc-50 leading-tight">Room {res.roomNumber}</div>
+                              <div className="text-[10px] text-zinc-500">
+                                {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
                               </div>
-                              <div className="flex items-center gap-2 mt-1">
+                              <div className="flex items-center gap-2 mt-0.5">
                                 <div className={cn(
-                                  "text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
+                                  "text-[8px] font-black uppercase px-1 py-0.2 rounded-[3px]",
                                   res.paymentStatus === 'paid' ? "bg-emerald-500/10 text-emerald-500" :
                                   res.paymentStatus === 'partial' ? "bg-amber-500/10 text-amber-500" :
                                   "bg-red-500/10 text-red-500"
@@ -872,18 +857,18 @@ export function GuestManagement() {
                                 </div>
                                 <button 
                                   onClick={() => setShowFolio(res)}
-                                  className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 uppercase tracking-wider"
+                                  className="text-[8px] font-black text-emerald-500 hover:text-emerald-400 flex items-center gap-0.5 uppercase tracking-tighter"
                                 >
-                                  <Receipt size={10} />
-                                  View Folio
+                                  <Receipt size={8} />
+                                  Folio
                                 </button>
                               </div>
                             </div>
                           </div>
                           <div className="text-right">
-                            <div className="text-sm font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
+                            <div className="text-xs font-bold text-zinc-50">{formatCurrency(res.totalAmount, currency, exchangeRate)}</div>
                             <div className={cn(
-                              "text-[10px] font-bold uppercase px-2 py-0.5 rounded inline-block mt-1",
+                              "text-[8px] font-black uppercase px-1.5 py-0.5 rounded-[4px] inline-block mt-1",
                               res.status === 'checked_out' ? "bg-emerald-500/10 text-emerald-500" : 
                               res.status === 'checked_in' ? "bg-blue-500/10 text-blue-500" :
                               res.status === 'cancelled' ? "bg-red-500/10 text-red-500" :
@@ -899,27 +884,27 @@ export function GuestManagement() {
                 </>
               ) : (
                 <>
-                  <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Transaction History</h3>
+                  <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Transaction History</h3>
                   {guestLedger.length === 0 ? (
-                    <div className="text-center py-12 text-zinc-500 bg-zinc-950 rounded-2xl border border-dashed border-zinc-800">
-                      <CreditCard size={32} className="mx-auto mb-2 opacity-20" />
-                      <p>No transactions found</p>
+                    <div className="text-center py-10 text-zinc-500 bg-zinc-950 rounded-xl border border-dashed border-zinc-800">
+                      <CreditCard size={24} className="mx-auto mb-2 opacity-20" />
+                      <p className="text-xs">No transactions found</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {guestLedger.map(entry => (
-                        <div key={entry.id} className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex items-center justify-between">
+                        <div key={entry.id} className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 flex items-center justify-between">
                           <div>
-                            <div className="text-sm font-bold text-zinc-50">{entry.description}</div>
-                            <div className="text-[10px] text-zinc-500 flex items-center gap-2">
-                              {format(new Date(entry.timestamp), 'MMM d, yyyy HH:mm')}
-                              <span className="px-1.5 py-0.5 bg-zinc-900 rounded text-[8px] font-bold uppercase tracking-wider">
+                            <div className="text-xs font-bold text-zinc-50 leading-tight">{entry.description}</div>
+                            <div className="text-[9px] text-zinc-500 flex items-center gap-2">
+                              {format(new Date(entry.timestamp), 'MMM d, yy HH:mm')}
+                              <span className="px-1 py-0.2 bg-zinc-900 rounded text-[7px] font-bold uppercase tracking-wider">
                                 {entry.category}
                               </span>
                             </div>
                           </div>
                           <div className={cn(
-                            "text-sm font-bold",
+                            "text-xs font-bold",
                             entry.type === 'credit' ? "text-emerald-500" : "text-red-500"
                           )}>
                             {entry.type === 'credit' ? '+' : '-'}{formatCurrency(entry.amount, currency, exchangeRate)}

@@ -228,13 +228,13 @@ export function Dashboard() {
         </button>
       </header>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl animate-pulse">
-              <div className="w-8 h-8 bg-zinc-800 rounded-lg mb-4" />
-              <div className="w-20 h-5 bg-zinc-800 rounded mb-2" />
-              <div className="w-12 h-2.5 bg-zinc-800 rounded opacity-50" />
+            <div key={i} className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl md:rounded-2xl animate-pulse">
+              <div className="w-6 h-6 bg-zinc-800 rounded-lg mb-3" />
+              <div className="w-16 h-4 bg-zinc-800 rounded mb-2" />
+              <div className="w-10 h-2 bg-zinc-800 rounded opacity-50" />
             </div>
           ))
         ) : (
@@ -244,15 +244,15 @@ export function Dashboard() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.1 }}
               key={stat.label}
-              className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
+              className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl md:rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
             >
-              <div className="flex items-center justify-between mb-2 sm:mb-4">
-                <div className={cn("p-1.5 sm:p-2 rounded-lg bg-zinc-950", stat.color)}>
-                  <stat.icon size={18} />
+              <div className="flex items-center justify-between mb-2">
+                <div className={cn("p-1 sm:p-1.5 rounded-lg bg-zinc-950", stat.color)}>
+                  <stat.icon size={16} />
                 </div>
               </div>
-              <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1 truncate">{stat.value}</div>
-              <div className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
+              <div className="text-base sm:text-xl font-bold text-zinc-50 mb-0.5 truncate">{stat.value}</div>
+              <div className="text-[7px] sm:text-[9px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
             </motion.div>
           ))
         )}

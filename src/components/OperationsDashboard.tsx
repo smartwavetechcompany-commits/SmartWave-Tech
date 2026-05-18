@@ -73,53 +73,53 @@ export function OperationsDashboard() {
   ];
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
       <header>
-        <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
-        <p className="text-zinc-400">Manage today's guest movements and room status</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
+        <p className="text-xs text-zinc-400">Manage today's guest movements and room status</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
         {stats.map((stat) => (
           <button
             key={stat.tab}
             type="button"
             onClick={() => setActiveTab(stat.tab as any)}
             className={cn(
-              "bg-zinc-900 border p-6 rounded-2xl transition-all text-left",
-              activeTab === stat.tab ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-zinc-800 hover:border-zinc-700"
+               "bg-zinc-900 border p-3 sm:p-4 rounded-xl transition-all text-left group",
+               activeTab === stat.tab ? "border-emerald-500 ring-1 ring-emerald-500/20 shadow-lg shadow-emerald-500/5" : "border-zinc-800 hover:border-zinc-700"
             )}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className={cn("p-2 rounded-lg bg-zinc-950", stat.color)}>
-                <stat.icon size={20} />
+            <div className="flex items-center justify-between mb-2">
+              <div className={cn("p-1.5 rounded-lg bg-zinc-950", stat.color)}>
+                <stat.icon size={16} />
               </div>
               {activeTab === stat.tab && (
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               )}
             </div>
-            <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.count}</div>
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
+            <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5">{stat.count}</div>
+            <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{stat.label}</div>
           </button>
         ))}
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-bold text-zinc-50 capitalize">{activeTab.replace('-', ' ')}</h2>
-            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs font-bold rounded-full">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
+        <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-900/50">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold text-zinc-50 capitalize tracking-tight">{activeTab.replace('-', ' ')}</h2>
+            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] font-black rounded-full">
               {filteredData().length}
             </span>
           </div>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
             <input
               type="text"
               placeholder="Search guest or room..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500 transition-colors w-full sm:w-64"
+              className="bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500 transition-colors w-full sm:w-64"
             />
           </div>
         </div>

@@ -476,31 +476,31 @@ export function Housekeeping() {
             <div 
               key={room.id} 
               className={cn(
-                "bg-zinc-900 border rounded-2xl p-6 space-y-4 flex flex-col transition-all relative group",
-                isSelected ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-zinc-800"
+                "bg-zinc-900 border rounded-xl p-4 space-y-3 flex flex-col transition-all relative group shadow-lg shadow-black/20",
+                isSelected ? "border-emerald-500 ring-1 ring-emerald-500/10" : "border-zinc-800"
               )}
             >
               <button 
                 onClick={() => toggleRoomSelection(room.id)}
-                className="absolute top-4 right-4 text-zinc-600 hover:text-emerald-500 transition-colors"
+                className="absolute top-3 right-3 text-zinc-700 hover:text-emerald-500 transition-colors"
               >
-                {isSelected ? <CheckSquare size={20} className="text-emerald-500" /> : <Square size={20} />}
+                {isSelected ? <CheckSquare size={18} className="text-emerald-500" /> : <Square size={18} />}
               </button>
 
-          <div className="flex items-center justify-between pr-8">
-            <span className="text-2xl font-bold text-zinc-50">Room {room.roomNumber}</span>
+          <div className="flex items-center justify-between pr-6">
+            <span className="text-xl font-bold text-zinc-50">Room {room.roomNumber}</span>
             <div className="flex flex-col items-end gap-1">
               <span 
                 style={{ 
                   backgroundColor: `${statusColor}1a`,
                   color: statusColor
                 }}
-                className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider"
+                className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-[currentColor]/10"
               >
                 {room.status.replace(/_/g, ' ')}
               </span>
               {room.assignedTo && (
-                <div className="flex items-center gap-1 text-[9px] text-emerald-500 font-bold uppercase tracking-tighter">
+                <div className="flex items-center gap-1 text-[8px] text-emerald-500 font-bold uppercase tracking-tighter">
                   <UserIcon size={10} />
                   {staff.find(s => s.uid === room.assignedTo)?.displayName?.split(' ')[0] || 'Assigned'}
                 </div>
@@ -508,94 +508,86 @@ export function Housekeeping() {
             </div>
           </div>
               
-              <div className="text-xs text-zinc-500 uppercase font-bold tracking-widest">
-                {room.type} • Floor {room.floor}
-              </div>
+          <div className="text-[9px] text-zinc-500 uppercase font-black tracking-widest bg-zinc-950 px-2 py-0.5 rounded-md self-start">
+            {room.type} • Floor {room.floor}
+          </div>
 
-              {activeReservation && (
-                <div className="bg-blue-500/5 border border-blue-500/10 rounded-xl p-3 space-y-1">
-                  <div className="flex items-center gap-2 text-[10px] text-blue-500 font-bold uppercase tracking-wider">
-                    <UserIcon size={12} />
-                    Current Guest
-                  </div>
-                  <p className="text-sm font-bold text-zinc-50">{activeReservation.guestName}</p>
-                  <p className="text-[10px] text-zinc-500">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Assigned To</label>
-                <select
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none transition-all"
-                  value={room.assignedTo || ''}
-                  onChange={(e) => updateRoomStatus(room.id, room.status, e.target.value)}
-                >
-                  <option value="">Unassigned</option>
-                  {staff.map(s => (
-                    <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
-                  ))}
-                </select>
+          {activeReservation && (
+            <div className="bg-blue-500/5 border border-blue-500/10 rounded-lg p-2.5 space-y-0.5">
+              <div className="flex items-center gap-2 text-[8px] text-blue-500 font-black uppercase tracking-widest">
+                <UserIcon size={10} />
+                Current Guest
               </div>
-
-              <div className="flex-1 space-y-2">
-                <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Housekeeping Notes</label>
-                <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20 transition-all"
-                  placeholder="Add notes (e.g. broken bulb, needs deep clean...)"
-                  value={roomNotes[room.id] ?? room.notes ?? ''}
-                  onChange={(e) => setRoomNotes(prev => ({ ...prev, [room.id]: e.target.value }))}
-                  onBlur={() => {
-                    const notes = roomNotes[room.id];
-                    if (notes !== undefined && notes !== room.notes) {
-                      updateRoomStatus(room.id, room.status);
-                    }
-                  }}
-                />
-              </div>
-
-              <div className="pt-4 border-t border-zinc-800 grid grid-cols-2 gap-2">
-                <button 
-                  onClick={() => updateRoomStatus(room.id, 'clean')}
-                  disabled={room.status === 'clean'}
-                  className="flex items-center justify-center gap-2 bg-emerald-500/10 text-emerald-500 py-2 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
-                >
-                  <CheckCircle2 size={14} />
-                  Mark Clean
-                </button>
-                <button 
-                  onClick={() => updateRoomStatus(room.id, 'cleaning')}
-                  disabled={room.status === 'cleaning'}
-                  className="flex items-center justify-center gap-2 bg-purple-500/10 text-purple-500 py-2 rounded-lg text-xs font-bold hover:bg-purple-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
-                >
-                  <Clock size={14} />
-                  Cleaning
-                </button>
-                <button 
-                  onClick={() => updateRoomStatus(room.id, 'dirty')}
-                  disabled={room.status === 'dirty'}
-                  className="flex items-center justify-center gap-2 bg-red-500/10 text-red-500 py-2 rounded-lg text-xs font-bold hover:bg-red-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
-                >
-                  <AlertCircle size={14} />
-                  Mark Dirty
-                </button>
-                <button 
-                  onClick={() => updateRoomStatus(room.id, 'maintenance')}
-                  disabled={room.status === 'maintenance'}
-                  className="flex items-center justify-center gap-2 bg-amber-500/10 text-amber-500 py-2 rounded-lg text-xs font-bold hover:bg-amber-500/20 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
-                >
-                  <RefreshCw size={14} />
-                  Maintenance
-                </button>
-                <button 
-                  onClick={() => updateRoomStatus(room.id, 'out_of_service')}
-                  disabled={room.status === 'out_of_service'}
-                  className="flex items-center justify-center gap-2 bg-zinc-800 text-zinc-400 py-2 rounded-lg text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
-                >
-                  <AlertCircle size={14} />
-                  Out of Service
-                </button>
-              </div>
+              <p className="text-xs font-bold text-zinc-100">{activeReservation.guestName}</p>
+              <p className="text-[9px] text-zinc-600 font-medium">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
             </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Assignment</label>
+            <select
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[11px] text-zinc-400 focus:border-emerald-500 outline-none transition-all"
+              value={room.assignedTo || ''}
+              onChange={(e) => updateRoomStatus(room.id, room.status, e.target.value)}
+            >
+              <option value="">Unassigned</option>
+              {staff.map(s => (
+                <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex-1 space-y-1.5">
+            <label className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Notes</label>
+            <textarea
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-[11px] text-zinc-400 focus:border-emerald-500 outline-none resize-none h-16 transition-all"
+              placeholder="Maintenance items..."
+              value={roomNotes[room.id] ?? room.notes ?? ''}
+              onChange={(e) => setRoomNotes(prev => ({ ...prev, [room.id]: e.target.value }))}
+              onBlur={() => {
+                const notes = roomNotes[room.id];
+                if (notes !== undefined && notes !== room.notes) {
+                  updateRoomStatus(room.id, room.status);
+                }
+              }}
+            />
+          </div>
+
+          <div className="pt-3 border-t border-zinc-800 grid grid-cols-2 gap-2">
+            <button 
+              onClick={() => updateRoomStatus(room.id, 'clean')}
+              disabled={room.status === 'clean'}
+              className="flex items-center justify-center gap-1.5 bg-emerald-500/5 text-emerald-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-emerald-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
+            >
+              <CheckCircle2 size={12} />
+              Clean
+            </button>
+            <button 
+              onClick={() => updateRoomStatus(room.id, 'cleaning')}
+              disabled={room.status === 'cleaning'}
+              className="flex items-center justify-center gap-1.5 bg-purple-500/5 text-purple-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
+            >
+              <Clock size={12} />
+              Loading
+            </button>
+            <button 
+              onClick={() => updateRoomStatus(room.id, 'dirty')}
+              disabled={room.status === 'dirty'}
+              className="flex items-center justify-center gap-1.5 bg-red-500/5 text-red-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
+            >
+              <AlertCircle size={12} />
+              Dirty
+            </button>
+            <button 
+              onClick={() => updateRoomStatus(room.id, 'maintenance')}
+              disabled={room.status === 'maintenance'}
+              className="flex items-center justify-center gap-1.5 bg-amber-500/5 text-amber-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-amber-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
+            >
+              <RefreshCw size={12} />
+              Repair
+            </button>
+          </div>
+        </div>
           );
             })
           )}

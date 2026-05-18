@@ -2775,16 +2775,16 @@ export function FrontDesk() {
       )}
 
       {/* Room Inventory Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {roomTypes.map(type => {
           const totalRooms = rooms.filter(r => r.type === type.name).length;
           const availableRooms = rooms.filter(r => r.type === type.name && isRoomAvailable(r.id, format(new Date(), 'yyyy-MM-dd'), format(addDays(new Date(), 1), 'yyyy-MM-dd'), reservations, roomBlockings)).length;
           return (
-            <div key={type.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">{type.name}</div>
+            <div key={type.id} className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl">
+              <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{type.name}</div>
               <div className="flex items-end justify-between">
-                <div className="text-xl font-bold text-zinc-50">{availableRooms}</div>
-                <div className="text-[10px] text-zinc-500">of {totalRooms}</div>
+                <div className="text-lg font-bold text-zinc-50">{availableRooms} <span className="text-[10px] text-zinc-600 font-medium">Available</span></div>
+                <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-tighter self-center bg-zinc-950 px-1.5 py-0.5 rounded">Total {totalRooms}</div>
               </div>
               <div className="mt-2 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
                 <div 
@@ -2801,180 +2801,152 @@ export function FrontDesk() {
       </div>
 
       {/* Room Status Legend */}
-      <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-zinc-900 border border-zinc-800 rounded-2xl mb-8">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl mb-6">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Clean / Vacant</span>
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.2)]" />
+          <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Clean</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Occupied</span>
+          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.2)]" />
+          <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Occupied</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maintenance</span>
+          <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.2)]" />
+          <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Repair</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Dirty</span>
+          <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.2)]" />
+          <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Dirty</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vacant (Unready)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-zinc-800" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Out of Service</span>
+          <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+          <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-widest">Unready</span>
         </div>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-4 md:p-6 border-b border-zinc-800 flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-          <div className="flex flex-wrap items-center gap-4 md:gap-6">
-            <h3 className="font-bold text-zinc-50">Reservations</h3>
-            <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 overflow-x-auto no-scrollbar">
-              {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => {
-                    setActiveTab(tab);
-                    setSelectedReservations([]);
-                  }}
-                  className={cn(
-                    "px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                    activeTab === tab 
-                      ? "bg-emerald-500 text-black" 
-                      : "text-zinc-500 hover:text-zinc-300"
-                  )}
-                >
-                  {tab === 'checked_in' ? 'In-House' : tab}
-                </button>
-              ))}
+        <div className="p-4 border-b border-zinc-800 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <h3 className="font-bold text-zinc-50 text-sm">{selectedReservations.length > 0 ? `Selected: ${selectedReservations.length}` : 'Reservations'}</h3>
+              <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => {
+                      setActiveTab(tab);
+                      setSelectedReservations([]);
+                    }}
+                    className={cn(
+                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all",
+                      activeTab === tab 
+                        ? "bg-emerald-500 text-black shadow-lg" 
+                        : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    {tab === 'checked_in' ? 'In-House' : tab}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col md:flex-row md:items-center gap-4 w-full xl:w-auto">
-            {selectedReservations.length > 0 && (
-              <button
-                onClick={handleBulkCheckIn}
-                disabled={loading}
-                className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
-              >
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                Check In Selected ({selectedReservations.length})
-              </button>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 md:flex-none">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+            
+            <div className="flex items-center gap-2">
+               {selectedReservations.length > 0 && (
+                <button
+                  onClick={handleBulkCheckIn}
+                  disabled={loading}
+                  className="bg-emerald-500 text-black px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition-all flex items-center gap-2"
+                >
+                  {loading ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                  Check In ({selectedReservations.length})
+                </button>
+              )}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                 <input 
                   type="text" 
-                  placeholder="Search guests or rooms..."
-                  className="w-full md:w-64 bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
+                  placeholder="Quick search..."
+                  className="bg-zinc-950 border border-zinc-800 rounded-lg pl-8 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500 min-w-[200px]"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="all">Status: All</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="checked_in">In-House</option>
+              <option value="checked_out">Departed</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="no_show">No Show</option>
+            </select>
+
+            <select
+              value={paymentStatusFilter}
+              onChange={(e) => setPaymentStatusFilter(e.target.value)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="all">Payment: All</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="partial">Partial</option>
+              <option value="paid">Settled</option>
+            </select>
+
+            <select
+              value={roomTypeFilter}
+              onChange={(e) => setRoomTypeFilter(e.target.value)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="all">Type: All</option>
+              {roomTypes.map(t => (
+                <option key={t.id} value={t.name}>{t.name}</option>
+              ))}
+            </select>
+
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5">
+              <Calendar size={12} className="text-emerald-500" />
+              <input 
+                type="date"
+                className="bg-transparent text-[10px] font-bold text-zinc-400 focus:outline-none appearance-none w-24"
+                style={{ colorScheme: 'dark' }}
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              />
+              <span className="text-zinc-700">-</span>
+              <input 
+                type="date"
+                className="bg-transparent text-[10px] font-bold text-zinc-400 focus:outline-none appearance-none w-24"
+                style={{ colorScheme: 'dark' }}
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              />
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
               <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none"
               >
-                <option value="all">All Status</option>
-                <option value="pending">Pending</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="checked_in">Checked In</option>
-                <option value="checked_out">Checked Out</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="no_show">No Show</option>
+                <option value="checkIn">Sort: Date</option>
+                <option value="guestName">Sort: Name</option>
+                <option value="roomNumber">Sort: Room</option>
+                <option value="status">Sort: Status</option>
               </select>
-
-              <select
-                value={paymentStatusFilter}
-                onChange={(e) => setPaymentStatusFilter(e.target.value)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
+              <button
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                className="p-1.5 bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-500 hover:text-emerald-500 transition-colors"
               >
-                <option value="all">All Payments</option>
-                <option value="unpaid">Unpaid</option>
-                <option value="partial">Partial</option>
-                <option value="paid">Paid</option>
-              </select>
-
-              <select
-                value={roomTypeFilter}
-                onChange={(e) => setRoomTypeFilter(e.target.value)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Room Types</option>
-                {roomTypes.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={staffFilter}
-                onChange={(e) => setStaffFilter(e.target.value)}
-                className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="all">All Staff</option>
-                {staffMembers.map(staff => (
-                  <option key={staff.id} value={staff.id}>{staff.name}</option>
-                ))}
-              </select>
-
-              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
-                <div className="flex items-center gap-1">
-                  <Calendar size={14} className="text-emerald-500" />
-                  <input 
-                    type="date"
-                    className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
-                    style={{ colorScheme: 'dark' }}
-                    value={dateRange.start}
-                    onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                  />
-                </div>
-                <span className="text-zinc-500 text-[10px]">-</span>
-                <div className="flex items-center gap-1">
-                  <Calendar size={14} className="text-emerald-500" />
-                  <input 
-                    type="date"
-                    className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
-                    style={{ colorScheme: 'dark' }}
-                    value={dateRange.end}
-                    onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 h-full">
-                <Filter size={14} className="text-zinc-500" />
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
-                  className="bg-transparent text-xs text-zinc-50 focus:outline-none cursor-pointer"
-                >
-                  <option value="checkIn">Sort: Check In</option>
-                  <option value="guestName">Sort: Name</option>
-                  <option value="roomNumber">Sort: Room</option>
-                  <option value="status">Sort: Status</option>
-                </select>
-                <button
-                  onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className="text-zinc-500 hover:text-emerald-500 transition-colors"
-                >
-                  {sortOrder === 'asc' ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
-                </button>
-              </div>
-
-              {selectedReservations.length > 0 && activeTab === 'arrivals' && (
-                <button
-                  onClick={handleBulkCheckIn}
-                  disabled={loading}
-                  className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
-                >
-                  <CheckCircle2 size={14} />
-                  Check In ({selectedReservations.length})
-                </button>
-              )}
+                {sortOrder === 'asc' ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
+              </button>
             </div>
           </div>
         </div>

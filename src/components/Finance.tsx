@@ -760,54 +760,53 @@ export function Finance() {
   };
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+    <div className="p-4 lg:p-6 space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Financial Management</h1>
-          <p className="text-zinc-400">Track income, expenses and overall hotel performance</p>
+          <h1 className="text-2xl font-bold text-zinc-50 tracking-tight">Finance</h1>
+          <p className="text-xs text-zinc-400">Track and manage hotel revenue and expenses</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button 
             onClick={handleSyncCharges}
             disabled={isSyncing}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
-            title="Sync missing daily charges for all checked-in guests"
+            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
           >
-            <RefreshCw size={18} className={cn(isSyncing && "animate-spin")} />
-            Sync Charges
+            <RefreshCw size={14} className={cn(isSyncing && "animate-spin")} />
+            Sync
           </button>
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
           >
-            <Download size={18} />
-            Export CSV
+            <Download size={14} />
+            Export
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black rounded-lg transition-all text-[10px] font-black uppercase tracking-widest active:scale-95"
           >
-            <Plus size={18} />
+            <Plus size={14} />
             Add Record
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-8">
+      <div className="flex flex-col lg:flex-row gap-6">
         {/* Sidebar Navigation */}
-        <div className="w-full lg:w-64 flex-shrink-0 space-y-1">
+        <div className="w-full lg:w-48 flex-shrink-0 flex lg:flex-col overflow-x-auto lg:overflow-visible gap-1 no-scrollbar bg-zinc-900/30 p-1 rounded-xl border border-zinc-800/50">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id as any)}
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all",
+                "flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap lg:whitespace-normal",
                 activeTab === item.id 
-                  ? "bg-emerald-500 text-zinc-50 shadow-lg shadow-emerald-500/20" 
-                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                  ? "bg-zinc-800 text-zinc-50 shadow-sm" 
+                  : "text-zinc-500 hover:text-zinc-300"
               )}
             >
-              <item.icon size={18} />
+              <item.icon size={12} className={cn(activeTab === item.id ? "text-emerald-500" : "text-zinc-600")} />
               {item.label}
             </button>
           ))}
@@ -816,15 +815,15 @@ export function Finance() {
         {/* Main Content Area */}
         <div className="flex-1 min-w-0">
           {activeTab === 'overview' && (
-            <div className="space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {stats.map((stat) => (
-                  <div key={stat.label} className={cn("border border-zinc-800 p-6 rounded-2xl", stat.bg)}>
+                  <div key={stat.label} className={cn("border border-zinc-800 p-4 rounded-xl", stat.bg)}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
-                      <stat.icon className={stat.color} size={20} />
+                      <stat.icon className={stat.color} size={16} />
                     </div>
-                    <div className="text-2xl font-bold text-zinc-50">{stat.value}</div>
+                    <div className="text-xl font-bold text-zinc-50 mb-0.5">{stat.value}</div>
+                    <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{stat.label}</div>
                   </div>
                 ))}
               </div>

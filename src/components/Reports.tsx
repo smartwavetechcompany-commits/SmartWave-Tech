@@ -734,44 +734,44 @@ export function Reports() {
         <div className="flex-1 min-w-0">
           {activeReport === 'overview' && (
             <div className="space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-                      <Bed size={20} />
-                    </div>
-                  </div>
-                  <div className="text-2xl font-bold text-zinc-50 mb-1">{stats.occupancy}%</div>
-                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Occupancy Rate</div>
-                </div>
-                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
-                      <TrendingUp size={20} />
-                    </div>
-                  </div>
-                  <div className="text-2xl font-bold text-zinc-50 mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
-                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
-                </div>
-                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
-                      <TrendingUp size={20} />
-                    </div>
-                  </div>
-                  <div className="text-2xl font-bold text-zinc-50 mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
-                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
-                </div>
-                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
-                      <Users size={20} />
-                    </div>
-                  </div>
-                  <div className="text-2xl font-bold text-zinc-50 mb-1">{stats.totalGuests}</div>
-                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Guests</div>
-                </div>
-              </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
+              <Bed size={16} />
+            </div>
+          </div>
+          <div className="text-xl font-bold text-zinc-50 mb-0.5">{stats.occupancy}%</div>
+          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Occupancy Rate</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
+              <TrendingUp size={16} />
+            </div>
+          </div>
+          <div className="text-xl font-bold text-zinc-50 mb-0.5">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
+          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">RevPAR</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-500">
+              <TrendingUp size={16} />
+            </div>
+          </div>
+          <div className="text-xl font-bold text-zinc-50 mb-0.5">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
+          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">ADR</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="flex items-center justify-between mb-2">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+              <Users size={16} />
+            </div>
+          </div>
+          <div className="text-xl font-bold text-zinc-50 mb-0.5">{stats.totalGuests}</div>
+          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Total Guests</div>
+        </div>
+      </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
@@ -839,28 +839,28 @@ export function Reports() {
 
           {activeReport !== 'overview' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
-                <div>
-                  <h3 className="font-bold text-zinc-50">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
-                  <p className="text-xs text-zinc-500">Detailed report for the period {dateRange.start} to {dateRange.end}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={exportExcel}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-xs font-bold"
-                  >
-                    <FileSpreadsheet size={14} />
-                    Excel
-                  </button>
-                  <button 
-                    onClick={exportPDF}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500 hover:text-zinc-50 transition-colors text-xs font-bold"
-                  >
-                    <FileText size={14} />
-                    PDF
-                  </button>
-                </div>
-              </div>
+        <div className="p-4 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-zinc-50 text-sm">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
+            <p className="text-[10px] text-zinc-500 font-medium">Detailed report: {dateRange.start} – {dateRange.end}</p>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={exportExcel}
+              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
+            >
+              <FileSpreadsheet size={12} />
+              Excel
+            </button>
+            <button 
+              onClick={exportPDF}
+              className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black rounded-lg transition-all text-[10px] font-black uppercase tracking-widest active:scale-95"
+            >
+              <FileText size={12} />
+              PDF
+            </button>
+          </div>
+        </div>
               
               <div className="overflow-x-auto">
                 <table className="w-full text-left">

@@ -614,59 +614,61 @@ export function CorporateManagement() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Accounts</div>
-          <div className="text-2xl font-bold text-white">{accounts.length}</div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Accounts</div>
+          <div className="text-xl font-bold text-zinc-50">{accounts.length}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Credit Limit</div>
-          <div className="text-2xl font-bold text-blue-500">{formatCurrency(accounts.reduce((acc, a) => acc + a.creditLimit, 0), currency, exchangeRate)}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Credit Limit</div>
+          <div className="text-xl font-bold text-blue-500">{formatCurrency(accounts.reduce((acc, a) => acc + a.creditLimit, 0), currency, exchangeRate)}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Charges</div>
-          <div className="text-2xl font-bold text-amber-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalDebits || 0), 0), currency, exchangeRate)}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Accrued Debits</div>
+          <div className="text-xl font-bold text-amber-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalDebits || 0), 0), currency, exchangeRate)}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Total Payments</div>
-          <div className="text-2xl font-bold text-emerald-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalCredits || 0), 0), currency, exchangeRate)}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Receipts</div>
+          <div className="text-xl font-bold text-emerald-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.totalCredits || 0), 0), currency, exchangeRate)}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-          <div className="text-zinc-400 text-sm font-medium mb-1">Outstanding Balance</div>
-          <div className="text-2xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0), currency, exchangeRate)}</div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Net Balance</div>
+          <div className="text-xl font-bold text-red-500">{formatCurrency(accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0), currency, exchangeRate)}</div>
         </div>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+        <div className="p-4 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="relative w-full max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
             <input 
               type="text" 
-              placeholder="Search accounts or contacts..."
+              placeholder="Search companies or contacts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500 transition-all"
             />
           </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <span className="text-xs font-bold text-zinc-500 uppercase whitespace-nowrap">Sort By:</span>
-            <select 
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-            >
-              <option value="name">Company Name</option>
-              <option value="contactPerson">Contact Person</option>
-              <option value="creditLimit">Credit Limit</option>
-              <option value="currentBalance">Balance</option>
-            </select>
-            <button 
-              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-              className="p-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-all"
-            >
-              <TrendingUp size={16} className={cn(sortOrder === 'desc' && "rotate-180")} />
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Sort</span>
+              <select 
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-transparent text-[10px] font-bold text-zinc-400 focus:outline-none cursor-pointer"
+              >
+                <option value="name">Company</option>
+                <option value="contactPerson">Contact</option>
+                <option value="creditLimit">Limit</option>
+                <option value="currentBalance">Balance</option>
+              </select>
+              <button 
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                className="p-1 text-zinc-500 hover:text-emerald-500 transition-all"
+              >
+                <TrendingUp size={12} className={cn(sortOrder === 'desc' && "rotate-180")} />
+              </button>
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
