@@ -523,23 +523,23 @@ export function Settings() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-4 sm:space-y-8">
+    <div className="p-8 max-w-4xl mx-auto space-y-8">
       <header>
-        <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 tracking-tight">{t('settings.title')}</h1>
-        <p className="text-xs sm:text-sm text-zinc-400">Manage your account and preferences</p>
+        <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">{t('settings.title')}</h1>
+        <p className="text-zinc-400">Manage your account and system preferences</p>
       </header>
 
-      <div className="flex flex-col lg:flex-row gap-4 sm:gap-8">
-        {/* Sidebar Tabs - Horizontal on Mobile, Vertical on Desktop */}
-        <aside className="lg:w-64 flex lg:flex-col gap-1 sm:gap-2 overflow-x-auto pb-2 lg:pb-0 no-scrollbar">
+      <div className="flex gap-8">
+        {/* Sidebar Tabs */}
+        <aside className="w-64 space-y-2">
           <button 
             onClick={() => setActiveTab('profile')}
             className={cn(
-              "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
               activeTab === 'profile' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
-            <User size={14} className="sm:size-18" />
+            <User size={18} />
             {t('settings.profile')}
           </button>
           
@@ -547,11 +547,11 @@ export function Settings() {
             <button 
               onClick={() => setActiveTab('hotel')}
               className={cn(
-                "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
                 activeTab === 'hotel' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
-              <Building2 size={14} className="sm:size-18" />
+              <Building2 size={18} />
               {t('settings.hotelSettings')}
             </button>
           )}
@@ -560,11 +560,11 @@ export function Settings() {
             <button 
               onClick={() => setActiveTab('branding')}
               className={cn(
-                "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
                 activeTab === 'branding' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
-              <Smartphone size={14} className="sm:size-18" />
+              <Smartphone size={18} />
               {t('settings.branding')}
             </button>
           )}
@@ -573,11 +573,11 @@ export function Settings() {
             <button 
               onClick={() => setActiveTab('taxes')}
               className={cn(
-                "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
                 activeTab === 'taxes' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
-              <Percent size={14} className="sm:size-18" />
+              <Percent size={18} />
               {t('settings.taxes')}
             </button>
           )}
@@ -585,33 +585,33 @@ export function Settings() {
           <button 
             onClick={() => setActiveTab('preferences')}
             className={cn(
-              "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
               activeTab === 'preferences' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
-            <Moon size={14} className="sm:size-18" />
+            <Moon size={18} />
             {t('settings.preferences')}
           </button>
 
           <button 
             onClick={() => setActiveTab('security')}
             className={cn(
-              "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
               activeTab === 'security' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
-            <Shield size={14} className="sm:size-18" />
+            <Shield size={18} />
             {t('settings.security')}
           </button>
 
           <button 
             onClick={() => setActiveTab('support')}
             className={cn(
-              "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
               activeTab === 'support' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
             )}
           >
-            <Mail size={14} className="sm:size-18" />
+            <Mail size={18} />
             {t('settings.support')}
           </button>
 
@@ -619,55 +619,56 @@ export function Settings() {
             <button 
               onClick={() => setActiveTab('danger')}
               className={cn(
-                "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-sm font-medium transition-all active:scale-95 whitespace-nowrap",
+                "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
                 activeTab === 'danger' ? "bg-red-500 text-white" : "text-red-500/60 hover:bg-red-500/10 hover:text-red-500"
               )}
             >
-              <Shield size={14} className="sm:size-18" />
+              <Shield size={18} />
               {t('settings.dangerZone')}
             </button>
           )}
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl sm:rounded-2xl p-4 sm:p-8">
+        <main className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
           {activeTab === 'profile' && (
-            <form onSubmit={handleSaveProfile} className="space-y-4 sm:space-y-6">
-              <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-8">
-                <div className="w-12 h-12 sm:w-20 sm:h-20 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-500 border-2 border-zinc-700">
-                  <User size={24} className="sm:size-[40px]" />
+            <form onSubmit={handleSaveProfile} className="space-y-6">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-20 h-20 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-500 border-2 border-zinc-700">
+                  <User size={40} />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-zinc-50">{profile?.displayName || 'User'}</h3>
-                  <p className="text-xs sm:text-sm text-zinc-500 capitalize">{profile?.role.replace('hotelAdmin', 'Hotel Administrator')}</p>
+                  <h3 className="text-lg font-bold text-zinc-50">{profile?.displayName || 'User'}</h3>
+                  <p className="text-sm text-zinc-500 capitalize">{profile?.role.replace('hotelAdmin', 'Hotel Administrator')}</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:gap-6">
+              <div className="grid grid-cols-1 gap-6">
                 <div>
-                  <label className="block text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase mb-1 sm:mb-2 text-zinc-500">Display Name</label>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Display Name</label>
                   <input 
                     type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-zinc-50 focus:border-emerald-500 outline-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                     value={formData.displayName}
                     onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] sm:text-xs font-semibold text-zinc-500 uppercase mb-1 sm:mb-2 text-zinc-500">Email Address</label>
-                  <div className="flex items-center gap-2 sm:gap-3 w-full bg-zinc-800/50 border border-zinc-800 rounded-lg px-3 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-sm text-zinc-500 cursor-not-allowed">
-                    <Mail size={12} className="sm:size-16" />
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Email Address</label>
+                  <div className="flex items-center gap-3 w-full bg-zinc-800/50 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-500 cursor-not-allowed">
+                    <Mail size={16} />
                     {profile?.email}
                   </div>
+                  <p className="text-[10px] text-zinc-600 mt-1 italic">Email cannot be changed directly for security reasons.</p>
                 </div>
               </div>
 
-              <div className="pt-4 sm:pt-6 border-t border-zinc-800 flex justify-end">
+              <div className="pt-6 border-t border-zinc-800 flex justify-end">
                 <button 
                   disabled={isSaving}
-                  className="bg-emerald-500 text-black px-4 sm:px-6 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
+                  className="bg-emerald-500 text-black px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
                 >
-                  <Save size={14} className="sm:size-18" />
+                  <Save size={18} />
                   {isSaving ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>

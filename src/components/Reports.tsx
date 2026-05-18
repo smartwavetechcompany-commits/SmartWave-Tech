@@ -664,67 +664,67 @@ export function Reports() {
   });
 
   return (
-    <div className="p-4 sm:p-8 space-y-4 sm:space-y-8">
-      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
+    <div className="p-8 space-y-8">
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
-          <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Reports</h1>
-          <p className="text-xs sm:text-sm text-zinc-400">Monitor performance and trends</p>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Reports & Analytics</h1>
+          <p className="text-zinc-400">Monitor hotel performance and trends</p>
         </div>
         
-        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-          <div className="flex flex-wrap items-center gap-1 sm:gap-2 bg-zinc-900 border border-zinc-800 p-1.5 sm:p-2 rounded-lg sm:rounded-xl relative">
-            <Calendar size={14} className="text-emerald-500 ml-1 sm:ml-2 pointer-events-none" />
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-xl relative">
+            <Calendar size={18} className="text-emerald-500 ml-2 pointer-events-none" />
             <input 
               type="date" 
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="bg-transparent text-zinc-50 text-[10px] sm:text-sm outline-none border-none p-0.5 sm:p-1 appearance-none"
+              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
               style={{ colorScheme: 'dark' }}
             />
-            <span className="text-zinc-600 text-[10px] sm:text-sm">to</span>
+            <span className="text-zinc-600">to</span>
             <input 
               type="date" 
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="bg-transparent text-zinc-50 text-[10px] sm:text-sm outline-none border-none p-0.5 sm:p-1 appearance-none"
+              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
               style={{ colorScheme: 'dark' }}
             />
           </div>
 
-          <div className="flex gap-1.5 sm:gap-2">
+          <div className="flex gap-2">
             <button 
               onClick={exportPDF}
-              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
             >
-              <FileText size={14} className="sm:size-18 text-red-500" />
-              <span>PDF</span>
+              <FileText size={18} className="text-red-500" />
+              PDF
             </button>
             <button 
               onClick={exportExcel}
-              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-bold flex items-center gap-1.5 sm:gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
             >
-              <FileSpreadsheet size={14} className="sm:size-18 text-emerald-500" />
-              <span>Excel</span>
+              <FileSpreadsheet size={18} className="text-emerald-500" />
+              Excel
             </button>
           </div>
         </div>
       </header>
 
-      <div className="flex flex-col lg:flex-row gap-4 sm:gap-8">
-        {/* Sidebar Navigation - Horizontal on Mobile */}
-        <div className="w-full lg:w-64 flex lg:flex-col gap-1 sm:gap-1.5 overflow-x-auto pb-2 lg:pb-0 lg:max-h-[calc(100vh-200px)] lg:overflow-y-auto lg:pr-2 no-scrollbar">
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Sidebar Navigation */}
+        <div className="w-full lg:w-64 flex-shrink-0 space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar">
           {reportTypes.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveReport(item.id)}
               className={cn(
-                "flex-none lg:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-bold transition-all whitespace-nowrap",
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all",
                 activeReport === item.id 
-                  ? "bg-emerald-500 text-zinc-50 shadow-lg shadow-emerald-500/10" 
+                  ? "bg-emerald-500 text-zinc-50 shadow-lg shadow-emerald-500/20" 
                   : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               )}
             >
-              <item.icon size={14} className="sm:size-18" />
+              <item.icon size={18} />
               {item.label}
             </button>
           ))}
@@ -733,50 +733,50 @@ export function Reports() {
         {/* Main Content Area */}
         <div className="flex-1 min-w-0">
           {activeReport === 'overview' && (
-            <div className="space-y-4 sm:space-y-8">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
-                <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-xl sm:rounded-2xl">
-                  <div className="flex items-center justify-between mb-2 sm:mb-4">
-                    <div className="p-1.5 sm:p-2 rounded-lg bg-blue-500/10 text-blue-500">
-                      <Bed size={16} className="sm:size-20" />
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+                      <Bed size={20} />
                     </div>
                   </div>
-                  <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1">{stats.occupancy}%</div>
-                  <div className="text-[8px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Occupancy Rate</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{stats.occupancy}%</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Occupancy Rate</div>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-xl sm:rounded-2xl">
-                  <div className="flex items-center justify-between mb-2 sm:mb-4">
-                    <div className="p-1.5 sm:p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
-                      <TrendingUp size={16} className="sm:size-20" />
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+                      <TrendingUp size={20} />
                     </div>
                   </div>
-                  <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1 truncate">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
-                  <div className="text-[8px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">RevPAR</div>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-xl sm:rounded-2xl">
-                  <div className="flex items-center justify-between mb-2 sm:mb-4">
-                    <div className="p-1.5 sm:p-2 rounded-lg bg-purple-500/10 text-purple-500">
-                      <TrendingUp size={16} className="sm:size-20" />
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
+                      <TrendingUp size={20} />
                     </div>
                   </div>
-                  <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1 truncate">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
-                  <div className="text-[8px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ADR</div>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-xl sm:rounded-2xl">
-                  <div className="flex items-center justify-between mb-2 sm:mb-4">
-                    <div className="p-1.5 sm:p-2 rounded-lg bg-amber-500/10 text-amber-500">
-                      <Users size={16} className="sm:size-20" />
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+                      <Users size={20} />
                     </div>
                   </div>
-                  <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1">{stats.totalGuests}</div>
-                  <div className="text-[8px] sm:text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Guests</div>
+                  <div className="text-2xl font-bold text-zinc-50 mb-1">{stats.totalGuests}</div>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Total Guests</div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
-                <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-xl sm:rounded-2xl">
-                  <h3 className="text-sm sm:text-base font-bold text-zinc-50 mb-4 sm:mb-6">Revenue Trend</h3>
-                  <div className="h-[200px] sm:h-[300px]">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <h3 className="font-bold text-zinc-50 mb-6">Revenue Trend</h3>
+                  <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={revenueData}>
                         <defs>
@@ -786,10 +786,10 @@ export function Reports() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                        <XAxis dataKey="name" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
+                        <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
                         <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', fontSize: '10px' }}
+                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
                           itemStyle={{ color: '#10b981' }}
                           formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
                         />
@@ -799,17 +799,17 @@ export function Reports() {
                   </div>
                 </div>
 
-                <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-xl sm:rounded-2xl">
-                  <h3 className="text-sm sm:text-base font-bold text-zinc-50 mb-4 sm:mb-6">Revenue Mix</h3>
-                  <div className="h-[200px] sm:h-[300px]">
+                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                  <h3 className="font-bold text-zinc-50 mb-6">Revenue Mix</h3>
+                  <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={corporateData}
                           cx="50%"
                           cy="50%"
-                          innerRadius={40}
-                          outerRadius={60}
+                          innerRadius={60}
+                          outerRadius={80}
                           paddingAngle={5}
                           dataKey="value"
                         >
@@ -818,17 +818,17 @@ export function Reports() {
                           ))}
                         </Pie>
                         <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', fontSize: '10px' }}
+                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
                           formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
                         />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex flex-wrap justify-center gap-3 sm:gap-6 mt-2 sm:mt-4">
+                  <div className="flex justify-center gap-6 mt-4">
                     {corporateData.map((entry, index) => (
-                      <div key={entry.name} className="flex items-center gap-1.5 sm:gap-2">
-                        <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
-                        <span className="text-[10px] sm:text-xs text-zinc-400">{entry.name}</span>
+                      <div key={entry.name} className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
+                        <span className="text-xs text-zinc-400">{entry.name}</span>
                       </div>
                     ))}
                   </div>
@@ -838,43 +838,43 @@ export function Reports() {
           )}
 
           {activeReport !== 'overview' && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl sm:rounded-2xl overflow-hidden">
-              <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
                 <div>
-                  <h3 className="text-sm sm:text-base font-bold text-zinc-50">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
-                  <p className="text-[10px] sm:text-xs text-zinc-500">Period {dateRange.start} to {dateRange.end}</p>
+                  <h3 className="font-bold text-zinc-50">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
+                  <p className="text-xs text-zinc-500">Detailed report for the period {dateRange.start} to {dateRange.end}</p>
                 </div>
-                <div className="flex gap-1.5 sm:gap-2 w-full sm:w-auto">
+                <div className="flex gap-2">
                   <button 
                     onClick={exportExcel}
-                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] sm:text-xs font-bold"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-xs font-bold"
                   >
-                    <FileSpreadsheet size={12} className="sm:size-14" />
+                    <FileSpreadsheet size={14} />
                     Excel
                   </button>
                   <button 
                     onClick={exportPDF}
-                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500 hover:text-zinc-50 transition-colors text-[10px] sm:text-xs font-bold"
+                    className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500 hover:text-zinc-50 transition-colors text-xs font-bold"
                   >
-                    <FileText size={12} className="sm:size-14" />
+                    <FileText size={14} />
                     PDF
                   </button>
                 </div>
               </div>
               
               <div className="overflow-x-auto">
-                <table className="w-full text-left min-w-[700px]">
+                <table className="w-full text-left">
                   <thead className="bg-zinc-950 border-b border-zinc-800">
-                    <tr className="text-[8px] sm:text-[10px] text-zinc-500 uppercase font-bold tracking-wider">
+                    <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">
                       {getReportHeaders(activeReport).map(header => (
-                        <th key={header} className="px-3 sm:px-6 py-2.5 sm:py-4">{header}</th>
+                        <th key={header} className="px-6 py-4">{header}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
                     {getReportData(activeReport).length === 0 ? (
                       <tr>
-                        <td colSpan={getReportHeaders(activeReport).length} className="px-6 py-12 text-center text-zinc-500 italic text-xs sm:text-sm">
+                        <td colSpan={getReportHeaders(activeReport).length} className="px-6 py-12 text-center text-zinc-500 italic">
                           No data found for this period
                         </td>
                       </tr>
@@ -882,20 +882,20 @@ export function Reports() {
                       getReportData(activeReport).map((row, i) => (
                         <tr key={i} className="hover:bg-zinc-800/50 transition-colors">
                           {Object.entries(row).filter(([key]) => !key.startsWith('_')).map(([key, val]: [string, any], j) => (
-                            <td key={j} className="px-3 sm:px-6 py-2.5 sm:py-4 text-[10px] sm:text-sm text-zinc-400 whitespace-nowrap">
-                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays', 'Res #'].some(k => key.includes(k))
+                            <td key={j} className="px-6 py-4 text-sm text-zinc-400">
+                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays'].some(k => key.includes(k))
                                 ? formatCurrency(val, currency, exchangeRate)
                                 : val}
                             </td>
                           ))}
                           {row._id && row._collection && (
-                            <td className="px-3 sm:px-6 py-2.5 sm:py-4 text-right">
+                            <td className="px-6 py-4 text-right">
                               <button
                                 onClick={() => setRecordToDelete({ id: row._id, collection: row._collection, label: row._label || 'Record' })}
-                                className="p-1.5 sm:p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
                                 title="Delete Record"
                               >
-                                <Trash2 size={14} className="sm:size-16" />
+                                <Trash2 size={16} />
                               </button>
                             </td>
                           )}

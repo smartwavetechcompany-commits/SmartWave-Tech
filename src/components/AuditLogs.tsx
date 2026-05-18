@@ -369,56 +369,56 @@ export function AuditLogs() {
           <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 bg-zinc-900 z-10 shadow-sm">
               <tr className="text-[9px] sm:text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
-                <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('timestamp')}>
-                  <div className="flex items-center gap-1 sm:gap-2">
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('timestamp')}>
+                  <div className="flex items-center gap-2">
                     Date & Time
                     <SortIcon column="timestamp" />
                   </div>
                 </th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors group/header" onClick={() => handleSort('actor')}>
-                  <div className="flex items-center gap-1 sm:gap-2">
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors group/header" onClick={() => handleSort('actor')}>
+                  <div className="flex items-center gap-2">
                     Actor
                     <div className={cn("transition-opacity", sortConfig.key === 'actor' ? "opacity-100" : "opacity-0 group-hover/header:opacity-100")}>
                       <SortIcon column="actor" />
                     </div>
                   </div>
                 </th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors group/header" onClick={() => handleSort('userRole')}>
-                  <div className="flex items-center gap-1 sm:gap-2">
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors group/header" onClick={() => handleSort('userRole')}>
+                  <div className="flex items-center gap-2">
                     Role
                     <div className={cn("transition-opacity", sortConfig.key === 'userRole' ? "opacity-100" : "opacity-0 group-hover/header:opacity-100")}>
                       <SortIcon column="userRole" />
                     </div>
                   </div>
                 </th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('action')}>
-                  <div className="flex items-center gap-1 sm:gap-2">
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('action')}>
+                  <div className="flex items-center gap-2">
                     Action
                     <SortIcon column="action" />
                   </div>
                 </th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('module')}>
-                  <div className="flex items-center gap-1 sm:gap-2">
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => handleSort('module')}>
+                  <div className="flex items-center gap-2">
                     Module
                     <SortIcon column="module" />
                   </div>
                 </th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden md:table-cell" onClick={() => handleSort('target')}>
-                  <div className="flex items-center gap-1 sm:gap-2">
+                <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden md:table-cell" onClick={() => handleSort('target')}>
+                  <div className="flex items-center gap-2">
                     Target
                     <SortIcon column="target" />
                   </div>
                 </th>
                 {profile.role === 'superAdmin' && (
-                  <th className="px-3 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden lg:table-cell" onClick={() => handleSort('hotelId')}>
-                    <div className="flex items-center gap-1 sm:gap-2">
+                  <th className="px-4 sm:px-6 py-3 sm:py-4 cursor-pointer hover:text-zinc-50 transition-colors hidden lg:table-cell" onClick={() => handleSort('hotelId')}>
+                    <div className="flex items-center gap-2">
                       Hotel Name
                       <SortIcon column="hotelId" />
                     </div>
                   </th>
                 )}
-                <th className="px-3 sm:px-6 py-3 sm:py-4">Details</th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 text-right">View</th>
+                <th className="px-4 sm:px-6 py-3 sm:py-4">Details</th>
+                <th className="px-4 sm:px-6 py-3 sm:py-4 text-right">View</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
@@ -433,23 +433,23 @@ export function AuditLogs() {
               ) : (
                 paginatedLogs.map(log => (
                   <tr key={log.id} className="hover:bg-zinc-800/30 transition-colors group">
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                       <div className="flex flex-col">
                         <span className="text-[10px] sm:text-xs text-zinc-50 font-medium">{safeFormat(log.timestamp, 'MMM d, yyyy')}</span>
-                        <span className="text-[8px] sm:text-[10px] text-zinc-500">{safeFormat(log.timestamp, 'HH:mm:ss')}</span>
+                        <span className="text-[9px] sm:text-[10px] text-zinc-500">{safeFormat(log.timestamp, 'HH:mm:ss')}</span>
                       </div>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <div className="flex items-center gap-2 text-[10px] sm:text-xs text-zinc-300">
                         <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-zinc-500">
                           {(log as any).actor?.charAt(0).toUpperCase()}
                         </div>
-                        <span className="truncate max-w-[80px] sm:max-w-none">{(log as any).actor}</span>
+                        <span className="truncate max-w-[100px] sm:max-w-none">{(log as any).actor}</span>
                       </div>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <span className={cn(
-                        "px-1 sm:px-1.5 py-0.5 rounded text-[7px] sm:text-[9px] font-bold uppercase tracking-tight",
+                        "px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-tight",
                         (log as any).userRole === 'superAdmin' ? "bg-purple-500/10 text-purple-400" :
                         (log as any).userRole === 'hotelAdmin' ? "bg-blue-500/10 text-blue-400" :
                         "bg-zinc-800 text-zinc-400"
@@ -457,24 +457,24 @@ export function AuditLogs() {
                         {((log as any).userRole || 'staff').replace('_', ' ')}
                       </span>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
-                      <span className="px-1 sm:px-1.5 py-0.5 rounded text-[8px] sm:text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
+                      <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                         {log.action}
                       </span>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
-                      <span className="text-[9px] sm:text-xs text-zinc-400 font-medium whitespace-nowrap">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4">
+                      <span className="text-[10px] sm:text-xs text-zinc-400 font-medium">
                         {(log as any).module || 'System'}
                       </span>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 hidden md:table-cell">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 hidden md:table-cell">
                       <div className="flex items-center gap-2 text-[10px] sm:text-xs text-zinc-400">
                         <Tag size={10} className="text-zinc-600" />
                         <span className="truncate max-w-[120px]">{(log as any).target}</span>
                       </div>
                     </td>
                     {profile.role === 'superAdmin' && (
-                      <td className="px-3 sm:px-6 py-3 sm:py-4 hidden lg:table-cell">
+                      <td className="px-4 sm:px-6 py-3 sm:py-4 hidden lg:table-cell">
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-1 text-[10px] sm:text-xs text-blue-400 font-bold uppercase tracking-tight">
                             <Building2 size={10} />
@@ -486,18 +486,18 @@ export function AuditLogs() {
                         </div>
                       </td>
                     )}
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 max-w-[120px] sm:max-w-xs">
-                      <p className="text-[8px] sm:text-[10px] text-zinc-500 font-mono line-clamp-1 italic group-hover:line-clamp-none transition-all">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 max-w-[150px] sm:max-w-xs">
+                      <p className="text-[9px] sm:text-[10px] text-zinc-500 font-mono line-clamp-2 italic group-hover:line-clamp-none transition-all">
                         {log.details || 'No additional details'}
                       </p>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">
                       <button 
                         onClick={() => setSelectedLog(log)}
-                        className="p-1 px-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all active:scale-95 flex items-center justify-center ml-auto"
+                        className="p-1 px-2 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all active:scale-95 flex items-center justify-center ml-auto"
                         title="View Metadata"
                       >
-                        <Eye size={12} className="sm:size-14" />
+                        <Eye size={14} />
                       </button>
                     </td>
                   </tr>

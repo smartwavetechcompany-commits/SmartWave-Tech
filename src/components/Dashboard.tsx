@@ -228,31 +228,31 @@ export function Dashboard() {
         </button>
       </header>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-2xl animate-pulse">
-              <div className="w-6 h-6 bg-zinc-800 rounded-lg mb-3" />
-              <div className="w-16 h-4 bg-zinc-800 rounded mb-2" />
-              <div className="w-10 h-2 bg-zinc-800 rounded opacity-50" />
+            <div key={i} className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl animate-pulse">
+              <div className="w-8 h-8 bg-zinc-800 rounded-lg mb-4" />
+              <div className="w-20 h-5 bg-zinc-800 rounded mb-2" />
+              <div className="w-12 h-2.5 bg-zinc-800 rounded opacity-50" />
             </div>
           ))
         ) : (
           stats.map((stat, i) => (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.1 }}
               key={stat.label}
-              className="bg-zinc-900 border border-zinc-800 p-3 sm:p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
+              className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
             >
-              <div className="flex items-center justify-between mb-2">
-                <div className={cn("p-1 sm:p-2 rounded-lg bg-zinc-950", stat.color)}>
-                  <stat.icon size={16} className="sm:size-5" />
+              <div className="flex items-center justify-between mb-2 sm:mb-4">
+                <div className={cn("p-1.5 sm:p-2 rounded-lg bg-zinc-950", stat.color)}>
+                  <stat.icon size={18} />
                 </div>
               </div>
-              <div className="text-base sm:text-2xl font-bold text-zinc-50 mb-0.5 truncate">{stat.value}</div>
-              <div className="text-[7px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
+              <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5 sm:mb-1 truncate">{stat.value}</div>
+              <div className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
             </motion.div>
           ))
         )}
@@ -302,46 +302,44 @@ export function Dashboard() {
               <h3 className="font-bold text-zinc-50 text-sm sm:text-base">Recent Reservations</h3>
               <Link to="/front-desk" target="_self" className="text-emerald-500 text-xs sm:text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
             </div>
-            <div className="overflow-x-auto">
-              <div className="min-w-full divide-y divide-zinc-800">
-                {loading ? (
-                  Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="p-3 sm:p-4 flex items-center justify-between animate-pulse">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full" />
-                        <div className="space-y-1.5">
-                          <div className="w-20 h-2.5 bg-zinc-800 rounded" />
-                          <div className="w-28 h-2 bg-zinc-800 rounded opacity-50" />
-                        </div>
-                      </div>
-                      <div className="w-12 h-3 bg-zinc-800 rounded" />
-                    </div>
-                  ))
-                ) : reservations.length === 0 ? (
-                  <div className="p-6 sm:p-8 text-center text-zinc-600 text-xs italic">No recent reservations</div>
-                ) : (
-                  reservations.map(res => (
-                    <div key={res.id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
-                      <div className="flex items-center gap-3 sm:gap-4">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                          <Users size={14} className="sm:size-4" />
-                        </div>
-                        <div>
-                          <div className="text-xs sm:text-sm font-medium text-zinc-50">{res.guestName}</div>
-                          <div className="text-[10px] sm:text-xs text-zinc-500 whitespace-nowrap">Room {res.roomNumber} • {res.checkIn}</div>
-                        </div>
-                      </div>
-                      <div className={cn(
-                        "px-1.5 py-0.5 rounded text-[8px] sm:text-[10px] font-bold uppercase tracking-wider ml-4",
-                        res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                        res.status === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
-                      )}>
-                        {res.status.replace('_', ' ')}
+            <div className="divide-y divide-zinc-800">
+              {loading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="p-3 sm:p-4 flex items-center justify-between animate-pulse">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full" />
+                      <div className="space-y-1.5">
+                        <div className="w-20 h-2.5 bg-zinc-800 rounded" />
+                        <div className="w-28 h-2 bg-zinc-800 rounded opacity-50" />
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                    <div className="w-12 h-3 bg-zinc-800 rounded" />
+                  </div>
+                ))
+              ) : reservations.length === 0 ? (
+                <div className="p-6 sm:p-8 text-center text-zinc-500 text-xs">No recent reservations</div>
+              ) : (
+                reservations.map(res => (
+                  <div key={res.id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
+                        <Users size={16} />
+                      </div>
+                      <div>
+                        <div className="text-xs sm:text-sm font-medium text-zinc-50">{res.guestName}</div>
+                        <div className="text-[10px] sm:text-xs text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "px-1.5 py-0.5 rounded text-[8px] sm:text-[10px] font-bold uppercase tracking-wider",
+                      res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
+                      res.status === 'pending' ? "bg-blue-500/10 text-blue-500" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {res.status.replace('_', ' ')}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

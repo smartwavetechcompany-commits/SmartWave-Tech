@@ -761,34 +761,34 @@ export function Finance() {
 
   return (
     <div className="p-8 space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 sm:mb-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-xl sm:text-3xl font-bold text-zinc-50 mb-1 sm:mb-2 tracking-tight">Finance</h1>
-          <p className="text-xs sm:text-sm text-zinc-400">Track and manage financial records</p>
+          <h1 className="text-3xl font-bold text-zinc-50 mb-2 tracking-tight">Financial Management</h1>
+          <p className="text-zinc-400">Track income, expenses and overall hotel performance</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-3">
           <button 
             onClick={handleSyncCharges}
             disabled={isSyncing}
-            className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95 disabled:opacity-50"
-            title="Sync missing daily charges"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
+            title="Sync missing daily charges for all checked-in guests"
           >
-            <RefreshCw size={14} className={cn("sm:size-[18px]", isSyncing && "animate-spin")} />
-            <span>Sync</span>
+            <RefreshCw size={18} className={cn(isSyncing && "animate-spin")} />
+            Sync Charges
           </button>
           <button 
             onClick={handleExport}
-            className="flex items-center gap-1.5 sm:gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
-            <Download size={14} className="sm:size-[18px]" />
-            <span>Export</span>
+            <Download size={18} />
+            Export CSV
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 sm:gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-bold transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
-            <Plus size={14} className="sm:size-[18px]" />
-            <span>Add</span>
+            <Plus size={18} />
+            Add Record
           </button>
         </div>
       </div>
@@ -819,12 +819,12 @@ export function Finance() {
             <div className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {stats.map((stat) => (
-                  <div key={stat.label} className={cn("border border-zinc-800 p-3 sm:p-6 rounded-2xl", stat.bg)}>
-                    <div className="flex items-center justify-between mb-1 sm:mb-2">
-                      <span className="text-zinc-500 text-[10px] sm:text-sm font-bold uppercase tracking-wider">{stat.label}</span>
-                      <stat.icon className={cn(stat.color, "sm:size-5")} size={14} />
+                  <div key={stat.label} className={cn("border border-zinc-800 p-6 rounded-2xl", stat.bg)}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-zinc-400 text-sm font-medium">{stat.label}</span>
+                      <stat.icon className={stat.color} size={20} />
                     </div>
-                    <div className="text-lg sm:text-2xl font-bold text-zinc-50">{stat.value}</div>
+                    <div className="text-2xl font-bold text-zinc-50">{stat.value}</div>
                   </div>
                 ))}
               </div>
