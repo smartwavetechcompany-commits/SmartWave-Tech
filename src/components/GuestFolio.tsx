@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger } from '../services/ledgerService';
+import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { ConfirmModal } from './ConfirmModal';
 import { 
@@ -142,6 +143,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const handleSettlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
+
+    const policy = canEditInvoice(hotel, profile, currentReservation);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Invoice is locked');
+      return;
+    }
+
     try {
       setIsSaving(true);
       
@@ -179,6 +187,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const handleSettleOverpayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
+
+    const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
+    const policy = canProcessRefund(hotel, profile, totalAmount);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Refund denied by policy');
+      return;
+    }
+
     try {
       setIsSaving(true);
       const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
@@ -197,6 +213,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     e.preventDefault();
     if (!hotel?.id || !profile || !currentReservation.guestId) return;
 
+    const policy = canEditInvoice(hotel, profile, currentReservation);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Invoice is locked');
+      return;
+    }
+
     try {
       setIsSaving(true);
       
@@ -206,6 +228,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       const amountAfterDiscount = chargeDetails.discountType === 'fixed' 
         ? baseAmount - chargeDetails.discount
         : baseAmount * (1 - chargeDetails.discount / 100);
+
+      const discountAmount = baseAmount - amountAfterDiscount;
+      if (discountAmount > 0 || chargeDetails.category === 'discount') {
+        const policy = canApplyDiscount(hotel, profile, discountAmount || chargeDetails.amount, baseAmount || currentReservation.totalAmount);
+        if (!policy.allowed) {
+          toast.error(policy.message || 'Discount denied by policy');
+          return;
+        }
+      }
 
       await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
         amount: amountAfterDiscount,
@@ -424,6 +455,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const handleVoidEntry = async () => {
     if (!hotel?.id || !confirmDelete || !profile) return;
     
+    const policy = canVoidTransaction(hotel, profile, confirmDelete);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Voiding denied');
+      return;
+    }
+
     try {
       setIsDeleting(true);
       await voidLedgerEntry(hotel.id, confirmDelete as any, profile.uid);

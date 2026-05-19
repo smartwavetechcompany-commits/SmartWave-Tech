@@ -5,6 +5,7 @@ import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
+import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
 import { GuestFolio } from './GuestFolio';
 import { 
@@ -313,6 +314,15 @@ export function Finance() {
       if (!lastRes) {
         toast.error('No reservation found for this account to post the settlement.');
         return;
+      }
+
+      // Check refund policy if entity has credit and we are refunding
+      if (currentBalance > 0) {
+        const policy = canProcessRefund(hotel, profile, totalAmount);
+        if (!policy.allowed) {
+          toast.error(policy.message || 'Refund denied by policy');
+          return;
+        }
       }
 
       // Process each split

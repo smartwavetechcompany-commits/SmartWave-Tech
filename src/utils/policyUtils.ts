@@ -1,4 +1,4 @@
-import { Hotel, UserProfile, Reservation, Room } from '../types';
+import { Hotel, UserProfile, Reservation, Room, LedgerEntry } from '../types';
 import { hasPermission } from './permissions';
 import { differenceInDays } from 'date-fns';
 
@@ -237,7 +237,7 @@ export const canBlockRoom = (
   }
 
   const duration = differenceInDays(new Date(endDate), new Date(startDate)) + 1;
-  const maxDur = 30; // Default or could add to settings if needed
+  const maxDur = settings.maxBlockDuration || 30;
   if (duration > maxDur && !hasPermission(profile, 'manage_rooms')) {
     return { allowed: false, message: `Policy limits room blocks to a maximum of ${maxDur} days.` };
   }
@@ -256,6 +256,64 @@ export const canUnblockRoom = (
 
   if (!settings.allowUnblocking && !hasPermission(profile, 'remove_room_blocks')) {
     return { allowed: false, message: 'Unblocking rooms is currently restricted to administrators.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canVoidTransaction = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  entry: LedgerEntry
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.financial;
+  if (!settings) return { allowed: true };
+
+  if (!hasPermission(profile, 'void_transaction')) {
+    return { allowed: false, message: 'You do not have permission to void transactions.' };
+  }
+
+  const invoiceLocking = settings.lockInvoicesAfterCheckout;
+  // If we had a checkout status on reservation, we'd check it here.
+  // For now, let's assume we check if the entry is old or if there are other flags.
+
+  return { allowed: true };
+};
+
+export const canEditInvoice = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  reservation: Reservation
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.financial;
+  if (!settings) return { allowed: true };
+
+  if (reservation.status === 'checked_out' && settings.lockInvoicesAfterCheckout && !hasPermission(profile, 'void_transaction')) {
+    return { allowed: false, message: 'Invoices are locked for checked-out reservations. Manager override required.' };
+  }
+
+  if (reservation.ledgerBalance === 0 && !settings.allowInvoiceEditingAfterPayment && !hasPermission(profile, 'void_transaction')) {
+     return { allowed: false, message: 'Editing is disabled for fully paid invoices. Manager override required.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canReleaseNoShow = (
+  hotel: Hotel | null,
+  profile: UserProfile | null
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.reservations;
+  if (!settings) return { allowed: true };
+
+  if (!settings.autoReleaseNoShow && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Manual release of no-shows is restricted.' };
   }
 
   return { allowed: true };

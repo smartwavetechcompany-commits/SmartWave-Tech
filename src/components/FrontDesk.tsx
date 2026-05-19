@@ -528,8 +528,10 @@ export function FrontDesk() {
     }
 
     // Check for blocked rooms and occupancy
+    const preventOverbooking = hotel.settings?.reservations?.preventOverbooking ?? true;
+    
     for (const stay of allStays) {
-      if (!isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings)) {
+      if (preventOverbooking && !isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings)) {
         const room = rooms.find(r => r.id === stay.roomId);
         toast.error(`Room ${room?.roomNumber || stay.roomId} is not available for the selected dates.`);
         return;
@@ -1476,6 +1478,11 @@ export function FrontDesk() {
         if (res.corporateId && outstandingBalance > 0) {
           await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid, res.corporateId);
           toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} transferred to City Ledger.`);
+        } else if (outstandingBalance > 0 && hotel.settings?.checkout?.autoMarkUnpaidAsDebt) {
+          // If autoMarkUnpaidAsDebt is enabled, we could transfer to city ledger or just log it as debt
+          // Let's use city ledger as it represents debt to the hotel
+          await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
+          toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} marked as Debt (Transferred to City Ledger).`);
         }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
