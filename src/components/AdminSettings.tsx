@@ -4,6 +4,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
 import { HotelSettings } from '../types';
+import { DEFAULT_SETTINGS } from '../constants';
 import { 
   ShieldCheck, 
   CreditCard, 
@@ -30,189 +31,84 @@ import {
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
-const DEFAULT_SETTINGS: HotelSettings = {
-  checkout: {
-    allowBalanceOutstanding: false,
-    preventOwingGuestCheckout: true,
-    requireApprovalForDebtCheckout: true,
-    autoMarkUnpaidAsDebt: false,
-    allowPartialPaymentCheckout: true,
-    requireFullPaymentBeforeCheckout: false,
-    allowPostpaidCheckout: false,
-    enableUnpaidWarningPopup: true,
-    autoGenerateOutstandingInvoice: true,
-  },
-  reservations: {
-    allowEditing: true,
-    allowCancellation: true,
-    allowConfirmation: true,
-    allowNoShow: true,
-    preventOverbooking: true,
-    allowDoubleBookingOverride: false,
-    requireApprovalForEdits: false,
-    autoReleaseNoShow: true,
-    autoCancelUnpaidTimeMinutes: 60,
-    allowWalkIn: true,
-  },
-  roomBlocking: {
-    allowBlocking: true,
-    allowUnblocking: true,
-    allowRecurringBlocks: false,
-    allowMaintenanceBlocks: true,
-    allowHousekeepingBlocks: true,
-    allowPartialDayBlocks: false,
-    requireReasonForBlock: true,
-    preventBookingBlocked: true,
-    autoExpireTempBlocks: true,
-  },
-  financial: {
-    allowRefunds: true,
-    requireApprovalForRefunds: true,
-    allowDiscounts: true,
-    requireApprovalForLargeDiscounts: true,
-    largeDiscountThreshold: 10,
-    allowManualLedgerAdjustments: false,
-    allowExpenseManagement: true,
-    allowFinancialReportViewing: true,
-    allowExportingReports: true,
-    allowInvoiceEditingAfterPayment: false,
-    lockInvoicesAfterCheckout: true,
-  },
-  payments: {
-    allowSplitPayments: true,
-    allowMultipleMethods: true,
-    allowOfflinePayments: true,
-    requireTransactionReference: true,
-    requirePaymentProofUpload: false,
-    allowPaymentReversal: false,
-    trackPaymentStaff: true,
-    autoSendReceipts: true,
-  },
-  guests: {
-    allowProfileEditing: true,
-    allowDeletion: false,
-    allowBlacklisting: true,
-    allowLoyaltyEditing: true,
-    allowEmailCommunication: true,
-    allowHistoryViewing: true,
-    requireIdVerification: false,
-    requirePhoneVerification: false,
-  },
-  checkIn: {
-    allowEarlyCheckIn: true,
-    requireRoomInspection: true,
-    preventCheckInDirty: true,
-    allowManualRoomOverride: false,
-    requirePaymentBeforeCheckIn: false,
-    allowCheckInPendingBalance: true,
-  },
-  housekeeping: {
-    allowStatusUpdates: true,
-    allowDirtyToCleanChanges: true,
-    requireConfirmationForAvailability: true,
-    preventOccupiedOverride: true,
-    autoSyncStatusAfterCheckout: true,
-  },
-  staff: {
-    allowActivityTracking: true,
-    allowSessionMonitoring: false,
-    restrictByDepartment: false,
-    enableRoleInheritance: true,
-  },
-  auditLogs: {
-    enableFullLogging: true,
-    trackReservations: true,
-    trackPayments: true,
-    trackRoomChanges: true,
-    trackAuthEvents: true,
-    trackDeletions: true,
-    restrictLogVisibility: true,
-  },
-  reporting: {
-    allowExports: true,
-    allowScheduledReports: false,
-    allowFiltering: true,
-    allowRevenueAnalytics: true,
-    allowOccupancyAnalytics: true,
-    restrictSensitiveReports: true,
-  },
-  notifications: {
-    sendReservationAlerts: true,
-    sendPaymentAlerts: true,
-    sendNoShowAlerts: true,
-    sendMaintenanceAlerts: true,
-    sendOverduePaymentAlerts: true,
-    sendRoomStatusAlerts: true,
-    enableEmail: true,
-    enableSms: false,
-  },
-  security: {
-    require2FAForAdmins: false,
-    forcePasswordResetDays: 0,
-    sessionTimeoutMinutes: 30,
-    enableIpTracking: true,
-    restrictMultipleLogins: false,
-    lockAccountAfterFailedAttempts: 5,
-    requireApprovalForSensitiveActions: true,
-  }
-};
+const DEFAULT_SETTINGS_LOCAL = DEFAULT_SETTINGS;
 
 export function AdminSettings() {
   const { hotel, profile } = useAuth();
   const [activeTab, setActiveTab ] = useState<keyof HotelSettings>('checkout');
   const [settings, setSettings] = useState<HotelSettings>(hotel?.settings || DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
 
+  // Sync with hotel settings from context if it's updated elsewhere (e.g. from another admin)
   useEffect(() => {
     if (hotel?.settings) {
       setSettings(hotel.settings);
-    } else {
-      setSettings(DEFAULT_SETTINGS);
     }
   }, [hotel?.settings]);
 
-  const handleToggle = (group: keyof HotelSettings, key: string) => {
-    setSettings(prev => ({
-      ...prev,
-      [group]: {
-        ...(prev[group] as any),
-        [key]: !(prev[group] as any)[key]
-      }
-    }));
-  };
-
-  const handleInputChange = (group: keyof HotelSettings, key: string, value: any) => {
-    setSettings(prev => ({
-      ...prev,
-      [group]: {
-        ...(prev[group] as any),
-        [key]: value
-      }
-    }));
-  };
-
-  const saveSettings = async () => {
+  const saveSettings = async (updatedSettings: HotelSettings, group?: keyof HotelSettings, key? : string) => {
     if (!hotel?.id) return;
     setIsSaving(true);
     try {
-      await database.safeUpdate(doc(db, 'hotels', hotel.id), {
-        settings: settings
-      }, {
+      // Use Firestore dot notation to update nesting safely without overwriting other groups
+      const updateData: any = {};
+      if (group && key) {
+        updateData[`settings.${group}.${key}`] = (updatedSettings[group] as any)[key];
+      } else if (group) {
+        updateData[`settings.${group}`] = updatedSettings[group];
+      } else {
+        updateData.settings = updatedSettings;
+      }
+
+      await database.safeUpdate(doc(db, 'hotels', hotel.id), updateData, {
         hotelId: hotel.id,
         module: 'Admin Settings',
         action: 'UPDATE_ADMIN_SETTINGS',
-        details: `Updated hotel operational controls: ${activeTab.toUpperCase()} group`,
+        details: `Updated hotel operational controls${group ? ` (${group})` : ''}`,
         metadata: {
-          group: activeTab,
-          settings: settings[activeTab]
+          group,
+          key,
+          value: group && key ? (updatedSettings[group] as any)[key] : undefined
         }
       });
-      toast.success('Operational settings updated successfully');
+      toast.success('Settings updated in real-time');
+      setHasChanges(false);
     } catch (err: any) {
       console.error("Save admin settings error:", err);
       toast.error('Failed to update settings');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleToggle = (group: keyof HotelSettings, key: string) => {
+    const updated = {
+      ...settings,
+      [group]: {
+        ...(settings[group] as any),
+        [key]: !(settings[group] as any)[key]
+      }
+    };
+    setSettings(updated);
+    saveSettings(updated, group, key);
+  };
+
+  const handleInputChange = (group: keyof HotelSettings, key: string, value: any) => {
+    const updated = {
+      ...settings,
+      [group]: {
+        ...(settings[group] as any),
+        [key]: value
+      }
+    };
+    setSettings(updated);
+    setHasChanges(true); // Inputs wait for manual save or blur
+  };
+
+  const handleInputBlur = (group: keyof HotelSettings, key: string) => {
+    if (hasChanges) {
+      saveSettings(settings, group, key);
     }
   };
 
@@ -269,6 +165,7 @@ export function AdminSettings() {
           type={type}
           value={(settings[group] as any)[key]}
           onChange={(e) => handleInputChange(group, key, type === 'number' ? parseFloat(e.target.value) : e.target.value)}
+          onBlur={() => handleInputBlur(group, key)}
           className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-50 outline-none focus:border-emerald-500 w-24 text-right"
         />
       </div>
@@ -286,12 +183,12 @@ export function AdminSettings() {
           <p className="text-zinc-400">Configure operational rules and system-wide policies</p>
         </div>
         <button
-          onClick={saveSettings}
+          onClick={() => saveSettings(settings)}
           disabled={isSaving}
-          className="bg-emerald-500 text-black px-6 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
+          className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-6 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
         >
-          <Save size={18} />
-          {isSaving ? 'Saving...' : 'Save All Changes'}
+          <div className={cn("w-2 h-2 rounded-full", isSaving ? "bg-amber-500 animate-pulse" : "bg-emerald-500")} />
+          {isSaving ? 'Syncing...' : 'Settings Auto-Saved'}
         </button>
       </header>
 

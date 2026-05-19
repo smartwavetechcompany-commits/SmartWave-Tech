@@ -1440,18 +1440,19 @@ export function FrontDesk() {
           details: `Finalized checkout for reservation ${res.id}`
         });
 
-        // 4. Mark room as dirty
+        // 4. Mark room as dirty or clean based on sync settings
+        const syncStatus = hotel.settings?.housekeeping?.autoSyncStatusAfterCheckout ?? true;
         const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
         await database.safeUpdate(roomRef, { 
-          status: 'dirty',
-          housekeepingStatus: 'dirty',
+          status: syncStatus ? 'dirty' : 'clean',
+          housekeepingStatus: syncStatus ? 'dirty' : 'clean',
           currentGuestId: null,
           currentReservationId: null
         }, {
           hotelId: hotel.id,
           module: 'Housekeeping',
           action: 'ROOM_VACATED',
-          details: `Room ${res.roomNumber} vacated and marked dirty`
+          details: `Room ${res.roomNumber} vacated and marked ${syncStatus ? 'dirty' : 'clean'}`
         });
 
         // 5. Update Guest Profile Statistics
@@ -1768,19 +1769,21 @@ export function FrontDesk() {
           <p className="text-xs sm:text-sm text-zinc-500">Manage bookings and guest check-ins</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="relative group">
-            <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
-              <Download size={18} />
-              Export
-            </button>
-            <div className="absolute right-0 mt-2 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
-              <button onClick={() => handleExport('rooms')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Room Status</button>
-              <button onClick={() => handleExport('arrivals')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Arrivals</button>
-              <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-ins</button>
-              <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-outs</button>
-              <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">In-House Guests</button>
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (
+            <div className="relative group">
+              <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
+                <Download size={18} />
+                Export
+              </button>
+              <div className="absolute right-0 mt-2 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                <button onClick={() => handleExport('rooms')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Room Status</button>
+                <button onClick={() => handleExport('arrivals')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Arrivals</button>
+                <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-ins</button>
+                <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-outs</button>
+                <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">In-House Guests</button>
+              </div>
             </div>
-          </div>
+          )}
           <button 
             onClick={() => setShowNightAuditModal(true)}
             disabled={isAuditing}
@@ -1789,86 +1792,90 @@ export function FrontDesk() {
           >
             <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
           </button>
-          <button 
-            onClick={() => {
-              setNewBooking({
-                guestName: '',
-                guestEmail: '',
-                guestPhone: '',
-                idType: '',
-                idNumber: '',
-                address: '',
-                roomId: '',
-                checkIn: format(new Date(), 'yyyy-MM-dd'),
-                checkInTime: hotel?.defaultCheckInTime || '14:00',
-                checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                checkOutTime: hotel?.defaultCheckOutTime || '12:00',
-                guestType: 'corporate',
-                corporateId: '',
-                guestId: '',
-                totalAmount: 0,
-                paidAmount: 0,
-                paymentStatus: 'unpaid' as const,
-                notes: '',
-                corporateReference: '',
-                discountAmount: 0,
-                discountType: 'fixed',
-                discountReason: '',
-                taxAmount: 0,
-                taxDetails: [],
-                initialPayment: 0,
-                paymentMethod: 'cash',
-                payments: [{ amount: 0, method: 'cash' }],
-                autoNightDeduction: true,
-                additionalStays: [] as any[],
-              });
-              setIsBooking(true);
-            }}
-            className="hidden sm:flex bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold items-center justify-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-          >
-            <Building2 size={18} className="text-emerald-500" />
-            Corporate Booking
-          </button>
-                <button 
-                  onClick={() => {
-                    setNewBooking({
-                      guestName: '',
-                      guestEmail: '',
-                      guestPhone: '',
-                      idType: '',
-                      idNumber: '',
-                      address: '',
-                      roomId: '',
-                      checkIn: format(new Date(), 'yyyy-MM-dd'),
-                      checkInTime: hotel?.defaultCheckInTime || '14:00',
-                      checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-                      checkOutTime: hotel?.defaultCheckOutTime || '12:00',
-                      guestType: 'individual',
-                      corporateId: '',
-                      guestId: '',
-                      totalAmount: 0,
-                      paidAmount: 0,
-                      paymentStatus: 'unpaid' as const,
-                      notes: '',
-                      corporateReference: '',
-                      discountAmount: 0,
-                      discountType: 'fixed',
-                      discountReason: '',
-                      taxAmount: 0,
-                      taxDetails: [],
-                      initialPayment: 0,
-                      paymentMethod: 'cash',
-                      payments: [{ amount: 0, method: 'cash' }],
-                      autoNightDeduction: true,
-                      additionalStays: [] as any[]
-                    });
-                    setIsBooking(true);
-                  }}
-                  className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-                >
-            <Plus size={18} />
-            New Booking
-          </button>
+          {(hotel?.settings?.reservations?.allowWalkIn ?? true) && (
+            <>
+              <button 
+                onClick={() => {
+                  setNewBooking({
+                    guestName: '',
+                    guestEmail: '',
+                    guestPhone: '',
+                    idType: '',
+                    idNumber: '',
+                    address: '',
+                    roomId: '',
+                    checkIn: format(new Date(), 'yyyy-MM-dd'),
+                    checkInTime: hotel?.defaultCheckInTime || '14:00',
+                    checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+                    checkOutTime: hotel?.defaultCheckOutTime || '12:00',
+                    guestType: 'corporate',
+                    corporateId: '',
+                    guestId: '',
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    paymentStatus: 'unpaid' as const,
+                    notes: '',
+                    corporateReference: '',
+                    discountAmount: 0,
+                    discountType: 'fixed',
+                    discountReason: '',
+                    taxAmount: 0,
+                    taxDetails: [],
+                    initialPayment: 0,
+                    paymentMethod: 'cash',
+                    payments: [{ amount: 0, method: 'cash' }],
+                    autoNightDeduction: true,
+                    additionalStays: [] as any[],
+                  });
+                  setIsBooking(true);
+                }}
+                className="hidden sm:flex bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold items-center justify-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              >
+                <Building2 size={18} className="text-emerald-500" />
+                Corporate Booking
+              </button>
+              <button 
+                onClick={() => {
+                  setNewBooking({
+                    guestName: '',
+                    guestEmail: '',
+                    guestPhone: '',
+                    idType: '',
+                    idNumber: '',
+                    address: '',
+                    roomId: '',
+                    checkIn: format(new Date(), 'yyyy-MM-dd'),
+                    checkInTime: hotel?.defaultCheckInTime || '14:00',
+                    checkOut: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
+                    checkOutTime: hotel?.defaultCheckOutTime || '12:00',
+                    guestType: 'individual',
+                    corporateId: '',
+                    guestId: '',
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    paymentStatus: 'unpaid' as const,
+                    notes: '',
+                    corporateReference: '',
+                    discountAmount: 0,
+                    discountType: 'fixed',
+                    discountReason: '',
+                    taxAmount: 0,
+                    taxDetails: [],
+                    initialPayment: 0,
+                    paymentMethod: 'cash',
+                    payments: [{ amount: 0, method: 'cash' }],
+                    autoNightDeduction: true,
+                    additionalStays: [] as any[]
+                  });
+                  setIsBooking(true);
+                }}
+                className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+              >
+                <Plus size={18} />
+                New Booking
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -3277,9 +3284,12 @@ export function FrontDesk() {
                           <button 
                             type="button"
                             onClick={() => updateReservationStatus(res, 'checked_out')}
-                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Check Out"
-                            disabled={loading}
+                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={(() => {
+                              const policy = canCheckout(hotel, profile, res);
+                              return policy.allowed ? "Check Out" : policy.message;
+                            })()}
+                            disabled={loading || !canCheckout(hotel, profile, res).allowed}
                           >
                             <LogOut size={18} />
                           </button>
@@ -3300,27 +3310,37 @@ export function FrontDesk() {
                           >
                             <DollarSign size={18} />
                           </button>
-                          <button 
+                           <button 
                             onClick={() => updateReservationStatus(res, 'checked_in')}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Check In"
-                            disabled={loading}
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={(() => {
+                              const room = rooms.find(r => r.id === res.roomId);
+                              const policy = canCheckIn(hotel, profile, res, room);
+                              return policy.allowed ? "Check In" : policy.message;
+                            })()}
+                            disabled={loading || !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId)).allowed}
                           >
                             <CheckCircle2 size={18} />
                           </button>
                           <button 
                             onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Mark No-Show"
-                            disabled={loading}
+                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={(() => {
+                              const policy = canCancelReservation(hotel, profile, res); // No-show uses same cancel policy
+                              return policy.allowed ? "Mark No-Show" : policy.message;
+                            })()}
+                            disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
                           >
                             <UserX size={18} />
                           </button>
                           <button 
                             onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
-                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                            title="Cancel"
-                            disabled={loading}
+                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={(() => {
+                              const policy = canCancelReservation(hotel, profile, res);
+                              return policy.allowed ? "Cancel" : policy.message;
+                            })()}
+                            disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
                           >
                             <XCircle size={18} />
                           </button>
@@ -3330,6 +3350,11 @@ export function FrontDesk() {
                       {(profile && hasPermission(profile, 'edit_reservation')) && (
                         <button 
                           onClick={() => {
+                            const policy = canEditReservation(hotel, profile, res);
+                            if (!policy.allowed) {
+                              toast.error(policy.message || 'Editing disabled');
+                              return;
+                            }
                             setEditingReservation(res);
                             setEditForm({
                               checkIn: res.checkIn,
@@ -3338,8 +3363,16 @@ export function FrontDesk() {
                               notes: res.notes || ''
                             });
                           }}
-                          className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                          title="Edit Reservation"
+                          className={cn(
+                            "p-2 rounded-lg transition-all active:scale-90",
+                            !canEditReservation(hotel, profile, res).allowed
+                              ? "text-zinc-600 cursor-not-allowed"
+                              : "text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
+                          )}
+                          title={(() => {
+                            const policy = canEditReservation(hotel, profile, res);
+                            return policy.allowed ? "Edit Reservation" : policy.message;
+                          })()}
                         >
                           <Edit2 size={18} />
                         </button>

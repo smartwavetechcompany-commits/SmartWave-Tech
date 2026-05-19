@@ -3,7 +3,8 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
-import { UserProfile, Hotel, SystemSettings, OperationType } from '../types';
+import { UserProfile, Hotel, SystemSettings, OperationType, HotelSettings } from '../types';
+import { DEFAULT_SETTINGS } from '../constants';
 import { safeStringify } from '../utils';
 
 const SUPER_ADMIN_EMAILS = ['admin@tyyltech.com', 'smartwavetechcompany@gmail.com'];
@@ -182,7 +183,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const hotelRef = doc(db, 'hotels', hotelId);
     const unsub = onSnapshot(hotelRef, (snap) => {
       if (snap.exists()) {
-        setHotel({ id: snap.id, ...snap.data() } as Hotel);
+        const data = snap.data() as Hotel;
+        
+        // Deep merge settings with defaults to ensure all keys exist
+        // This prevents "reset" issues if DB has partial settings
+        const settings = { ...DEFAULT_SETTINGS };
+        if (data.settings) {
+          Object.keys(data.settings).forEach(group => {
+            const groupKey = group as keyof HotelSettings;
+            if (settings[groupKey]) {
+              settings[groupKey] = {
+                ...(settings[groupKey] as any),
+                ...(data.settings![groupKey] as any)
+              };
+            }
+          });
+        }
+        
+        setHotel({ id: snap.id, ...data, settings } as Hotel);
       } else {
         setHotel(null);
       }

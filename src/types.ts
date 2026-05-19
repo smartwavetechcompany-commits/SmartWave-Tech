@@ -37,6 +37,7 @@ export interface UserProfile {
   roles?: StaffRole[]; // Multi-role support
   subscriptionExpiry?: string;
   hasCompletedOnboarding?: boolean;
+  department?: string; // Added for department-based tracking and navigation
 }
 
 export interface HotelBranding {

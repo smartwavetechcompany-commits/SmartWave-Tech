@@ -656,10 +656,21 @@ export function Reports() {
     { id: 'balance_sheet', label: 'Balance Sheet', icon: Wallet, enterprise: true },
     { id: 'inventory_value', label: 'Inventory Value Report', icon: LayoutDashboard, enterprise: true, module: 'inventory' },
     { id: 'net_income', label: 'Net Income Report', icon: BarChart3, enterprise: true },
-  ].filter(r => {
+  ];
+  const visibleReportTypes = reportTypes.filter(r => {
     if (profile?.role === 'superAdmin') return true;
     if (r.enterprise && hotel?.plan !== 'enterprise') return false;
     if (r.module && !isModuleEnabled(hotel, r.module)) return false;
+    
+    // Check for restrictive settings
+    const settings = hotel?.settings?.reporting;
+    if (settings?.restrictSensitiveReports && !['hotelAdmin', 'manager'].includes(profile?.role || '')) {
+      if (['profit_loss', 'revenue_analysis', 'financial_ledger', 'expenses_detail'].includes(r.id)) return false;
+    }
+
+    if (settings?.allowRevenueAnalytics === false && ['revenue_analysis', 'profit_loss'].includes(r.id)) return false;
+    if (settings?.allowOccupancyAnalytics === false && ['occupancy_rate'].includes(r.id)) return false;
+
     return true;
   });
 
@@ -691,29 +702,31 @@ export function Reports() {
             />
           </div>
 
-          <div className="flex gap-2">
-            <button 
-              onClick={exportPDF}
-              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-            >
-              <FileText size={18} className="text-red-500" />
-              PDF
-            </button>
-            <button 
-              onClick={exportExcel}
-              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-            >
-              <FileSpreadsheet size={18} className="text-emerald-500" />
-              Excel
-            </button>
-          </div>
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (
+            <div className="flex gap-2">
+              <button 
+                onClick={exportPDF}
+                className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              >
+                <FileText size={18} className="text-red-500" />
+                PDF
+              </button>
+              <button 
+                onClick={exportExcel}
+                className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              >
+                <FileSpreadsheet size={18} className="text-emerald-500" />
+                Excel
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
       <div className="flex flex-col lg:flex-row gap-8">
         {/* Sidebar Navigation */}
         <div className="w-full lg:w-64 flex-shrink-0 space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar">
-          {reportTypes.map((item) => (
+          {visibleReportTypes.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveReport(item.id)}

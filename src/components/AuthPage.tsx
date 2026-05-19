@@ -4,8 +4,9 @@ import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, onSnaps
 import { auth, db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { motion } from 'motion/react';
-import { Hotel, TrackingCode, UserProfile, OperationType, PlanType } from '../types';
+import { Hotel, TrackingCode, UserProfile, OperationType, PlanType, HotelSettings } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { DEFAULT_SETTINGS } from '../constants';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail } from 'lucide-react';
 import { cn } from '../utils';
 
@@ -368,6 +369,7 @@ export function AuthPage() {
             limits: features.limits,
             roomLimit: features.limits.rooms,
             staffLimit: features.limits.staff,
+            settings: DEFAULT_SETTINGS,
             createdAt: new Date().toISOString(),
             adminUIDs: [currentUser.uid],
           };

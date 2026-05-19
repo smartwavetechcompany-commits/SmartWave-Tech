@@ -71,6 +71,34 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       if (!isModuleEnabled(hotel, item.module)) return false;
     }
 
+    // 3. Check Department-based Restriction from Hotel Admin Settings
+    if (hotel?.settings?.staff?.restrictByDepartment && profile?.department && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      const dep = profile.department.toLowerCase();
+      
+      // Map modules to departments
+      const moduleMap: Record<string, string[]> = {
+        'frontDesk': ['front desk', 'reception', 'reservations'],
+        'rooms': ['front desk', 'reception', 'housekeeping'],
+        'housekeeping': ['housekeeping'],
+        'kitchen': ['kitchen', 'f&b', 'restaurant', 'food & beverage'],
+        'inventory': ['store', 'purchase', 'kitchen', 'maintenance'],
+        'maintenance': ['maintenance', 'engineering'],
+        'finance': ['accounts', 'finance'],
+        'reports': ['management', 'finance', 'accounts'],
+        'staff': ['hr', 'admin'],
+        'corporate': ['sales', 'reservations', 'front desk'],
+        'guests': ['front desk', 'reception', 'reservations'],
+      };
+      
+      if (item.module && moduleMap[item.module]) {
+        const allowedDepartments = moduleMap[item.module];
+        const isAllowed = allowedDepartments.some(d => dep.includes(d) || d.includes(dep));
+        
+        // Settings/Dashboard are usually allowed for everyone, but let's be strict if module is defined
+        if (!isAllowed) return false;
+      }
+    }
+
     // Default: allow (Super Admins pass through here for items without modules)
     return true;
   });

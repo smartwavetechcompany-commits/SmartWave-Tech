@@ -20,6 +20,7 @@ import {
   User as UserIcon
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
+import { hasPermission } from '../utils/permissions';
 import { canUpdateRoomStatus } from '../utils/policyUtils';
 import { format, isWithinInterval, parseISO } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -97,6 +98,13 @@ export function Housekeeping() {
     if (!hotel?.id || !profile) return;
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
+
+    // Check generic status update permission from settings
+    const canUpdate = hotel.settings?.housekeeping?.allowStatusUpdates ?? true;
+    if (!canUpdate && !hasPermission(profile, 'manage_rooms')) {
+      toast.error('Room status updates are currently disabled by administrator.');
+      return;
+    }
 
     const policy = canUpdateRoomStatus(hotel, profile, room, status);
     if (!policy.allowed) {
