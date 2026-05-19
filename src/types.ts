@@ -61,6 +61,135 @@ export interface HotelBranding {
   };
 }
 
+export interface HotelSettings {
+  checkout: {
+    allowBalanceOutstanding: boolean;
+    preventOwingGuestCheckout: boolean;
+    requireApprovalForDebtCheckout: boolean;
+    autoMarkUnpaidAsDebt: boolean;
+    allowPartialPaymentCheckout: boolean;
+    requireFullPaymentBeforeCheckout: boolean;
+    allowPostpaidCheckout: boolean;
+    enableUnpaidWarningPopup: boolean;
+    autoGenerateOutstandingInvoice: boolean;
+  };
+  reservations: {
+    allowEditing: boolean;
+    allowCancellation: boolean;
+    allowConfirmation: boolean;
+    allowNoShow: boolean;
+    preventOverbooking: boolean;
+    allowDoubleBookingOverride: boolean;
+    requireApprovalForEdits: boolean;
+    autoReleaseNoShow: boolean;
+    autoCancelUnpaidTimeMinutes: number;
+    allowWalkIn: boolean;
+  };
+  roomBlocking: {
+    allowBlocking: boolean;
+    allowRoomsBlocking?: boolean; // Alias for consistency in code
+    allowUnblocking: boolean;
+    allowRecurringBlocks: boolean;
+    allowMaintenanceBlocks: boolean;
+    allowHousekeepingBlocks: boolean;
+    allowPartialDayBlocks: boolean;
+    requireReasonForBlock: boolean;
+    preventBookingBlocked: boolean;
+    autoExpireTempBlocks: boolean;
+    maxBlockDuration?: number;
+  };
+  financial: {
+    allowRefunds: boolean;
+    requireApprovalForRefunds: boolean;
+    allowDiscounts: boolean;
+    requireApprovalForLargeDiscounts: boolean;
+    largeDiscountThreshold: number;
+    allowManualLedgerAdjustments: boolean;
+    allowExpenseManagement: boolean;
+    allowFinancialReportViewing: boolean;
+    allowExportingReports: boolean;
+    allowInvoiceEditingAfterPayment: boolean;
+    lockInvoicesAfterCheckout: boolean;
+  };
+  payments: {
+    allowSplitPayments: boolean;
+    allowMultipleMethods: boolean;
+    allowOfflinePayments: boolean;
+    requireTransactionReference: boolean;
+    requirePaymentProofUpload: boolean;
+    allowPaymentReversal: boolean;
+    trackPaymentStaff: boolean;
+    autoSendReceipts: boolean;
+  };
+  guests: {
+    allowProfileEditing: boolean;
+    allowDeletion: boolean;
+    allowBlacklisting: boolean;
+    allowLoyaltyEditing: boolean;
+    allowEmailCommunication: boolean;
+    allowHistoryViewing: boolean;
+    requireIdVerification: boolean;
+    requirePhoneVerification: boolean;
+  };
+  checkIn: {
+    allowEarlyCheckIn: boolean;
+    requireRoomInspection: boolean;
+    preventCheckInDirty: boolean;
+    allowManualRoomOverride: boolean;
+    requirePaymentBeforeCheckIn: boolean;
+    allowCheckInPendingBalance: boolean;
+  };
+  housekeeping: {
+    allowStatusUpdates: boolean;
+    allowDirtyToCleanChanges: boolean;
+    requireConfirmationForAvailability: boolean;
+    preventOccupiedOverride: boolean;
+    autoSyncStatusAfterCheckout: boolean;
+  };
+  staff: {
+    allowActivityTracking: boolean;
+    allowSessionMonitoring: boolean;
+    restrictByDepartment: boolean;
+    enableRoleInheritance: boolean;
+  };
+  auditLogs: {
+    enableFullLogging: boolean;
+    trackReservations: boolean;
+    trackPayments: boolean;
+    trackRoomChanges: boolean;
+    trackAuthEvents: boolean;
+    trackDeletions: boolean;
+    restrictLogVisibility: boolean;
+  };
+  reporting: {
+    allowExports: boolean;
+    allowScheduledReports: boolean;
+    allowFiltering: boolean;
+    allowRevenueAnalytics: boolean;
+    allowOccupancyAnalytics: boolean;
+    restrictSensitiveReports: boolean;
+  };
+  notifications: {
+    sendReservationAlerts: boolean;
+    sendPaymentAlerts: boolean;
+    sendNoShowAlerts: boolean;
+    sendMaintenanceAlerts: boolean;
+    sendOverduePaymentAlerts: boolean;
+    sendRoomStatusAlerts: boolean;
+    enableEmail: boolean;
+    enableSms: boolean;
+  };
+  security: {
+    require2FAForAdmins: boolean;
+    forcePasswordResetDays: number;
+    sessionTimeoutMinutes: number;
+    enableIpTracking: boolean;
+    restrictMultipleLogins: boolean;
+    lockAccountAfterFailedAttempts: number;
+    requireApprovalForSensitiveActions: boolean;
+  };
+}
+
 export interface Hotel {
   id: string;
   name: string;
@@ -87,6 +216,7 @@ export interface Hotel {
   overstayChargeTime?: string; // Time after which an extra night is charged
   autoChargeOverstays?: boolean;
   lastAuditDate?: string; // Tracks the last time the global nightly audit was run
+  settings?: HotelSettings;
   planHistory?: {
     plan: PlanType;
     previousPlan?: PlanType;
@@ -227,6 +357,8 @@ export interface Reservation {
   taxAmount?: number;
   taxDetails?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
   ledgerBalance?: number; // Added to track current balance on the reservation level
+  idNumber?: string;
+  idType?: string;
   advanceDeposit?: number;
   autoNightDeduction: boolean; // Mandatory toggle for automatic nightly charges
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied

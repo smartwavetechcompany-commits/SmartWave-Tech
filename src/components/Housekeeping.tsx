@@ -20,6 +20,7 @@ import {
   User as UserIcon
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
+import { canUpdateRoomStatus } from '../utils/policyUtils';
 import { format, isWithinInterval, parseISO } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -93,8 +94,16 @@ export function Housekeeping() {
   }, [hotel?.id, profile?.uid]);
 
   const updateRoomStatus = async (roomId: string, status: Room['status'], assignedTo?: string) => {
-    if (!hotel?.id) return;
+    if (!hotel?.id || !profile) return;
     const room = rooms.find(r => r.id === roomId);
+    if (!room) return;
+
+    const policy = canUpdateRoomStatus(hotel, profile, room, status);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Action denied by hotel policy');
+      return;
+    }
+
     const notes = roomNotes[roomId] ?? room?.notes ?? '';
     const now = new Date().toISOString();
     
@@ -147,8 +156,17 @@ export function Housekeeping() {
     try {
       const batch = writeBatch(db);
       
-      selectedRoomIds.forEach(roomId => {
+      for (const roomId of selectedRoomIds) {
         const room = rooms.find(r => r.id === roomId);
+        if (!room) continue;
+
+        const policy = canUpdateRoomStatus(hotel, profile, room, status);
+        if (!policy.allowed) {
+          toast.error(`Policy violation for Room ${room.roomNumber}: ${policy.message}`);
+          setSelectedRoomIds([]); // Unselect to prevent partial batch if desired, or skip this room
+          return; // Stop bulk update if any room fails policy
+        }
+
         const notes = roomNotes[roomId] ?? room?.notes ?? '';
         
         const updateData: any = { 
@@ -160,7 +178,7 @@ export function Housekeeping() {
         if (status === 'maintenance' || status === 'dirty' || status === 'out_of_service') updateData.lastFlaggedAt = now;
 
         batch.update(doc(db, 'hotels', hotel.id!, 'rooms', roomId), updateData);
-      });
+      }
 
       await database.commitBatch(hotel.id, batch, {
         module: 'Housekeeping',

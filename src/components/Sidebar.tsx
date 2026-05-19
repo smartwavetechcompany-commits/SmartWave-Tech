@@ -52,6 +52,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'process_payments', module: 'finance' },
     { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports' },
     { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff' },
+    { icon: ShieldCheck, label: 'Admin Controls', path: '/admin-settings', capability: 'edit_hotel_settings', module: 'settings' },
     { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', capability: 'access_super_admin' },
     { icon: Settings, label: t('sidebar.settings'), path: '/settings', capability: null, module: 'settings' },

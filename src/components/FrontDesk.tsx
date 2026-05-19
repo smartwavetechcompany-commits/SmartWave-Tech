@@ -44,6 +44,7 @@ import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
 import { roomService } from '../services/roomService';
 import { hasPermission } from '../utils/permissions';
+import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canApplyDiscount } from '../utils/policyUtils';
 import { logActivity } from '../utils/activityLogger';
 import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
@@ -764,6 +765,13 @@ export function FrontDesk() {
 
   const deleteReservation = async (res: Reservation) => {
     if (!hotel?.id || !profile) return;
+    
+    const policy = canCancelReservation(hotel, profile, res);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Cancellation denied by hotel policy');
+      return;
+    }
+
     if (!hasPermission(profile, 'delete_reservation')) {
       toast.error('You do not have permission to delete reservations');
       return;
@@ -810,6 +818,13 @@ export function FrontDesk() {
   const handleEditReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !editingReservation || !profile) return;
+
+    const policy = canEditReservation(hotel, profile, editingReservation);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Editing denied by hotel policy');
+      return;
+    }
+
     if (!hasPermission(profile, 'edit_reservation')) {
       toast.error('You do not have permission to edit reservations');
       return;
@@ -1012,6 +1027,18 @@ export function FrontDesk() {
 
   const handleApplyDiscount = async () => {
     if (!showDiscountModal || !hotel?.id || !discountData.amount || !profile) return;
+    
+    let finalAmount = discountData.amount;
+    if (discountData.type === 'percentage') {
+      finalAmount = (showDiscountModal.totalAmount * discountData.amount) / 100;
+    }
+
+    const policy = canApplyDiscount(hotel, profile, finalAmount, showDiscountModal.totalAmount);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Discount denied by hotel policy');
+      return;
+    }
+
     if (!hasPermission(profile, 'edit_reservation')) {
       toast.error('You do not have permission to apply discounts');
       return;
@@ -1177,6 +1204,32 @@ export function FrontDesk() {
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
     if (!hotel?.id || !profile) return;
     
+    // Policy checks
+    if (status === 'checked_in') {
+      const room = rooms.find(r => r.id === res.roomId);
+      const policy = canCheckIn(hotel, profile, res, room);
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Check-in denied by hotel policy');
+        return;
+      }
+    }
+
+    if (status === 'checked_out') {
+      const policy = canCheckout(hotel, profile, res);
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Check-out denied by hotel policy');
+        return;
+      }
+    }
+
+    if (status === 'cancelled' || status === 'no_show') {
+      const policy = canCancelReservation(hotel, profile, res);
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Action denied by hotel policy');
+        return;
+      }
+    }
+
     // Permission checks
     if (status === 'checked_in' && !hasPermission(profile, 'manage_rooms')) {
       toast.error('Permission denied: Check-in');

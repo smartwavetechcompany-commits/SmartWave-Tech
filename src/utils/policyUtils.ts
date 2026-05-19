@@ -1,0 +1,262 @@
+import { Hotel, UserProfile, Reservation, Room } from '../types';
+import { hasPermission } from './permissions';
+import { differenceInDays } from 'date-fns';
+
+export const canCheckout = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  reservation: Reservation
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.checkout;
+  if (!settings) return { allowed: true }; // Default behavior
+
+  const balance = reservation.ledgerBalance || 0;
+  const isOwing = balance > 0;
+
+  if (isOwing) {
+    if (settings.requireFullPaymentBeforeCheckout && !settings.allowBalanceOutstanding) {
+      return { allowed: false, message: 'Full payment is required before checkout as per hotel policy.' };
+    }
+    
+    if (settings.preventOwingGuestCheckout && !hasPermission(profile, 'void_transaction')) {
+      return { allowed: false, message: 'Policy prevents checkout for guests with outstanding balances without admin approval.' };
+    }
+
+    if (settings.requireApprovalForDebtCheckout && !hasPermission(profile, 'void_transaction')) {
+      return { allowed: false, message: 'Manager approval is required to checkout a guest with debt.' };
+    }
+  }
+
+  return { allowed: true };
+};
+
+export const canCheckIn = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  reservation: Reservation,
+  room: Room | undefined
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.checkIn;
+  if (!settings) return { allowed: true };
+
+  if (room) {
+    if (settings.preventCheckInDirty && (room.status === 'dirty' || room.status === 'cleaning')) {
+      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
+        return { allowed: false, message: 'Cannot check-in to a dirty room. Housekeeping must clear it first.' };
+      }
+    }
+
+    if (settings.requireRoomInspection && room.status !== 'inspected') {
+      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
+        return { allowed: false, message: 'Room must be inspected before check-in.' };
+      }
+    }
+  }
+
+  if (settings.requirePaymentBeforeCheckIn) {
+    const totalAmount = reservation.totalAmount || 0;
+    const paidAmount = (reservation.paidAmount || 0) + (reservation.totalDiscount || 0);
+    if (paidAmount < totalAmount) {
+      if (!settings.allowCheckInPendingBalance) {
+        return { allowed: false, message: 'Full payment is required before check-in as per hotel policy.' };
+      }
+    }
+  }
+
+  const guestSettings = hotel.settings?.guests;
+  if (guestSettings?.requireIdVerification) {
+    if (!reservation.idNumber || !reservation.idType) {
+      return { allowed: false, message: 'Guest ID verification is required for check-in. Please update the reservation with ID details.' };
+    }
+  }
+
+  return { allowed: true };
+};
+
+export const canEditReservation = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  reservation: Reservation
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.reservations;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowEditing && !hasPermission(profile, 'edit_reservation')) {
+    return { allowed: false, message: 'Reservation editing is currently disabled by administrator.' };
+  }
+
+  if (settings.requireApprovalForEdits && !hasPermission(profile, 'edit_reservation')) {
+    return { allowed: false, message: 'Manager approval required to edit reservations.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canCancelReservation = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  reservation: Reservation
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.reservations;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowCancellation && !hasPermission(profile, 'delete_reservation')) {
+    return { allowed: false, message: 'Cancellations are currently disabled by administrator.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canUpdateRoomStatus = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  room: Room,
+  newStatus: Room['status']
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.housekeeping;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowStatusUpdates && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Room status updates are currently disabled by administrator.' };
+  }
+
+  if (settings.preventOccupiedOverride && room.status === 'occupied' && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Cannot change the status of an occupied room from here.' };
+  }
+
+  if (!settings.allowDirtyToCleanChanges && room.status === 'dirty' && newStatus === 'clean') {
+    return { allowed: false, message: 'Policy prevents direct "Dirty" to "Clean" status changes. Please use "Cleaning" status first.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canProcessRefund = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  amount: number
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.financial;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowRefunds && !hasPermission(profile, 'void_transaction')) {
+    return { allowed: false, message: 'Refund processing is currently disabled by administrator.' };
+  }
+
+  if (settings.requireApprovalForRefunds && !hasPermission(profile, 'void_transaction')) {
+    return { allowed: false, message: 'Manager approval is required to process refunds.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canApplyDiscount = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  amount: number,
+  totalAmount: number
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.financial;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowDiscounts && !hasPermission(profile, 'edit_reservation')) {
+    return { allowed: false, message: 'Discounts are currently disabled by administrator.' };
+  }
+
+  const percentage = (amount / totalAmount) * 100;
+  if (settings.requireApprovalForLargeDiscounts && percentage > (settings.largeDiscountThreshold || 10)) {
+    if (!hasPermission(profile, 'void_transaction')) {
+      return { allowed: false, message: `Discounts above ${settings.largeDiscountThreshold}% require manager approval.` };
+    }
+  }
+
+  return { allowed: true };
+};
+
+export const canManageGuest = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  action: 'edit' | 'delete' | 'blacklist'
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.guests;
+  if (!settings) return { allowed: true };
+
+  if (action === 'edit' && !settings.allowProfileEditing && !hasPermission(profile, 'edit_guest_profiles')) {
+    return { allowed: false, message: 'Guest profile editing is currently disabled by administrator.' };
+  }
+
+  if (action === 'delete' && !settings.allowDeletion && !hasPermission(profile, 'edit_guest_profiles')) {
+    return { allowed: false, message: 'Guest record deletion is currently restricted.' };
+  }
+
+  if (action === 'blacklist' && !settings.allowBlacklisting && !hasPermission(profile, 'manage_staff')) {
+    return { allowed: false, message: 'Blacklisting functionality is currently disabled.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canBlockRoom = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  startDate: string,
+  endDate: string,
+  reason: string
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.roomBlocking;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowBlocking && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Room blocking is currently disabled by administrator.' };
+  }
+
+  if (settings.requireReasonForBlock && !reason) {
+    return { allowed: false, message: 'A reason or category is required for room blocking.' };
+  }
+
+  if (reason === 'maintenance' && !settings.allowMaintenanceBlocks && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Maintenance blocks are currently disabled.' };
+  }
+
+  const duration = differenceInDays(new Date(endDate), new Date(startDate)) + 1;
+  const maxDur = 30; // Default or could add to settings if needed
+  if (duration > maxDur && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: `Policy limits room blocks to a maximum of ${maxDur} days.` };
+  }
+
+  return { allowed: true };
+};
+
+export const canUnblockRoom = (
+  hotel: Hotel | null,
+  profile: UserProfile | null
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+  
+  const settings = hotel.settings?.roomBlocking;
+  if (!settings) return { allowed: true };
+
+  if (!settings.allowUnblocking && !hasPermission(profile, 'remove_room_blocks')) {
+    return { allowed: false, message: 'Unblocking rooms is currently restricted to administrators.' };
+  }
+
+  return { allowed: true };
+};

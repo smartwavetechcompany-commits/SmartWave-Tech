@@ -10,6 +10,7 @@ import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { Rooms } from './components/Rooms';
 import { FrontDesk } from './components/FrontDesk';
 import { StaffManagement } from './components/StaffManagement';
+import { AdminSettings } from './components/AdminSettings';
 import { Settings } from './components/Settings';
 import { Housekeeping } from './components/Housekeeping';
 import { FandB } from './components/FandB';
@@ -154,6 +155,11 @@ function AppContent() {
             <Route path="/staff" element={
               <PermissionGuard permission="manage_staff" showError>
                 <StaffManagement />
+              </PermissionGuard>
+            } />
+            <Route path="/admin-settings" element={
+              <PermissionGuard permission="edit_hotel_settings" showError>
+                <AdminSettings />
               </PermissionGuard>
             } />
             <Route path="/activity-logs" element={

@@ -36,6 +36,7 @@ import {
   Package
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
+import { canBlockRoom, canUnblockRoom } from '../utils/policyUtils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
@@ -1097,6 +1098,13 @@ export function Rooms() {
                       data.daysOfWeek = days;
                     }
 
+                    const policy = canBlockRoom(hotel, profile, startDate, endDate, reason);
+                    if (!policy.allowed) {
+                      toast.error(policy.message || 'Room blocking denied by hotel policy');
+                      setIsBlockingRoom(false);
+                      return;
+                    }
+
                     await roomService.blockRoom(hotel.id, data);
                     toast.success('Room blocked successfully');
                     e.currentTarget.reset();
@@ -1229,6 +1237,11 @@ export function Rooms() {
                       <button 
                         onClick={async () => {
                           if (hotel?.id) {
+                            const policy = canUnblockRoom(hotel, profile);
+                            if (!policy.allowed) {
+                              toast.error(policy.message || 'Unblocking denied by hotel policy');
+                              return;
+                            }
                             try {
                               await roomService.unblockRoom(hotel.id, b.id, b.roomId);
                               toast.success('Room unblocked successfully');

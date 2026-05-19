@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
+import { canManageGuest } from '../utils/policyUtils';
 import Fuse from 'fuse.js';
 import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenceInDays, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -167,6 +168,14 @@ export function GuestManagement() {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
 
+    if (editingGuest) {
+      const policy = canManageGuest(hotel, profile, 'edit');
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Editing denied by hotel policy');
+        return;
+      }
+    }
+
     try {
       if (editingGuest) {
         // Exclude read-only financial fields from update to prevent clearing them
@@ -236,6 +245,12 @@ export function GuestManagement() {
   const deleteGuest = async (guestId: string) => {
     if (!hotel?.id || !profile) return;
     
+    const policy = canManageGuest(hotel, profile, 'delete');
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Deletion denied by hotel policy');
+      return;
+    }
+
     if (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
       toast.error('Only administrators can delete guest profiles');
       return;
