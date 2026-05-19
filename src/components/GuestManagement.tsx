@@ -707,27 +707,25 @@ export function GuestManagement() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Stay Count</div>
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
                       <div className="text-sm font-bold text-zinc-100">{guest.totalStays || 0}</div>
                     </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 text-right">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Value</div>
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
+                      <div className="text-sm font-bold text-amber-500">{((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
+                    </div>
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
                       <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
                     </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 col-span-2 flex justify-between items-center">
-                      <div>
-                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Outstanding</div>
-                        <div className={cn(
-                          "text-sm font-bold",
-                          (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
-                        )}>
-                          {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
-                        <div className="text-sm font-bold text-amber-500">{((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
+                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Owed</div>
+                      <div className={cn(
+                        "text-sm font-bold",
+                        (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                      )}>
+                        {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
                       </div>
                     </div>
                   </div>

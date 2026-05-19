@@ -136,10 +136,13 @@ export const postToLedger = async (
   const guestBalanceAdj = guestEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
   const corpBalanceAdj = corpEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
 
-  if (guestBalanceAdj !== 0) {
+  const nightCountAdj = guestEntries.filter(e => e.type === 'debit' && e.category === 'room').length;
+
+  if (guestBalanceAdj !== 0 || nightCountAdj > 0) {
     batch.update(guestRef, {
       ledgerBalance: increment(guestBalanceAdj),
-      totalSpent: increment(guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0))
+      totalSpent: increment(guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0)),
+      totalNights: increment(nightCountAdj)
     });
   }
 

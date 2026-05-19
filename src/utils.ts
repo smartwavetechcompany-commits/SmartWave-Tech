@@ -29,14 +29,32 @@ export function deepCloneSafe(obj: any): any {
       return val.toISOString();
     }
 
-    // Handle Firestore-like objects (e.g. Timestamp, DocumentReference)
-    if (val && typeof val === 'object' && val.constructor) {
-      const className = val.constructor.name;
-      if (className === 'Timestamp') {
-        return val.toDate?.()?.toISOString() || String(val);
-      }
-      if (className === 'DocumentReference' || className === 'CollectionReference' || className === 'Query') {
-        return `[Firestore ${className}: ${val.path || 'unknown'}]`;
+    // Handle Firestore-like objects (e.g. Timestamp, DocumentReference, FieldValue)
+    if (val && typeof val === 'object') {
+      // Check if it's a known non-plain object that we shouldn't recurse into
+      const proto = Object.getPrototypeOf(val);
+      const isPlain = proto === Object.prototype || proto === null;
+      const isArray = Array.isArray(val);
+
+      if (!isPlain && !isArray) {
+        // Special types handling
+        if ('seconds' in val && 'nanoseconds' in val) {
+          return (val as any).toDate?.()?.toISOString() || String(val);
+        }
+        
+        if ('path' in val && typeof (val as any).path === 'string') {
+          return `[Firestore Reference: ${val.path}]`;
+        }
+
+        if (val.constructor) {
+          const name = val.constructor.name;
+          if (name === 'FieldValue' || name === 'rt' || name === 'Y2' || name === 'Ka') {
+            return '[Firestore FieldValue]';
+          }
+          return `[Object ${name}]`;
+        }
+        
+        return '[Special Object]';
       }
     }
 

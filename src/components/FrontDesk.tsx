@@ -1226,6 +1226,17 @@ export function FrontDesk() {
         });
         
         if (res.guestId) {
+          // Increment guest totalStays
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
+          await database.safeUpdate(guestRef, {
+            totalStays: increment(1)
+          }, {
+            hotelId: hotel.id,
+            module: 'Guests',
+            action: 'STAY_COUNT_INCREMENT',
+            details: `Incremented stay count for guest ${res.guestId} upon check-in`
+          });
+          
           // Trigger inventory consumption based on rules
           const selectedRoom = rooms.find(r => r.id === res.roomId);
           const roomType = roomTypes.find(t => t.id === selectedRoom?.roomTypeId || t.name === selectedRoom?.type);
@@ -1393,8 +1404,6 @@ export function FrontDesk() {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
           const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
           await database.safeUpdate(guestRef, {
-            totalStays: increment(1),
-            totalNights: increment(nights || 0),
             stayHistory: arrayUnion({
               reservationId: res.id,
               roomNumber: res.roomNumber,
