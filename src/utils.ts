@@ -15,9 +15,23 @@ export function deepCloneSafe(obj: any): any {
   if (typeof obj !== 'object') return obj;
 
   const stack = new Map();
-  
+
+  function isPlainObject(val: any): boolean {
+    if (typeof val !== 'object' || val === null) return false;
+    const proto = Object.getPrototypeOf(val);
+    if (proto === null || proto === Object.prototype) return true;
+    
+    // Check if the constructor name is 'Object'
+    try {
+      if (val.constructor && val.constructor.name === 'Object') {
+        return true;
+      }
+    } catch (e) {}
+    
+    return false;
+  }
+
   function getSafeValue(val: any, depth: number = 0): any {
-    // Prevent deep recursion
     if (depth > 12) return '[Max Depth Reached]';
     
     if (val === null || typeof val !== 'object') {
@@ -28,6 +42,13 @@ export function deepCloneSafe(obj: any): any {
     if (val instanceof Date) {
       return val.toISOString();
     }
+
+    // Handle Firestore Timestamps
+    try {
+      if (typeof val.toDate === 'function' && 'seconds' in val && 'nanoseconds' in val) {
+        return val.toDate().toISOString();
+      }
+    } catch (e) {}
 
     // Check circular references
     if (stack.has(val)) {
@@ -41,61 +62,45 @@ export function deepCloneSafe(obj: any): any {
       return '[Unserializable]';
     }
 
-    // Check if it's a non-plain, non-array object
-    const isArray = Array.isArray(val);
-    const proto = Object.getPrototypeOf(val);
-    const isPlain = proto === Object.prototype || proto === null;
-
-    let constructorName = '';
     try {
-      if (val.constructor && typeof val.constructor === 'function') {
-        constructorName = val.constructor.name || '';
-      }
-    } catch (e) {
-      // Ignore errors when accessing constructor
-    }
-
-    // If it has a custom constructor name that is NOT Object or Array
-    const isCustomClass = constructorName && constructorName !== 'Object' && constructorName !== 'Array';
-
-    if (isCustomClass || (!isPlain && !isArray)) {
-      // Try to handle special types
-      try {
-        if ('seconds' in val && 'nanoseconds' in val) {
-          return (val as any).toDate?.()?.toISOString() || String(val);
-        }
-        
-        if ('path' in val && typeof (val as any).path === 'string') {
-          return `[Firestore Reference: ${val.path}]`;
-        }
-
-        if (constructorName) {
-          if (constructorName === 'FieldValue' || constructorName === 'rt' || constructorName === 'Y2' || constructorName === 'Ka') {
-            return '[Firestore FieldValue]';
+      const isArray = Array.isArray(val);
+      
+      // If NOT a plain object and NOT an array, treat as a special object
+      // and stop traversing to prevent circular structures and getter errors
+      if (!isArray && !isPlainObject(val)) {
+        let constructorName = '';
+        try {
+          if (val.constructor && typeof val.constructor === 'function') {
+            constructorName = val.constructor.name || '';
           }
-          return `[Object ${constructorName}]`;
+        } catch (e) {}
+
+        if (constructorName === 'FieldValue' || constructorName === 'rt' || constructorName === 'Y2' || constructorName === 'Ka') {
+          return '[Firestore FieldValue]';
         }
-      } catch (e) {
-        // Fallback
+
+        // Check if it's a Firestore Document/Collection/Query Reference
+        try {
+          if ('path' in val && typeof (val as any).path === 'string') {
+            return `[Firestore Reference: ${val.path}]`;
+          }
+        } catch (e) {}
+
+        return constructorName ? `[Object ${constructorName}]` : '[Special Object]';
       }
-      return '[Special Object]';
-    }
 
-    // Handle Errors
-    if (val instanceof Error || (val.message && val.stack)) {
-      stack.delete(val);
-      return {
-        name: val.name || 'Error',
-        message: val.message,
-        code: (val as any).code,
-        stack: val.stack
-      };
-    }
+      // Handle Errors
+      if (val instanceof Error || (val.message && val.stack)) {
+        return {
+          name: val.name || 'Error',
+          message: val.message,
+          code: (val as any).code,
+          stack: val.stack
+        };
+      }
 
-    let result: any;
+      let result: any;
 
-    try {
-      // Handle Arrays
       if (isArray) {
         if (val.length > 500) {
           result = val.slice(0, 500).map(item => getSafeValue(item, depth + 1)).concat([`... and ${val.length - 500} more items`]);
@@ -103,11 +108,9 @@ export function deepCloneSafe(obj: any): any {
           result = val.map(item => getSafeValue(item, depth + 1));
         }
       } else {
-        // Handle Plain Objects
         const safeObj: any = {};
         let count = 0;
         const MAX_KEYS = 200;
-        
         const keys = Object.keys(val);
         
         for (const key of keys) {
@@ -128,11 +131,11 @@ export function deepCloneSafe(obj: any): any {
         }
         result = safeObj;
       }
+
+      return result;
     } finally {
       stack.delete(val);
     }
-    
-    return result;
   }
 
   return getSafeValue(obj);

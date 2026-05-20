@@ -111,7 +111,7 @@ export function Reports() {
           getDocs(collection(db, 'hotels', hotel.id, 'inventory')),
           getDocs(collection(db, 'hotels', hotel.id, 'accounts')),
           getDocs(collection(db, 'hotels', hotel.id, 'suppliers')),
-          getDocs(collection(db, 'hotels', hotel.id, 'staff'))
+          getDocs(query(collection(db, 'users'), where('hotelId', '==', hotel.id)))
         ]);
 
         const allReservations = rSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
@@ -122,7 +122,7 @@ export function Reports() {
         const allInventory = iSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const allAccounts = aSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const allSuppliers = sSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const allStaff = staffSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const allStaff = staffSnap.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() }));
 
         setReservations(allReservations);
         setRooms(allRooms);
@@ -227,13 +227,13 @@ export function Reports() {
         case 'occupancy': return ['Date', 'Total Rooms', 'Occupied', 'Occupancy %'];
         case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Nights', 'Balance'];
         case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
-        case 'daily_sales': return ['Date', 'Room Revenue', 'F & B', 'Other', 'Total'];
-        case 'monthly_sales': return ['Month', 'Room Revenue', 'F & B', 'Other', 'Total'];
+        case 'daily_sales': return ['Date', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
+        case 'monthly_sales': return ['Month', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
         case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
         case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Transaction ID'];
         case 'balance': return ['Guest Name', 'Room', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
-        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Total Spent'];
+        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
         case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
@@ -324,23 +324,66 @@ export function Reports() {
           const roomRev = dayEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const fbRev = dayEntries.filter(e => e.category === 'F & B' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const otherRev = dayEntries.filter(e => !['room', 'F & B'].includes(e.category) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const paidCollected = dayEntries.filter(e => e.category === 'payment' && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+          const totalExpected = roomRev + fbRev + otherRev;
+
           data.push({
             Date: dayStr,
-            'Room Revenue': roomRev,
-            'F & B': fbRev,
-            Other: otherRev,
-            Total: roomRev + fbRev + otherRev
+            'Expected Room Rev': roomRev,
+            'Expected F & B': fbRev,
+            'Expected Other': otherRev,
+            'Total Expected': totalExpected,
+            'Actual Paid Collected': paidCollected,
+            'Outstanding Balance': Math.max(0, totalExpected - paidCollected)
           });
           curr = addDays(curr, 1);
         }
         return data;
+      }
+      case 'monthly_sales': {
+        const months: Record<string, { roomRev: number; fbRev: number; otherRev: number; paidCollected: number }> = {};
+        
+        ledgerEntries.forEach(e => {
+          const mDate = new Date(e.timestamp);
+          const monthStr = format(mDate, 'yyyy-MM');
+          if (!months[monthStr]) {
+            months[monthStr] = { roomRev: 0, fbRev: 0, otherRev: 0, paidCollected: 0 };
+          }
+          
+          if (e.type === 'debit') {
+            if (e.category === 'room') {
+              months[monthStr].roomRev += e.amount;
+            } else if (e.category === 'F & B') {
+              months[monthStr].fbRev += e.amount;
+            } else {
+              months[monthStr].otherRev += e.amount;
+            }
+          } else if (e.type === 'credit' && e.category === 'payment') {
+            months[monthStr].paidCollected += e.amount;
+          }
+        });
+        
+        return Object.entries(months)
+          .sort((a, b) => b[0].localeCompare(a[0]))
+          .map(([month, data]) => {
+            const totalExpected = data.roomRev + data.fbRev + data.otherRev;
+            return {
+              Month: month,
+              'Expected Room Rev': data.roomRev,
+              'Expected F & B': data.fbRev,
+              'Expected Other': data.otherRev,
+              'Total Expected': totalExpected,
+              'Actual Paid Collected': data.paidCollected,
+              'Outstanding Balance': Math.max(0, totalExpected - data.paidCollected)
+            };
+          });
       }
       case 'payments': {
         return ledgerEntries
           .filter(e => e.category === 'payment' && e.type === 'credit')
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
-            const staffMember = staff.find(s => s.id === e.postedBy);
+            const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
             return {
               Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
               Guest: res?.guestName || 'Unknown',
@@ -362,7 +405,7 @@ export function Reports() {
           .filter(e => e.category === 'payment' && e.type === 'credit')
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
-            const staffMember = staff.find(s => s.id === e.postedBy);
+            const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
             return {
               'Staff Name': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
               'User Role': staffMember?.role || 'Staff',
@@ -396,24 +439,50 @@ export function Reports() {
       case 'rooms': {
         return rooms.map(room => {
           const roomRes = reservations.filter(r => r.roomId === room.id);
-          const revenue = ledgerEntries.filter(e => e.reservationId && roomRes.find(r => r.id === e.reservationId) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const roomResIds = new Set(roomRes.map(r => r.id));
+          const roomEntries = ledgerEntries.filter(e => e.reservationId && roomResIds.has(e.reservationId));
+          
+          const expectedRevenue = roomEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const paidRevenue = roomEntries.filter(e => e.category === 'payment' && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+          const outstanding = Math.max(0, expectedRevenue - paidRevenue);
+          
           return {
             'Room #': room.roomNumber,
             Type: room.type,
             Status: room.status.toUpperCase(),
-            'Total Revenue': revenue,
+            'Expected Revenue': expectedRevenue,
+            'Paid Revenue': paidRevenue,
+            'Outstanding Balance': outstanding,
             'Occupancy Count': roomRes.length
           };
         });
       }
       case 'guests': {
-        return guests.map(guest => ({
-          'Guest Name': guest.name,
-          Email: guest.email,
-          Phone: guest.phone,
-          'Total Stays': guest.totalStays || 0,
-          'Total Spent': guest.totalSpent || 0
-        }));
+        return guests.map(guest => {
+          const guestRes = reservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail === guest.email));
+          const completedStays = guestRes.filter(r => r.status === 'checked_out').length;
+          const activeStays = guestRes.filter(r => r.status === 'checked_in').length;
+          const cancelledStays = guestRes.filter(r => r.status === 'cancelled').length;
+          const noshowStays = guestRes.filter(r => r.status === 'no_show').length;
+          const totalStays = completedStays + activeStays;
+          
+          const calculatedSpent = guestRes
+            .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+            .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+          const totalSpent = Math.max(guest.totalSpent || 0, calculatedSpent);
+
+          return {
+            'Guest Name': guest.name,
+            Email: guest.email,
+            Phone: guest.phone,
+            'Total Stays': totalStays,
+            'Completed Stays': completedStays,
+            'Active Stays': activeStays,
+            'Cancelled Stays': cancelledStays,
+            'No-Show Stays': noshowStays,
+            'Total Spent': totalSpent
+          };
+        });
       }
       case 'services': {
         return ledgerEntries
@@ -446,9 +515,11 @@ export function Reports() {
       case 'staff_sales': {
         const staffSales: Record<string, { name: string; module: string; total: number; count: number }> = {};
         ledgerEntries.filter(e => e.type === 'debit').forEach(e => {
+          const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
+          const staffName = staffMember?.name || staffMember?.displayName || e.postedBy || 'System';
           const key = `${e.postedBy}_${e.category}`;
           if (!staffSales[key]) {
-            staffSales[key] = { name: e.postedBy, module: e.category, total: 0, count: 0 };
+            staffSales[key] = { name: staffName, module: e.category, total: 0, count: 0 };
           }
           staffSales[key].total += e.amount;
           staffSales[key].count += 1;

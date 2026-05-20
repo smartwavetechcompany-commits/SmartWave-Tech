@@ -1505,6 +1505,8 @@ export function FrontDesk() {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
           const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
           await database.safeUpdate(guestRef, {
+            totalNights: increment(nights),
+            totalSpent: increment(totalDebits),
             stayHistory: arrayUnion({
               reservationId: res.id,
               roomNumber: res.roomNumber,

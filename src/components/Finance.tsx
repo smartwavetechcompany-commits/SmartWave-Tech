@@ -317,7 +317,7 @@ export function Finance() {
       }
 
       // Check refund policy if entity has credit and we are refunding
-      if (currentBalance > 0) {
+      if (currentBalance < 0) {
         const policy = canProcessRefund(hotel, profile, totalAmount);
         if (!policy.allowed) {
           toast.error(policy.message || 'Refund denied by policy');
@@ -328,7 +328,7 @@ export function Finance() {
       // Process each split
       for (const split of settleData.splits) {
         if (split.amount > 0) {
-          if (currentBalance < 0) {
+          if (currentBalance > 0) {
             // Entity owes money: Post a payment (credit)
             await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
           } else {
@@ -1716,7 +1716,7 @@ export function Finance() {
                 <>
                   <div className="p-6 border-b border-zinc-800">
                     <h2 className="text-xl font-bold text-zinc-50">
-                      {balance < 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
+                      {balance > 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
                     </h2>
                     <p className="text-sm text-zinc-500 mt-1">
                       {'ledgerBalance' in showSettleModal ? 'Guest' : 'Corporate'}: {showSettleModal.name}
@@ -1726,11 +1726,11 @@ export function Finance() {
                     <div className="p-6 space-y-4">
                       <div className={cn(
                         "p-4 rounded-2xl border flex items-center gap-4",
-                        balance < 0 ? "bg-red-500/5 border-red-500/20" : "bg-emerald-500/5 border-emerald-500/20"
+                        balance > 0 ? "bg-red-500/5 border-red-500/20" : "bg-emerald-500/5 border-emerald-500/20"
                       )}>
                         <div className={cn(
                           "w-10 h-10 rounded-full flex items-center justify-center",
-                          balance < 0 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                          balance > 0 ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
                         )}>
                           <AlertCircle size={20} />
                         </div>
@@ -1738,9 +1738,9 @@ export function Finance() {
                           <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
                           <p className={cn(
                             "text-lg font-bold",
-                            balance < 0 ? "text-red-500" : "text-emerald-500"
+                            balance > 0 ? "text-red-500" : "text-emerald-500"
                           )}>
-                            {formatCurrency(balance, currency, exchangeRate)}
+                            {formatCurrency(Math.abs(balance), currency, exchangeRate)}
                           </p>
                         </div>
                       </div>

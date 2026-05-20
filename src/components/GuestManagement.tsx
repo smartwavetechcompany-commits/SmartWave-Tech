@@ -48,6 +48,7 @@ export function GuestManagement() {
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
   const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
+  const [allReservations, setAllReservations] = useState<Reservation[]>([]);
   const [guestLedger, setGuestLedger] = useState<LedgerEntry[]>([]);
   const [historyTab, setHistoryTab] = useState<'reservations' | 'ledger'>('reservations');
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
@@ -115,6 +116,19 @@ export function GuestManagement() {
     });
 
     return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    
+    const qReservations = query(collection(db, 'hotels', hotel.id, 'reservations'));
+    const unsubReservations = onSnapshot(qReservations, (snap) => {
+      setAllReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    }, (error: any) => {
+      console.error("Failed to fetch all reservations in GuestManagement:", error);
+    });
+
+    return () => unsubReservations();
   }, [hotel?.id, profile?.uid]);
 
   useEffect(() => {
@@ -370,11 +384,28 @@ export function GuestManagement() {
       let result = 0;
       if (sortBy === 'name') result = a.name.localeCompare(b.name);
       else if (sortBy === 'ledgerBalance') result = (a.ledgerBalance || 0) - (b.ledgerBalance || 0);
-      else if (sortBy === 'totalSpent') result = (a.totalSpent || 0) - (b.totalSpent || 0);
-      else if (sortBy === 'totalStays') result = (a.totalStays || 0) - (b.totalStays || 0);
+      else if (sortBy === 'totalSpent') {
+        const getSpentSum = (g: typeof a) => {
+          const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
+          const calculatedSpent = resList
+            .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+            .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+          return Math.max(g.totalSpent || 0, calculatedSpent);
+        };
+        result = getSpentSum(a) - getSpentSum(b);
+      }
+      else if (sortBy === 'totalStays') {
+        const getStaysCount = (g: typeof a) => {
+          const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
+          const completedStays = resList.filter(r => r.status === 'checked_out').length;
+          const activeStays = resList.filter(r => r.status === 'checked_in').length;
+          return completedStays + activeStays;
+        };
+        result = getStaysCount(a) - getStaysCount(b);
+      }
       return sortOrder === 'desc' ? -result : result;
     });
-  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder]);
+  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder, allReservations]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
@@ -721,29 +752,54 @@ export function GuestManagement() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
-                      <div className="text-sm font-bold text-zinc-100">{guest.totalStays || 0}</div>
-                    </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
-                      <div className="text-sm font-bold text-amber-500">{((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
-                    </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
-                      <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(guest.totalSpent || 0, currency, exchangeRate)}</div>
-                    </div>
-                    <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                      <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Owed</div>
-                      <div className={cn(
-                        "text-sm font-bold",
-                        (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
-                      )}>
-                        {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                  {(() => {
+                    const guestRes = allReservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail === guest.email));
+                    const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
+                    const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
+                    const visitsCount = completedCount + activeCount;
+                    
+                    let calculatedDays = 0;
+                    guestRes.forEach(r => {
+                      if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
+                        try {
+                          const cin = parseISO(r.checkIn);
+                          const cout = parseISO(r.checkOut);
+                          calculatedDays += Math.max(1, differenceInDays(cout, cin));
+                        } catch (e) {}
+                      }
+                    });
+
+                    const calculatedSpentVal = guestRes
+                      .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+                      .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+                    const totalSpentVal = Math.max(guest.totalSpent || 0, calculatedSpentVal);
+                    
+                    return (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
+                          <div className="text-sm font-bold text-zinc-100">{visitsCount}</div>
+                        </div>
+                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
+                          <div className="text-sm font-bold text-amber-500">{calculatedDays || ((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
+                        </div>
+                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
+                          <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
+                        </div>
+                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Owed</div>
+                          <div className={cn(
+                            "text-sm font-bold",
+                            (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                          )}>
+                            {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {guest.preferences && guest.preferences.length > 0 && (
                     <div className="mt-3 pt-2 border-t border-zinc-800/50">
@@ -806,11 +862,22 @@ export function GuestManagement() {
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                   <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Stays</div>
-                  <div className="text-lg font-bold text-zinc-50 leading-tight">{viewingHistory.totalStays || 0}</div>
+                  <div className="text-lg font-bold text-zinc-50 leading-tight">
+                    {Math.max(viewingHistory.totalStays || 0, viewingHistory.stayHistory?.length || 0, guestHistory.length)}
+                  </div>
                 </div>
                 <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                   <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Spent</div>
-                  <div className="text-lg font-bold text-emerald-500 leading-tight">{formatCurrency(viewingHistory.totalSpent || 0, currency, exchangeRate)}</div>
+                  <div className="text-lg font-bold text-emerald-500 leading-tight">
+                    {formatCurrency(
+                      Math.max(
+                        viewingHistory.totalSpent || 0,
+                        guestHistory.filter(r => r.status === 'checked_out').reduce((sum, r) => sum + (r.paidAmount || r.totalAmount || 0), 0)
+                      ),
+                      currency,
+                      exchangeRate
+                    )}
+                  </div>
                 </div>
                 <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                   <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Account Balance</div>
@@ -822,6 +889,40 @@ export function GuestManagement() {
                   </div>
                 </div>
               </div>
+
+              {(() => {
+                const guestRes = allReservations.filter(r => r.guestId === viewingHistory.id || (viewingHistory.email && r.guestEmail === viewingHistory.email));
+                const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
+                const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
+                const cancelledCount = guestRes.filter(r => r.status === 'cancelled').length;
+                const noshowCount = guestRes.filter(r => r.status === 'no_show').length;
+                const visitsCount = completedCount + activeCount;
+                
+                return (
+                  <div className="grid grid-cols-5 gap-2 px-1 text-center">
+                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                      <div className="text-[7px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">Visits</div>
+                      <div className="text-xs font-bold text-zinc-100">{visitsCount}</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                      <div className="text-[7px] font-black text-emerald-500 uppercase tracking-widest mb-0.5">Completed</div>
+                      <div className="text-xs font-bold text-emerald-500">{completedCount}</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                      <div className="text-[7px] font-black text-blue-400 uppercase tracking-widest mb-0.5">Active</div>
+                      <div className="text-xs font-bold text-blue-400">{activeCount}</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                      <div className="text-[7px] font-black text-rose-500 uppercase tracking-widest mb-0.5">Cancelled</div>
+                      <div className="text-xs font-bold text-rose-500">{cancelledCount}</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                      <div className="text-[7px] font-black text-amber-500 uppercase tracking-widest mb-0.5">No-Show</div>
+                      <div className="text-xs font-bold text-amber-500">{noshowCount}</div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Tabs */}
               <div className="flex gap-2 p-1 bg-zinc-950 rounded-lg border border-zinc-800 mb-4">

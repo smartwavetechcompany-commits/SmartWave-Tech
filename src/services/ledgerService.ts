@@ -139,9 +139,13 @@ export const postToLedger = async (
   const nightCountAdj = guestEntries.filter(e => e.type === 'debit' && e.category === 'room').length;
 
   if (guestBalanceAdj !== 0 || nightCountAdj > 0) {
+    const spentCredit = guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0);
+    const spentRefund = guestEntries.filter(e => e.type === 'debit' && e.category === 'refund').reduce((acc, e) => acc + e.amount, 0);
+    const spentAdj = spentCredit - spentRefund;
+
     batch.update(guestRef, {
       ledgerBalance: increment(guestBalanceAdj),
-      totalSpent: increment(guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0)),
+      totalSpent: increment(spentAdj),
       totalNights: increment(nightCountAdj)
     });
   }
@@ -161,27 +165,32 @@ export const postToLedger = async (
     const resData = resSnap.data() as Reservation;
     const resUpdates: any = {};
     
-    const totalCreditAdjustments = entries
+    // Total payments received (credits) minus refunds (debit category 'refund')
+    const creditsSum = entries
       .filter(e => e.type === 'credit')
-      .reduce((acc, e) => acc + (e.category === 'refund' ? -e.amount : e.amount), 0);
+      .reduce((acc, e) => acc + e.amount, 0);
 
-    const isRoomCharge = entry.category === 'room';
-    const isPaymentCharge = entry.category === 'payment';
-    
-    // Calculate how much we should increase the projected total
-    const projectedTotalAdj = (isRoomCharge || isPaymentCharge)
-      ? 0 
-      : entries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+    const refundDebitsSum = entries
+      .filter(e => e.type === 'debit' && e.category === 'refund')
+      .reduce((acc, e) => acc + e.amount, 0);
+
+    const totalPaidAmountAdj = creditsSum - refundDebitsSum;
+
+    // Debbie charges that are room, payment, refund, or transfer should NOT increase the contract's totalAmount
+    const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger'];
+    const projectedTotalAdj = entries
+      .filter(e => e.type === 'debit' && !nonTotalDebits.includes(e.category))
+      .reduce((acc, e) => acc + e.amount, 0);
 
     if (projectedTotalAdj !== 0) resUpdates.totalAmount = increment(projectedTotalAdj);
-    if (totalCreditAdjustments !== 0) resUpdates.paidAmount = increment(totalCreditAdjustments);
+    if (totalPaidAmountAdj !== 0) resUpdates.paidAmount = increment(totalPaidAmountAdj);
     
     const totalBalanceAdj = guestBalanceAdj + corpBalanceAdj;
     if (totalBalanceAdj !== 0) resUpdates.ledgerBalance = increment(totalBalanceAdj);
 
     // Calculate new status
     const freshTotalAmount = (resData.totalAmount || 0) + projectedTotalAdj;
-    const freshPaidAmount = (resData.paidAmount || 0) + totalCreditAdjustments;
+    const freshPaidAmount = (resData.paidAmount || 0) + totalPaidAmountAdj;
 
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
     if (freshTotalAmount > 0) {

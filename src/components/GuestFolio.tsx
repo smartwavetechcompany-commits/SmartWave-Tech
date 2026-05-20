@@ -428,6 +428,61 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   }, [currentReservation.corporateId]);
 
+  const [hasAutoAudited, setHasAutoAudited] = useState(false);
+
+  const autoSyncNightlyCharges = async () => {
+    if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
+    
+    try {
+      const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
+      const now = new Date();
+      const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+      let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+
+      // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
+      if (hotel.autoChargeOverstays !== false) {
+        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+        const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
+        if (isAfter(now, checkOutDateTime)) {
+          const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
+          const expectedTotalNights = (currentReservation.nights || 1) + daysPastCheckout;
+          targetCharges = Math.max(targetCharges, expectedTotalNights);
+        }
+      }
+      
+      const existingCharges = ledgerEntries.filter(e => e.category === 'room' && e.type === 'debit').length;
+      
+      if (existingCharges < targetCharges) {
+        const nightsToCharge = targetCharges - existingCharges;
+        const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
+        
+        for (let i = 0; i < nightsToCharge; i++) {
+          const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+          const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
+          
+          await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
+            amount: rate,
+            type: 'debit',
+            category: 'room',
+            description: `${isOverstay ? 'Overstay' : 'Automated Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+            referenceId: currentReservation.id,
+            postedBy: profile.uid
+          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+        }
+        toast.info(`Accrued ${nightsToCharge} night stays automatically.`);
+      }
+    } catch (err: any) {
+      console.error("Auto sync nightly charges error:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!loading && currentReservation.status === 'checked_in' && !hasAutoAudited && hotel?.id && profile) {
+      setHasAutoAudited(true);
+      autoSyncNightlyCharges();
+    }
+  }, [loading, currentReservation.status, hasAutoAudited, hotel?.id, profile, ledgerEntries]);
+
   // Improved filtering:
   // If it's a corporate reservation, split the entries.
   // If it's NOT a corporate reservation, show everything on the Guest folio.
@@ -476,7 +531,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-2 sm:p-4">
       <div
         className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]"
       >
@@ -521,7 +576,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         </div>
 
         {showReceipt && hotel && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-start justify-center p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[90] flex items-start justify-center p-4 overflow-y-auto">
             <div className="relative w-full max-w-5xl my-8">
               <button 
                 onClick={() => setShowReceipt(false)}
@@ -891,7 +946,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </div>
 
           {showTransferBalanceModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
               <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-md">
                 <h3 className="text-lg font-bold text-zinc-50 mb-4">Transfer Balance</h3>
                 
@@ -972,7 +1027,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {showSettleOverpayment && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1059,7 +1114,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {showGuestHistory && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[85] flex items-center justify-center p-4">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -1124,7 +1179,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {showPostChargeModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1246,7 +1301,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {showSettlePayment && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
