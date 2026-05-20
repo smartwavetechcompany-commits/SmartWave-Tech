@@ -859,37 +859,6 @@ export function GuestManagement() {
             </div>
             
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Stays</div>
-                  <div className="text-lg font-bold text-zinc-50 leading-tight">
-                    {Math.max(viewingHistory.totalStays || 0, viewingHistory.stayHistory?.length || 0, guestHistory.length)}
-                  </div>
-                </div>
-                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Spent</div>
-                  <div className="text-lg font-bold text-emerald-500 leading-tight">
-                    {formatCurrency(
-                      Math.max(
-                        viewingHistory.totalSpent || 0,
-                        guestHistory.filter(r => r.status === 'checked_out').reduce((sum, r) => sum + (r.paidAmount || r.totalAmount || 0), 0)
-                      ),
-                      currency,
-                      exchangeRate
-                    )}
-                  </div>
-                </div>
-                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Account Balance</div>
-                  <div className={cn(
-                    "text-lg font-bold leading-tight",
-                    (viewingHistory.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
-                  )}>
-                    {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
-                  </div>
-                </div>
-              </div>
-
               {(() => {
                 const guestRes = allReservations.filter(r => r.guestId === viewingHistory.id || (viewingHistory.email && r.guestEmail === viewingHistory.email));
                 const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
@@ -898,29 +867,60 @@ export function GuestManagement() {
                 const noshowCount = guestRes.filter(r => r.status === 'no_show').length;
                 const visitsCount = completedCount + activeCount;
                 
+                const calculatedSpentVal = guestRes
+                  .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+                  .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+                const totalSpentVal = Math.max(viewingHistory.totalSpent || 0, calculatedSpentVal);
+
                 return (
-                  <div className="grid grid-cols-5 gap-2 px-1 text-center">
-                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
-                      <div className="text-[7px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">Visits</div>
-                      <div className="text-xs font-bold text-zinc-100">{visitsCount}</div>
+                  <>
+                    <div className="grid grid-cols-3 gap-3 mb-4">
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Visits</div>
+                        <div className="text-lg font-bold text-zinc-50 leading-tight">
+                          {visitsCount}
+                        </div>
+                      </div>
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Spent</div>
+                        <div className="text-lg font-bold text-emerald-500 leading-tight">
+                          {formatCurrency(totalSpentVal, currency, exchangeRate)}
+                        </div>
+                      </div>
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Account Balance</div>
+                        <div className={cn(
+                          "text-lg font-bold leading-tight",
+                          (viewingHistory.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                        )}>
+                          {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
-                      <div className="text-[7px] font-black text-emerald-500 uppercase tracking-widest mb-0.5">Completed</div>
-                      <div className="text-xs font-bold text-emerald-500">{completedCount}</div>
+
+                    <div className="grid grid-cols-5 gap-2 px-1 text-center">
+                      <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                        <div className="text-[7px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">Visits</div>
+                        <div className="text-xs font-bold text-zinc-100">{visitsCount}</div>
+                      </div>
+                      <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                        <div className="text-[7px] font-black text-emerald-500 uppercase tracking-widest mb-0.5">Completed</div>
+                        <div className="text-xs font-bold text-emerald-500">{completedCount}</div>
+                      </div>
+                      <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                        <div className="text-[7px] font-black text-blue-400 uppercase tracking-widest mb-0.5">Active</div>
+                        <div className="text-xs font-bold text-blue-400">{activeCount}</div>
+                      </div>
+                      <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                        <div className="text-[7px] font-black text-rose-500 uppercase tracking-widest mb-0.5">Cancelled</div>
+                        <div className="text-xs font-bold text-rose-500">{cancelledCount}</div>
+                      </div>
+                      <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
+                        <div className="text-[7px] font-black text-amber-500 uppercase tracking-widest mb-0.5">No-Show</div>
+                        <div className="text-xs font-bold text-amber-500">{noshowCount}</div>
+                      </div>
                     </div>
-                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
-                      <div className="text-[7px] font-black text-blue-400 uppercase tracking-widest mb-0.5">Active</div>
-                      <div className="text-xs font-bold text-blue-400">{activeCount}</div>
-                    </div>
-                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
-                      <div className="text-[7px] font-black text-rose-500 uppercase tracking-widest mb-0.5">Cancelled</div>
-                      <div className="text-xs font-bold text-rose-500">{cancelledCount}</div>
-                    </div>
-                    <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
-                      <div className="text-[7px] font-black text-amber-500 uppercase tracking-widest mb-0.5">No-Show</div>
-                      <div className="text-xs font-bold text-amber-500">{noshowCount}</div>
-                    </div>
-                  </div>
+                  </>
                 );
               })()}
 

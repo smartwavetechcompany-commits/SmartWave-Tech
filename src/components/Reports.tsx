@@ -233,7 +233,7 @@ export function Reports() {
         case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Transaction ID'];
         case 'balance': return ['Guest Name', 'Room', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
-        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Stays', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
+        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Visits', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
         case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
@@ -464,7 +464,7 @@ export function Reports() {
           const activeStays = guestRes.filter(r => r.status === 'checked_in').length;
           const cancelledStays = guestRes.filter(r => r.status === 'cancelled').length;
           const noshowStays = guestRes.filter(r => r.status === 'no_show').length;
-          const totalStays = completedStays + activeStays;
+          const totalVisits = completedStays + activeStays;
           
           const calculatedSpent = guestRes
             .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
@@ -475,7 +475,7 @@ export function Reports() {
             'Guest Name': guest.name,
             Email: guest.email,
             Phone: guest.phone,
-            'Total Stays': totalStays,
+            'Total Visits': totalVisits,
             'Completed Stays': completedStays,
             'Active Stays': activeStays,
             'Cancelled Stays': cancelledStays,
