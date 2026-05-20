@@ -14,7 +14,7 @@ export function deepCloneSafe(obj: any): any {
   if (obj === null) return null;
   if (typeof obj !== 'object') return obj;
 
-  const stack = new WeakMap();
+  const stack = new Map();
   
   function getSafeValue(val: any, depth: number = 0): any {
     // Prevent deep recursion
@@ -29,15 +29,38 @@ export function deepCloneSafe(obj: any): any {
       return val.toISOString();
     }
 
-    // Handle Firestore-like objects (e.g. Timestamp, DocumentReference, FieldValue)
-    if (val && typeof val === 'object') {
-      // Check if it's a known non-plain object that we shouldn't recurse into
-      const proto = Object.getPrototypeOf(val);
-      const isPlain = proto === Object.prototype || proto === null;
-      const isArray = Array.isArray(val);
+    // Check circular references
+    if (stack.has(val)) {
+      return '[Circular Reference]';
+    }
 
-      if (!isPlain && !isArray) {
-        // Special types handling
+    // Add to stack before recursion
+    try {
+      stack.set(val, true);
+    } catch (e) {
+      return '[Unserializable]';
+    }
+
+    // Check if it's a non-plain, non-array object
+    const isArray = Array.isArray(val);
+    const proto = Object.getPrototypeOf(val);
+    const isPlain = proto === Object.prototype || proto === null;
+
+    let constructorName = '';
+    try {
+      if (val.constructor && typeof val.constructor === 'function') {
+        constructorName = val.constructor.name || '';
+      }
+    } catch (e) {
+      // Ignore errors when accessing constructor
+    }
+
+    // If it has a custom constructor name that is NOT Object or Array
+    const isCustomClass = constructorName && constructorName !== 'Object' && constructorName !== 'Array';
+
+    if (isCustomClass || (!isPlain && !isArray)) {
+      // Try to handle special types
+      try {
         if ('seconds' in val && 'nanoseconds' in val) {
           return (val as any).toDate?.()?.toISOString() || String(val);
         }
@@ -46,20 +69,21 @@ export function deepCloneSafe(obj: any): any {
           return `[Firestore Reference: ${val.path}]`;
         }
 
-        if (val.constructor) {
-          const name = val.constructor.name;
-          if (name === 'FieldValue' || name === 'rt' || name === 'Y2' || name === 'Ka') {
+        if (constructorName) {
+          if (constructorName === 'FieldValue' || constructorName === 'rt' || constructorName === 'Y2' || constructorName === 'Ka') {
             return '[Firestore FieldValue]';
           }
-          return `[Object ${name}]`;
+          return `[Object ${constructorName}]`;
         }
-        
-        return '[Special Object]';
+      } catch (e) {
+        // Fallback
       }
+      return '[Special Object]';
     }
 
     // Handle Errors
     if (val instanceof Error || (val.message && val.stack)) {
+      stack.delete(val);
       return {
         name: val.name || 'Error',
         message: val.message,
@@ -68,25 +92,11 @@ export function deepCloneSafe(obj: any): any {
       };
     }
 
-    // Check circular references
-    if (stack.has(val)) {
-      return '[Circular Reference]';
-    }
-    
-    // Add to stack before recursion
-    try {
-      stack.set(val, true);
-    } catch (e) {
-      // Some objects (like frozen ones) might fail WeakMap.set in older environments
-      // but usually this is rare for the objects we handle.
-      return '[Unserializable]';
-    }
-
     let result: any;
 
     try {
       // Handle Arrays
-      if (Array.isArray(val)) {
+      if (isArray) {
         if (val.length > 500) {
           result = val.slice(0, 500).map(item => getSafeValue(item, depth + 1)).concat([`... and ${val.length - 500} more items`]);
         } else {
@@ -98,8 +108,6 @@ export function deepCloneSafe(obj: any): any {
         let count = 0;
         const MAX_KEYS = 200;
         
-        // Use Reflect.ownKeys or Object.getOwnPropertyNames to be more thorough
-        // but Object.keys is usually safer for generic structures
         const keys = Object.keys(val);
         
         for (const key of keys) {
@@ -121,14 +129,7 @@ export function deepCloneSafe(obj: any): any {
         result = safeObj;
       }
     } finally {
-      // Remove from stack after recursion to allow same object appearing in DIFFERENT branches
-      // but this is actually what causes circular structure errors in JSON.stringify if it's the SAME object
-      // wait, actually, if it's the same object twice but NOT circular, JSON.stringify IS fine.
-      // BUT if it's the same object identity multiple times, it's safer to keep it as [Circular] 
-      // if we want to BE ABSOLUTELY SURE.
-      // So we DON'T remove it from the stack if we want to avoid multiple refs to same identity.
-      // Actually, JSON.stringify doesn't care about multiple refs to same object UNLESS it's circular.
-      // But keeping it in stack is safer for performance and avoids re-processing.
+      stack.delete(val);
     }
     
     return result;

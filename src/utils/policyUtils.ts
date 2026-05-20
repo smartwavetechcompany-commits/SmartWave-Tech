@@ -1,4 +1,4 @@
-import { Hotel, UserProfile, Reservation, Room, LedgerEntry } from '../types';
+import { Hotel, UserProfile, Reservation, Room, LedgerEntry, Guest } from '../types';
 import { hasPermission } from './permissions';
 import { differenceInDays } from 'date-fns';
 
@@ -16,6 +16,10 @@ export const canCheckout = (
   const isOwing = balance > 0;
 
   if (isOwing) {
+    if (settings.allowBalanceOutstanding) {
+      return { allowed: true };
+    }
+
     if (settings.requireFullPaymentBeforeCheckout && !settings.allowBalanceOutstanding) {
       return { allowed: false, message: 'Full payment is required before checkout as per hotel policy.' };
     }
@@ -36,14 +40,26 @@ export const canCheckIn = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   reservation: Reservation,
-  room: Room | undefined
+  room: Room | undefined,
+  guest?: Guest | null
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.checkIn;
   if (!settings) return { allowed: true };
 
+  // Check Blacklist (DNR)
+  if (hotel.settings?.guests?.allowBlacklisting && guest) {
+    if ((guest.tags || []).includes('DNR')) {
+      return { allowed: false, message: 'Check-in denied: Guest is on Do Not Rent (DNR) / Blacklist.' };
+    }
+  }
+
   if (room) {
+    if (room.status === 'occupied') {
+      return { allowed: false, message: 'Cannot check-in. This room is currently occupied by another guest.' };
+    }
+
     if (settings.preventCheckInDirty && (room.status === 'dirty' || room.status === 'cleaning')) {
       if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
         return { allowed: false, message: 'Cannot check-in to a dirty room. Housekeeping must clear it first.' };

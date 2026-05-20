@@ -1,4 +1,4 @@
-import { Room, Reservation, RoomBlocking } from '../types';
+import { Room, Reservation, RoomBlocking, Hotel } from '../types';
 import { isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns';
 
 export type DisplayRoomStatus = Room['status'] | 'occupied' | 'reserved' | 'blocked';
@@ -47,7 +47,8 @@ export const isRoomAvailable = (
   checkIn: string,
   checkOut: string,
   reservations: Reservation[],
-  roomBlockings: RoomBlocking[] = []
+  roomBlockings: RoomBlocking[] = [],
+  hotel: Hotel | null = null
 ): boolean => {
   const start = startOfDay(parseISO(checkIn));
   const end = startOfDay(parseISO(checkOut));
@@ -66,15 +67,18 @@ export const isRoomAvailable = (
 
   if (hasConflict) return false;
 
-  // Check Blockings
-  const hasBlock = roomBlockings.some(b => {
-    if (b.roomId !== roomId) return false;
-    const blockStart = startOfDay(parseISO(b.startDate));
-    const blockEnd = endOfDay(parseISO(b.endDate));
-    return start <= blockEnd && end >= blockStart;
-  });
+  // Check Blockings if setting is enabled (or defaults to true)
+  const preventBookingBlocked = hotel?.settings?.roomBlocking?.preventBookingBlocked ?? true;
+  if (preventBookingBlocked) {
+    const hasBlock = roomBlockings.some(b => {
+      if (b.roomId !== roomId) return false;
+      const blockStart = startOfDay(parseISO(b.startDate));
+      const blockEnd = endOfDay(parseISO(b.endDate));
+      return start <= blockEnd && end >= blockStart;
+    });
 
-  if (hasBlock) return false;
+    if (hasBlock) return false;
+  }
 
   return true;
 };

@@ -527,11 +527,24 @@ export function FrontDesk() {
       return;
     }
 
+    // Check blacklist (DNR)
+    if (hotel.settings?.guests?.allowBlacklisting) {
+      for (const stay of allStays) {
+        if (stay.guestId) {
+          const guestObj = guests.find(g => g.id === stay.guestId);
+          if (guestObj && (guestObj.tags || []).includes('DNR')) {
+            toast.error(`Booking denied: Guest "${stay.guestName}" is blacklisted (DNR).`);
+            return;
+          }
+        }
+      }
+    }
+
     // Check for blocked rooms and occupancy
     const preventOverbooking = hotel.settings?.reservations?.preventOverbooking ?? true;
     
     for (const stay of allStays) {
-      if (preventOverbooking && !isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings)) {
+      if (preventOverbooking && !isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel)) {
         const room = rooms.find(r => r.id === stay.roomId);
         toast.error(`Room ${room?.roomNumber || stay.roomId} is not available for the selected dates.`);
         return;
@@ -1209,7 +1222,8 @@ export function FrontDesk() {
     // Policy checks
     if (status === 'checked_in') {
       const room = rooms.find(r => r.id === res.roomId);
-      const policy = canCheckIn(hotel, profile, res, room);
+      const guest = guests.find(g => g.id === res.guestId);
+      const policy = canCheckIn(hotel, profile, res, room, guest);
       if (!policy.allowed) {
         toast.error(policy.message || 'Check-in denied by hotel policy');
         return;
@@ -1414,15 +1428,46 @@ export function FrontDesk() {
         const outstandingBalance = freshResData.ledgerBalance || 0;
         const totalDebits = (freshResData.totalAmount || 0);
 
+        // Determine check-out permission based on dynamic hotel settings
+        const checkoutSettings = hotel.settings?.checkout;
+        let blockCheckout = false;
+        let blockMessage = '';
+
         if (!res.corporateId && outstandingBalance > 0.01) {
-          toast.error(`Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`);
+          if (checkoutSettings) {
+            if (checkoutSettings.allowBalanceOutstanding) {
+              // Allowed to check out with balance
+              blockCheckout = false;
+            } else if (checkoutSettings.requireFullPaymentBeforeCheckout) {
+              blockCheckout = true;
+              blockMessage = `Full payment is required before checkout as per hotel policy. Outstanding balance is ${formatCurrency(outstandingBalance, currency, exchangeRate)}.`;
+            } else if (checkoutSettings.preventOwingGuestCheckout) {
+              if (!hasPermission(profile, 'void_transaction')) {
+                blockCheckout = true;
+                blockMessage = `Zero-balance checkout is enforced. Policy prevents checkout for owing guests without manager approval.`;
+              }
+            } else if (checkoutSettings.requireApprovalForDebtCheckout) {
+              if (!hasPermission(profile, 'void_transaction')) {
+                blockCheckout = true;
+                blockMessage = `Manager approval is required to checkout a guest with debt.`;
+              }
+            }
+          } else {
+            // Default legacy/strict behavior
+            blockCheckout = true;
+            blockMessage = `Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`;
+          }
+        }
+
+        if (blockCheckout) {
+          toast.error(blockMessage);
           setLoading(false);
           // Revert status to checked_in
           await database.safeUpdate(resRef, { status: 'checked_in' }, { 
             hotelId: hotel.id, 
             module: 'Front Desk', 
             action: 'REVERT_CHECKOUT', 
-            details: 'Reverting status to checked_in due to outstanding balance' 
+            details: 'Reverting status to checked_in due to outstanding balance policy' 
           });
           return;
         }
@@ -2213,7 +2258,7 @@ export function FrontDesk() {
                   >
                     <option value="">Select a room</option>
                     {rooms.filter(r => 
-                      isRoomAvailable(r.id, newBooking.checkIn, newBooking.checkOut, reservations, roomBlockings) || r.id === newBooking.roomId
+                      isRoomAvailable(r.id, newBooking.checkIn, newBooking.checkOut, reservations, roomBlockings, hotel) || r.id === newBooking.roomId
                     ).map(room => {
                       let displayPrice = room.price;
                       let isNegotiated = false;
@@ -2768,7 +2813,7 @@ export function FrontDesk() {
                         >
                           <option value="">Select Room</option>
                           {rooms.filter(r => 
-                            isRoomAvailable(r.id, stay.checkIn, stay.checkOut, reservations, roomBlockings) || r.id === stay.roomId
+                            isRoomAvailable(r.id, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel) || r.id === stay.roomId
                           ).map(room => {
                             let displayPrice = room.price;
                             let isNegotiated = false;
@@ -2857,7 +2902,7 @@ export function FrontDesk() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {roomTypes.map(type => {
           const totalRooms = rooms.filter(r => r.type === type.name).length;
-          const availableRooms = rooms.filter(r => r.type === type.name && isRoomAvailable(r.id, format(new Date(), 'yyyy-MM-dd'), format(addDays(new Date(), 1), 'yyyy-MM-dd'), reservations, roomBlockings)).length;
+          const availableRooms = rooms.filter(r => r.type === type.name && isRoomAvailable(r.id, format(new Date(), 'yyyy-MM-dd'), format(addDays(new Date(), 1), 'yyyy-MM-dd'), reservations, roomBlockings, hotel)).length;
           return (
             <div key={type.id} className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl">
               <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1">{type.name}</div>
@@ -3315,10 +3360,11 @@ export function FrontDesk() {
                             className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                             title={(() => {
                               const room = rooms.find(r => r.id === res.roomId);
-                              const policy = canCheckIn(hotel, profile, res, room);
+                              const guest = guests.find(g => g.id === res.guestId);
+                              const policy = canCheckIn(hotel, profile, res, room, guest);
                               return policy.allowed ? "Check In" : policy.message;
                             })()}
-                            disabled={loading || !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId)).allowed}
+                            disabled={loading || !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId)).allowed}
                           >
                             <CheckCircle2 size={18} />
                           </button>
