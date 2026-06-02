@@ -116,6 +116,12 @@ service cloud.firestore {
       allow read: if (isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || (resource != null && resource.data.email.lower() == request.auth.token.email.lower()))) ||
                     (request.auth == null && resource.data.initialPassword != null);
       
+      allow list: if isAuthenticated() && (
+                    isSuperAdmin() ||
+                    isAdmin() ||
+                    (resource != null && resource.data.email.lower() == request.auth.token.email.lower())
+                  );
+      
       // SuperAdmin has full control
       allow write: if isSuperAdmin();
 
@@ -124,7 +130,7 @@ service cloud.firestore {
                     resource != null && resource.data.hotelId == getHotelId();
       
       allow create: if isAuthenticated() && (
-                      (request.auth.uid == userId && (request.resource.data.role == "staff" || request.resource.data.role == "hotelAdmin")) ||
+                      (request.auth.uid == userId && request.resource.data.role != "superAdmin") ||
                       (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin")
                     );
 
@@ -144,7 +150,7 @@ service cloud.firestore {
 
       allow delete: if isAuthenticated() && (
                       (isAdmin() && resource != null && resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.auth.uid != userId) ||
-                      (resource.data.email == request.auth.token.email && resource.data.initialPassword != null)
+                      (resource != null && resource.data.email.lower() == request.auth.token.email.lower())
                     );
     }
 
