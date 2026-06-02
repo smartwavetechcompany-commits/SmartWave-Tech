@@ -49,7 +49,15 @@ export function AuditLogs() {
 
   const safeFormat = (date: any, formatStr: string) => {
     try {
-      const d = new Date(date);
+      if (!date) return 'N/A';
+      let d: Date;
+      if (typeof date.toDate === 'function') {
+        d = date.toDate();
+      } else if (typeof date.seconds === 'number') {
+        d = new Date(date.seconds * 1000);
+      } else {
+        d = new Date(date);
+      }
       if (!isValid(d)) return 'N/A';
       return format(d, formatStr);
     } catch (e) {

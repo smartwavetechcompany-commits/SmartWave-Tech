@@ -6,6 +6,7 @@ import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType } from '../types';
+import { hasPermission } from '../utils/permissions';
 import { 
   UserPlus, 
   Search, 
@@ -89,6 +90,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     e.preventDefault();
     if (!hotelId) return;
 
+    // Check user permissions before submitting
+    if (!hasPermission(profile, 'manage_staff') && !hasPermission(profile, 'manage_roles')) {
+      toast.error("You do not have the required permissions to add staff members.");
+      return;
+    }
+
     const tempUid = `staff_${Math.random().toString(36).substr(2, 9)}`;
     const staffProfile: any = {
       uid: tempUid,
@@ -112,13 +119,41 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         userContext: profile ? { uid: profile.uid, email: profile.email, role: profile.role } : undefined
       });
 
+      // Role compliance logging to GlobalAuditLog
+      try {
+        await database.safeAdd(collection(db, 'GlobalAuditLog'), {
+          timestamp: new Date().toISOString(),
+          actorId: profile?.uid || 'unknown',
+          actorEmail: profile?.email || 'unknown',
+          actorRole: profile?.role || 'unknown',
+          targetUserId: tempUid,
+          targetUserEmail: staffProfile.email,
+          targetUserName: staffProfile.displayName,
+          assignedRoles: [staffProfile.role, ...staffProfile.roles],
+          hotelId: hotelId,
+          action: 'ROLE_ASSIGNMENT',
+          details: `Teammate status created with base access role '${staffProfile.role}' and override permissions: ${staffProfile.roles.join(', ')}`
+        }, {
+          hotelId: hotelId,
+          module: 'Staff',
+          action: 'CREATE_STAFF_GLOBAL_AUDIT',
+          details: 'Staff creation role compliance log'
+        });
+      } catch (logErr) {
+        console.error("Failed to write to GlobalAuditLog:", logErr);
+      }
+
       setIsAddingStaff(false);
       setNewStaff({ email: '', displayName: '', password: '', role: 'staff', roles: ['frontDesk'] });
       toast.success('Staff member added successfully. They can now login with the password you provided.');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
       console.error("Add staff error:", err.message || safeStringify(err));
-      toast.error('Failed to add staff member');
+      if (err.code === 'permission-denied' || (err.message && err.message.toLowerCase().includes('permission'))) {
+        toast.error('Insufficient Firestore permissions. You do not have the authorization required to create staff.');
+      } else {
+        toast.error('Failed to add staff member');
+      }
     }
   };
 
@@ -179,6 +214,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const toggleRole = async (member: UserProfile, roleId: StaffRole) => {
     if (!hotelId) return;
     
+    // Check user permissions before submitting
+    if (!hasPermission(profile, 'manage_roles')) {
+      toast.error("You do not have the required role management permissions to assign or modify roles.");
+      return;
+    }
+    
     const currentRoles: StaffRole[] = (member.roles || member.permissions || []) as StaffRole[];
     const newRoles = currentRoles.includes(roleId)
       ? currentRoles.filter(r => r !== roleId)
@@ -199,6 +240,30 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       if (editingPermissions) {
         setEditingPermissions({ ...editingPermissions, roles: newRoles, permissions: newRoles });
       }
+
+      // Create an automated log entry in the 'GlobalAuditLog' collection for compliance
+      try {
+        await database.safeAdd(collection(db, 'GlobalAuditLog'), {
+          timestamp: new Date().toISOString(),
+          actorId: profile?.uid || 'unknown',
+          actorEmail: profile?.email || 'unknown',
+          actorRole: profile?.role || 'unknown',
+          targetUserId: member.uid,
+          targetUserEmail: member.email,
+          targetUserName: member.displayName || 'Unnamed Staff',
+          assignedRoles: newRoles,
+          hotelId: hotelId,
+          action: 'ROLE_ASSIGNMENT',
+          details: `Assigned roles/permissions updated for ${member.email} to: [${newRoles.join(', ')}]`
+        }, {
+          hotelId: hotelId,
+          module: 'Staff',
+          action: 'UPDATE_STAFF_ROLES_GLOBAL_AUDIT',
+          details: 'Staff role assignment compliance log'
+        });
+      } catch (logErr) {
+        console.error("Failed to write to GlobalAuditLog:", logErr);
+      }
       
       // Log the action for UI visibility (Audit Trail)
       await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
@@ -217,9 +282,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         details: 'Staff roles update activity'
       });
       toast.success('Permissions updated');
-    } catch (err) {
+    } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${member.uid}`);
-      toast.error('Failed to update permissions');
+      if (err.code === 'permission-denied' || (err.message && err.message.toLowerCase().includes('permission'))) {
+        toast.error('Insufficient Firestore permissions. You do not have the authorization required to update user roles.');
+      } else {
+        toast.error('Failed to update permissions');
+      }
     }
   };
 
