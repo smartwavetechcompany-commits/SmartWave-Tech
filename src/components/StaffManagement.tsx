@@ -65,6 +65,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [isResetting, setIsResetting] = useState<string | null>(null);
+  const [pendingRoleChange, setPendingRoleChange] = useState<{
+    member: UserProfile;
+    roleId: StaffRole;
+    roleLabel: string;
+    isAdding: boolean;
+  } | null>(null);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -215,8 +221,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId) return;
     
     // Check user permissions before submitting
-    if (!hasPermission(profile, 'manage_roles')) {
-      toast.error("You do not have the required role management permissions to assign or modify roles.");
+    if (!hasPermission(profile, 'manage_staff')) {
+      toast.error("You do not have the required 'manage_staff' permission to assign or modify roles.");
       return;
     }
     
@@ -292,6 +298,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     }
   };
 
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
 
@@ -307,8 +314,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   const filteredStaff = staff.filter(member => {
     const search = searchTerm.toLowerCase();
-    return (member.displayName?.toLowerCase() || '').includes(search) || 
-           (member.email?.toLowerCase() || '').includes(search);
+    const matchesSearch = (member.displayName?.toLowerCase() || '').includes(search) || 
+                          (member.email?.toLowerCase() || '').includes(search);
+    
+    const status = member.status || 'active';
+    const matchesStatus = statusFilter === 'all' || status === statusFilter;
+
+    return matchesSearch && matchesStatus;
   });
 
   const handleExport = () => {
@@ -334,6 +346,22 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         onCancel={() => setShowConfirmRemove(null)}
         type="danger"
         confirmText="Remove Staff"
+      />
+
+      <ConfirmModal
+        isOpen={!!pendingRoleChange}
+        title="Confirm Permission Override"
+        message={pendingRoleChange ? `Are you sure you want to ${pendingRoleChange.isAdding ? 'grant' : 'revoke'} the "${pendingRoleChange.roleLabel}" override permission for ${pendingRoleChange.member.displayName || pendingRoleChange.member.email}?` : ''}
+        onConfirm={async () => {
+          if (pendingRoleChange) {
+            const { member, roleId } = pendingRoleChange;
+            setPendingRoleChange(null);
+            await toggleRole(member, roleId);
+          }
+        }}
+        onCancel={() => setPendingRoleChange(null)}
+        type="warning"
+        confirmText={pendingRoleChange ? (pendingRoleChange.isAdding ? 'Confirm Grant' : 'Confirm Revoke') : 'Confirm'}
       />
 
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -456,18 +484,85 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         </div>
       )}
 
+      {/* Summary Panel */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+        <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">Team Composition</h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          {BASE_ROLES.map(role => {
+            const count = staff.filter(m => m.role === role.id).length;
+            const getRoleDisplayName = (id: string, qty: number) => {
+              switch (id) {
+                case 'hotelAdmin':
+                  return qty === 1 ? 'Admin' : 'Admins';
+                case 'manager':
+                  return qty === 1 ? 'Manager' : 'Managers';
+                case 'frontDesk':
+                  return qty === 1 ? 'Front Desk Agent' : 'Front Desk Agents';
+                case 'housekeeper':
+                  return qty === 1 ? 'Housekeeper' : 'Housekeepers';
+                case 'maintenance':
+                  return qty === 1 ? 'Maintenance Personnel' : 'Maintenance Staff';
+                case 'accountant':
+                  return qty === 1 ? 'Accountant' : 'Accountants';
+                default:
+                  return qty === 1 ? 'Staff' : 'Staff Members';
+              }
+            };
+            return (
+              <div 
+                key={role.id} 
+                className="bg-zinc-950 border border-zinc-900 p-4 rounded-xl flex flex-col items-center justify-center text-center hover:border-zinc-700 transition duration-200 cursor-default"
+              >
+                <div className="text-2xl font-bold text-zinc-50 font-mono mb-1">{count}</div>
+                <div className="text-xs text-zinc-400 capitalize font-medium">
+                  {getRoleDisplayName(role.id, count)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="font-bold text-zinc-50">Team Members</h3>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search staff..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
-            />
+        <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-zinc-50">Team Members</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Showing {filteredStaff.length} of {staff.length} staff members</p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            {/* Status Dropdown Filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="bg-zinc-950 border border-zinc-850 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500 cursor-pointer w-full sm:w-auto font-medium"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Inactive Only</option>
+            </select>
+
+            {/* Export To CSV Button */}
+            <button
+              type="button"
+              onClick={handleExport}
+              className="flex items-center justify-center gap-2 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-zinc-50 px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-95 w-full sm:w-auto cursor-pointer"
+              title="Export currently filtered list to CSV"
+            >
+              <Download size={14} />
+              <span>Export CSV</span>
+            </button>
+
+            {/* Search Input */}
+            <div className="relative w-full sm:w-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+              <input 
+                type="text" 
+                placeholder="Search staff..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:w-auto bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -592,7 +687,15 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 return (
                   <button
                     key={role.id}
-                    onClick={() => toggleRole(editingPermissions, role.id as StaffRole)}
+                    onClick={() => {
+                      const isGranted = (editingPermissions.roles || editingPermissions.permissions || []).includes(role.id);
+                      setPendingRoleChange({
+                        member: editingPermissions,
+                        roleId: role.id as StaffRole,
+                        roleLabel: role.label,
+                        isAdding: !isGranted
+                      });
+                    }}
                     className={cn(
                       "w-full flex items-center justify-between p-3 rounded-xl border transition-all active:scale-[0.98]",
                       isGranted 

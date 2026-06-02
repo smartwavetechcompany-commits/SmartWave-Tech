@@ -42,6 +42,16 @@ service cloud.firestore {
       return data != null && data.role == "hotelAdmin";
     }
 
+    function hasStaffManagementPermission() {
+      let data = getUserData();
+      return data != null && (
+        isSuperAdmin() ||
+        data.role == "hotelAdmin" ||
+        (data.permissions != null && data.permissions.hasAny(['manage_staff', 'manage_roles'])) ||
+        (data.roles != null && data.roles.hasAny(['manager', 'admin']))
+      );
+    }
+
     function isStaff() {
       let data = getUserData();
       return data != null && data.role == "staff";
@@ -115,7 +125,7 @@ service cloud.firestore {
       
       allow create: if isAuthenticated() && (
                       (request.auth.uid == userId && (request.resource.data.role == "staff" || request.resource.data.role == "hotelAdmin")) ||
-                      (isAdmin() && request.resource.data.hotelId == getHotelId() && request.resource.data.role != "superAdmin")
+                      (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin")
                     );
 
       allow update: if isAuthenticated() && (
@@ -123,6 +133,7 @@ service cloud.firestore {
                        request.resource.data.role == resource.data.role &&
                        request.resource.data.hotelId == resource.data.hotelId) ||
                       (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
+                       hasStaffManagementPermission() &&
                        request.resource.data.hotelId == getHotelId() &&
                        (request.auth.uid != userId || (
                          request.resource.data.role == resource.data.role &&
@@ -132,7 +143,7 @@ service cloud.firestore {
                     );
 
       allow delete: if isAuthenticated() && (
-                      (isAdmin() && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId) ||
+                      (isAdmin() && resource != null && resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.auth.uid != userId) ||
                       (resource.data.email == request.auth.token.email && resource.data.initialPassword != null)
                     );
     }
