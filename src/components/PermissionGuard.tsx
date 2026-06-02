@@ -44,3 +44,21 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
 
   return <>{children}</>;
 };
+
+/**
+ * Centralized hook to check a user's assigned modules based on their role and permissions overrides.
+ */
+export const useModuleAccess = () => {
+  const { profile } = useAuth();
+
+  const canAccessModule = (capability: Permission | null): boolean => {
+    if (!capability) return true;
+    return hasPermission(profile, capability);
+  };
+
+  return {
+    canAccessModule,
+    hasPermission: (perm: Permission) => hasPermission(profile, perm),
+    profile
+  };
+};

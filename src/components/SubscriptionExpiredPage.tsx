@@ -110,24 +110,24 @@ export function SubscriptionExpiredPage() {
       // 2. Update Hotel
       if (!hotel) throw new Error('Hotel data not found');
 
-      // Define plan features (same as in AuthPage)
+      // Define plan features (same as in AuthPage and SuperAdmin)
       const planFeatures = {
-        Standard: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'settings'],
-          limits: { rooms: 30, staff: 5 }
+        standard: {
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports'],
+          limits: { rooms: 30, staff: 10 }
         },
-        Premium: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'staff', 'reports', 'settings'],
-          limits: { rooms: 100, staff: 20 }
+        premium: {
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'],
+          limits: { rooms: 150, staff: 50 }
         },
-        Enterprise: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings'],
-          limits: { rooms: 1000, staff: 100 }
+        enterprise: {
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff', 'corporate'],
+          limits: { rooms: 5000, staff: 1000 }
         }
       };
 
-      const selectedPlan = (tcData.plan as keyof typeof planFeatures) || 'Standard';
-      const features = planFeatures[selectedPlan];
+      const selectedPlan = (tcData.plan?.toLowerCase() || 'standard') as PlanType;
+      const features = planFeatures[selectedPlan] || planFeatures.standard;
 
       // 2. Update Hotel
       await database.safeSet(doc(db, 'hotels', hotel.id), {
@@ -136,6 +136,8 @@ export function SubscriptionExpiredPage() {
         plan: selectedPlan,
         modulesEnabled: features.modules,
         limits: features.limits,
+        roomLimit: features.limits.rooms,
+        staffLimit: features.limits.staff,
         trackingCode: trackingCode.trim()
       }, {
         hotelId: hotel.id,

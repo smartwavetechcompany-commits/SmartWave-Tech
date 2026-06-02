@@ -85,21 +85,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 1. Auth State Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      // Force loading state first when transition happens to prevent stale profile flash
+      setLoading(true);
+      
       if (firebaseUser) {
-        // Reset state for new user session
-        setHasProfileError(false);
-        setHasHotelError(false);
-        setLoading(true);
-      }
-      
-      setUser(firebaseUser);
-      
-      if (!firebaseUser) {
+        // Clear old state & errors to prevent stale flashes
         setProfile(null);
         setHotel(null);
-        setLoading(false);
         setHasProfileError(false);
         setHasHotelError(false);
+        
+        // Re-validate session
+        firebaseUser.reload()
+          .then(() => {
+            const freshUser = auth.currentUser;
+            setUser(freshUser);
+          })
+          .catch((err) => {
+            console.error("Session re-validation error:", err);
+            setUser(firebaseUser);
+          });
+      } else {
+        // Clear all state on Sign Out
+        setUser(null);
+        setProfile(null);
+        setHotel(null);
+        setHasProfileError(false);
+        setHasHotelError(false);
+        setLoading(false);
       }
     });
     
@@ -108,10 +121,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 2. Profile Fetcher (Real-time)
   useEffect(() => {
-    if (!user || hasProfileError) return;
+    if (!user) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+    if (hasProfileError) return;
 
-    const profileRef = doc(db, 'users', user.uid);
+    const currentUid = user.uid;
+    const profileRef = doc(db, 'users', currentUid);
     const unsubscribe = onSnapshot(profileRef, async (snap) => {
+      // Guard against race conditions if user has changed while the snapshot was being fetched
+      if (auth.currentUser?.uid !== currentUid) return;
+
       if (snap.exists()) {
         const data = snap.data() as UserProfile;
         setProfile(data);
@@ -125,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           displayName: user.displayName || 'System Owner',
           createdAt: new Date().toISOString(),
           status: 'active',
-          uid: user.uid
+          uid: currentUid
         };
         await database.safeSet(profileRef, bootstrapProfile, {
           hotelId: 'system',
@@ -133,23 +155,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           action: 'BOOTSTRAP_PROFILE',
           details: `Bootstrapped superAdmin profile for ${user.email}`
         });
-        setProfile(bootstrapProfile);
-        setLoading(false);
+        if (auth.currentUser?.uid === currentUid) {
+          setProfile(bootstrapProfile);
+          setLoading(false);
+        }
       } else {
         // Look for temporary/unlinked profile for this user's email
         if (user.email) {
           try {
             const userQuery = query(collection(db, 'users'), where('email', '==', user.email.toLowerCase()));
             const querySnap = await getDocs(userQuery);
-            if (!querySnap.empty) {
+            if (!querySnap.empty && auth.currentUser?.uid === currentUid) {
               const tempDoc = querySnap.docs[0];
               const tempData = tempDoc.data() as UserProfile;
               
-              if (tempDoc.id !== user.uid) {
-                console.log(`Auto-healing and migrating profile for ${user.email} from ${tempDoc.id} to auth uid ${user.uid}`);
+              if (tempDoc.id !== currentUid) {
+                console.log(`Auto-healing and migrating profile for ${user.email} from ${tempDoc.id} to auth uid ${currentUid}`);
                 const migratedProfile: UserProfile = {
                   ...tempData,
-                  uid: user.uid,
+                  uid: currentUid,
                   initialPassword: null, // Clear initialPassword so they don't trigger staff-activation again
                   status: 'active',
                   updatedAt: new Date().toISOString()
@@ -159,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   hotelId: tempData.hotelId || 'system',
                   module: 'Auth',
                   action: 'MIGRATE_RECREATED_PROFILE',
-                  details: `Migrated recreated staff profile for ${user.email} from temp ID ${tempDoc.id} to permanent UID ${user.uid}`
+                  details: `Migrated recreated staff profile for ${user.email} from temp ID ${tempDoc.id} to permanent UID ${currentUid}`
                 });
                 
                 await database.safeDelete(doc(db, 'users', tempDoc.id), {
@@ -169,8 +193,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   details: `Deleted old temporary recreated profile ID ${tempDoc.id} for ${user.email}`
                 });
                 
-                setProfile(migratedProfile);
-                setLoading(false);
+                if (auth.currentUser?.uid === currentUid) {
+                  setProfile(migratedProfile);
+                  setLoading(false);
+                }
                 return;
               }
             }
@@ -178,14 +204,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Error auto-healing/migrating profile:", migrateErr);
           }
         }
-        setProfile(null);
-        setLoading(false);
+        if (auth.currentUser?.uid === currentUid) {
+          setProfile(null);
+          setLoading(false);
+        }
       }
     }, (err: any) => {
+      if (auth.currentUser?.uid !== currentUid) return;
       if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
         setIsOffline(true);
       }
-      handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+      handleFirestoreError(err, OperationType.GET, `users/${currentUid}`);
       if (err.code === 'permission-denied') {
         console.warn("Profile access restricted.");
         setHasProfileError(true);
@@ -200,6 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let hotelId = profile?.hotelId;
     const role = profile?.role;
+    const currentProfileUid = profile?.uid;
 
     // Super Admin can override hotelId with selectedHotelId
     if (role === 'superAdmin' && selectedHotelId) {
@@ -224,6 +254,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const hotelRef = doc(db, 'hotels', hotelId);
     const unsub = onSnapshot(hotelRef, (snap) => {
+      // Guard against profile changes during fetching
+      if (profile?.uid !== currentProfileUid) return;
+
       if (snap.exists()) {
         const data = snap.data() as Hotel;
         
@@ -247,6 +280,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setHotel(null);
       }
     }, (err: any) => {
+      if (profile?.uid !== currentProfileUid) return;
       if (err.code === 'permission-denied') {
         console.warn("Hotel access restricted.");
         setHasHotelError(true);

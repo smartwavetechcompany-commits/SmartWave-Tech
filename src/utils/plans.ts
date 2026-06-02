@@ -2,8 +2,8 @@ export const getDefaultModulesForPlan = (plan: string): string[] => {
   const p = plan?.toLowerCase() || 'standard';
   const core = ['dashboard', 'frontDesk', 'rooms', 'settings'];
   const standard = [...core, 'housekeeping', 'guests', 'reports'];
-  const premium = [...standard, 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'];
-  const enterprise = [...premium, 'corporate'];
+  const premium = [...standard, 'kitchen', 'inventory', 'maintenance', 'staff'];
+  const enterprise = [...premium, 'finance', 'corporate'];
   
   if (p === 'enterprise') return enterprise;
   if (p === 'premium') return premium;

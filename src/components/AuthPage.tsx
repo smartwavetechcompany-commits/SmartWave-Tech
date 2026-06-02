@@ -357,7 +357,7 @@ export function AuthPage() {
             limits: { rooms: 30, staff: 10 }
           },
           premium: {
-            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'],
+            modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'staff'],
             limits: { rooms: 150, staff: 50 }
           },
           enterprise: {

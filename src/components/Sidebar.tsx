@@ -23,7 +23,7 @@ import {
   X
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { hasPermission } from '../utils/permissions';
+import { useModuleAccess } from './PermissionGuard';
 import { cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
 import { auth } from '../firebase';
@@ -35,6 +35,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { profile, hotel, isSubscriptionActive, systemSettings, setSelectedHotelId } = useAuth();
+  const { canAccessModule } = useModuleAccess();
   const location = useLocation();
 
   const menuItems = [
@@ -62,7 +63,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     if (!profile) return false;
     
     // 1. Check Role-based Capability
-    if (item.capability && !hasPermission(profile, item.capability as any)) {
+    if (item.capability && !canAccessModule(item.capability as any)) {
       return false;
     }
 

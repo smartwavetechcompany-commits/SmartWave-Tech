@@ -43,17 +43,6 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'edit_hotel_settings', 'view_activity_logs', 'manage_roles', 'access_front_desk', 'manage_kitchen',
     'manage_inventory', 'manage_maintenance', 'manage_corporate'
   ],
-  'staff': [
-     'manage_rooms', 'process_payments', 'nightly_audit', 'access_front_desk'
-  ],
-  'receptionist': [
-    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports', 'edit_reservation', 'edit_guest_profiles',
-    'access_front_desk', 'manage_corporate'
-  ],
-  'frontDesk': [
-    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports', 'edit_reservation', 'edit_guest_profiles',
-    'access_front_desk', 'manage_corporate'
-  ],
   'manager': [
     'view_reports', 'export_reports', 'void_transaction', 'delete_reservation', 'edit_reservation', 
     'process_refunds', 'manage_staff', 'manage_rooms', 'create_room_blocks', 'remove_room_blocks', 
@@ -61,18 +50,13 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'edit_hotel_settings', 'view_activity_logs', 'manage_roles', 'access_front_desk', 'manage_kitchen',
     'manage_inventory', 'manage_maintenance', 'manage_corporate'
   ],
-  'accountant': [
-    'view_reports', 'process_payments', 'view_financial_records', 'export_reports', 'manage_corporate'
-  ],
-  'housekeeper': [
-    'manage_rooms'
-  ],
-  'maintenance': [
-    'manage_rooms', 'create_room_blocks', 'remove_room_blocks', 'manage_maintenance'
-  ],
-  'kitchen': [
-    'process_payments', 'manage_kitchen'
-  ],
+  'staff': [],
+  'receptionist': [],
+  'frontDesk': [],
+  'accountant': [],
+  'housekeeper': [],
+  'maintenance': [],
+  'kitchen': [],
   'guest': [],
   'corporate': []
 };

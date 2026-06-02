@@ -725,7 +725,7 @@ export function SuperAdmin() {
           limits: { rooms: 30, staff: 10 }
         },
         premium: {
-          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'finance', 'staff'],
+          modules: ['dashboard', 'rooms', 'frontDesk', 'housekeeping', 'guests', 'settings', 'reports', 'kitchen', 'inventory', 'maintenance', 'staff'],
           limits: { rooms: 150, staff: 50 }
         },
         enterprise: {
@@ -1321,22 +1321,60 @@ export function SuperAdmin() {
             </div>
 
             <div className="grid grid-cols-1 gap-3">
-              {(['standard', 'premium', 'enterprise'] as PlanType[]).map(plan => (
-                <button 
-                  key={plan}
-                  onClick={() => changeHotelPlan(changingPlanHotel, plan)}
-                  disabled={changingPlanHotel.plan === plan}
-                  className={cn(
-                    "w-full py-3 rounded-lg font-medium transition-all active:scale-95 flex items-center justify-between px-6",
-                    changingPlanHotel.plan === plan 
-                      ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 cursor-default"
-                      : "bg-zinc-800 hover:bg-zinc-700 text-zinc-50"
-                  )}
-                >
-                  <span className="capitalize">{plan}</span>
-                  {changingPlanHotel.plan === plan && <CheckCircle2 size={16} />}
-                </button>
-              ))}
+              {(['standard', 'premium', 'enterprise'] as PlanType[]).map(plan => {
+                const details = {
+                  standard: {
+                    desc: "Core operations for small-scale hotels",
+                    limits: "30 Rooms • 10 Staff",
+                    features: "Front desk, Housekeeping, Guests, basic Reports"
+                  },
+                  premium: {
+                    desc: "Comprehensive operational support & departments",
+                    limits: "150 Rooms • 50 Staff",
+                    features: "Standard + Kitchen, Inventory, Maintenance, Staff management"
+                  },
+                  enterprise: {
+                    desc: "Full-scale corporate networks & financial auditing",
+                    limits: "5000 Rooms • 1000 Staff",
+                    features: "Premium + Corporate contract rates & Financial ledger"
+                  }
+                }[plan];
+
+                return (
+                  <button 
+                    key={plan}
+                    onClick={() => changeHotelPlan(changingPlanHotel, plan)}
+                    disabled={changingPlanHotel.plan === plan}
+                    className={cn(
+                      "w-full p-4 rounded-xl font-medium transition-all text-left border relative",
+                      changingPlanHotel.plan === plan 
+                        ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 cursor-default"
+                        : "bg-zinc-800/50 hover:bg-zinc-800 border-zinc-800 text-zinc-200 hover:border-zinc-700"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="capitalize font-bold text-base tracking-tight">{plan}</span>
+                      {changingPlanHotel.plan === plan ? (
+                        <div className="flex items-center gap-1.5 text-xs font-semibold bg-emerald-500/20 px-2 py-0.5 rounded-full text-emerald-400">
+                          <CheckCircle2 size={12} />
+                          Active
+                        </div>
+                      ) : (
+                        <span className="text-[10px] font-bold text-zinc-400 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                          {plan === 'standard' ? 'NGN 50,000/mo' : plan === 'premium' ? 'NGN 100,000/mo' : 'NGN 250,000/mo'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-400 font-normal leading-relaxed mb-1.5">{details.desc}</p>
+                    <div className="text-[10px] font-mono font-medium text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded inline-block mb-1.5">
+                      {details.limits}
+                    </div>
+                    <div className="text-[9px] text-zinc-500 font-normal leading-tight">
+                      Includes: <span className="text-zinc-400">{details.features}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
             <button 
               onClick={() => setChangingPlanHotel(null)}
