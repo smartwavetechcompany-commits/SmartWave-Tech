@@ -176,7 +176,7 @@ function AppContent() {
               </PermissionGuard>
             } />
             <Route path="/finance" element={
-              <PermissionGuard permission="process_payments" showError>
+              <PermissionGuard permission="view_financial_records" showError>
                 <Finance />
               </PermissionGuard>
             } />
