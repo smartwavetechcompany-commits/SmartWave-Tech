@@ -68,11 +68,7 @@ service cloud.firestore {
 
     function isStaffOf(hotelId) {
       let data = getUserData();
-      return data != null && data.hotelId == hotelId && (
-        data.role == "hotelAdmin" || 
-        data.role == "staff" ||
-        (data.roles != null && data.roles.hasAny(['frontDesk', 'housekeeping', 'kitchen', 'finance', 'reports', 'staff', 'settings', 'maintenance', 'inventory', 'corporate', 'manager', 'receptionist', 'housekeeper', 'accountant', 'admin', 'dashboard', 'rooms', 'guests', 'view_activity_logs', 'edit_reservation', 'delete_reservation']))
-      );
+      return data != null && data.hotelId == hotelId && data.role != "guest" && data.role != "corporate";
     }
 
     function subscriptionActive(hotelId) {
