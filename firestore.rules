@@ -140,8 +140,8 @@ service cloud.firestore {
                     );
 
       allow delete: if isAuthenticated() && (
-                      (isAdmin() && resource != null && resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.auth.uid != userId) ||
-                      (resource != null && resource.data.email.lower() == request.auth.token.email.lower())
+                      isSuperAdmin() ||
+                      (isHotelAdmin() && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId)
                     );
     }
 
@@ -162,12 +162,12 @@ service cloud.firestore {
       match /corporate_accounts/{accountId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId);
         allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId) && subscriptionActive(hotelId));
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
 
         match /rates/{rateId} {
           allow read: if isSuperAdmin() || isStaffOf(hotelId);
           allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId) && subscriptionActive(hotelId));
-          allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
+          allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
         }
       }
 
@@ -182,10 +182,7 @@ service cloud.firestore {
           )
         );
         allow delete: if isSuperAdmin() || (
-          sameHotel(hotelId) && (
-            isHotelAdmin() || 
-            (getUserData().roles != null && getUserData().roles.hasAny(['manager', 'admin', 'delete_reservation']))
-          )
+          sameHotel(hotelId) && isHotelAdmin()
         );
       }
     }

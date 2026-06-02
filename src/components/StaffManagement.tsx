@@ -165,6 +165,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   const removeStaff = async (staffUid: string, staffEmail: string) => {
     if (!hotelId) return;
+    if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Only administrators can remove staff members');
+      return;
+    }
 
     try {
       await database.safeDelete(doc(db, 'users', staffUid), {
@@ -657,7 +661,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                           <Lock size={18} />
                         </button>
                       )}
-                      {member.role !== 'hotelAdmin' && member.uid !== profile?.uid && (
+                      {member.role !== 'hotelAdmin' && member.uid !== profile?.uid && (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                         <button 
                           onClick={() => setShowConfirmRemove({ uid: member.uid, email: member.email })}
                           className="p-2 text-zinc-500 hover:text-red-500 transition-colors"

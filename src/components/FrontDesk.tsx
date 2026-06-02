@@ -787,8 +787,9 @@ export function FrontDesk() {
       return;
     }
 
-    if (!hasPermission(profile, 'delete_reservation')) {
-      toast.error('You do not have permission to delete reservations');
+    const isAdminUser = profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+    if (!isAdminUser) {
+      toast.error('Only administrators can delete reservations');
       return;
     }
 
@@ -3435,7 +3436,7 @@ export function FrontDesk() {
                         View Folio
                       </button>
 
-                      {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin' || hasPermission(profile, 'edit_reservation'))) && (
+                      {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
                         <button 
                           onClick={() => setShowConfirmAction({ res, action: 'delete' })}
                           className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"

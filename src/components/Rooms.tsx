@@ -341,6 +341,10 @@ export function Rooms() {
 
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
+    if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Only administrators can delete room types');
+      return;
+    }
     const type = roomTypes.find(t => t.id === id);
     try {
       await database.safeDelete(doc(db, 'hotels', hotel.id, 'room_types', id), {
@@ -357,6 +361,10 @@ export function Rooms() {
 
   const deleteRoom = async (id: string) => {
     if (!hotel?.id) return;
+    if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Only administrators can delete rooms');
+      return;
+    }
     const room = rooms.find(r => r.id === id);
     try {
       await database.safeDelete(doc(db, 'hotels', hotel.id, 'rooms', id), {
@@ -1557,26 +1565,28 @@ export function Rooms() {
                             >
                               <Edit2 size={18} />
                             </button>
-                            <button 
-                              onClick={async () => {
-                                if (!hotel?.id || !confirm('Permanently delete this rate rule?')) return;
-                                try {
-                                  await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
-                                    hotelId: hotel.id,
-                                    module: 'Rooms',
-                                    action: 'DELETE_RATE_RULE',
-                                    details: `Deleted rate rule for room type ${type?.name || c.roomTypeId}`
-                                  });
-                                  toast.success('Rate rule deleted');
-                                } catch (err) {
-                                  handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
-                                }
-                              }}
-                              className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                              title="Delete Rule"
-                            >
-                              <Trash2 size={18} />
-                            </button>
+                            {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              <button 
+                                onClick={async () => {
+                                  if (!hotel?.id || !confirm('Permanently delete this rate rule?')) return;
+                                  try {
+                                    await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
+                                      hotelId: hotel.id,
+                                      module: 'Rooms',
+                                      action: 'DELETE_RATE_RULE',
+                                      details: `Deleted rate rule for room type ${type?.name || c.roomTypeId}`
+                                    });
+                                    toast.success('Rate rule deleted');
+                                  } catch (err) {
+                                    handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
+                                  }
+                                }}
+                                className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                title="Delete Rule"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
@@ -1674,24 +1684,26 @@ export function Rooms() {
                           Applies to: {r.roomTypeId ? roomTypes.find(t => t.id === r.roomTypeId)?.name : 'All Rooms'}
                         </div>
                       </div>
-                      <button 
-                        onClick={async () => {
-                          if (!hotel?.id) return;
-                          try {
-                            await database.safeDelete(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id), {
-                              hotelId: hotel.id,
-                              module: 'Rooms',
-                              action: 'DELETE_CONSUMPTION_RULE',
-                              details: `Deleted consumption rule for item ${inventoryItems.find(i => i.id === r.itemId)?.name || r.itemId}`
-                            });
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory_consumption_rules/${r.id}`);
-                          }
-                        }}
-                        className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                        <button 
+                          onClick={async () => {
+                            if (!hotel?.id) return;
+                            try {
+                              await database.safeDelete(doc(db, 'hotels', hotel.id, 'inventory_consumption_rules', r.id), {
+                                hotelId: hotel.id,
+                                module: 'Rooms',
+                                action: 'DELETE_CONSUMPTION_RULE',
+                                details: `Deleted consumption rule for item ${inventoryItems.find(i => i.id === r.itemId)?.name || r.itemId}`
+                              });
+                            } catch (err) {
+                              handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/inventory_consumption_rules/${r.id}`);
+                            }
+                          }}
+                          className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1875,12 +1887,14 @@ export function Rooms() {
                         >
                           <Edit2 size={18} />
                         </button>
-                        <button 
-                          onClick={() => setShowConfirmDelete(type.id)}
-                          className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                        {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          <button 
+                            onClick={() => setShowConfirmDelete(type.id)}
+                            className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2139,7 +2153,9 @@ export function Rooms() {
                       >
                         <XCircle size={16} />
                       </button>
-                      <button onClick={() => setShowConfirmDeleteRoom(room.id)} className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded" title="Delete Room"><Trash2 size={16} /></button>
+                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                        <button onClick={() => setShowConfirmDeleteRoom(room.id)} className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded" title="Delete Room"><Trash2 size={16} /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
