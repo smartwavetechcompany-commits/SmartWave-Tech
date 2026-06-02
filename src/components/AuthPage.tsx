@@ -140,8 +140,51 @@ export function AuthPage() {
       if (isLogin) {
         console.log("Attempting login for:", formData.email);
         try {
-          await signInWithEmailAndPassword(auth, formData.email, formData.password);
+          const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+          const loggedInUser = userCredential.user;
           console.log("Login successful in AuthPage");
+
+          // Auto-healing migration during successful login:
+          // Check if a profile document exists for this user's UID
+          const profileDocRef = doc(db, 'users', loggedInUser.uid);
+          const profileSnap = await getDoc(profileDocRef);
+
+          if (!profileSnap.exists() && loggedInUser.email) {
+            console.log("No profile found for logged-in user UID, searching for temporary/unlinked profile by email:", loggedInUser.email);
+            const staffQuery = query(
+              collection(db, 'users'),
+              where('email', '==', loggedInUser.email.toLowerCase())
+            );
+            const staffSnap = await getDocs(staffQuery);
+            if (!staffSnap.empty) {
+              const staffDoc = staffSnap.docs[0];
+              const staffData = staffDoc.data();
+              if (staffDoc.id !== loggedInUser.uid) {
+                console.log(`Migrating profile from ${staffDoc.id} to ${loggedInUser.uid}`);
+                await database.safeSet(profileDocRef, {
+                  ...staffData,
+                  uid: loggedInUser.uid,
+                  initialPassword: null,
+                  status: 'active',
+                  updatedAt: new Date().toISOString()
+                }, {
+                  hotelId: staffData.hotelId || 'SYSTEM',
+                  module: 'Auth',
+                  action: 'STAFF_ACTIVATION_MIGRATION',
+                  details: `Migrated staff profile during successful login for ${loggedInUser.email}`
+                });
+
+                // Delete temporary staff profile
+                await database.safeDelete(doc(db, 'users', staffDoc.id), {
+                  hotelId: staffData.hotelId || 'SYSTEM',
+                  module: 'Auth',
+                  action: 'STAFF_TEMP_DELETE',
+                  details: `Removed temporary staff document for ${loggedInUser.email}`
+                });
+                console.log(`Migration completed successfully in AuthPage!`);
+              }
+            }
+          }
         } catch (authErr: any) {
           // If login fails, check if it's a staff member with an initial password
           if (authErr.code === 'auth/invalid-credential' || authErr.code === 'auth/user-not-found' || authErr.code === 'auth/wrong-password') {

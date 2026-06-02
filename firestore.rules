@@ -112,23 +112,18 @@ service cloud.firestore {
     //////////////////////////////
 
     match /users/{userId} {
-      // Primary access: Self or SuperAdmin
-      allow read: if (isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || (resource != null && resource.data.email.lower() == request.auth.token.email.lower()))) ||
-                    (request.auth == null && resource.data.initialPassword != null);
-      
-      allow list: if isAuthenticated() && (
-                    isSuperAdmin() ||
-                    isAdmin() ||
-                    (resource != null && resource.data.email.lower() == request.auth.token.email.lower())
-                  );
+      // Primary access: Self, SuperAdmin, anyone in the same hotel, or by email matching the authenticated token
+      allow read, list: if (isAuthenticated() && (
+                            request.auth.uid == userId || 
+                            isSuperAdmin() || 
+                            (resource != null && resource.data.hotelId == getHotelId()) ||
+                            (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
+                          )) ||
+                          (request.auth == null && resource != null && resource.data.initialPassword != null);
       
       // SuperAdmin has full control
       allow write: if isSuperAdmin();
 
-      // Hotel Admin/Manager access for their own hotel staff
-      allow read: if isAuthenticated() && isAdmin() && 
-                    resource != null && resource.data.hotelId == getHotelId();
-      
       allow create: if isAuthenticated() && (
                       (request.auth.uid == userId && request.resource.data.role != "superAdmin") ||
                       (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin")
