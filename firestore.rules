@@ -113,7 +113,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       // Primary access: Self or SuperAdmin
-      allow read: if (isAuthenticated() && (request.auth.uid == userId || isSuperAdmin())) ||
+      allow read: if (isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || (resource != null && resource.data.email.lower() == request.auth.token.email.lower()))) ||
                     (request.auth == null && resource.data.initialPassword != null);
       
       // SuperAdmin has full control

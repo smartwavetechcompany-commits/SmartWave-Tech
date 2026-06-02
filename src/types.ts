@@ -38,6 +38,8 @@ export interface UserProfile {
   subscriptionExpiry?: string;
   hasCompletedOnboarding?: boolean;
   department?: string; // Added for department-based tracking and navigation
+  initialPassword?: string | null;
+  updatedAt?: string;
 }
 
 export interface HotelBranding {

@@ -157,8 +157,16 @@ export function AuthPage() {
               const staffData = staffDoc.data();
               
               // Create the Auth user on the fly
-              const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-              const newUser = userCredential.user;
+              let newUser;
+              try {
+                const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+                newUser = userCredential.user;
+              } catch (createErr: any) {
+                if (createErr.code === 'auth/email-already-in-use') {
+                  throw new Error('This email address is already registered in our system from a previous assignment. To login, please sign in with your previous password, or click "Forgot Password" to reset your password. Once you log in, your new staff permissions will be automatically linked!');
+                }
+                throw createErr;
+              }
               
               // Update the user document: link to real UID and remove initialPassword
               await database.safeSet(doc(db, 'users', newUser.uid), {

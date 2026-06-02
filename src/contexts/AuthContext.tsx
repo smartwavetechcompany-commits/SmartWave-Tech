@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { UserProfile, Hotel, SystemSettings, OperationType, HotelSettings } from '../types';
@@ -136,6 +136,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(bootstrapProfile);
         setLoading(false);
       } else {
+        // Look for temporary/unlinked profile for this user's email
+        if (user.email) {
+          try {
+            const userQuery = query(collection(db, 'users'), where('email', '==', user.email.toLowerCase()));
+            const querySnap = await getDocs(userQuery);
+            if (!querySnap.empty) {
+              const tempDoc = querySnap.docs[0];
+              const tempData = tempDoc.data() as UserProfile;
+              
+              if (tempDoc.id !== user.uid) {
+                console.log(`Auto-healing and migrating profile for ${user.email} from ${tempDoc.id} to auth uid ${user.uid}`);
+                const migratedProfile: UserProfile = {
+                  ...tempData,
+                  uid: user.uid,
+                  initialPassword: null, // Clear initialPassword so they don't trigger staff-activation again
+                  status: 'active',
+                  updatedAt: new Date().toISOString()
+                };
+                
+                await database.safeSet(profileRef, migratedProfile, {
+                  hotelId: tempData.hotelId || 'system',
+                  module: 'Auth',
+                  action: 'MIGRATE_RECREATED_PROFILE',
+                  details: `Migrated recreated staff profile for ${user.email} from temp ID ${tempDoc.id} to permanent UID ${user.uid}`
+                });
+                
+                await database.safeDelete(doc(db, 'users', tempDoc.id), {
+                  hotelId: tempData.hotelId || 'system',
+                  module: 'Auth',
+                  action: 'DELETE_TEMP_RECREATED_PROFILE',
+                  details: `Deleted old temporary recreated profile ID ${tempDoc.id} for ${user.email}`
+                });
+                
+                setProfile(migratedProfile);
+                setLoading(false);
+                return;
+              }
+            }
+          } catch (migrateErr) {
+            console.error("Error auto-healing/migrating profile:", migrateErr);
+          }
+        }
         setProfile(null);
         setLoading(false);
       }
