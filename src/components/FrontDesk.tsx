@@ -37,7 +37,9 @@ import {
   X,
   Filter,
   TrendingUp,
-  ArrowDownRight
+  ArrowDownRight,
+  Users,
+  Sparkles
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
@@ -2168,9 +2170,17 @@ export function FrontDesk() {
                   }}
                 >
                   <option value="">New Guest</option>
-                  {guests.map(g => (
-                    <option key={g.id} value={g.id}>{g.name} ({g.phone}) - Bal: {formatCurrency(g.ledgerBalance || 0, currency, exchangeRate)}</option>
-                  ))}
+                  {guests.map(g => {
+                    const guestRes = reservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
+                    const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
+                    const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
+                    const staysCount = completedCount + activeCount;
+                    return (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({g.phone || 'No phone'}) — {staysCount} {staysCount === 1 ? 'visit' : 'visits'} — Bal: {formatCurrency(g.ledgerBalance || 0, currency, exchangeRate)}
+                      </option>
+                    );
+                  })}
                 </select>
                 {newBooking.guestId && guests.find(g => g.id === newBooking.guestId)?.ledgerBalance !== 0 && (
                   <div className={cn(
@@ -2213,6 +2223,72 @@ export function FrontDesk() {
                   />
                 </div>
               </div>
+
+              {/* Returning Guest Auto-Detection Banner */}
+              {(() => {
+                if (newBooking.guestId) return null;
+                const normalizedEmail = newBooking.guestEmail?.trim().toLowerCase();
+                const normalizedPhone = newBooking.guestPhone?.trim();
+                const normalizedName = newBooking.guestName?.trim().toLowerCase();
+
+                if (!normalizedEmail && !normalizedPhone && !normalizedName) return null;
+
+                const match = guests.find(g => {
+                  if (normalizedEmail && g.email && g.email.trim().toLowerCase() === normalizedEmail) return true;
+                  if (normalizedPhone && g.phone && g.phone.trim() === normalizedPhone) return true;
+                  // Look for name match but only if they have typed at least 3 characters
+                  if (normalizedName && normalizedName.length >= 3 && g.name && g.name.trim().toLowerCase() === normalizedName) return true;
+                  return false;
+                });
+
+                if (!match) return null;
+
+                const guestRes = reservations.filter(r => r.guestId === match.id || (match.email && r.guestEmail === match.email));
+                const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
+                const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
+                const staysCount = completedCount + activeCount;
+
+                return (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3.5 bg-amber-500/10 border border-amber-500/20 text-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div className="p-1.5 bg-amber-500/20 rounded-lg text-amber-400 mt-0.5 sm:mt-0">
+                        <Users size={16} />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-amber-300">Returning Guest Detected ({staysCount} previous {staysCount === 1 ? 'visit' : 'visits'})</p>
+                        <p className="text-zinc-400 mt-0.5">
+                          We found an existing profile for <span className="text-white font-medium">{match.name}</span> ({match.email || match.phone || 'No contact'}). Match level is high.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewBooking({
+                          ...newBooking,
+                          guestId: match.id,
+                          guestName: match.name,
+                          guestEmail: match.email || '',
+                          guestPhone: match.phone || '',
+                          idType: match.idType || '',
+                          idNumber: match.idNumber || '',
+                          address: match.address || '',
+                          corporateId: match.corporateId || newBooking.corporateId,
+                          guestType: match.corporateId ? 'corporate' : newBooking.guestType
+                        });
+                        toast.success(`Matched to returning guest: ${match.name}`);
+                      }}
+                      className="shrink-0 bg-amber-500 hover:bg-amber-600 active:scale-95 text-black px-3.5 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wide transition-all self-end sm:self-center cursor-pointer"
+                    >
+                      Use Profile
+                    </button>
+                  </motion.div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -3156,7 +3232,24 @@ export function FrontDesk() {
                         {res.corporateId ? <Building2 size={14} /> : <User size={14} />}
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
+                        <div className="text-sm font-medium text-zinc-50 flex items-center gap-1.5 flex-wrap">
+                          {res.guestName}
+                          {(() => {
+                            const guestStaysList = reservations.filter(r => r.guestId === res.guestId || (res.guestEmail && r.guestEmail === res.guestEmail));
+                            const completedCount = guestStaysList.filter(r => r.status === 'checked_out').length;
+                            const activeCount = guestStaysList.filter(r => r.status === 'checked_in').length;
+                            const staysCount = completedCount + activeCount;
+                            if (staysCount > 1) {
+                              return (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-md text-[9px] font-bold tracking-wide" title={`${staysCount} total registered stays`}>
+                                  <Sparkles size={9} />
+                                  Returning ({staysCount})
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
                         {res.corporateId && (
                           <div className="text-[10px] text-emerald-500 font-bold flex flex-col gap-0.5">
                             <div className="flex items-center gap-1">
