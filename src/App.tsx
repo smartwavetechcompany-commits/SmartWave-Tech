@@ -130,16 +130,56 @@ function AppContent() {
           <AnimatePresence mode="wait">
           <Routes location={location} key={location.pathname}>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/rooms" element={<Rooms />} />
-            <Route path="/front-desk" element={<FrontDesk />} />
-            <Route path="/housekeeping" element={<Housekeeping />} />
-            <Route path="/f-and-b" element={<FandB />} />
-            <Route path="/inventory" element={<Inventory />} />
-            <Route path="/maintenance" element={<Maintenance />} />
-            <Route path="/guests" element={<GuestManagement />} />
-            <Route path="/corporate" element={<CorporateManagement />} />
-            <Route path="/operations" element={<OperationsDashboard />} />
-            <Route path="/finance" element={<Finance />} />
+            <Route path="/rooms" element={
+              <PermissionGuard permission="manage_rooms" showError>
+                <Rooms />
+              </PermissionGuard>
+            } />
+            <Route path="/front-desk" element={
+              <PermissionGuard permission="access_front_desk" showError>
+                <FrontDesk />
+              </PermissionGuard>
+            } />
+            <Route path="/housekeeping" element={
+              <PermissionGuard permission="manage_rooms" showError>
+                <Housekeeping />
+              </PermissionGuard>
+            } />
+            <Route path="/f-and-b" element={
+              <PermissionGuard permission="manage_kitchen" showError>
+                <FandB />
+              </PermissionGuard>
+            } />
+            <Route path="/inventory" element={
+              <PermissionGuard permission="manage_inventory" showError>
+                <Inventory />
+              </PermissionGuard>
+            } />
+            <Route path="/maintenance" element={
+              <PermissionGuard permission="manage_maintenance" showError>
+                <Maintenance />
+              </PermissionGuard>
+            } />
+            <Route path="/guests" element={
+              <PermissionGuard permission="edit_guest_profiles" showError>
+                <GuestManagement />
+              </PermissionGuard>
+            } />
+            <Route path="/corporate" element={
+              <PermissionGuard permission="manage_corporate" showError>
+                <CorporateManagement />
+              </PermissionGuard>
+            } />
+            <Route path="/operations" element={
+              <PermissionGuard permission="access_front_desk" showError>
+                <OperationsDashboard />
+              </PermissionGuard>
+            } />
+            <Route path="/finance" element={
+              <PermissionGuard permission="process_payments" showError>
+                <Finance />
+              </PermissionGuard>
+            } />
             <Route path="/reports" element={
               <PermissionGuard permission="view_reports" showError>
                 <Reports />

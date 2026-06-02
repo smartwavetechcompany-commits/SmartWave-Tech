@@ -20,7 +20,12 @@ export type Permission =
   | 'edit_hotel_settings'
   | 'access_super_admin'
   | 'view_activity_logs'
-  | 'manage_roles';
+  | 'manage_roles'
+  | 'access_front_desk'
+  | 'manage_kitchen'
+  | 'manage_inventory'
+  | 'manage_maintenance'
+  | 'manage_corporate';
 
 const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   'superAdmin': [
@@ -28,40 +33,45 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'process_refunds', 'manage_staff', 'manage_rooms', 'create_room_blocks', 'remove_room_blocks', 
     'edit_guest_profiles', 'process_payments', 'view_financial_records', 'nightly_audit', 
     'bypass_inventory_limits', 'edit_hotel_settings', 'access_super_admin', 'view_activity_logs', 
-    'manage_roles'
+    'manage_roles', 'access_front_desk', 'manage_kitchen', 'manage_inventory', 'manage_maintenance',
+    'manage_corporate'
   ],
   'hotelAdmin': [
     'view_reports', 'export_reports', 'void_transaction', 'delete_reservation', 'edit_reservation', 
     'process_refunds', 'manage_staff', 'manage_rooms', 'create_room_blocks', 'remove_room_blocks', 
     'edit_guest_profiles', 'process_payments', 'view_financial_records', 'nightly_audit', 
-    'edit_hotel_settings', 'view_activity_logs', 'manage_roles'
+    'edit_hotel_settings', 'view_activity_logs', 'manage_roles', 'access_front_desk', 'manage_kitchen',
+    'manage_inventory', 'manage_maintenance', 'manage_corporate'
   ],
   'staff': [
-     'manage_rooms', 'process_payments', 'nightly_audit'
+     'manage_rooms', 'process_payments', 'nightly_audit', 'access_front_desk'
   ],
   'receptionist': [
-    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports', 'edit_reservation', 'edit_guest_profiles'
+    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports', 'edit_reservation', 'edit_guest_profiles',
+    'access_front_desk', 'manage_corporate'
   ],
   'frontDesk': [
-    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports', 'edit_reservation', 'edit_guest_profiles'
+    'manage_rooms', 'process_payments', 'nightly_audit', 'view_reports', 'edit_reservation', 'edit_guest_profiles',
+    'access_front_desk', 'manage_corporate'
   ],
   'manager': [
     'view_reports', 'export_reports', 'void_transaction', 'delete_reservation', 'edit_reservation', 
     'process_refunds', 'manage_staff', 'manage_rooms', 'create_room_blocks', 'remove_room_blocks', 
     'edit_guest_profiles', 'process_payments', 'view_financial_records', 'nightly_audit', 
-    'edit_hotel_settings', 'view_activity_logs', 'manage_roles'
+    'edit_hotel_settings', 'view_activity_logs', 'manage_roles', 'access_front_desk', 'manage_kitchen',
+    'manage_inventory', 'manage_maintenance', 'manage_corporate'
   ],
   'accountant': [
-    'view_reports', 'process_payments', 'view_financial_records', 'export_reports'
+    'view_reports', 'process_payments', 'view_financial_records', 'export_reports', 'manage_corporate'
   ],
   'housekeeper': [
     'manage_rooms'
   ],
   'maintenance': [
-    'manage_rooms', 'create_room_blocks', 'remove_room_blocks'
+    'manage_rooms', 'create_room_blocks', 'remove_room_blocks', 'manage_maintenance'
   ],
   'kitchen': [
-    'process_payments'
+    'process_payments', 'manage_kitchen'
   ],
   'guest': [],
   'corporate': []

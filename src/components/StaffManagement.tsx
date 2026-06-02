@@ -38,6 +38,11 @@ const AVAILABLE_ROLES = [
   { id: 'manage_roles', label: 'Roles/Permissions' },
   { id: 'edit_hotel_settings', label: 'Hotel Settings' },
   { id: 'nightly_audit', label: 'Nightly Audit' },
+  { id: 'access_front_desk', label: 'Front Desk Access' },
+  { id: 'manage_kitchen', label: 'Kitchen & F&B' },
+  { id: 'manage_inventory', label: 'Inventory Access' },
+  { id: 'manage_maintenance', label: 'Maintenance Access' },
+  { id: 'manage_corporate', label: 'Corporate Accounts' },
 ];
 
 const BASE_ROLES = [
@@ -150,7 +155,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       }
 
       setIsAddingStaff(false);
-      setNewStaff({ email: '', displayName: '', password: '', role: 'staff', roles: ['frontDesk'] });
+      setNewStaff({ email: '', displayName: '', password: '', role: 'frontDesk', roles: [] });
       toast.success('Staff member added successfully. They can now login with the password you provided.');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
