@@ -838,11 +838,15 @@ export function Settings() {
                   
                   <div className="flex items-center gap-3 text-xs text-zinc-400">
                     <Calendar size={14} />
-                    Expires on {hotel?.subscriptionExpiry ? (
+                    <span>Expires on {hotel?.subscriptionExpiry ? (
                       isValid(new Date(hotel.subscriptionExpiry)) 
-                        ? format(new Date(hotel.subscriptionExpiry), 'MMMM d, yyyy') 
+                        ? (() => {
+                            const d = new Date(hotel.subscriptionExpiry);
+                            const daysLeft = Math.ceil((d.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+                            return `${format(d, 'MMMM d, yyyy')} (${daysLeft > 0 ? `${daysLeft} days remaining` : 'Expired'})`;
+                          })()
                         : 'N/A'
-                    ) : 'N/A'}
+                    ) : 'N/A'}</span>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs text-zinc-400">
@@ -1448,8 +1452,20 @@ export function Settings() {
                   </div>
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase">Subscription Expiry</span>
-                    <p className="text-sm text-zinc-50">
-                      {hotel?.subscriptionExpiry ? format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy') : 'N/A'}
+                    <p className="text-sm text-zinc-50 flex items-center gap-2 flex-wrap">
+                      <span>{hotel?.subscriptionExpiry ? format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy') : 'N/A'}</span>
+                      {hotel?.subscriptionExpiry && (() => {
+                        const daysLeft = Math.ceil((new Date(hotel.subscriptionExpiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+                        return daysLeft > 0 ? (
+                          <span className="text-[9px] bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black tracking-wider uppercase">
+                            {daysLeft} days remaining
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-red-500/10 text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded font-black tracking-wider uppercase">
+                            Expired
+                          </span>
+                        );
+                      })()}
                     </p>
                   </div>
                 </div>

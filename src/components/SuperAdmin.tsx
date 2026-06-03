@@ -1549,9 +1549,18 @@ export function SuperAdmin() {
                               isNearExpiry ? "text-amber-400 font-bold" : 
                               "text-zinc-400"
                             )}>
-                              {safeFormat(hotel.subscriptionExpiry, 'MMM d, yyyy')}
-                              {isExpired && <span className="ml-2 text-[10px] uppercase tracking-tighter bg-red-500/10 px-1 rounded">(Expired)</span>}
-                              {isNearExpiry && <span className="ml-2 text-[10px] uppercase tracking-tighter bg-amber-500/10 px-1 rounded">(Expiring Soon)</span>}
+                              <div className="flex flex-col gap-0.5">
+                                <span>{safeFormat(hotel.subscriptionExpiry, 'MMM d, yyyy')}</span>
+                                <span className={cn(
+                                  "text-[10px] font-semibold tracking-wide",
+                                  isExpired ? "text-red-500/80" : isNearExpiry ? "text-amber-500" : "text-emerald-500/80"
+                                )}>
+                                  {isExpired 
+                                    ? `Expired ${Math.abs(Math.floor(remainingDays))} days ago` 
+                                    : `${Math.ceil(remainingDays)} days remaining`
+                                  }
+                                </span>
+                              </div>
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -1878,10 +1887,10 @@ export function SuperAdmin() {
                           )}
                         </div>
                         <span className={cn(
-                          isActuallyActive ? "text-emerald-500" : isNearExpiry ? "text-amber-500" : "text-red-500"
+                          isActuallyActive ? "text-emerald-500 font-medium" : isNearExpiry ? "text-amber-500 font-bold" : "text-red-500"
                         )}>
-                          {isActuallyActive ? `Active until ${safeFormat(expiryToUse, 'MMM d, yyyy')}` : 
-                           isCodeExpired ? `Expired (${safeFormat(expiryToUse, 'MMM d, yyyy')})` :
+                          {isActuallyActive ? `Active until ${safeFormat(expiryToUse, 'MMM d, yyyy')} (${Math.ceil(remainingDays)}d left)` : 
+                           isCodeExpired ? `Expired ${Math.abs(Math.floor(remainingDays))}d ago` :
                            `Inactive (${safeFormat(expiryToUse, 'MMM d, yyyy')})`}
                         </span>
                       </div>

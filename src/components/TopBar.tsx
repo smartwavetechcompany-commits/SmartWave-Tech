@@ -155,6 +155,30 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
             <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
           </div>
 
+          {hotel?.subscriptionExpiry && (
+            (() => {
+              const expiryTime = new Date(hotel.subscriptionExpiry).getTime();
+              if (isNaN(expiryTime)) return null;
+              const now = Date.now();
+              const isExpired = expiryTime <= now;
+              const remainingDays = Math.ceil((expiryTime - now) / (24 * 60 * 60 * 1000));
+              
+              return (
+                <div className={cn(
+                  "hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border",
+                  isExpired 
+                    ? "bg-red-500/10 border-red-500/20 text-red-400" 
+                    : remainingDays <= 7 
+                      ? "bg-amber-500/10 border-amber-500/20 text-amber-500 animate-pulse" 
+                      : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                )}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                  <span>{isExpired ? 'Expired' : `${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} left`}</span>
+                </div>
+              );
+            })()
+          )}
+
           {isSuperAdmin && (
             <div className="relative border-l border-zinc-800 ml-2 pl-2" ref={selectRef}>
               <button 
