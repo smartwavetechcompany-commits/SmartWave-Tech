@@ -176,11 +176,15 @@ export const postToLedger = async (
 
     const totalPaidAmountAdj = creditsSum - refundDebitsSum;
 
-    // Debbie charges that are room, payment, refund, or transfer should NOT increase the contract's totalAmount
+    // Debit charges that are room, payment, refund, or transfer should NOT increase the reservation's totalAmount.
+    // Additionally, if the main posted charge is room-related or non-total, any automatic taxes generated for it should also not increase totalAmount.
     const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger'];
-    const projectedTotalAdj = entries
-      .filter(e => e.type === 'debit' && !nonTotalDebits.includes(e.category))
-      .reduce((acc, e) => acc + e.amount, 0);
+    const isMainEntryNonTotal = nonTotalDebits.includes(entry.category);
+    const projectedTotalAdj = isMainEntryNonTotal
+      ? 0
+      : entries
+          .filter(e => e.type === 'debit' && !nonTotalDebits.includes(e.category))
+          .reduce((acc, e) => acc + e.amount, 0);
 
     if (projectedTotalAdj !== 0) resUpdates.totalAmount = increment(projectedTotalAdj);
     if (totalPaidAmountAdj !== 0) resUpdates.paidAmount = increment(totalPaidAmountAdj);

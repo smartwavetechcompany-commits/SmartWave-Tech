@@ -1361,7 +1361,7 @@ export function SuperAdmin() {
                         </div>
                       ) : (
                         <span className="text-[10px] font-bold text-zinc-400 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-                          {plan === 'standard' ? 'NGN 50,000/mo' : plan === 'premium' ? 'NGN 100,000/mo' : 'NGN 250,000/mo'}
+                          Select
                         </span>
                       )}
                     </div>
