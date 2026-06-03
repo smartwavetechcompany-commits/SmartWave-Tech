@@ -33,6 +33,7 @@ import { Toaster } from 'sonner';
 
 import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
 import { OnboardingTour } from './components/OnboardingTour';
+import { CommandPalette } from './components/CommandPalette';
 
 function AppContent() {
   const { user, loading, profile, isSubscriptionActive, isOffline, retryConnection } = useAuth();
@@ -103,6 +104,7 @@ function AppContent() {
       )}
 
       <OnboardingTour />
+      <CommandPalette />
       
       {/* Overlay for mobile sidebar */}
       <AnimatePresence>

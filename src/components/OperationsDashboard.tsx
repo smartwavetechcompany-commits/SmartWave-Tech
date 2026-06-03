@@ -13,7 +13,10 @@ import {
   Calendar,
   Clock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Info
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
@@ -24,6 +27,120 @@ export function OperationsDashboard() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'checkouts' | 'inhouse'>('arrivals');
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<string | null>(format(new Date(), 'yyyy-MM-dd'));
+
+  const handlePrevMonth = () => {
+    setCurrentMonth(prev => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() - 1);
+      return d;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setCurrentMonth(prev => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() + 1);
+      return d;
+    });
+  };
+
+  const getCalendarDays = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+
+    const firstDayOfMonth = new Date(year, month, 1);
+    const startDayOfWeek = firstDayOfMonth.getDay();
+
+    const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const daysPrevMonth = new Date(year, month, 0).getDate();
+    const prevMonthList = [];
+    for (let i = startDayOfWeek - 1; i >= 0; i--) {
+      prevMonthList.push({
+        day: daysPrevMonth - i,
+        isCurrentMonth: false,
+        dateString: format(new Date(year, month - 1, daysPrevMonth - i), 'yyyy-MM-dd'),
+        dateObj: new Date(year, month - 1, daysPrevMonth - i)
+      });
+    }
+
+    const currentMonthList = [];
+    for (let i = 1; i <= totalDaysInMonth; i++) {
+      currentMonthList.push({
+        day: i,
+        isCurrentMonth: true,
+        dateString: format(new Date(year, month, i), 'yyyy-MM-dd'),
+        dateObj: new Date(year, month, i)
+      });
+    }
+
+    const totalCells = prevMonthList.length + currentMonthList.length;
+    const nextMonthPadding = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+    const nextMonthList = [];
+    for (let i = 1; i <= nextMonthPadding; i++) {
+      nextMonthList.push({
+        day: i,
+        isCurrentMonth: false,
+        dateString: format(new Date(year, month + 1, i), 'yyyy-MM-dd'),
+        dateObj: new Date(year, month + 1, i)
+      });
+    }
+
+    return [...prevMonthList, ...currentMonthList, ...nextMonthList];
+  };
+
+  const getOccupancyInfo = (dateString: string) => {
+    const totalRoomsCount = rooms.length || 10;
+    const activeRes = reservations.filter(r => 
+      r.status !== 'cancelled' && 
+      r.status !== 'no_show' && 
+      r.checkIn <= dateString && 
+      dateString < r.checkOut
+    );
+    const count = activeRes.length;
+    const rate = Math.round((count / totalRoomsCount) * 100);
+
+    let colorClass = '';
+    let textClass = '';
+    let level: 'none' | 'low' | 'moderate' | 'high' | 'peak' = 'none';
+
+    if (rate === 0) {
+      colorClass = 'bg-zinc-950/40 text-zinc-650 border border-zinc-900 hover:border-zinc-805';
+      textClass = 'text-zinc-650';
+      level = 'none';
+    } else if (rate <= 30) {
+      colorClass = 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40';
+      textClass = 'text-emerald-400 font-bold';
+      level = 'low';
+    } else if (rate <= 60) {
+      colorClass = 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 border border-yellow-500/20 hover:border-yellow-500/40';
+      textClass = 'text-yellow-400 font-bold';
+      level = 'moderate';
+    } else if (rate <= 85) {
+      colorClass = 'bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/25 hover:border-orange-500/50';
+      textClass = 'text-orange-400 font-bold';
+      level = 'high';
+    } else {
+      colorClass = 'bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 hover:border-red-500/50';
+      textClass = 'text-red-400 font-black';
+      level = 'peak';
+    }
+
+    return { count, rate, colorClass, textClass, level };
+  };
+
+  const calendarDays = getCalendarDays();
+
+  const selectedDayActiveReservations = selectedDate 
+    ? reservations.filter(r => 
+        r.status !== 'cancelled' && 
+        r.status !== 'no_show' && 
+        r.checkIn <= selectedDate && 
+        selectedDate < r.checkOut
+      )
+    : [];
 
   useEffect(() => {
     if (!hotel?.id) return;
@@ -102,6 +219,210 @@ export function OperationsDashboard() {
             <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{stat.label}</div>
           </button>
         ))}
+      </div>
+
+      {/* Calendar Occupancy Section */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl p-4 sm:p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-850 pb-4">
+          <div>
+            <h2 className="text-lg font-bold text-zinc-50 tracking-tight flex items-center gap-2">
+              <Calendar className="text-emerald-500" size={20} />
+              Monthly Occupancy Forecast
+            </h2>
+            <p className="text-xs text-zinc-400">Click any date to see overnight bookings and density limits</p>
+          </div>
+          
+          <div className="flex items-center gap-1 bg-zinc-950 p-1 border border-zinc-800 rounded-xl">
+            <button
+              onClick={handlePrevMonth}
+              className="p-1.5 hover:bg-zinc-900 text-zinc-405 hover:text-zinc-100 rounded-lg transition-all active:scale-95"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-xs font-bold text-zinc-100 uppercase tracking-wider w-32 text-center select-none py-1">
+              {format(currentMonth, 'MMMM yyyy')}
+            </span>
+            <button
+              onClick={handleNextMonth}
+              className="p-1.5 hover:bg-zinc-900 text-zinc-405 hover:text-zinc-100 rounded-lg transition-all active:scale-95"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Legend of density levels */}
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 bg-zinc-950/40 p-3 rounded-xl border border-zinc-850 text-[10px] sm:text-xs">
+          <span className="text-zinc-500 font-bold uppercase tracking-wider">Density Legend:</span>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded bg-zinc-950 border border-zinc-900" />
+            <span className="text-zinc-400">0% (Empty)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded bg-emerald-500/20 border border-emerald-500/40" />
+            <span className="text-zinc-400">1-30% (Low)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded bg-yellow-500/20 border border-yellow-500/40" />
+            <span className="text-zinc-400">31-60% (Moderate)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded bg-orange-500/20 border border-orange-500/40" />
+            <span className="text-zinc-400">61-85% (High)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded bg-red-400/20 border border-red-500/40" />
+            <span className="text-zinc-400">86-100% (Peak)</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Calendar Grid */}
+          <div className="lg:col-span-2 space-y-3">
+            <div className="grid grid-cols-7 gap-1 text-center font-bold text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+              <div>Sun</div>
+              <div>Mon</div>
+              <div>Tue</div>
+              <div>Wed</div>
+              <div>Thu</div>
+              <div>Fri</div>
+              <div>Sat</div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1.5 animate-fade-in">
+              {calendarDays.map((calDay, i) => {
+                const info = getOccupancyInfo(calDay.dateString);
+                const isSelected = selectedDate === calDay.dateString;
+                const isTodayStr = calDay.dateString === today;
+
+                return (
+                  <button
+                    key={`${calDay.dateString}-${i}`}
+                    onClick={() => setSelectedDate(calDay.dateString)}
+                    type="button"
+                    className={cn(
+                      "min-h-[72px] sm:min-h-[84px] p-2 flex flex-col justify-between text-left rounded-xl transition-all cursor-pointer select-none",
+                      info.colorClass,
+                      !calDay.isCurrentMonth && "opacity-30",
+                      isSelected && "ring-2 ring-emerald-500 ring-offset-2 ring-offset-zinc-900 scale-[0.99]"
+                    )}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className={cn(
+                        "text-xs font-bold",
+                        isTodayStr ? "w-6 h-6 flex items-center justify-center bg-emerald-600 text-white rounded-full font-black shadow-md shadow-emerald-600/20" : "text-zinc-400"
+                      )}>
+                        {calDay.day}
+                      </span>
+                      {info.rate > 0 && (
+                        <span className={cn("text-[8px] tracking-tight py-0.5 px-1 rounded bg-zinc-950/60 font-medium", info.textClass)}>
+                          {info.rate}%
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-2 flex flex-col justify-end">
+                      <span className="text-[9px] font-semibold text-zinc-300 leading-none truncate block">
+                        {info.count > 0 ? `${info.count} room${info.count > 1 ? 's' : ''}` : 'Vacant'}
+                      </span>
+                      <span className="text-[8px] text-zinc-400 font-normal capitalize block mt-0.5">
+                        {info.level !== 'none' ? `${info.level} occupancy` : 'Available'}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Details Sidebar/Card Panel */}
+          <div className="bg-zinc-950 border border-zinc-805 rounded-xl p-4 flex flex-col justify-between gap-4">
+            <div className="space-y-4">
+              <div className="border-b border-zinc-800 pb-3">
+                <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">
+                  Selected Date Forecast
+                </div>
+                <h3 className="text-sm font-bold text-emerald-400">
+                  {selectedDate ? format(new Date(selectedDate + 'T00:00:00'), 'E, MMMM d, yyyy') : 'No Date Selected'}
+                </h3>
+              </div>
+
+              {/* Day Occupancy Percentage Visual Ring/Scale */}
+              {selectedDate && (() => {
+                const info = getOccupancyInfo(selectedDate);
+                return (
+                  <div className="bg-zinc-900/40 border border-zinc-800/60 p-3 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-zinc-400 font-medium">Occupancy Rate:</span>
+                      <span className={cn("font-bold text-xs", info.textClass)}>
+                        {info.rate}%
+                      </span>
+                    </div>
+                    {/* Visual Progress Bar */}
+                    <div className="w-full bg-zinc-950 h-2 rounded-full overflow-hidden border border-zinc-855">
+                      <div 
+                        className={cn(
+                          "h-full rounded-full transition-all duration-300",
+                          info.level === 'none' ? 'bg-zinc-850' :
+                          info.level === 'low' ? 'bg-emerald-500' :
+                          info.level === 'moderate' ? 'bg-yellow-500' :
+                          info.level === 'high' ? 'bg-orange-500' : 'bg-red-500'
+                        )} 
+                        style={{ width: `${Math.min(info.rate, 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center text-[9px] text-zinc-500">
+                      <span>{info.count} of {rooms.length || 10} rooms occupied</span>
+                      <span className="capitalize">{info.level} Load</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Selected date stayers list */}
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center justify-between">
+                  <span>Overnight Residents ({selectedDayActiveReservations.length})</span>
+                  {selectedDayActiveReservations.length > 0 && <span className="text-zinc-500 text-[9px]">Roll Call</span>}
+                </div>
+
+                <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                  {selectedDayActiveReservations.length === 0 ? (
+                    <div className="py-8 text-center bg-zinc-900/20 rounded-xl border border-dashed border-zinc-800 text-zinc-500 text-xs">
+                      <Info size={14} className="mx-auto mb-1 text-zinc-650" />
+                      No booked stayers on this date
+                    </div>
+                  ) : (
+                    selectedDayActiveReservations.map((res) => (
+                      <div 
+                        key={res.id}
+                        className="p-2.5 bg-zinc-900/60 border border-zinc-805 hover:border-zinc-700/50 rounded-lg flex items-center justify-between text-left transition-colors"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <span className="text-xs font-bold text-zinc-200 block truncate">{res.guestName}</span>
+                          <span className="text-[9px] text-zinc-500 block">
+                            Room {res.roomNumber} &bull; {res.checkIn} to {res.checkOut}
+                          </span>
+                        </div>
+                        <span className={cn(
+                          "text-[8px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wider shrink-0",
+                          res.status === 'checked_in' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                        )}>
+                          {res.status.replace('_', ' ')}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* General monthly insights footer inside detail card */}
+            <div className="text-[9px] text-zinc-500 border-t border-zinc-900 pt-3">
+              This interactive widget reflects active commitments in real-time. Cancelled stays are excluded dynamically to keep statistics accurate.
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
