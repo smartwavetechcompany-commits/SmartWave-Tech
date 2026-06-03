@@ -27,6 +27,7 @@ import {
   DollarSign,
   PlusCircle,
   RefreshCw,
+  AlertCircle,
   X
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify } from '../utils';
@@ -69,6 +70,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [isDeleting, setIsDeleting] = useState(false);
   const [showSettleOverpayment, setShowSettleOverpayment] = useState(false);
   const [showSettlePayment, setShowSettlePayment] = useState(false);
+  const [showOverpaymentWarning, setShowOverpaymentWarning] = useState(false);
   const [showPostChargeModal, setShowPostChargeModal] = useState(false);
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
@@ -140,25 +142,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   };
 
-  const handleSettlePayment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeSettlePayment = async () => {
     if (!hotel?.id || !profile) return;
-
-    const policy = canEditInvoice(hotel, profile, currentReservation);
-    if (!policy.allowed) {
-      toast.error(policy.message || 'Invoice is locked');
-      return;
-    }
-
     try {
       setIsSaving(true);
-      
-      const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
-      if (totalAmount <= 0) {
-        toast.error('Payment amount must be greater than zero');
-        return;
-      }
-
       for (const split of settleData.splits) {
         if (split.amount > 0) {
           await settleLedger(
@@ -175,6 +162,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       toast.success('Payment recorded successfully');
       setShowSettlePayment(false);
+      setShowOverpaymentWarning(false);
       setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
     } catch (err: any) {
       console.error("Settle payment error:", err.message || safeStringify(err));
@@ -182,6 +170,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSettlePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile) return;
+
+    const policy = canEditInvoice(hotel, profile, currentReservation);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Invoice is locked');
+      return;
+    }
+
+    const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
+    if (totalAmount <= 0) {
+      toast.error('Payment amount must be greater than zero');
+      return;
+    }
+
+    // Validation hook: Detect when a payment amount exceeds the calculated net total (balance)
+    if (totalAmount > balance + 0.01) {
+      setShowOverpaymentWarning(true);
+      return;
+    }
+
+    await executeSettlePayment();
   };
 
   const handleSettleOverpayment = async (e: React.FormEvent) => {
@@ -836,17 +849,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <Banknote size={18} className="text-amber-500" />
-                  <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Folio Summary</h3>
+                  <h3 className="text-sm font-bold text-zinc-55 uppercase tracking-wider">Folio Summary</h3>
                 </div>
               </div>
-              <div className="space-y-3">
-                <div className="space-y-1 pb-2 border-b border-zinc-800/50">
-                  <div className="flex justify-between text-[10px] text-zinc-500 uppercase tracking-wider font-bold">
-                    <span>Pricing Breakdown</span>
+              
+              <div className="space-y-4">
+                {/* TIER 1: GROSS RATE */}
+                <div className="bg-zinc-900/30 p-4 rounded-xl border border-zinc-805 space-y-2">
+                  <div className="flex justify-between items-center pb-1 border-b border-zinc-800/50">
+                    <span className="text-[10px] font-black tracking-wider text-zinc-400 uppercase">Tier 1: Gross Rate & Services</span>
+                    <span className="text-[8px] font-bold text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded tracking-widest uppercase">Pre-Tax</span>
                   </div>
-                  <div className="flex justify-between text-xs italic opacity-80">
-                    <span className="text-zinc-400">Room Base Amount</span>
-                    <span className="text-zinc-200">
+                  
+                  {/* Base rate calculations */}
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-500">Base Room Stay Gross</span>
+                    <span className="text-zinc-300 font-medium font-mono">
                       {formatCurrency(
                         currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0), 
                         currency, 
@@ -854,93 +872,126 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       )}
                     </span>
                   </div>
-                  {currentReservation.taxDetails?.map((tax, idx) => (
-                    <div key={idx} className="flex justify-between text-[10px] italic opacity-70 pl-2">
-                      <span className="text-zinc-500">{tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}</span>
-                      <span className="text-zinc-200">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                  
+                  {/* Ancillary services list if any */}
+                  {displayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').length > 0 && (
+                    <div className="pt-2 border-t border-zinc-900 space-y-1">
+                      <span className="text-[9px] font-bold text-zinc-600 uppercase">Ancillary Gross Charges</span>
+                      {displayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').map((e, idx) => (
+                        <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2">
+                          <span className="truncate max-w-[200px]">{e.description}</span>
+                          <span className="font-mono">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  <div className="flex justify-between text-xs pt-1 mt-1 border-t border-zinc-800/30">
-                    <span className="text-zinc-400 font-bold">Scheduled Stay Total</span>
-                    <span className="text-zinc-50 font-bold">{formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}</span>
+                  )}
+
+                  {/* Gross Rate Sum */}
+                  <div className="flex justify-between text-xs pt-2 mt-2 border-t border-zinc-800 font-bold">
+                    <span className="text-zinc-400">Total Gross Rate</span>
+                    <span className="text-zinc-100 font-mono">
+                      {(() => {
+                        const baseAmt = currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
+                        const otherGross = displayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0);
+                        return formatCurrency(baseAmt + otherGross, currency, exchangeRate);
+                      })()}
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Accrued Charges (Debits)</span>
-                  <span className="text-zinc-50 font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-500">Payments & Credits</span>
-                  <span className="text-emerald-500 font-bold">{formatCurrency(totalCredits, currency, exchangeRate)}</span>
-                </div>
-                
-                <div className="pt-3 border-t border-zinc-800 flex flex-col gap-4">
-          <div className="flex justify-between items-center group">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Projected Stay Total</span>
-              <span className="text-[8px] font-medium text-zinc-600 uppercase leading-none mt-0.5">Total estimated at time of booking</span>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className="text-sm font-bold text-zinc-400">
-                {formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}
-              </span>
-            </div>
-          </div>
+                {/* TIER 2: TAX INCLUSIVE BREAKDOWN */}
+                <div className="bg-zinc-900/30 p-4 rounded-xl border border-zinc-805 space-y-2">
+                  <div className="flex justify-between items-center pb-1 border-b border-zinc-800/50">
+                    <span className="text-[10px] font-black tracking-wider text-zinc-400 uppercase">Tier 2: Tax Inclusive Breakdown</span>
+                    <span className="text-[8px] font-bold text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded tracking-widest uppercase">Breakdown</span>
+                  </div>
 
-          <div className="flex justify-between items-center bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/50">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Actually Accrued (Debits)</span>
-              <span className="text-[8px] font-medium text-zinc-600 uppercase leading-none mt-0.5">Total amount posted to ledger</span>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className="text-lg font-bold text-zinc-200">
-                {formatCurrency(totalDebits, currency, exchangeRate)}
-              </span>
-            </div>
-          </div>
+                  {/* Render hotel taxes detail */}
+                  {currentReservation.taxDetails && currentReservation.taxDetails.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {currentReservation.taxDetails.map((tax, idx) => (
+                        <div key={idx} className="flex justify-between text-xs">
+                          <span className="text-zinc-500 flex items-center gap-1">
+                            {tax.name} ({tax.percentage}%)
+                            <span className="text-[8px] text-zinc-650 bg-zinc-950 border border-zinc-850 px-1 rounded-sm">
+                              {tax.isInclusive ? 'Incl.' : 'Excl.'}
+                            </span>
+                          </span>
+                          <span className="text-zinc-300 font-mono">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-zinc-600 italic">No tax rules applied to this folio reservation</p>
+                  )}
 
-          <div className="flex justify-between items-center pt-2">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payments Made (Credits)</span>
-              <span className="text-[8px] font-medium text-emerald-500/50 uppercase leading-none mt-0.5">Total cash/transfer received</span>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className="text-lg font-bold text-emerald-500">
-                {formatCurrency(totalCredits, currency, exchangeRate)}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center border-t border-zinc-800 pt-4">
-            <div className="flex flex-col">
-              <span className="text-[11px] font-black text-zinc-400 uppercase tracking-widest">Balance Outstanding</span>
-              <span className="text-[8px] font-medium text-red-500/50 uppercase leading-none mt-1">Real-time ledger balance</span>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className={cn(
-                  "text-3xl font-black transition-colors duration-300",
-                  balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
-                )}>
-                {formatCurrency(Math.abs(balance), currency, exchangeRate)}
-              </span>
-              <span className={cn(
-                "text-[10px] font-bold uppercase",
-                balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
-              )}>
-                {balance > 0.01 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < -0.01 ? "Credit Balance (Overpaid)" : "Account Fully Settled"}
-              </span>
-            </div>
-          </div>
-                  
-                  <button
-                    onClick={() => setShowSettlePayment(true)}
-                    className="w-full py-3 bg-emerald-500 text-black rounded-xl font-black text-sm uppercase tracking-widest hover:bg-emerald-400 transition-all shadow-xl shadow-emerald-500/10 flex items-center justify-center gap-2 active:scale-95"
-                  >
-                    <DollarSign size={18} />
-                    Receive Payment / Pay Bill
-                  </button>
+                  {/* Ledger specific taxes if any */}
+                  {displayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').length > 0 && (
+                    <div className="pt-2 border-t border-zinc-900 space-y-1">
+                      <span className="text-[9px] font-bold text-zinc-600 uppercase font-mono">Ledger Adjusted Taxes</span>
+                      {displayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').map((e, idx) => (
+                        <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2 font-mono">
+                          <span className="truncate max-w-[200px]">{e.description}</span>
+                          <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+
+                {/* TIER 3: NET AMOUNT DUE */}
+                <div className="bg-zinc-900/50 p-4 rounded-xl border border-zinc-800 space-y-3">
+                  <div className="flex justify-between items-center pb-1 border-b border-zinc-800/50">
+                    <span className="text-[10px] font-black tracking-wider text-emerald-500 uppercase">Tier 3: Net Amount Due</span>
+                    <span className="text-[8px] font-bold text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded tracking-widest uppercase">Net Calc</span>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-450">Total Net Invoice (Gross + Excl. Taxes)</span>
+                      <span className="text-zinc-200 font-bold font-mono">
+                        {formatCurrency(totalDebits + projectedRoomCharge, currency, exchangeRate)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-emerald-500">
+                      <span>Less: Payments & Credits Applied (Credits)</span>
+                      <span className="font-bold font-mono">
+                        -{formatCurrency(totalCredits, currency, exchangeRate)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-zinc-800 flex justify-between items-center">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-black text-zinc-400 uppercase tracking-widest leading-none">Net Amount Due</span>
+                      <span className="text-[8px] font-medium text-red-500/50 uppercase leading-none mt-1.5">Real-Time Outstanding</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className={cn(
+                        "text-3xl font-black transition-colors duration-300 font-mono tracking-tight",
+                        balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
+                      )}>
+                        {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+                      </span>
+                      <span className={cn(
+                        "text-[9px] font-bold uppercase tracking-wider mt-0.5",
+                        balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
+                      )}>
+                        {balance > 0.01 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < -0.01 ? "Credit Balance (Overpaid)" : "Account Fully Settled"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowSettlePayment(true)}
+                  className="w-full py-3 bg-emerald-500 text-black rounded-xl font-black text-sm uppercase tracking-widest hover:bg-emerald-400 transition-all shadow-xl shadow-emerald-500/10 flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <DollarSign size={18} />
+                  Receive Payment / Pay Bill
+                </button>
               </div>
             </div>
           </div>
@@ -1435,6 +1486,44 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </button>
                   </div>
                 </form>
+              </motion.div>
+            </div>
+          )}
+
+          {showOverpaymentWarning && (
+            <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[95] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-zinc-900 border border-zinc-800 p-6 rounded-3xl w-full max-w-md shadow-2xl"
+              >
+                <div className="flex items-center gap-3 text-amber-500 mb-4">
+                  <AlertCircle size={24} />
+                  <h3 className="text-lg font-bold">Overpayment Detected</h3>
+                </div>
+                <p className="text-sm text-zinc-300 mb-6 leading-relaxed">
+                  The payment amount of <span className="font-bold text-zinc-100">{formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}</span> exceeds the calculated net remaining total of <span className="font-bold text-zinc-100">{formatCurrency(balance, currency, exchangeRate)}</span> (calculated inclusive of stays, taxes & service fees).
+                  <br /><br />
+                  Proceeding may create unnecessary ledger overpayment credits. Are you sure you want to proceed and record this payment?
+                </p>
+                <div className="flex gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => setShowOverpaymentWarning(false)}
+                    className="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl font-bold transition-all"
+                  >
+                    Adjust Amount
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={async () => {
+                      await executeSettlePayment();
+                    }}
+                    className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-black rounded-xl font-bold transition-all"
+                  >
+                    Confirm Payment
+                  </button>
+                </div>
               </motion.div>
             </div>
           )}

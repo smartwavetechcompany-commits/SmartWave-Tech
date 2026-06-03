@@ -104,7 +104,7 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -129,6 +129,11 @@ export function Finance() {
   });
   const [showFolio, setShowFolio] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+
+  // Invoice Diagnostics states
+  const [selectedDiagResId, setSelectedDiagResId] = useState<string>('');
+  const [diagLedgerEntries, setDiagLedgerEntries] = useState<any[]>([]);
+  const [diagLoading, setDiagLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
@@ -189,6 +194,7 @@ export function Finance() {
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
     { id: 'payments', label: 'Payments', icon: CreditCard },
     { id: 'reports', label: 'Finance Reports', icon: BarChart3 },
+    { id: 'diagnostics', label: 'Invoice Diagnostics', icon: FileText },
   ];
 
   useEffect(() => {
@@ -210,6 +216,37 @@ export function Finance() {
 
     return () => unsub();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
+
+  // Sync ledger entries in real-time for the selected diagnostics reservation
+  useEffect(() => {
+    if (!hotel?.id || !selectedDiagResId) {
+      setDiagLedgerEntries([]);
+      return;
+    }
+
+    setDiagLoading(true);
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'ledger'),
+      where('reservationId', '==', selectedDiagResId)
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Client-side sort descending of timestamps
+      const sorted = [...entries].sort((a: any, b: any) => {
+        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return timeB - timeA;
+      });
+      setDiagLedgerEntries(sorted);
+      setDiagLoading(false);
+    }, (err) => {
+      console.error("Invoice Diagnostics ledger error:", err);
+      setDiagLoading(false);
+    });
+
+    return () => unsub();
+  }, [hotel?.id, selectedDiagResId]);
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
@@ -1586,6 +1623,338 @@ export function Finance() {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'diagnostics' && (
+            <div className="space-y-6">
+              <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+                <div>
+                  <h3 className="text-lg font-black text-zinc-50 flex items-center gap-2">
+                    <FileText className="text-emerald-500" size={20} />
+                    Invoice Calculation Step-by-Step Diagnostic View
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Select a reservation to trace its billing build-up, tax classifications, service fee logs, discount adjustments, and detect discrepancies causing payment disparities.
+                  </p>
+                </div>
+
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="text-xs font-black text-zinc-400 uppercase tracking-widest">Select Folio Reservation</label>
+                    <select
+                      value={selectedDiagResId}
+                      onChange={(e) => setSelectedDiagResId(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="">-- Choose Guest Stay / Corporate Booking --</option>
+                      {reservations.map(res => (
+                        <option key={res.id} value={res.id}>
+                          [{res.roomNumber ? `Room ${res.roomNumber}` : 'No Room'}] {res.guestName} ({res.checkIn} to {res.checkOut} - {res.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="md:col-span-2 space-y-2">
+                    <span className="text-xs font-black text-zinc-400 uppercase tracking-widest block">Quick Disparity Filters</span>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {reservations.filter(r => (r.totalAmount !== (r.paidAmount || 0)) || (r.status === 'checked_in')).slice(0, 3).map(res => (
+                        <button
+                          key={res.id}
+                          onClick={() => setSelectedDiagResId(res.id || '')}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                            selectedDiagResId === res.id 
+                              ? "bg-amber-500 text-black shadow-lg" 
+                              : "bg-zinc-950 text-zinc-400 border border-zinc-800 hover:text-zinc-200"
+                          )}
+                        >
+                          {res.guestName} ({formatCurrency(res.totalAmount, currency, exchangeRate)})
+                        </button>
+                      ))}
+                      {reservations.length === 0 && <span className="text-xs text-zinc-500 italic">No reservation records loaded</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {selectedDiagResId ? (
+                (() => {
+                  const resInstance = reservations.find(r => r.id === selectedDiagResId);
+                  if (!resInstance) {
+                    return (
+                      <div className="p-8 bg-zinc-900 border border-zinc-800 rounded-2xl text-center text-zinc-500 italic">
+                        Selected reservation record not found.
+                      </div>
+                    );
+                  }
+
+                  // 1. CALCULATE QUANTIFIABLE ACCRUED PRE-TAX BASE RATE:
+                  const grossStayAmount = resInstance.totalAmount - (resInstance.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
+                  const nightlyRateCalculated = resInstance.nightlyRate || (grossStayAmount / (resInstance.nights || 1)) || 0;
+                  const totalNightsExpected = resInstance.nights || 1;
+                  
+                  // 2. QUERY DETAILED ACCRUED ANCILLARY FEES
+                  const serviceDebits = diagLedgerEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax');
+                  const ancillarySubtotal = serviceDebits.reduce((acc, e) => acc + (e.amount || 0), 0);
+
+                  // 3. TAX ANALYSIS
+                  const taxDetailsList = resInstance.taxDetails || [];
+                  const inclusiveTaxesSum = taxDetailsList.filter(t => t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
+                  const exclusiveTaxesSum = taxDetailsList.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
+                  const ledgerAdjustedTaxes = diagLedgerEntries.filter(e => e.type === 'debit' && e.category === 'tax').reduce((acc, e) => acc + e.amount, 0);
+                  const totalTaxesApplied = inclusiveTaxesSum + exclusiveTaxesSum + ledgerAdjustedTaxes;
+
+                  // 4. DISCOUNTS AND ADJUSTED CREDITS
+                  const discountCredits = diagLedgerEntries.filter(e => e.type === 'credit' && e.category === 'discount');
+                  const totalAdjustmentsDiscount = discountCredits.reduce((acc, e) => acc + e.amount, 0);
+
+                  // 5. SETTLEMENT ANALYSIS
+                  const paymentCredits = diagLedgerEntries.filter(e => e.type === 'credit' && e.category !== 'discount');
+                  const totalPaymentsAccrued = paymentCredits.reduce((acc, e) => acc + e.amount, 0);
+
+                  // Real Ledger totals
+                  const ledgerDebitsSum = diagLedgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+                  const isFolioRoomCharged = diagLedgerEntries.some(e => e.category === 'room' && e.type === 'debit');
+                  const unpostedStayAccrual = !isFolioRoomCharged ? resInstance.totalAmount : 0;
+                  
+                  const calculatedNetBill = ledgerDebitsSum + unpostedStayAccrual - totalAdjustmentsDiscount;
+                  const outstandingDisparityBalance = calculatedNetBill - totalPaymentsAccrued;
+
+                  // TRACING COMMENTARIES
+                  const diagnosticsComments: string[] = [];
+                  if (unpostedStayAccrual > 0) {
+                    diagnosticsComments.push(
+                      `Stay Nightly Charges Not Posted: Since the room charges of ${formatCurrency(resInstance.totalAmount, currency, exchangeRate)} are not fully checked-out or audited into the ledger entries, the system treats them as projected stay charges. Run audit status in her folio to reconcile.`
+                    );
+                  }
+                  if (ancillarySubtotal > 0) {
+                    diagnosticsComments.push(
+                      `On-Property Incidentals Posted: Additional purchases (dining, mini-bar, laundry) totaling ${formatCurrency(ancillarySubtotal, currency, exchangeRate)} were posted directly to the guest's folio ledger, increasing user indebtedness.`
+                    );
+                  }
+                  if (totalPaymentsAccrued < calculatedNetBill - 0.05) {
+                    diagnosticsComments.push(
+                      `Underpayment Detected: The net billing of ${formatCurrency(calculatedNetBill, currency, exchangeRate)} is higher than actual payments received (${formatCurrency(totalPaymentsAccrued, currency, exchangeRate)}). Guest owes an outstanding balance of ${formatCurrency(outstandingDisparityBalance, currency, exchangeRate)}.`
+                    );
+                  } else if (totalPaymentsAccrued > calculatedNetBill + 0.05) {
+                    diagnosticsComments.push(
+                      `Overpayment Recorded: Payments submitted of ${formatCurrency(totalPaymentsAccrued, currency, exchangeRate)} skew higher than calculated charges (${formatCurrency(calculatedNetBill, currency, exchangeRate)}). An overpayment credit of ${formatCurrency(totalPaymentsAccrued - calculatedNetBill, currency, exchangeRate)} sits on the folio.`
+                    );
+                  } else {
+                    diagnosticsComments.push(
+                      `Perfect Reconciliation achieved: All ledger debit statements and projected payments balance accurately without anomalies.`
+                    );
+                  }
+
+                  return (
+                    <AnimatePresence mode="popLayout">
+                      <motion.div 
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in"
+                      >
+                        {/* DIAGNOSTIC COMMENTS CARD */}
+                        <div className="lg:col-span-3 bg-amber-500/5 border border-amber-500/25 p-5 rounded-2xl space-y-3">
+                          <h4 className="text-xs font-black text-amber-500 uppercase tracking-widest flex items-center gap-2">
+                            <AlertCircle size={16} />
+                            Step-By-Step Reconciliation Diagnostics & Trace Comments
+                          </h4>
+                          <div className="space-y-2">
+                            {diagnosticsComments.map((comment, i) => (
+                              <p key={i} className="text-sm text-zinc-300 pl-4 border-l-2 border-amber-500/50 leading-relaxed font-medium">
+                                {comment}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* STEP 1: BASE RATE */}
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
+                          <div className="flex justify-between items-center pb-3 border-b border-zinc-800/50">
+                            <span className="text-xs font-black text-zinc-400 uppercase tracking-wider">Step 1: Base Stay Rate Building</span>
+                            <span className="font-mono text-[10px] text-zinc-500">Scheduled: {totalNightsExpected} nights</span>
+                          </div>
+
+                          <div className="space-y-3 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-zinc-500">Stay Gross Sum</span>
+                              <span className="text-zinc-200 font-mono font-medium">{formatCurrency(grossStayAmount, currency, exchangeRate)}</span>
+                            </div>
+                            <div className="flex justify-between pl-3 border-l border-zinc-805">
+                              <span className="text-zinc-550 italic">Rate Per Night</span>
+                              <span className="text-zinc-300 font-mono">{formatCurrency(nightlyRateCalculated, currency, exchangeRate)} x {totalNightsExpected}</span>
+                            </div>
+
+                            <div className="pt-2 border-t border-zinc-800/50 space-y-2">
+                              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest block">Accrual Progress Check</span>
+                              <div className="flex justify-between pl-3 border-l border-emerald-500/30">
+                                <span className="text-zinc-400">Total room gross posted</span>
+                                <span className="text-zinc-50 font-bold font-mono">
+                                  {formatCurrency(diagLedgerEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* STEP 2: TAXES & REGULATORY FEES */}
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
+                          <div className="flex justify-between items-center pb-3 border-b border-zinc-800/50">
+                            <span className="text-xs font-black text-zinc-400 uppercase tracking-wider">Step 2: Taxes & Regulatory Fees</span>
+                            <span className="font-mono text-[10px] bg-zinc-950 px-2 py-0.5 rounded text-zinc-500">{taxDetailsList.length} Rules Applied</span>
+                          </div>
+
+                          <div className="space-y-3 text-xs">
+                            {taxDetailsList.map((tax, index) => (
+                              <div key={index} className="space-y-1">
+                                <div className="flex justify-between">
+                                  <span className="text-zinc-300">{tax.name} ({tax.percentage}%)</span>
+                                  <span className="text-zinc-100 font-semibold font-mono">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                                </div>
+                                <span className="text-[9px] text-zinc-500 block pl-1">
+                                  Type: {tax.isInclusive ? 'Inclusive (Already added in base stays)' : 'Exclusive (Added to billable subtotal)'}
+                                </span>
+                              </div>
+                            ))}
+
+                            {diagLedgerEntries.filter(e => e.category === 'tax').map((e, index) => (
+                              <div key={index} className="flex justify-between border-t border-dashed border-zinc-800 pt-1 font-mono text-[11px] text-zinc-400">
+                                <span>Adjusted Tax ({e.description})</span>
+                                <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                              </div>
+                            ))}
+
+                            <div className="pt-2 border-t border-zinc-800/50 flex justify-between font-black text-zinc-50">
+                              <span>Total Taxes Accrued</span>
+                              <span className="font-mono text-amber-500">{formatCurrency(totalTaxesApplied, currency, exchangeRate)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* STEP 3 & 4: INCIDENTALS & ADJUSTMENTS */}
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
+                          <div className="flex justify-between items-center pb-3 border-b border-zinc-800/50">
+                            <span className="text-xs font-black text-zinc-400 uppercase tracking-wider">Step 3: Ancillary Charges & Services</span>
+                            <span className="font-mono text-[10px] text-zinc-500">Incidentals</span>
+                          </div>
+
+                          <div className="space-y-3 text-xs">
+                            {serviceDebits.length === 0 ? (
+                              <p className="text-[10px] text-zinc-500 italic">No ancillary room services posted to folio ledger.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                                {serviceDebits.map(e => (
+                                  <div key={e.id} className="flex justify-between font-mono text-zinc-400">
+                                    <span className="truncate max-w-[170px]">{e.description}</span>
+                                    <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="pt-2 border-t border-zinc-800/50 flex justify-between font-black text-zinc-400">
+                              <span>Ancillary subtotal</span>
+                              <span className="font-mono text-zinc-50">{formatCurrency(ancillarySubtotal, currency, exchangeRate)}</span>
+                            </div>
+
+                            <div className="pt-2 border-t border-zinc-800 space-y-1">
+                              <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">Step 4: Discount Deductions</span>
+                              {discountCredits.length === 0 ? (
+                                <p className="text-[10px] text-zinc-500 italic">No credit adjustments or discount lines detected</p>
+                              ) : (
+                                discountCredits.map(e => (
+                                  <div key={e.id} className="flex justify-between font-mono text-[11px] text-emerald-500 pl-2">
+                                    <span>{e.description}</span>
+                                    <span>-{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* STEP 5: GRAND TOTAL RECONCILIATION */}
+                        <div className="lg:col-span-3 bg-zinc-950 border border-zinc-800 rounded-3xl p-6 space-y-6">
+                          <h4 className="text-sm font-black text-zinc-200 uppercase tracking-wider">
+                            Step 5: Ledger Balance Sheets & Reconciliation
+                          </h4>
+
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="bg-zinc-900 border border-zinc-805 p-4 rounded-xl">
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Estimated Stay Quote</span>
+                              <span className="text-xl font-bold text-zinc-200 font-mono">
+                                {formatCurrency(resInstance.totalAmount, currency, exchangeRate)}
+                              </span>
+                            </div>
+
+                            <div className="bg-zinc-900 border border-zinc-805 p-4 rounded-xl">
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Total Actual Bill (Net)</span>
+                              <span className="text-xl font-bold text-zinc-50 font-mono">
+                                {formatCurrency(calculatedNetBill, currency, exchangeRate)}
+                              </span>
+                            </div>
+
+                            <div className="bg-zinc-900 border border-zinc-805 p-4 rounded-xl">
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Actual Payments Added</span>
+                              <span className="text-xl font-bold text-emerald-500 font-mono">
+                                {formatCurrency(totalPaymentsAccrued, currency, exchangeRate)}
+                              </span>
+                            </div>
+
+                            <div className={cn(
+                              "border p-4 rounded-xl",
+                              outstandingDisparityBalance > 0.01 
+                                ? "bg-red-500/5 border-red-500/30 text-red-500" 
+                                : outstandingDisparityBalance < -0.01 
+                                  ? "bg-blue-500/5 border-blue-500/30 text-blue-500" 
+                                  : "bg-emerald-500/5 border-emerald-500/30 text-emerald-400"
+                            )}>
+                              <span className="text-[10px] font-bold uppercase tracking-wider block mb-1">Balance Outstanding</span>
+                              <span className="text-xl font-black font-mono">
+                                {formatCurrency(Math.abs(outstandingDisparityBalance), currency, exchangeRate)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 flex flex-col md:flex-row md:items-center justify-between gap-4 border-t border-zinc-800">
+                            <div>
+                              <p className="text-xs text-zinc-400">
+                                This automated diagnostic is calculated directly against the ledger collection documents for reservation reference:
+                              </p>
+                              <span className="text-[10px] font-mono text-zinc-500 font-semibold">{resInstance.id}</span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedReservation(resInstance);
+                                setShowFolio(true);
+                              }}
+                              className="px-4 py-2 bg-emerald-500 text-black hover:bg-emerald-400 active:scale-95 transition-all rounded-xl font-bold text-xs uppercase"
+                            >
+                              Open Reconciled Folio Screen
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    </AnimatePresence>
+                  );
+                })()
+              ) : (
+                <div className="p-12 bg-zinc-900/50 border border-zinc-800 rounded-3xl text-center space-y-3">
+                  <div className="w-12 h-12 bg-zinc-950 rounded-full border border-zinc-800 flex items-center justify-center mx-auto text-zinc-500">
+                    <FileText size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-zinc-350">No Reservation Selected for Audit</h4>
+                    <p className="text-xs text-zinc-500 mt-1 max-w-md mx-auto">
+                      Choose an active guest stay above to perform complete step-by-step audit calculations. The advisor will trace stay parameters, taxes inclusive breakdown, ancillary service additions, and payments immediately.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
