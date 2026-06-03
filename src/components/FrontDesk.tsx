@@ -2182,15 +2182,20 @@ export function FrontDesk() {
                     );
                   })}
                 </select>
-                {newBooking.guestId && guests.find(g => g.id === newBooking.guestId)?.ledgerBalance !== 0 && (
-                  <div className={cn(
-                    "mt-2 p-2 rounded border flex items-center gap-2 text-[10px]",
-                    (guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0) < 0 ? "bg-red-500/10 border-red-500/20 text-red-500" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
-                  )}>
-                    <AlertCircle size={12} />
-                    Guest has an {(guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0) < 0 ? 'outstanding balance' : 'overpayment credit'} of {formatCurrency(Math.abs(guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0), currency, exchangeRate)}
-                  </div>
-                )}
+                {newBooking.guestId && (() => {
+                  const guestBal = guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0;
+                  if (guestBal === 0) return null;
+                  const isDebit = guestBal > 0.01;
+                  return (
+                    <div className={cn(
+                      "mt-2 p-2 rounded border flex items-center gap-2 text-[10px]",
+                      isDebit ? "bg-red-500/10 border-red-500/20 text-red-500" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+                    )}>
+                      <AlertCircle size={12} />
+                      Guest has an {isDebit ? 'outstanding balance' : 'overpayment credit'} of {formatCurrency(Math.abs(guestBal), currency, exchangeRate)}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -3348,14 +3353,27 @@ export function FrontDesk() {
                     )}>
                       {res.paymentStatus} ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)})
                     </div>
-                    {res.guestId && (
-                      <div className={cn(
-                        "text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded border inline-block",
-                        (res.ledgerBalance || 0) > 0 ? "text-red-400 bg-red-500/5 border-red-500/10" : "text-emerald-400 bg-emerald-500/5 border-emerald-500/10"
-                      )}>
-                        Owed: {formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)}
-                      </div>
-                    )}
+                    {res.guestId && (() => {
+                      const outstanding = (res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0);
+                      const isNegative = outstanding < -0.01;
+                      const isZero = Math.abs(outstanding) <= 0.01;
+                      
+                      return (
+                        <div className={cn(
+                          "text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded border inline-block",
+                          isNegative 
+                            ? "text-emerald-400 bg-emerald-500/5 border-emerald-500/10" 
+                            : isZero 
+                              ? "text-zinc-400 bg-zinc-500/5 border-zinc-500/10" 
+                              : "text-red-400 bg-red-500/5 border-red-500/10"
+                        )}>
+                          {isNegative 
+                            ? `Credit: ${formatCurrency(Math.abs(outstanding), currency, exchangeRate)}` 
+                            : `Owed: ${formatCurrency(isZero ? 0 : outstanding, currency, exchangeRate)}`
+                          }
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
