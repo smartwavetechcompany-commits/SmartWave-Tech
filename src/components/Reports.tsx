@@ -48,6 +48,8 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { PostStaySurveys } from './PostStaySurveys';
+import { Sparkles } from 'lucide-react';
 
 export function Reports() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -703,6 +705,7 @@ export function Reports() {
   
   const reportTypes = [
     { id: 'overview', label: 'Overview', icon: PieChart },
+    { id: 'post_stay_surveys', label: 'Guest Feedback & Surveys', icon: Sparkles },
     { id: 'occupancy', label: 'Daily Occupancy', icon: Bed },
     { id: 'inhouse', label: 'In House Guests', icon: Users },
     { id: 'occupancy_ratio', label: 'Occupancy Ratio', icon: BarChart3 },
@@ -921,7 +924,11 @@ export function Reports() {
             </div>
           )}
 
-          {activeReport !== 'overview' && (
+          {activeReport === 'post_stay_surveys' && hotel && (
+            <PostStaySurveys hotelId={hotel.id} currency={currency} exchangeRate={exchangeRate} />
+          )}
+
+          {activeReport !== 'overview' && activeReport !== 'post_stay_surveys' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

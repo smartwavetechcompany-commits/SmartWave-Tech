@@ -40,6 +40,8 @@ import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
+import { DigitalKeyModal } from './DigitalKeyModal';
+import { QrCode, Key as LucideKey } from 'lucide-react';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -53,6 +55,7 @@ export function GuestManagement() {
   const [historyTab, setHistoryTab] = useState<'reservations' | 'ledger'>('reservations');
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showFolio, setShowFolio] = useState<Reservation | null>(null);
+  const [showDigitalKey, setShowDigitalKey] = useState<Reservation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [guestTypeFilter, setGuestTypeFilter] = useState<'all' | 'individual' | 'corporate'>('all');
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'yes' | 'no'>('all');
@@ -1041,6 +1044,14 @@ export function GuestManagement() {
                                   <Receipt size={8} />
                                   Folio
                                 </button>
+                                <button 
+                                  onClick={() => setShowDigitalKey(res)}
+                                  className="text-[8px] font-black text-purple-400 hover:text-purple-350 flex items-center gap-0.5 uppercase tracking-tighter ml-1.5"
+                                  title="Generate time-sensitive encrypted SmartKey for guest room lock access"
+                                >
+                                  <QrCode size={8} className="text-purple-400" />
+                                  SmartKey
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -1135,6 +1146,14 @@ export function GuestManagement() {
         <GuestFolio 
           reservation={showFolio} 
           onClose={() => setShowFolio(null)} 
+        />
+      )}
+
+      {showDigitalKey && (
+        <DigitalKeyModal
+          reservation={showDigitalKey}
+          hotel={hotel}
+          onClose={() => setShowDigitalKey(null)}
         />
       )}
 

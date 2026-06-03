@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking } from '../types';
@@ -7,6 +7,8 @@ import { postToLedger, settleLedger, transferToCityLedger } from '../services/le
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
+import { DigitalKeyModal } from './DigitalKeyModal';
+import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Info,
@@ -91,6 +93,7 @@ export function FrontDesk() {
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
   const [showFolioModal, setShowFolioModal] = useState<Reservation | null>(null);
+  const [showDigitalKeyModal, setShowDigitalKeyModal] = useState<Reservation | null>(null);
   const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' | 'delete' } | null>(null);
   const [showPostponeModal, setShowPostponeModal] = useState<Reservation | null>(null);
   const [showDiscountModal, setShowDiscountModal] = useState<Reservation | null>(null);
@@ -195,7 +198,13 @@ export function FrontDesk() {
         setShowDiscountModal(updated);
       }
     }
-  }, [reservations, showFolioModal, showChargeModal, showTransferModal, showPostponeModal, showDiscountModal]);
+    if (showDigitalKeyModal) {
+      const updated = reservations.find(r => r.id === showDigitalKeyModal.id);
+      if (updated && (updated.updatedAt !== showDigitalKeyModal.updatedAt || updated.status !== showDigitalKeyModal.status)) {
+        setShowDigitalKeyModal(updated);
+      }
+    }
+  }, [reservations, showFolioModal, showChargeModal, showTransferModal, showPostponeModal, showDiscountModal, showDigitalKeyModal]);
 
   useEffect(() => {
     const action = searchParams.get('action');
@@ -1534,6 +1543,25 @@ export function FrontDesk() {
           // Let's use city ledger as it represents debt to the hotel
           await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
           toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} marked as Debt (Transferred to City Ledger).`);
+        }
+
+        // 7. Schedule Post-Stay Automated Survey (24 hours after checkout)
+        try {
+          const checkOutStr = format(now, 'yyyy-MM-dd');
+          const sendTime = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+          await addDoc(collection(db, 'hotels', hotel.id, 'surveys'), {
+            reservationId: res.id,
+            guestId: res.guestId || 'unknown_guest',
+            guestName: res.guestName,
+            guestEmail: res.guestEmail || `${res.guestName.toLowerCase().replace(/\s+/g, '')}@pms-demo.com`,
+            roomNumber: res.roomNumber,
+            checkoutDate: checkOutStr,
+            status: 'scheduled',
+            scheduledSendTime: sendTime
+          });
+          toast.info(`Automated post-stay survey scheduled for dispatch to ${res.guestName} in 24 hours.`);
+        } catch (surveyErr) {
+          console.error("Failed to automatically schedule post-stay survey:", surveyErr);
         }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
@@ -3442,6 +3470,14 @@ export function FrontDesk() {
                           </button>
                           <button 
                             type="button"
+                            onClick={() => setShowDigitalKeyModal(res)}
+                            className="p-2 text-purple-400 hover:bg-purple-500/10 rounded-lg transition-all active:scale-90"
+                            title="Room Digital SmartKey"
+                          >
+                            <QrCode size={18} />
+                          </button>
+                          <button 
+                            type="button"
                             onClick={() => updateReservationStatus(res, 'checked_out')}
                             className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                             title={(() => {
@@ -3545,6 +3581,16 @@ export function FrontDesk() {
                       >
                         <Receipt size={14} />
                         View Folio
+                      </button>
+
+                      <button 
+                        onClick={() => setShowDigitalKeyModal(res)}
+                        style={{ cursor: 'pointer' }}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                        title="Generate and view Room Digital SmartKey QR Code"
+                      >
+                        <QrCode size={14} />
+                        SmartKey
                       </button>
 
                       {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
@@ -3979,6 +4025,14 @@ export function FrontDesk() {
         confirmText={showConfirmAction?.action === 'delete' ? 'Delete' : showConfirmAction?.action === 'no_show' ? 'Confirm No-Show' : 'Cancel Reservation'}
         isLoading={loading}
       />
+
+      {showDigitalKeyModal && (
+        <DigitalKeyModal
+          reservation={showDigitalKeyModal}
+          hotel={hotel}
+          onClose={() => setShowDigitalKeyModal(null)}
+        />
+      )}
     </div>
   );
 }
