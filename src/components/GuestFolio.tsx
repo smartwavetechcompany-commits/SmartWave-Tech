@@ -72,6 +72,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showSettlePayment, setShowSettlePayment] = useState(false);
   const [showOverpaymentWarning, setShowOverpaymentWarning] = useState(false);
   const [showPostChargeModal, setShowPostChargeModal] = useState(false);
+  const [itemsToPost, setItemsToPost] = useState<{
+    id?: string;
+    amount: number;
+    price: number;
+    quantity: number;
+    type: 'debit' | 'credit';
+    category: 'restaurant' | 'service' | 'other' | 'laundry' | 'discount';
+    description: string;
+    discount: number;
+    discountType: 'fixed' | 'percentage';
+  }[]>([]);
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
     price: 0,
@@ -235,35 +246,62 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     try {
       setIsSaving(true);
       
-      // Calculate amount if price/quantity set
-      const baseAmount = chargeDetails.price > 0 ? chargeDetails.price * chargeDetails.quantity : chargeDetails.amount;
-      
-      const amountAfterDiscount = chargeDetails.discountType === 'fixed' 
-        ? baseAmount - chargeDetails.discount
-        : baseAmount * (1 - chargeDetails.discount / 100);
+      // Determine what to post
+      let finalItems = [...itemsToPost];
+      if (finalItems.length === 0) {
+        // Fallback to single item filled in current form inputs
+        finalItems.push({
+          price: chargeDetails.price,
+          quantity: chargeDetails.quantity,
+          type: chargeDetails.type,
+          category: chargeDetails.category,
+          description: chargeDetails.description,
+          discount: chargeDetails.discount,
+          discountType: chargeDetails.discountType,
+          amount: chargeDetails.amount
+        });
+      }
 
-      const discountAmount = baseAmount - amountAfterDiscount;
-      if (discountAmount > 0 || chargeDetails.category === 'discount') {
-        const policy = canApplyDiscount(hotel, profile, discountAmount || chargeDetails.amount, baseAmount || currentReservation.totalAmount);
-        if (!policy.allowed) {
-          toast.error(policy.message || 'Discount denied by policy');
-          return;
+      // Check permissions / policies
+      for (const item of finalItems) {
+        const baseAmount = item.price > 0 ? item.price * item.quantity : item.amount || 0;
+        const amountAfterDiscount = item.discountType === 'fixed' 
+          ? baseAmount - (item.discount || 0)
+          : baseAmount * (1 - (item.discount || 0) / 100);
+
+        const discountAmount = baseAmount - amountAfterDiscount;
+        if (discountAmount > 0 || item.category === 'discount') {
+          const policy = canApplyDiscount(hotel, profile, discountAmount || baseAmount, baseAmount || currentReservation.totalAmount);
+          if (!policy.allowed) {
+            toast.error(`${item.description || item.category}: ${policy.message || 'Discount denied by policy'}`);
+            setIsSaving(false);
+            return;
+          }
         }
       }
 
-      await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
-        amount: amountAfterDiscount,
-        type: chargeDetails.type,
-        category: chargeDetails.category,
-        description: chargeDetails.description || `${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}: ${chargeDetails.category}`,
-        referenceId: currentReservation.id,
-        postedBy: profile.uid,
-        quantity: chargeDetails.quantity,
-        price: chargeDetails.price
-      }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+      // Post each item sequentially to avoid write conflicts
+      for (const item of finalItems) {
+        const baseAmount = item.price > 0 ? item.price * item.quantity : item.amount || 0;
+        const amountAfterDiscount = item.discountType === 'fixed' 
+          ? baseAmount - (item.discount || 0)
+          : baseAmount * (1 - (item.discount || 0) / 100);
 
-      toast.success(`${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'} posted successfully`);
+        await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
+          amount: amountAfterDiscount,
+          type: item.type,
+          category: item.category,
+          description: item.description || `${item.type === 'debit' ? 'Charge' : 'Adjustment'}: ${item.category}`,
+          referenceId: currentReservation.id,
+          postedBy: profile.uid,
+          quantity: item.quantity,
+          price: item.price
+        }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+      }
+
+      toast.success(`${finalItems.length === 1 ? 'Entry' : 'All entries in the batch'} posted successfully`);
       setShowPostChargeModal(false);
+      setItemsToPost([]);
       setChargeDetails({ amount: 0, price: 0, quantity: 1, type: 'debit', category: 'restaurant', description: '', discount: 0, discountType: 'fixed' });
     } catch (err: any) {
       console.error("Post charge error:", err.message || safeStringify(err));
@@ -513,11 +551,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const hasRoomChargeInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
 
+  const postedExtraCharges = displayedEntries
+    .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes(e.category?.toLowerCase()))
+    .reduce((acc, e) => acc + e.amount, 0);
+
+  // Projected Room Charge should be the original room stay cost that hasn't been posted yet.
+  // Since extra charges posted to the ledger have already incremented currentReservation.totalAmount,
+  // we subtract those posted ledger extra-charges to get the pure unposted room stay cost.
+  const projectedRoomCharge = !hasRoomChargeInLedger 
+    ? Math.max(0, (currentReservation.totalAmount || 0) - postedExtraCharges)
+    : 0;
+
   const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  
-  // Projected Balance accounts for room charges not yet posted to ledger
-  const projectedRoomCharge = !hasRoomChargeInLedger ? (currentReservation.totalAmount || 0) : 0;
   const balance = (totalDebits + projectedRoomCharge) - totalCredits;
 
   const handleVoidEntry = async () => {
@@ -665,7 +711,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
             <button
               type="button"
-              onClick={() => setShowPostChargeModal(true)}
+              onClick={() => { setItemsToPost([]); setShowPostChargeModal(true); }}
               className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl sm:rounded-2xl text-amber-500 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
             >
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
@@ -721,7 +767,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   else acc[cat].credit += entry.amount;
                   return acc;
                 }, {
-                  room: !hasRoomChargeInLedger ? { debit: currentReservation.totalAmount || 0, credit: 0 } : { debit: 0, credit: 0 }
+                  room: !hasRoomChargeInLedger ? { debit: projectedRoomCharge, credit: 0 } : { debit: 0, credit: 0 }
                 })
               ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
                 <div key={cat} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
@@ -1326,24 +1372,93 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         placeholder="Item name or reason for adjustment"
                       />
                     </div>
+
+                    <button
+                      type="button"
+                      disabled={chargeDetails.price <= 0}
+                      onClick={() => {
+                        if (chargeDetails.price <= 0) return;
+                        setItemsToPost(prev => [...prev, {
+                          ...chargeDetails,
+                          id: Math.random().toString(36).substring(7)
+                        }]);
+                        setChargeDetails(prev => ({
+                          ...prev,
+                          price: 0,
+                          amount: 0,
+                          quantity: 1,
+                          description: ''
+                        }));
+                      }}
+                      className="w-full py-2.5 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-xl font-bold hover:bg-amber-500 hover:text-black transition-all text-xs flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-amber-500/10 disabled:hover:text-amber-500 disabled:cursor-not-allowed"
+                    >
+                      <Plus size={14} />
+                      Add to Batch List
+                    </button>
+
+                    {itemsToPost.length > 0 && (
+                      <div className="pt-3 border-t border-zinc-800 space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">Items in Batch ({itemsToPost.length})</span>
+                          <span className="text-xs font-bold text-amber-500 font-mono">
+                            Total: {formatCurrency(itemsToPost.reduce((sum, item) => sum + (item.price * item.quantity), 0), currency, exchangeRate)}
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {itemsToPost.map((item, index) => (
+                            <div key={item.id || index} className="flex justify-between items-center text-xs bg-zinc-950 p-2 rounded-xl border border-zinc-800/80">
+                              <div className="truncate max-w-[200px] text-left">
+                                <span className="font-mono text-[8px] bg-zinc-900 border border-zinc-800 px-1 py-0.5 rounded text-zinc-400 mr-1.5 uppercase">{item.category}</span>
+                                <span className="text-zinc-300 font-medium">{item.description || `${item.category.replace('_', ' ')} Charge`}</span>
+                                <div className="text-[10px] text-zinc-500 mt-0.5 font-mono">
+                                  {item.quantity} × {formatCurrency(item.price, currency, exchangeRate)}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-zinc-300 font-mono">
+                                  {formatCurrency(item.price * item.quantity, currency, exchangeRate)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setItemsToPost(prev => prev.filter((_, i) => i !== index))}
+                                  className="p-1 text-zinc-500 hover:text-red-400 rounded-lg hover:bg-zinc-900 transition-colors"
+                                  title="Remove item"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
                     <button
                       type="button"
                       onClick={() => setShowPostChargeModal(false)}
-                      className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                      className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-450 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      disabled={(chargeDetails.price <= 0 && chargeDetails.amount <= 0) || isSaving}
+                      disabled={isSaving || (itemsToPost.length === 0 && chargeDetails.price <= 0)}
                       className={cn(
                         "flex-1 px-4 py-2 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
-                        chargeDetails.type === 'debit' ? "bg-red-500 text-white" : "bg-emerald-500 text-black"
+                        itemsToPost.length > 0
+                          ? "bg-amber-500 text-black font-black"
+                          : chargeDetails.type === 'debit' 
+                            ? "bg-red-500 text-white" 
+                            : "bg-emerald-500 text-black"
                       )}
                     >
-                      {isSaving ? 'Processing...' : `Post ${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}`}
+                      {isSaving 
+                        ? 'Processing...' 
+                        : itemsToPost.length > 0 
+                          ? `Post Batch (${itemsToPost.length} ${itemsToPost.length === 1 ? 'Item' : 'Items'})` 
+                          : `Post ${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}`
+                      }
                     </button>
                   </div>
                 </form>
@@ -1555,7 +1670,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 )}
                 {currentReservation.status === 'checked_in' && (
                   <button 
-                    onClick={() => setShowPostChargeModal(true)}
+                    onClick={() => { setItemsToPost([]); setShowPostChargeModal(true); }}
                     className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 text-amber-500 text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-amber-500/20 transition-colors border border-amber-500/20"
                   >
                     <Plus size={12} />
