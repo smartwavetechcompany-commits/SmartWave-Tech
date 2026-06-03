@@ -49,11 +49,19 @@ export interface HotelBranding {
   address?: string;
   phone?: string;
   email?: string;
+  website?: string;
   footerNotes?: string;
   organizationName?: string;
   accountNumber?: string;
   bankName?: string;
   greeting?: string;
+  showLogoOnReceipt?: boolean;
+  showAddressOnReceipt?: boolean;
+  showPhoneOnReceipt?: boolean;
+  showEmailOnReceipt?: boolean;
+  showWebsiteOnReceipt?: boolean;
+  showBankDetailsOnReceipt?: boolean;
+  customReceiptTitle?: string;
   statusColors?: {
     clean?: string;
     dirty?: string;
@@ -739,6 +747,7 @@ export interface LedgerEntry {
   paymentMethod?: 'cash' | 'card' | 'transfer';
   quantity?: number;
   price?: number;
+  idempotencyKey?: string;
 }
 
 export interface CorporateAccount {

@@ -171,6 +171,21 @@ service cloud.firestore {
         }
       }
 
+      // Ledger entries are immutable and append-only audit logs.
+      match /ledger/{entryId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId);
+        allow create: if isSuperAdmin() || (
+          isStaffOf(hotelId) && subscriptionActive(hotelId) &&
+          request.resource.data.amount != null &&
+          request.resource.data.amount >= 0 &&
+          request.resource.data.type in ['debit', 'credit'] &&
+          request.resource.data.category is string &&
+          request.resource.data.timestamp != null
+        );
+        allow update: if isSuperAdmin(); // Immutable ledger!
+        allow delete: if isSuperAdmin(); // Immutable ledger!
+      }
+
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId);

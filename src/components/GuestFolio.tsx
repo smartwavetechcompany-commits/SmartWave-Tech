@@ -280,26 +280,60 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         }
       }
 
-      // Post each item sequentially to avoid write conflicts
-      for (const item of finalItems) {
-        const baseAmount = item.price > 0 ? item.price * item.quantity : item.amount || 0;
-        const amountAfterDiscount = item.discountType === 'fixed' 
-          ? baseAmount - (item.discount || 0)
-          : baseAmount * (1 - (item.discount || 0) / 100);
+      // Generate a unique idempotency key for this batch posting
+      const idempotencyKey = `batch_${currentReservation.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-        await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
-          amount: amountAfterDiscount,
-          type: item.type,
-          category: item.category,
-          description: item.description || `${item.type === 'debit' ? 'Charge' : 'Adjustment'}: ${item.category}`,
-          referenceId: currentReservation.id,
-          postedBy: profile.uid,
-          quantity: item.quantity,
-          price: item.price
-        }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+      try {
+        // Call server-side transaction validation logic (idempotent & immutable calculations)
+        const response = await fetch("/api/ledger/validate-and-post", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            hotelId: hotel.id,
+            guestId: currentReservation.guestId,
+            reservationId: currentReservation.id,
+            items: finalItems,
+            postedBy: profile.uid,
+            corporateId: activeFolio === 'company' ? currentReservation.corporateId : undefined,
+            idempotencyKey
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || "Server validation rejected the transaction.");
+        }
+
+        const resData = await response.json();
+        toast.success(resData.message || `${finalItems.length === 1 ? 'Entry' : 'All entries in the batch'} posted successfully`);
+      } catch (apiErr: any) {
+        console.warn("Server API posting failed or offline, falling back to local fallback transaction:", apiErr.message);
+        
+        // Post each item sequentially to avoid write conflicts
+        for (const item of finalItems) {
+          const baseAmount = item.price > 0 ? item.price * item.quantity : item.amount || 0;
+          const amountAfterDiscount = item.discountType === 'fixed' 
+            ? baseAmount - (item.discount || 0)
+            : baseAmount * (1 - (item.discount || 0) / 100);
+
+          await postToLedger(hotel.id, currentReservation.guestId, currentReservation.id, {
+            amount: amountAfterDiscount,
+            type: item.type,
+            category: item.category,
+            description: item.description || `${item.type === 'debit' ? 'Charge' : 'Adjustment'}: ${item.category}`,
+            referenceId: currentReservation.id,
+            postedBy: profile.uid,
+            quantity: item.quantity,
+            price: item.price,
+            idempotencyKey
+          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+        }
+        
+        toast.success(`${finalItems.length === 1 ? 'Entry' : 'All entries in the batch'} posted successfully (Local fallback)`);
       }
 
-      toast.success(`${finalItems.length === 1 ? 'Entry' : 'All entries in the batch'} posted successfully`);
       setShowPostChargeModal(false);
       setItemsToPost([]);
       setChargeDetails({ amount: 0, price: 0, quantity: 1, type: 'debit', category: 'restaurant', description: '', discount: 0, discountType: 'fixed' });
@@ -565,6 +599,57 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
   const balance = (totalDebits + projectedRoomCharge) - totalCredits;
+
+  // Combine real entries and a virtual projected room charge if room stay is unposted
+  const allHistoryItems = [...displayedEntries].map(item => ({ ...item, isVirtual: false }));
+  
+  if (!hasRoomChargeInLedger && projectedRoomCharge > 0) {
+    allHistoryItems.push({
+      id: 'projected_room_stay_charge_virtual',
+      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
+      description: 'Projected Room Stay (Unposted Stay Cost/Liability)',
+      category: 'room',
+      type: 'debit',
+      amount: projectedRoomCharge,
+      postedBy: 'system',
+      isVirtual: true
+    } as any);
+  }
+
+  // Sort chronologically (oldest first) to compute running balance correctly
+  const chronologicalHistory = [...allHistoryItems].sort((a, b) => {
+    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return timeA - timeB; // asc
+  });
+
+  // Calculate the running balance cumulative timeline
+  let runningBalAccumulator = 0;
+  const runningBalancesMap = new Map<string, { balance: number; calculation: string }>();
+
+  chronologicalHistory.forEach((entry) => {
+    const previousBal = runningBalAccumulator;
+    if (entry.type === 'debit') {
+      runningBalAccumulator += entry.amount;
+    } else {
+      runningBalAccumulator -= entry.amount;
+    }
+    
+    const sign = entry.type === 'debit' ? '+' : '−';
+    const detail = `${formatCurrency(previousBal, currency, exchangeRate)} ${sign} ${formatCurrency(entry.amount, currency, exchangeRate)} = ${formatCurrency(runningBalAccumulator, currency, exchangeRate)}`;
+    
+    runningBalancesMap.set(entry.id || (entry as any).firestoreId || 'projected_room_stay_charge_virtual', {
+      balance: runningBalAccumulator,
+      calculation: detail
+    });
+  });
+
+  // Display newest history entries first (descending timestamp order)
+  const sortedHistoryForDisplay = [...allHistoryItems].sort((a, b) => {
+    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return timeB - timeA; // desc
+  });
 
   const handleVoidEntry = async () => {
     if (!hotel?.id || !confirmDelete || !profile) return;
@@ -1329,7 +1414,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <div className="space-y-2">
                         <label className="text-xs font-bold text-zinc-500 uppercase">Unit Price ({currency})</label>
                         <input
-                          required
                           type="number"
                           value={currency === 'USD' ? (chargeDetails.price / exchangeRate) || '' : chargeDetails.price || ''}
                           onChange={(e) => {
@@ -1346,7 +1430,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <div className="space-y-2">
                         <label className="text-xs font-bold text-zinc-500 uppercase">Quantity</label>
                         <input
-                          required
                           type="number"
                           min="1"
                           value={chargeDetails.quantity}
@@ -1371,9 +1454,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         placeholder="Item name or reason for adjustment"
                       />
-                    </div>
-
-                    <button
+                    </div>                     <button
                       type="button"
                       disabled={chargeDetails.price <= 0}
                       onClick={() => {
@@ -1393,13 +1474,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       className="w-full py-2.5 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-xl font-bold hover:bg-amber-500 hover:text-black transition-all text-xs flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-amber-500/10 disabled:hover:text-amber-500 disabled:cursor-not-allowed"
                     >
                       <Plus size={14} />
-                      Add to Batch List
+                      Add Another Item
                     </button>
 
                     {itemsToPost.length > 0 && (
                       <div className="pt-3 border-t border-zinc-800 space-y-2 max-h-[160px] overflow-y-auto pr-1">
                         <div className="flex justify-between items-center mb-1">
-                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">Items in Batch ({itemsToPost.length})</span>
+                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">Items added ({itemsToPost.length})</span>
                           <span className="text-xs font-bold text-amber-500 font-mono">
                             Total: {formatCurrency(itemsToPost.reduce((sum, item) => sum + (item.price * item.quantity), 0), currency, exchangeRate)}
                           </span>
@@ -1454,10 +1535,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       )}
                     >
                       {isSaving 
-                        ? 'Processing...' 
+                        ? 'Confirming...' 
                         : itemsToPost.length > 0 
-                          ? `Post Batch (${itemsToPost.length} ${itemsToPost.length === 1 ? 'Item' : 'Items'})` 
-                          : `Post ${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}`
+                          ? `Confirm Posting (${itemsToPost.length} ${itemsToPost.length === 1 ? 'Item' : 'Items'})` 
+                          : `Confirm Single ${chargeDetails.type === 'debit' ? 'Charge' : 'Adjustment'}`
                       }
                     </button>
                   </div>
@@ -1688,6 +1769,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <th className="px-6 py-3">Category</th>
                     <th className="px-6 py-3 text-right">Debit</th>
                     <th className="px-6 py-3 text-right">Credit</th>
+                    <th className="px-6 py-3 text-right">Running Balance</th>
                     {hasPermission(profile?.role, 'void_transaction') && (
                       <th className="px-6 py-3 text-right">Actions</th>
                     )}
@@ -1696,51 +1778,87 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <tbody className="divide-y divide-zinc-800">
                   {loading ? (
                     <tr>
-                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 7 : 6} className="px-6 py-12 text-center text-zinc-500">
                         <Clock size={24} className="mx-auto mb-2 animate-spin opacity-20" />
                         Loading transactions...
                       </td>
                     </tr>
-                  ) : displayedEntries.length === 0 ? (
+                  ) : sortedHistoryForDisplay.length === 0 ? (
                     <tr>
-                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 7 : 6} className="px-6 py-12 text-center text-zinc-500">
                         No transactions recorded for this folio.
                       </td>
                     </tr>
                   ) : (
-                    displayedEntries.map((entry) => (
-                      <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
-                        <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-zinc-50 font-medium">{entry.description}</div>
-                          <div className="text-[10px] text-zinc-500">Ref: {(entry.id || '').slice(-8).toUpperCase()}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">
-                            {entry.category}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right text-sm font-bold text-red-500">
-                          {entry.type === 'debit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
-                        </td>
-                        <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
-                          {entry.type === 'credit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
-                        </td>
-                        {hasPermission(profile?.role, 'void_transaction') && (
-                          <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={() => setConfirmDelete(entry)}
-                              className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
-                              title="Void Transaction"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                    sortedHistoryForDisplay.map((entry) => {
+                      const entryKey = entry.id || (entry as any).firestoreId || 'projected_room_stay_charge_virtual';
+                      const runningInfo = runningBalancesMap.get(entryKey);
+                      const isOwing = (runningInfo?.balance || 0) > 0;
+                      return (
+                        <tr 
+                          key={entryKey} 
+                          className={cn(
+                            "hover:bg-zinc-900/50 transition-colors",
+                            entry.isVirtual ? "bg-amber-500/5 border-l-2 border-l-amber-500/50" : ""
+                          )}
+                        >
+                          <td className="px-6 py-4 text-xs text-zinc-400">
+                            {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                           </td>
-                        )}
-                      </tr>
-                    ))
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-medium text-zinc-50">{entry.description}</div>
+                              {entry.isVirtual && (
+                                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-500 text-[8px] font-black uppercase rounded tracking-wide border border-amber-500/30">
+                                  Projected
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-zinc-500 font-mono">
+                              {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${(entry.id || '').slice(-8).toUpperCase()}`}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-[10px] font-semi uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">
+                              {entry.category}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right text-sm font-bold text-red-500">
+                            {entry.type === 'debit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
+                          </td>
+                          <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
+                            {entry.type === 'credit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className={cn(
+                              "text-sm font-black font-mono",
+                              isOwing ? "text-red-500" : (runningInfo?.balance || 0) < 0 ? "text-emerald-500" : "text-zinc-400"
+                            )}>
+                              {formatCurrency(Math.abs(runningInfo?.balance || 0), currency, exchangeRate)}
+                              {isOwing ? " (Owing)" : (runningInfo?.balance || 0) < 0 ? " (Credit)" : ""}
+                            </div>
+                            <div className="text-[9px] text-zinc-500 font-mono mt-0.5" title="Detailed cumulative running transaction calculation">
+                              {runningInfo?.calculation}
+                            </div>
+                          </td>
+                          {hasPermission(profile?.role, 'void_transaction') && (
+                            <td className="px-6 py-4 text-right">
+                              {!entry.isVirtual ? (
+                                <button
+                                  onClick={() => setConfirmDelete(entry)}
+                                  className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                                  title="Void Transaction"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-zinc-650 italic">n/a</span>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
                 <tfoot className="bg-zinc-900/30 border-t border-zinc-800">
@@ -1752,18 +1870,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <td className="px-6 py-4 text-right text-sm font-bold text-emerald-500">
                       {formatCurrency(totalCredits, currency, exchangeRate)}
                     </td>
+                    <td className="px-6 py-4 text-right text-sm font-black text-zinc-500">
+                      —
+                    </td>
                     {hasPermission(profile?.role, 'void_transaction') && (
                       <td className="px-6 py-4"></td>
                     )}
                   </tr>
                   <tr className="border-t border-zinc-800/50">
-                    <td colSpan={3} className="px-6 py-2 text-right text-[10px] font-bold text-zinc-500 uppercase">Net Balance</td>
-                    <td colSpan={2} className={cn(
+                    <td colSpan={3} className="px-6 py-2 text-right text-[10px] font-bold text-zinc-500 uppercase">Net Balance (Including Projection)</td>
+                    <td colSpan={3} className={cn(
                       "px-6 py-2 text-right text-sm font-black",
-                      (totalDebits - totalCredits) > 0 ? "text-red-500" : "text-emerald-500"
+                      balance > 0 ? "text-red-500" : "text-emerald-500"
                     )}>
-                      {formatCurrency(Math.abs(totalDebits - totalCredits), currency, exchangeRate)}
-                      {(totalDebits - totalCredits) > 0 ? " (Owing)" : (totalDebits - totalCredits) < 0 ? " (Credit)" : " (Settled)"}
+                      {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+                      {balance > 0 ? " (Owing)" : balance < 0 ? " (Credit)" : " (Settled)"}
                     </td>
                     {hasPermission(profile?.role, 'void_transaction') && (
                       <td className="px-6 py-2"></td>

@@ -154,21 +154,34 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       `}} />
       {/* Hotel Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
-        {branding.logoUrl ? (
-          <img src={branding.logoUrl} alt={hotel.name} className="h-20 mx-auto mb-4 object-contain" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="w-16 h-16 bg-zinc-100 text-zinc-900 rounded-full flex items-center justify-center mx-auto mb-4 font-black text-2xl border-2 border-zinc-900">
-            {hotel.name.charAt(0)}
-          </div>
+        {(branding.showLogoOnReceipt ?? true) && (
+          branding.logoUrl ? (
+            <img src={branding.logoUrl} alt={hotel.name} className="h-20 mx-auto mb-4 object-contain" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-16 h-16 bg-zinc-100 text-zinc-900 rounded-full flex items-center justify-center mx-auto mb-4 font-black text-2xl border-2 border-zinc-900">
+              {hotel.name.charAt(0)}
+            </div>
+          )
         )}
         <h1 className="text-2xl font-black uppercase tracking-tighter">{branding.organizationName || hotel.name}</h1>
         <div className="text-[10px] text-zinc-500 font-medium mt-1 space-y-0.5">
-          <p className="flex items-center justify-center gap-1"><MapPin size={10} /> {branding.address || 'Hotel Address'}</p>
+          {(branding.showAddressOnReceipt ?? true) && (
+            <p className="flex items-center justify-center gap-1"><MapPin size={10} /> {branding.address || 'Hotel Address'}</p>
+          )}
           <p className="flex items-center justify-center gap-1">
-            <Phone size={10} /> {branding.phone || '+123456789'} 
-            {branding.email && <><span className="mx-2">|</span> <Mail size={10} /> {branding.email}</>}
+            {(branding.showPhoneOnReceipt ?? true) && (
+              <><Phone size={10} /> {branding.phone || '+123456789'}</>
+            )}
+            {(branding.showPhoneOnReceipt ?? true) && (branding.showEmailOnReceipt ?? true) && branding.email && (
+              <span className="mx-2">|</span>
+            )}
+            {(branding.showEmailOnReceipt ?? true) && branding.email && (
+              <><Mail size={10} /> {branding.email}</>
+            )}
           </p>
-          {hotel.website && <p className="text-emerald-600 font-bold text-xs">{hotel.website}</p>}
+          {(branding.showWebsiteOnReceipt ?? true) && (branding.website || hotel.website) && (
+            <p className="text-emerald-600 font-bold text-xs">{branding.website || hotel.website}</p>
+          )}
         </div>
       </div>
 
@@ -184,7 +197,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         </div>
         <div className="text-right">
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
-            <Receipt size={10} /> {type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : (folioType === 'company' ? 'CORPORATE FOLIO STATEMENT' : 'OFFICIAL GUEST RECEIPT')}
+            <Receipt size={10} /> {branding.customReceiptTitle || (type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : (folioType === 'company' ? 'CORPORATE FOLIO STATEMENT' : 'OFFICIAL GUEST RECEIPT'))}
           </p>
           <p className="font-bold text-base">#{type === 'corporate' ? (account?.id || '').slice(-8).toUpperCase() : (reservation?.id || '').slice(-8).toUpperCase()}</p>
           <p className="text-zinc-500 text-xs">{format(new Date(), 'MMMM dd, yyyy HH:mm')}</p>
@@ -361,7 +374,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       </div>
 
       {/* Bank Details Section */}
-      {(branding.bankName || branding.accountNumber) && (
+      {(branding.showBankDetailsOnReceipt ?? true) && (branding.bankName || branding.accountNumber) && (
         <div className="mt-4 p-3 border border-zinc-100 rounded-lg text-[9px]">
           <p className="text-zinc-400 font-bold uppercase tracking-widest mb-1">Bank Details</p>
           <div className="flex justify-between">

@@ -68,11 +68,19 @@ export function Settings() {
       address: hotel?.branding?.address || '',
       phone: hotel?.branding?.phone || '',
       email: hotel?.branding?.email || '',
+      website: hotel?.branding?.website || '',
       footerNotes: hotel?.branding?.footerNotes || '',
       organizationName: hotel?.branding?.organizationName || hotel?.name || '',
       accountNumber: hotel?.branding?.accountNumber || '',
       bankName: hotel?.branding?.bankName || '',
       greeting: hotel?.branding?.greeting || 'Thank you for staying with us!',
+      showLogoOnReceipt: hotel?.branding?.showLogoOnReceipt ?? true,
+      showAddressOnReceipt: hotel?.branding?.showAddressOnReceipt ?? true,
+      showPhoneOnReceipt: hotel?.branding?.showPhoneOnReceipt ?? true,
+      showEmailOnReceipt: hotel?.branding?.showEmailOnReceipt ?? true,
+      showWebsiteOnReceipt: hotel?.branding?.showWebsiteOnReceipt ?? true,
+      showBankDetailsOnReceipt: hotel?.branding?.showBankDetailsOnReceipt ?? true,
+      customReceiptTitle: hotel?.branding?.customReceiptTitle || '',
       statusColors: hotel?.branding?.statusColors || {
         clean: '#10b981',
         dirty: '#ef4444',
@@ -103,11 +111,19 @@ export function Settings() {
           address: hotel.branding?.address || prev.branding.address,
           phone: hotel.branding?.phone || prev.branding.phone,
           email: hotel.branding?.email || prev.branding.email,
+          website: hotel.branding?.website || prev.branding.website,
           footerNotes: hotel.branding?.footerNotes || prev.branding.footerNotes,
           organizationName: hotel.branding?.organizationName || hotel.name || prev.branding.organizationName,
           accountNumber: hotel.branding?.accountNumber || prev.branding.accountNumber,
           bankName: hotel.branding?.bankName || prev.branding.bankName,
           greeting: hotel.branding?.greeting || prev.branding.greeting,
+          showLogoOnReceipt: hotel.branding?.showLogoOnReceipt ?? prev.branding.showLogoOnReceipt,
+          showAddressOnReceipt: hotel.branding?.showAddressOnReceipt ?? prev.branding.showAddressOnReceipt,
+          showPhoneOnReceipt: hotel.branding?.showPhoneOnReceipt ?? prev.branding.showPhoneOnReceipt,
+          showEmailOnReceipt: hotel.branding?.showEmailOnReceipt ?? prev.branding.showEmailOnReceipt,
+          showWebsiteOnReceipt: hotel.branding?.showWebsiteOnReceipt ?? prev.branding.showWebsiteOnReceipt,
+          showBankDetailsOnReceipt: hotel.branding?.showBankDetailsOnReceipt ?? prev.branding.showBankDetailsOnReceipt,
+          customReceiptTitle: hotel.branding?.customReceiptTitle || prev.branding.customReceiptTitle,
           statusColors: hotel.branding?.statusColors || prev.branding.statusColors
         }
       }));
@@ -341,11 +357,13 @@ export function Settings() {
         defaultCheckOutTime: formData.defaultCheckOutTime,
         overstayChargeTime: formData.overstayChargeTime,
         autoChargeOverstays: formData.autoChargeOverstays,
+        branding: formData.branding,
       };
 
       // Calculate changed fields for better logging
       const changes: Record<string, { from: any, to: any }> = {};
       Object.entries(updates).forEach(([key, value]) => {
+        if (key === 'branding') return; // handle branding changes separately or ignore for log simplicity
         const oldValue = (hotel as any)[key];
         if (oldValue !== value) {
           changes[key] = { from: oldValue, to: value };
@@ -1040,6 +1058,137 @@ export function Settings() {
                       branding: { ...formData.branding, footerNotes: e.target.value } 
                     })}
                   />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Website URL (Printed on Receipt)</label>
+                  <input 
+                    type="url" 
+                    placeholder="https://yourhotel.com"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={formData.branding.website}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, website: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Custom Receipt Title (e.g. Tax Invoice, Bill Statement)</label>
+                  <input 
+                    type="text" 
+                    placeholder="Defaults to standard OFFICIAL GUEST RECEIPT"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                    value={formData.branding.customReceiptTitle}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      branding: { ...formData.branding, customReceiptTitle: e.target.value } 
+                    })}
+                  />
+                </div>
+
+                <div className="md:col-span-2 pt-6 border-t border-zinc-800">
+                  <h4 className="text-sm font-bold text-zinc-50 mb-1">Receipt Information Customization</h4>
+                  <p className="text-xs text-zinc-500 mb-4 font-normal">Choose which sections or details to show or hide on guest receipts</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                      <input 
+                        type="checkbox"
+                        checked={formData.branding.showLogoOnReceipt}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          branding: { ...formData.branding, showLogoOnReceipt: e.target.checked }
+                        })}
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="text-xs font-semibold block">Show Hotel Logo</span>
+                        <span className="text-[10px] text-zinc-500 block">Include your branding logo if uploaded</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                      <input 
+                        type="checkbox"
+                        checked={formData.branding.showAddressOnReceipt}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          branding: { ...formData.branding, showAddressOnReceipt: e.target.checked }
+                        })}
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="text-xs font-semibold block">Show Address</span>
+                        <span className="text-[10px] text-zinc-500 block">Include physical address at the header</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                      <input 
+                        type="checkbox"
+                        checked={formData.branding.showPhoneOnReceipt}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          branding: { ...formData.branding, showPhoneOnReceipt: e.target.checked }
+                        })}
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="text-xs font-semibold block">Show Contact Phone</span>
+                        <span className="text-[10px] text-zinc-500 block">Display contact phone number</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                      <input 
+                        type="checkbox"
+                        checked={formData.branding.showEmailOnReceipt}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          branding: { ...formData.branding, showEmailOnReceipt: e.target.checked }
+                        })}
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="text-xs font-semibold block">Show Contact Email</span>
+                        <span className="text-[10px] text-zinc-500 block">Display contact email address</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 bg-zinc-920 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                      <input 
+                        type="checkbox"
+                        checked={formData.branding.showWebsiteOnReceipt}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          branding: { ...formData.branding, showWebsiteOnReceipt: e.target.checked }
+                        })}
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="text-xs font-semibold block">Show Website Link</span>
+                        <span className="text-[10px] text-zinc-500 block">Display the hotel website URL if set</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 bg-zinc-920 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                      <input 
+                        type="checkbox"
+                        checked={formData.branding.showBankDetailsOnReceipt}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          branding: { ...formData.branding, showBankDetailsOnReceipt: e.target.checked }
+                        })}
+                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <span className="text-xs font-semibold block">Show Bank Details</span>
+                        <span className="text-[10px] text-zinc-500 block">Include bank and account transfer info</span>
+                      </div>
+                    </label>
+                  </div>
                 </div>
 
                 <div className="md:col-span-2 pt-6 border-t border-zinc-800">
