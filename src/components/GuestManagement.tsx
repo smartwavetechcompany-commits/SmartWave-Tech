@@ -519,22 +519,53 @@ export function GuestManagement() {
           </div>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-red-500/30 transition-all shadow-md">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1 sm:p-1.5 bg-red-500/10 rounded-lg text-red-500">
-              <CreditCard size={14} />
-            </div>
-            {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
-              <div className="p-0.5 bg-red-500 text-white rounded text-[7px] font-black px-1.5 uppercase shadow-sm">
-                {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
+        {(() => {
+          const totalNetOutstanding = guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0);
+          const isNegative = totalNetOutstanding < -0.01;
+          const isZero = Math.abs(totalNetOutstanding) <= 0.01;
+          
+          return (
+            <div className={cn(
+              "bg-zinc-900 border p-3 sm:p-4 rounded-xl group transition-all shadow-md",
+              isNegative 
+                ? "border-zinc-800 hover:border-emerald-500/30" 
+                : isZero 
+                  ? "border-zinc-800 hover:border-zinc-500/30" 
+                  : "border-zinc-800 hover:border-red-500/30"
+            )}>
+              <div className="flex items-center justify-between mb-2">
+                <div className={cn(
+                  "p-1 sm:p-1.5 rounded-lg",
+                  isNegative 
+                    ? "bg-emerald-500/10 text-emerald-500" 
+                    : isZero 
+                      ? "bg-zinc-500/10 text-zinc-500" 
+                      : "bg-red-500/10 text-red-500"
+                )}>
+                  <CreditCard size={14} />
+                </div>
+                {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
+                  <div className="p-0.5 bg-red-500 text-white rounded text-[7px] font-black px-1.5 uppercase shadow-sm">
+                    {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Net Outstanding</div>
-          <div className="text-lg sm:text-xl font-bold text-red-500 font-mono tracking-tight truncate">
-            {formatCurrency(guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0), currency, exchangeRate)}
-          </div>
-        </div>
+              <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">
+                {isNegative ? "Net Prepayments / Credits" : "Net Outstanding"}
+              </div>
+              <div className={cn(
+                "text-lg sm:text-xl font-bold font-mono tracking-tight truncate",
+                isNegative 
+                  ? "text-emerald-500" 
+                  : isZero 
+                    ? "text-zinc-500" 
+                    : "text-red-500"
+              )}>
+                {formatCurrency(Math.abs(totalNetOutstanding), currency, exchangeRate)}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="flex flex-col lg:flex-row gap-3 mb-4 sm:mb-6">
@@ -789,10 +820,20 @@ export function GuestManagement() {
                           <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
                         </div>
                         <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Owed</div>
+                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">
+                            {(guest.ledgerBalance || 0) > 0.01 
+                              ? "Owed" 
+                              : (guest.ledgerBalance || 0) < -0.01 
+                                ? "Credit / Deposit" 
+                                : "Owed"}
+                          </div>
                           <div className={cn(
                             "text-sm font-bold",
-                            (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                            (guest.ledgerBalance || 0) > 0.01 
+                              ? "text-red-500" 
+                              : (guest.ledgerBalance || 0) < -0.01 
+                                ? "text-emerald-500" 
+                                : "text-zinc-500"
                           )}>
                             {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
                           </div>
@@ -888,10 +929,20 @@ export function GuestManagement() {
                         </div>
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Account Balance</div>
+                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">
+                          {(viewingHistory.ledgerBalance || 0) > 0.01 
+                            ? "Account Balance (Owed)" 
+                            : (viewingHistory.ledgerBalance || 0) < -0.01 
+                              ? "Account Balance (Credit)" 
+                              : "Account Balance"}
+                        </div>
                         <div className={cn(
                           "text-lg font-bold leading-tight",
-                          (viewingHistory.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                          (viewingHistory.ledgerBalance || 0) > 0.01 
+                            ? "text-red-500" 
+                            : (viewingHistory.ledgerBalance || 0) < -0.01 
+                              ? "text-emerald-500" 
+                              : "text-zinc-500"
                         )}>
                           {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
                         </div>
