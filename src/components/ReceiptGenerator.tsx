@@ -32,7 +32,6 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const totalOtherCredits = totalCredits - totalPayments;
   
   const totalTaxDebits = filteredEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalNonTaxDebits = totalDebits - totalTaxDebits;
   let otherTaxAmount = 0;
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
@@ -40,9 +39,27 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   
   // Calculate exclusive taxes from reservation for when ledger is empty
   const resExclusiveTaxAmount = reservation?.taxDetails?.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0) || 0;
-  const resBaseAmount = reservation ? (reservation.totalAmount - resExclusiveTaxAmount) : 0;
 
-  const subtotal = totalNonTaxDebits + (!hasRoomChargeInLedger && reservation ? resBaseAmount : 0);
+  // Calculate posted extra charges (excluding room, payments, refunds, transfers, city_ledger, etc.)
+  const postedExtraCharges = filteredEntries
+    .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes(e.category?.toLowerCase()))
+    .reduce((acc, e) => acc + e.amount, 0);
+
+  // Unposted room stay cost (the virtual accommodation charge)
+  // Like GuestFolio, it is computed as reservation.totalAmount - postedExtraCharges - resExclusiveTaxAmount
+  const projectedRoomCharge = !hasRoomChargeInLedger && reservation
+    ? Math.max(0, (reservation.totalAmount || 0) - postedExtraCharges - resExclusiveTaxAmount)
+    : 0;
+
+  // Find exclusive tax debits in the ledger (tax debits with description not containing "inclusive")
+  const totalExclusiveTaxDebits = filteredEntries
+    .filter(e => e.category === 'tax' && e.type === 'debit' && !e.description.toLowerCase().includes('inclusive'))
+    .reduce((acc, e) => acc + e.amount, 0);
+
+  // Subtotal represents the gross charges of all stay/service items.
+  // We keep inclusive taxes as part of the subtotal (since they are built into the prices).
+  // Therefore, we only subtract exclusive tax debits from the ledger's total debits.
+  const subtotal = (totalDebits - totalExclusiveTaxDebits) + projectedRoomCharge;
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -101,7 +118,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   // Handle other taxes in ledger
   if (totalTaxDebits > 0) {
     const matchedExclusiveTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
-    otherTaxAmount = totalTaxDebits > matchedExclusiveTaxTotal ? totalTaxDebits - matchedExclusiveTaxTotal : 0;
+    otherTaxAmount = totalExclusiveTaxDebits > matchedExclusiveTaxTotal ? totalExclusiveTaxDebits - matchedExclusiveTaxTotal : 0;
     if (otherTaxAmount > 0.01) {
       exclusiveTaxTotal += otherTaxAmount;
     }
@@ -268,7 +285,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                     <p className="text-sm font-bold">Room Charges (Base)</p>
                     <p className="text-[10px] text-zinc-400">Accommodation for {reservation.roomNumber}</p>
                   </div>
-                  <span className="font-bold text-sm text-right">{formatCurrency(resBaseAmount, currency, exchangeRate)}</span>
+                  <span className="font-bold text-sm text-right">{formatCurrency(projectedRoomCharge, currency, exchangeRate)}</span>
                 </div>
               )}
               {debits.map(e => (
