@@ -44,7 +44,7 @@ export function Settings() {
   const { t, i18n } = useTranslation();
   const { profile, hotel, isSubscriptionActive, systemSettings, theme, setTheme } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences' | 'danger'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences' | 'shortcuts' | 'danger'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmSystemReset, setShowConfirmSystemReset] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
@@ -631,6 +631,17 @@ export function Settings() {
           >
             <Mail size={18} />
             {t('settings.support')}
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('shortcuts')}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95",
+              activeTab === 'shortcuts' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
+            )}
+          >
+            <Key size={18} />
+            Keyboard Shortcuts
           </button>
 
           {profile?.role === 'hotelAdmin' && (
@@ -1617,6 +1628,97 @@ export function Settings() {
                       })()}
                     </p>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'shortcuts' && (
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h3 className="text-xl font-bold font-sans tracking-tight text-zinc-50 mb-1">PMS Navigation Shortcuts</h3>
+                <p className="text-sm text-zinc-400">Use these rapid-access system keys to jump between departments instantaneously.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-800/80 space-y-3">
+                  <div className="flex items-center gap-2 mb-2 text-rose-400 font-bold text-xs uppercase tracking-wider">
+                    <Key size={14} />
+                    Core Navigation (Alt / Option Key)
+                  </div>
+                  
+                  <div className="space-y-2.5">
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Dashboard Overview</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + D</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Operations Window</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + O</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-[12px] text-zinc-300">Room Calendar (reception)</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + C</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Rooms & Bed Types</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + R</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5">
+                      <span className="text-xs text-zinc-300">Housekeeping Rules</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + H</kbd>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-800/80 space-y-3">
+                  <div className="flex items-center gap-2 mb-2 text-emerald-400 font-bold text-xs uppercase tracking-wider">
+                    <Key size={14} />
+                    Utility & Ledger (Alt / Option Key)
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Financial Ledger</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + F</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Guest Profiles</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + G</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Supplies & Stock</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + I</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5 border-b border-zinc-900">
+                      <span className="text-xs text-zinc-300">Maintenance & Tickets</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + M</kbd>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1.5">
+                      <span className="text-xs text-zinc-300">Property Settings</span>
+                      <kbd className="px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-mono text-zinc-200">Alt + S</kbd>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-800/80 flex items-start gap-4">
+                <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 text-purple-400 rounded-xl flex items-center justify-center shrink-0">
+                  <Key size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-zinc-200 text-sm">Universal Search & Commands</h4>
+                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                    Press <kbd className="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-300 font-mono text-[10px]">Ctrl + K</kbd> (or <kbd className="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-300 font-mono text-[10px]">⌘ + K</kbd> on macOS) at any time to spin up the Smart Command Search. Use arrows to browse and Enter to trigger any action instantly.
+                  </p>
                 </div>
               </div>
             </div>

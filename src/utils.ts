@@ -18,17 +18,16 @@ export function deepCloneSafe(obj: any): any {
 
   function isPlainObject(val: any): boolean {
     if (typeof val !== 'object' || val === null) return false;
+    
     const proto = Object.getPrototypeOf(val);
-    if (proto === null || proto === Object.prototype) return true;
+    if (proto === null) return true;
     
-    // Check if the constructor name is 'Object'
-    try {
-      if (val.constructor && val.constructor.name === 'Object') {
-        return true;
-      }
-    } catch (e) {}
+    if (proto !== Object.prototype) return false;
     
-    return false;
+    const ctor = val.constructor;
+    if (typeof ctor === 'undefined') return true;
+    
+    return ctor === Object;
   }
 
   function getSafeValue(val: any, depth: number = 0): any {

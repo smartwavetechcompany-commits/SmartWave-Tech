@@ -28,6 +28,7 @@ import {
   PlusCircle,
   RefreshCw,
   AlertCircle,
+  Tag,
   X
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify } from '../utils';
@@ -99,6 +100,101 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
+  const [showFolioDiscountModal, setShowFolioDiscountModal] = useState(false);
+  const [discountData, setDiscountData] = useState({
+    amount: 0,
+    type: 'fixed' as 'fixed' | 'percentage',
+    target: 'room' as 'room' | 'folio',
+    reason: ''
+  });
+
+  const handleApplyFolioDiscount = async () => {
+    if (!hotel?.id || !profile || !currentReservation) return;
+    if (discountData.amount <= 0) {
+      toast.error('Please enter a valid discount amount');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const resRef = doc(db, 'hotels', hotel.id, 'reservations', currentReservation.id);
+
+      if (discountData.target === 'room') {
+        const currentRate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
+        let discountVal = discountData.amount;
+        let newRate = currentRate - discountVal;
+
+        if (discountData.type === 'percentage') {
+          discountVal = (currentRate * discountData.amount) / 100;
+          newRate = currentRate - discountVal;
+        }
+
+        if (newRate < 0) {
+          toast.error('Discount cannot exceed the current nightly rate');
+          setIsSaving(false);
+          return;
+        }
+
+        const nights = currentReservation.nights || 1;
+        const totalAmountDiff = (newRate - currentRate) * nights;
+
+        const policy = canApplyDiscount(hotel, profile, Math.abs(totalAmountDiff), currentReservation.totalAmount);
+        if (!policy.allowed) {
+          toast.error(policy.message || 'Discount denied by hotel policy');
+          setIsSaving(false);
+          return;
+        }
+
+        const { updateDoc } = await import('firebase/firestore');
+        await updateDoc(resRef, {
+          nightlyRate: newRate,
+          totalAmount: Math.max(0, (currentReservation.totalAmount || 0) + totalAmountDiff)
+        });
+
+        await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
+          amount: Math.abs(totalAmountDiff),
+          type: 'credit',
+          category: 'room',
+          description: `Room Rate Discount Adjust (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Rate adjustment'}`,
+          referenceId: currentReservation.id,
+          postedBy: profile.uid
+        }, profile.uid);
+
+        toast.success(`Discount applied! Room nightly rate adjusted from ${formatCurrency(currentRate, currency, exchangeRate)} to ${formatCurrency(newRate, currency, exchangeRate)}`);
+      } else {
+        let finalAmount = discountData.amount;
+        if (discountData.type === 'percentage') {
+          finalAmount = (currentReservation.totalAmount * discountData.amount) / 100;
+        }
+
+        const policy = canApplyDiscount(hotel, profile, finalAmount, currentReservation.totalAmount);
+        if (!policy.allowed) {
+          toast.error(policy.message || 'Discount denied by hotel policy');
+          setIsSaving(false);
+          return;
+        }
+
+        await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
+          amount: finalAmount,
+          type: 'credit',
+          category: 'service',
+          description: `Folio Service Discount (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Service Adjustment'}`,
+          referenceId: currentReservation.id,
+          postedBy: profile.uid
+        }, profile.uid);
+
+        toast.success('Discount credit applied to guest folio successfully');
+      }
+
+      setShowFolioDiscountModal(false);
+      setDiscountData({ amount: 0, type: 'fixed', target: 'room', reason: '' });
+    } catch (err: any) {
+      console.error("Error applying folio discount:", err);
+      toast.error('Failed to apply discount');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleManualNightlyCharge = async () => {
     if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
@@ -765,7 +861,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {/* Quick Actions Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 sm:gap-4">
             <button
               type="button"
               onClick={() => setShowSettlePayment(true)}
@@ -805,6 +901,23 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <div className="text-left">
                 <p className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider leading-tight">Post</p>
                 <p className="text-xs sm:text-sm font-bold">Charge</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setDiscountData({ amount: 0, type: 'fixed', target: 'room', reason: '' });
+                setShowFolioDiscountModal(true);
+              }}
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl sm:rounded-2xl text-rose-500 hover:bg-rose-500 hover:text-white transition-all group active:scale-95"
+            >
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-rose-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Tag size={16} className="sm:size-5" />
+              </div>
+              <div className="text-left">
+                <p className="text-[10px] font-bold text-rose-500/70 uppercase tracking-wider leading-tight">Apply</p>
+                <p className="text-xs sm:text-sm font-bold">Discount</p>
               </div>
             </button>
 
@@ -1438,10 +1551,71 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-500 uppercase">Total Amount</label>
+                        <label className="text-xs font-bold text-zinc-500 uppercase">Effective Total Amount</label>
                         <div className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-400 font-bold">
-                          {formatCurrency(chargeDetails.price * chargeDetails.quantity, currency, exchangeRate)}
+                          {(() => {
+                            const baseBase = chargeDetails.price * chargeDetails.quantity;
+                            const discounted = chargeDetails.discountType === 'fixed'
+                              ? Math.max(0, baseBase - chargeDetails.discount)
+                              : Math.max(0, baseBase * (1 - chargeDetails.discount / 100));
+                            return formatCurrency(discounted, currency, exchangeRate);
+                          })()}
+                          {chargeDetails.discount > 0 && (
+                            <span className="text-[10px] text-emerald-400 block font-normal mt-0.5">
+                              Discount applied: -{chargeDetails.discountType === 'fixed' ? formatCurrency(chargeDetails.discount, currency, exchangeRate) : `${chargeDetails.discount}%`}
+                            </span>
+                          )}
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Service Level Discount Panel */}
+                    <div className="border border-zinc-800/80 bg-zinc-950/40 p-3 rounded-xl space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-zinc-400 uppercase">Service Discount</span>
+                        <div className="flex bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setChargeDetails({ ...chargeDetails, discountType: 'fixed', discount: 0 })}
+                            className={cn(
+                              "px-2 py-1 rounded font-bold transition-all",
+                              chargeDetails.discountType === 'fixed' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
+                            )}
+                          >
+                            Fixed
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setChargeDetails({ ...chargeDetails, discountType: 'percentage', discount: 0 })}
+                            className={cn(
+                              "px-2 py-1 rounded font-bold transition-all",
+                              chargeDetails.discountType === 'percentage' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
+                            )}
+                          >
+                            Percent
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase">
+                          {chargeDetails.discountType === 'fixed' ? `Discount Amount (${currency})` : 'Discount Percentage (%)'}
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={chargeDetails.discountType === 'percentage' ? "100" : undefined}
+                          value={chargeDetails.discountType === 'fixed' && currency === 'USD' ? (chargeDetails.discount / exchangeRate) || '' : chargeDetails.discount || ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setChargeDetails({
+                              ...chargeDetails,
+                              discount: chargeDetails.discountType === 'fixed' && currency === 'USD' ? val * exchangeRate : val
+                            });
+                          }}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50 font-mono"
+                          placeholder="0"
+                        />
                       </div>
                     </div>
 
@@ -1931,6 +2105,179 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </button>
         </div>
       </div>
+
+      {showFolioDiscountModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-50 font-sans tracking-tight">Apply Folio Discount</h2>
+                <p className="text-xs text-zinc-500 mt-1">
+                  Reservation {currentReservation.roomNumber ? `Room ${currentReservation.roomNumber}` : `ID: ${currentReservation.id.slice(-6).toUpperCase()}`}
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowFolioDiscountModal(false)}
+                className="text-zinc-500 hover:text-zinc-300"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Target Type Selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Discount Target</label>
+                <div className="grid grid-cols-2 gap-3 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setDiscountData({ ...discountData, target: 'room' })}
+                    className={cn(
+                      "py-2 rounded-lg text-xs font-bold transition-all",
+                      discountData.target === 'room' ? "bg-rose-500 text-white" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    Adjust Room Rate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscountData({ ...discountData, target: 'folio' })}
+                    className={cn(
+                      "py-2 rounded-lg text-xs font-bold transition-all",
+                      discountData.target === 'folio' ? "bg-rose-500 text-white" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    General Folio Credit
+                  </button>
+                </div>
+              </div>
+
+              {/* Discount Type Indicator (Fixed / Percentage) */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Discount Method</label>
+                <div className="grid grid-cols-2 gap-3 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setDiscountData({ ...discountData, type: 'fixed' })}
+                    className={cn(
+                      "py-2 rounded-lg text-xs font-bold transition-all",
+                      discountData.type === 'fixed' ? "bg-zinc-800 text-zinc-50 border border-zinc-700" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    Fixed Amount ({currency})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscountData({ ...discountData, type: 'percentage' })}
+                    className={cn(
+                      "py-2 rounded-lg text-xs font-bold transition-all",
+                      discountData.type === 'percentage' ? "bg-zinc-800 text-zinc-50 border border-zinc-700" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    Percentage (%)
+                  </button>
+                </div>
+              </div>
+
+              {/* Value Input */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
+                  {discountData.type === 'fixed' ? `Discount Value (${currency})` : 'Discount Percentage (%)'}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max={discountData.type === 'percentage' ? "100" : undefined}
+                  value={discountData.type === 'fixed' && currency === 'USD' ? (discountData.amount / exchangeRate) || '' : discountData.amount || ''}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 0;
+                    setDiscountData({
+                      ...discountData,
+                      amount: discountData.type === 'fixed' && currency === 'USD' ? val * exchangeRate : val
+                    });
+                  }}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-50 focus:outline-none focus:border-rose-500/50 text-sm font-mono"
+                  placeholder="0.00"
+                />
+              </div>
+
+              {/* Reason / Notes */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Adjustment Reason</label>
+                <input
+                  type="text"
+                  value={discountData.reason}
+                  onChange={(e) => setDiscountData({ ...discountData, reason: e.target.value })}
+                  placeholder="e.g. VIP guest package discount, service compensation"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-50 focus:outline-none focus:border-rose-500/50 text-sm"
+                />
+              </div>
+
+              {/* Live Preview Pane */}
+              <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-850 space-y-2">
+                <div className="flex justify-between items-center text-xs text-zinc-500">
+                  <span>Current {discountData.target === 'room' ? 'Room Nightly Rate' : 'Total Stay Invoice'}</span>
+                  <span className="font-mono text-zinc-300">
+                    {discountData.target === 'room'
+                      ? formatCurrency(currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0, currency, exchangeRate)
+                      : formatCurrency(currentReservation.totalAmount, currency, exchangeRate)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-zinc-500 border-t border-zinc-800/50 pt-2">
+                  <span className="font-bold text-rose-400">Discount Reduction</span>
+                  <span className="font-mono text-rose-400 font-bold">
+                    {(() => {
+                      const baseVal = discountData.target === 'room'
+                        ? (currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0)
+                        : currentReservation.totalAmount;
+                      const reduction = discountData.type === 'fixed'
+                        ? discountData.amount
+                        : (baseVal * discountData.amount) / 100;
+                      return `- ${formatCurrency(reduction, currency, exchangeRate)}`;
+                    })()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-zinc-500 border-t border-zinc-800/50 pt-2">
+                  <span className="font-black text-zinc-400 uppercase">Adjusted Effective Rate</span>
+                  <span className="font-mono text-emerald-400 font-bold">
+                    {(() => {
+                      const baseVal = discountData.target === 'room'
+                        ? (currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0)
+                        : currentReservation.totalAmount;
+                      const reduction = discountData.type === 'fixed'
+                        ? discountData.amount
+                        : (baseVal * discountData.amount) / 100;
+                      return formatCurrency(Math.max(0, baseVal - reduction), currency, exchangeRate);
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-zinc-950 border-t border-zinc-850 flex gap-4">
+              <button
+                type="button"
+                onClick={() => setShowFolioDiscountModal(false)}
+                className="flex-1 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSaving || discountData.amount <= 0}
+                onClick={handleApplyFolioDiscount}
+                className="flex-1 py-3 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-400 transition-all text-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSaving ? 'Applying...' : 'Apply Discount'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       <ConfirmModal
         isOpen={!!confirmDelete}

@@ -22,7 +22,8 @@ import {
   BarChart3,
   UserCog,
   ShieldCheck,
-  Settings
+  Settings,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
@@ -41,6 +42,9 @@ export function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [showNotificationBadge, setShowNotificationBadge] = useState(() => {
+    return localStorage.getItem('hide_shortcut_badge') !== 'true';
+  });
   const { profile, hotel, isSubscriptionActive } = useAuth();
   const { canAccessModule } = useModuleAccess();
   const navigate = useNavigate();
@@ -93,20 +97,74 @@ export function CommandPalette() {
            item.keywords.some(kw => kw.toLowerCase().includes(term));
   });
 
-  // Hotkey listener for Ctrl+K & Cmd+K
+  // Hotkey listener for Ctrl+K & Navigation Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      // Toggle Command Palette
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsOpen(prev => !prev);
-      } else if (e.key === 'Escape') {
+        return;
+      }
+      
+      if (e.key === 'Escape') {
         setIsOpen(false);
+        return;
+      }
+
+      // Check if user is typing in form fields before triggering navigation shortcuts
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable)) {
+        return;
+      }
+
+      // Alt key shortcuts for navigation
+      if (e.altKey) {
+        let path = '';
+        switch (e.key.toLowerCase()) {
+          case 'd': // Dashboard
+            path = '/';
+            break;
+          case 'o': // Operations
+            path = '/operations';
+            break;
+          case 'c': // Room Calendar (Front Desk)
+            path = '/front-desk';
+            break;
+          case 'r': // Rooms Inventory
+            path = '/rooms';
+            break;
+          case 'h': // Housekeeping
+            path = '/housekeeping';
+            break;
+          case 'f': // Financial Ledger (Finance)
+            path = '/finance';
+            break;
+          case 's': // Branding & Settings
+            path = '/settings';
+            break;
+          case 'g': // Guest Directory
+            path = '/guests';
+            break;
+          case 'i': // Inventory Supplies
+            path = '/inventory';
+            break;
+          case 'm': // Maintenance
+            path = '/maintenance';
+            break;
+        }
+
+        if (path) {
+          e.preventDefault();
+          navigate(path);
+          setIsOpen(false);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [navigate]);
 
   // Autofocus input when opened
   useEffect(() => {
@@ -161,13 +219,25 @@ export function CommandPalette() {
   return (
     <>
       {/* Universal Floating Shortcut Hint */}
-      <div className="fixed bottom-4 right-4 z-50 pointer-events-none hidden md:block">
-        <div className="bg-zinc-900/90 border border-zinc-800 text-zinc-400 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1.5 shadow-25 shadow-black/80">
-          <span className="text-zinc-500">SHORTCUT:</span>
-          <kbd className="px-1.5 py-0.5 bg-zinc-950 border border-zinc-800 rounded font-mono text-zinc-300">Ctrl + K</kbd>
-          <span className="text-zinc-500">FOR COMMAND PALETTE</span>
+      {showNotificationBadge && (
+        <div className="fixed bottom-4 right-4 z-[99] hidden md:block">
+          <div className="bg-zinc-900/95 border border-zinc-800 text-zinc-400 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1.5 shadow-2xl shadow-black">
+            <span className="text-zinc-500">SHORTCUT:</span>
+            <kbd className="px-1.5 py-0.5 bg-zinc-950 border border-zinc-800 rounded font-mono text-zinc-300">Ctrl + K</kbd>
+            <span className="text-zinc-500">FOR COMMAND PALETTE</span>
+            <button
+              onClick={() => {
+                localStorage.setItem('hide_shortcut_badge', 'true');
+                setShowNotificationBadge(false);
+              }}
+              className="ml-1 p-1 bg-zinc-950/55 rounded-full hover:bg-zinc-800 hover:text-white transition-all text-zinc-500 cursor-pointer pointer-events-auto"
+              title="Dismiss warning overlay"
+            >
+              <X size={10} />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <AnimatePresence>
         {isOpen && (

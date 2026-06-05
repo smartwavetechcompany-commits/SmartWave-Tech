@@ -89,6 +89,7 @@ export function FrontDesk() {
 
     checkAndRunAudit();
   }, [hotel?.id, hotel?.lastAuditDate, profile?.uid]);
+
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
@@ -164,6 +165,17 @@ export function FrontDesk() {
     notes: ''
   });
   const [isNegotiatedRate, setIsNegotiatedRate] = useState(false);
+
+  // Dynamic automatic overstay charges based on current time & settings
+  useEffect(() => {
+    if (!hotel?.id || !profile || isFetching || reservations.length === 0) return;
+    
+    const timer = setTimeout(() => {
+      checkAndChargeActiveOverstays();
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [hotel?.id, profile?.uid, reservations.length, isFetching]);
 
   // Keep modals in sync with real-time reservation updates
   useEffect(() => {
@@ -1225,6 +1237,94 @@ export function FrontDesk() {
     } finally {
       setIsAuditing(false);
       setShowNightAuditModal(false);
+    }
+  };
+
+  const checkAndChargeActiveOverstays = async () => {
+    if (!hotel?.id || !profile) return;
+    
+    // Only run if user has permission to write front desk / ledger entries
+    const canChange = profile.role === 'hotelAdmin' || 
+                      (profile.role === 'staff' && (profile.permissions || []).includes('frontDesk'));
+    if (!canChange) return;
+
+    try {
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
+      
+      const overstayingRes = reservations.filter(res => {
+        if (res.status !== 'checked_in' || !res.autoNightDeduction || !res.guestId) return false;
+        
+        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+        const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+        
+        return res.checkOut < todayStr || (res.checkOut === todayStr && now > checkOutDateTime);
+      });
+
+      if (overstayingRes.length === 0) return;
+
+      let chargedCount = 0;
+      let totalAmountCharged = 0;
+
+      for (const res of overstayingRes) {
+        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
+        
+        // Calculate nights spent vs already charged
+        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
+        let targetCharges = actualCalendarNightsPaid;
+
+        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+        const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
+        
+        if (isAfter(now, todayOverstayThreshold)) {
+          targetCharges += 1;
+        }
+
+        // Ensure we don't accidentally charge less than scheduled stay
+        const scheduledNights = res.nights || 1;
+        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
+
+        // Fetch ledger entries for this reservation
+        const ledgerRef = collection(db, 'hotels', hotel.id, 'ledger');
+        const qDoc = query(ledgerRef, where('reservationId', '==', res.id));
+        const ledgerSnap = await getDocs(qDoc);
+        
+        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
+          const data = doc.data();
+          return data.category === 'room' && data.type === 'debit';
+        });
+        const existingCharges = roomChargeEntries.length;
+
+        if (existingCharges < targetCharges) {
+          const nightsToCharge = targetCharges - existingCharges;
+          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          
+          if (rate <= 0) continue;
+
+          for (let i = 0; i < nightsToCharge; i++) {
+            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+            const isOverstay = isAfter(chargeDate, startOfDay(new Date(res.checkOut)));
+            
+            await postToLedger(hotel.id, res.guestId, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `${isOverstay ? 'Overstay' : 'Nightly'} Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
+
+            chargedCount++;
+            totalAmountCharged += rate;
+          }
+        }
+      }
+
+      if (chargedCount > 0) {
+        toast.info(`Auto-charged ${chargedCount} overstay night(s) totaling ${formatCurrency(totalAmountCharged, currency, exchangeRate)} based on initial rate & time settings.`);
+      }
+    } catch (err) {
+      console.error("Error auto-charging active overstays:", err);
     }
   };
 
