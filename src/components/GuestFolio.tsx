@@ -7,7 +7,7 @@ import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger } from '../services/ledgerService';
 import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
-import { ReceiptGenerator } from './ReceiptGenerator';
+import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
 import { ConfirmModal } from './ConfirmModal';
 import { 
   Receipt, 
@@ -679,9 +679,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     ? (activeFolio === 'company' ? companyEntries : guestEntries)
     : ledgerEntries; // Show all for regular guest bookings
 
-  const hasRoomChargeInLedger = displayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
-  const postedExtraCharges = displayedEntries
+  const hasRoomChargeInLedger = processedDisplayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+
+  const postedExtraCharges = processedDisplayedEntries
     .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes(e.category?.toLowerCase()))
     .reduce((acc, e) => acc + e.amount, 0);
 
@@ -692,12 +694,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     ? Math.max(0, (currentReservation.totalAmount || 0) - postedExtraCharges)
     : 0;
 
-  const totalDebits = displayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalCredits = displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const totalDebits = processedDisplayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalCredits = processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
   const balance = (totalDebits + projectedRoomCharge) - totalCredits;
 
   // Combine real entries and a virtual projected room charge if room stay is unposted
-  const allHistoryItems = [...displayedEntries].map(item => ({ ...item, isVirtual: false }));
+  const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
   
   if (!hasRoomChargeInLedger && projectedRoomCharge > 0) {
     allHistoryItems.push({
@@ -958,7 +960,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {Object.entries(
-                displayedEntries.reduce((acc: any, entry) => {
+                processedDisplayedEntries.reduce((acc: any, entry) => {
                   const cat = entry.category || 'Other';
                   if (!acc[cat]) acc[cat] = { debit: 0, credit: 0 };
                   if (entry.type === 'debit') acc[cat].debit += entry.amount;
@@ -1118,10 +1120,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   </div>
                   
                   {/* Ancillary services list if any */}
-                  {displayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').length > 0 && (
+                  {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').length > 0 && (
                     <div className="pt-2 border-t border-zinc-900 space-y-1">
                       <span className="text-[9px] font-bold text-zinc-600 uppercase">Ancillary Gross Charges</span>
-                      {displayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').map((e, idx) => (
+                      {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').map((e, idx) => (
                         <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2">
                           <span className="truncate max-w-[200px]">{e.description}</span>
                           <span className="font-mono">{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -1136,7 +1138,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <span className="text-zinc-100 font-mono">
                       {(() => {
                         const baseAmt = currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
-                        const otherGross = displayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0);
+                        const otherGross = processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0);
                         return formatCurrency(baseAmt + otherGross, currency, exchangeRate);
                       })()}
                     </span>
@@ -1153,7 +1155,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   {/* Render hotel taxes detail */}
                   {currentReservation.taxDetails && currentReservation.taxDetails.length > 0 ? (
                     <div className="space-y-1.5">
-                      {currentReservation.taxDetails.map((tax, idx) => (
+                      {currentReservation.taxDetails.filter(t => {
+                        const match = (hotel.taxes || []).find(ht => ht.name.toLowerCase() === t.name.toLowerCase());
+                        return match ? match.showOnFolio !== false : true;
+                      }).map((tax, idx) => (
                         <div key={idx} className="flex justify-between text-xs">
                           <span className="text-zinc-500 flex items-center gap-1">
                             {tax.name} ({tax.percentage}%)
@@ -1170,10 +1175,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   )}
 
                   {/* Ledger specific taxes if any */}
-                  {displayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').length > 0 && (
+                  {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').length > 0 && (
                     <div className="pt-2 border-t border-zinc-900 space-y-1">
                       <span className="text-[9px] font-bold text-zinc-600 uppercase font-mono">Ledger Adjusted Taxes</span>
-                      {displayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').map((e, idx) => (
+                      {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').map((e, idx) => (
                         <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2 font-mono">
                           <span className="truncate max-w-[200px]">{e.description}</span>
                           <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -1749,15 +1754,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <div className="pt-3 border-t border-zinc-800 space-y-1">
                         <div className="flex justify-between text-[10px]">
                           <span className="text-zinc-500 uppercase">Principal Charges</span>
-                          <span className="text-zinc-300">{formatCurrency(displayedEntries.filter(e => e.type === 'debit' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                          <span className="text-zinc-300">{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
                         </div>
                         <div className="flex justify-between text-[10px]">
                           <span className="text-zinc-500 uppercase">Taxes & Fees</span>
-                          <span className="text-zinc-300">{formatCurrency(displayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                          <span className="text-zinc-300">{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
                         </div>
                         <div className="flex justify-between text-[10px]">
                           <span className="text-zinc-500 uppercase">Total Payments</span>
-                          <span className="text-emerald-500">-{formatCurrency(displayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                          <span className="text-emerald-500">-{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
                         </div>
                       </div>
                     </div>
@@ -2078,7 +2083,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const headers = ['Date', 'Description', 'Category', 'Debit', 'Credit'];
               const csvContent = [
                 headers.join(','),
-                ...displayedEntries.map(e => [
+                ...processedDisplayedEntries.map(e => [
                   format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,

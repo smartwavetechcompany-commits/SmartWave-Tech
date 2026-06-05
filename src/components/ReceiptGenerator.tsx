@@ -1,9 +1,74 @@
 import React from 'react';
-import { Reservation, Hotel, LedgerEntry, CorporateAccount } from '../types';
+import { Reservation, Hotel, LedgerEntry, CorporateAccount, Tax } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
+
+export function processLedgerTaxes(
+  entries: LedgerEntry[],
+  taxes: Tax[] = [],
+  showOnField: 'showOnReceipt' | 'showOnFolio'
+): LedgerEntry[] {
+  const result: LedgerEntry[] = [];
+  const taxEntriesToMerge: { taxEntry: LedgerEntry; targetParentDesc: string }[] = [];
+
+  const nonTaxEntries = entries
+    .filter(e => e.category !== 'tax' || e.type !== 'debit')
+    .map(e => ({ ...e }));
+
+  const taxDebits = entries.filter(e => e.category === 'tax' && e.type === 'debit');
+  const sortedTaxes = [...(taxes || [])].sort((a, b) => b.name.length - a.name.length);
+
+  for (const taxEntry of taxDebits) {
+    const matchedTax = sortedTaxes.find(t => 
+      taxEntry.description.toLowerCase().includes(t.name.toLowerCase())
+    );
+
+    const isVisible = matchedTax ? (matchedTax[showOnField] !== false) : true;
+
+    if (!isVisible) {
+      let parentDesc = '';
+      const forIndex = taxEntry.description.toLowerCase().lastIndexOf(' for ');
+      if (forIndex !== -1) {
+        parentDesc = taxEntry.description.slice(forIndex + 5).trim();
+      }
+
+      taxEntriesToMerge.push({
+        taxEntry,
+        targetParentDesc: parentDesc.toLowerCase()
+      });
+    } else {
+      result.push({ ...taxEntry });
+    }
+  }
+
+  for (const { taxEntry, targetParentDesc } of taxEntriesToMerge) {
+    let merged = false;
+    
+    const parent = nonTaxEntries.find(parentEntry => {
+      if (parentEntry.type !== 'debit') return false;
+      const descMatches = parentEntry.description.toLowerCase() === targetParentDesc ||
+                          targetParentDesc.includes(parentEntry.description.toLowerCase()) ||
+                          parentEntry.description.toLowerCase().includes(targetParentDesc);
+      
+      const timeMatches = parentEntry.timestamp === taxEntry.timestamp || 
+                          Math.abs(new Date(parentEntry.timestamp).getTime() - new Date(taxEntry.timestamp).getTime()) < 5000;
+      return descMatches && timeMatches;
+    });
+
+    if (parent) {
+      parent.amount += taxEntry.amount;
+      merged = true;
+    }
+
+    if (!merged) {
+      result.push({ ...taxEntry });
+    }
+  }
+
+  return [...nonTaxEntries, ...result];
+}
 
 interface ReceiptProps {
   hotel: Hotel;
@@ -23,25 +88,28 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     ? ledgerEntries.filter(e => folioType === 'company' ? !!e.corporateId : !e.corporateId)
     : ledgerEntries;
   
-  const debits = filteredEntries.filter(e => e.type === 'debit');
-  const credits = filteredEntries.filter(e => e.type === 'credit');
+  // Merge hidden taxes into their parent entries based on active settings
+  const processedEntries = processLedgerTaxes(filteredEntries, hotel.taxes || [], 'showOnReceipt');
+  
+  const debits = processedEntries.filter(e => e.type === 'debit');
+  const credits = processedEntries.filter(e => e.type === 'credit');
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
   const totalPayments = credits.filter(e => e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments;
   
-  const totalTaxDebits = filteredEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalTaxDebits = processedEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   let otherTaxAmount = 0;
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
-  const hasRoomChargeInLedger = filteredEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  const hasRoomChargeInLedger = processedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   
   // Calculate exclusive taxes from reservation for when ledger is empty
   const resExclusiveTaxAmount = reservation?.taxDetails?.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0) || 0;
 
   // Calculate posted extra charges (excluding room, payments, refunds, transfers, city_ledger, etc.)
-  const postedExtraCharges = filteredEntries
+  const postedExtraCharges = processedEntries
     .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes(e.category?.toLowerCase()))
     .reduce((acc, e) => acc + e.amount, 0);
 
@@ -52,7 +120,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     : 0;
 
   // Find exclusive tax debits in the ledger (tax debits with description not containing "inclusive")
-  const totalExclusiveTaxDebits = filteredEntries
+  const totalExclusiveTaxDebits = processedEntries
     .filter(e => e.category === 'tax' && e.type === 'debit' && !e.description.toLowerCase().includes('inclusive'))
     .reduce((acc, e) => acc + e.amount, 0);
 
@@ -82,7 +150,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     
     // If we have taxes in ledger, use them for accurate reporting
     if (totalTaxDebits > 0) {
-      amount = filteredEntries
+      amount = processedEntries
         .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
         .reduce((acc, e) => acc + e.amount, 0);
       
