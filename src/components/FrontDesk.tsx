@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking } from '../types';
@@ -51,7 +51,7 @@ import { hasPermission } from '../utils/permissions';
 import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canApplyDiscount } from '../utils/policyUtils';
 import { logActivity } from '../utils/activityLogger';
 import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
-import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
+import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 
@@ -153,7 +153,10 @@ export function FrontDesk() {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [staffFilter, setStaffFilter] = useState('all');
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures' | 'checked_in' | 'overstay'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures' | 'checked_in' | 'overstay' | 'checkin_history' | 'checkout_history'>('all');
+  const [checkInHistory, setCheckInHistory] = useState<any[]>([]);
+  const [checkOutHistory, setCheckOutHistory] = useState<any[]>([]);
+  const [historyPeriod, setHistoryPeriod] = useState<'all' | 'daily' | 'weekly' | 'monthly' | 'custom'>('all');
   const [sortBy, setSortBy] = useState<'checkIn' | 'guestName' | 'roomNumber' | 'status'>('checkIn');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
@@ -234,57 +237,130 @@ export function FrontDesk() {
     }
   }, [searchParams, setSearchParams]);
 
-  const filteredReservations = reservations.filter(res => {
-    const matchesSearch = fuzzySearch(res.guestName || '', searchTerm) ||
-      fuzzySearch(res.roomNumber || '', searchTerm) ||
-      fuzzySearch(res.id || '', searchTerm);
-    
-    if (!matchesSearch) return false;
-
-    const matchesStatus = statusFilter === 'all' || res.status === statusFilter;
-    if (!matchesStatus) return false;
-
-    const matchesPaymentStatus = paymentStatusFilter === 'all' || res.paymentStatus === paymentStatusFilter;
-    if (!matchesPaymentStatus) return false;
-
-    const matchesRoomType = roomTypeFilter === 'all' || rooms.find(r => r.id === res.roomId)?.type === roomTypeFilter;
-    if (!matchesRoomType) return false;
-
-    const matchesStaff = staffFilter === 'all' || res.bookedBy === staffFilter;
-    if (!matchesStaff) return false;
-
-    if (dateRange.start) {
-      if (new Date(res.checkIn) < new Date(dateRange.start)) return false;
-    }
-    if (dateRange.end) {
-      if (new Date(res.checkIn) > new Date(dateRange.end)) return false;
+  const filteredReservations = React.useMemo(() => {
+    let baseList: any[] = [];
+    if (activeTab === 'checkin_history') {
+      baseList = checkInHistory;
+    } else if (activeTab === 'checkout_history') {
+      baseList = checkOutHistory;
+    } else {
+      baseList = reservations;
     }
 
-    const today = new Date().toISOString().split('T')[0];
-    if (activeTab === 'arrivals') {
-      return res.checkIn === today && res.status === 'pending';
-    }
-    if (activeTab === 'departures') {
-      return res.checkOut === today && res.status === 'checked_in';
-    }
-    if (activeTab === 'checked_in') {
-      return res.status === 'checked_in';
-    }
-    if (activeTab === 'overstay') {
-      const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-      const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
-      const now = new Date();
-      return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
-    }
-    return true;
-  }).sort((a, b) => {
-    let result = 0;
-    if (sortBy === 'guestName') result = a.guestName.localeCompare(b.guestName);
-    else if (sortBy === 'roomNumber') result = a.roomNumber.localeCompare(b.roomNumber);
-    else if (sortBy === 'status') result = a.status.localeCompare(b.status);
-    else result = new Date(a.checkIn).getTime() - new Date(b.checkIn).getTime();
-    return sortOrder === 'desc' ? -result : result;
-  });
+    return baseList.filter(res => {
+      const matchesSearch = fuzzySearch(res.guestName || '', searchTerm) ||
+        fuzzySearch(res.roomNumber || '', searchTerm) ||
+        fuzzySearch(res.id || '', searchTerm);
+      
+      if (!matchesSearch) return false;
+
+      // History Tab Date Filter Requirements
+      if (activeTab === 'checkin_history' || activeTab === 'checkout_history') {
+        const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : res.checkOut;
+        if (compareDateStr) {
+          const itemDate = new Date(compareDateStr);
+          const today = new Date();
+          const todayStr = format(today, 'yyyy-MM-dd');
+
+          if (historyPeriod === 'daily') {
+            if (compareDateStr !== todayStr) return false;
+          } else if (historyPeriod === 'weekly') {
+            const startOfThisWeek = startOfWeek(today, { weekStartsOn: 1 });
+            const endOfThisWeek = endOfWeek(today, { weekStartsOn: 1 });
+            if (itemDate < startOfThisWeek || itemDate > endOfThisWeek) return false;
+          } else if (historyPeriod === 'monthly') {
+            const startOfThisMonth = startOfMonth(today);
+            const endOfThisMonth = endOfMonth(today);
+            if (itemDate < startOfThisMonth || itemDate > endOfThisMonth) return false;
+          }
+        }
+
+        // Custom range filters if present
+        if (dateRange.start) {
+          const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : res.checkOut;
+          if (compareDateStr && new Date(compareDateStr) < new Date(dateRange.start)) return false;
+        }
+        if (dateRange.end) {
+          const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : res.checkOut;
+          if (compareDateStr && new Date(compareDateStr) > new Date(dateRange.end)) return false;
+        }
+
+        return true;
+      }
+
+      // Normal Active Tab Filter logic
+      const matchesStatus = statusFilter === 'all' || res.status === statusFilter;
+      if (!matchesStatus) return false;
+
+      const matchesPaymentStatus = paymentStatusFilter === 'all' || res.paymentStatus === paymentStatusFilter;
+      if (!matchesPaymentStatus) return false;
+
+      const matchesRoomType = roomTypeFilter === 'all' || rooms.find(r => r.id === res.roomId)?.type === roomTypeFilter;
+      if (!matchesRoomType) return false;
+
+      const matchesStaff = staffFilter === 'all' || res.bookedBy === staffFilter;
+      if (!matchesStaff) return false;
+
+      if (dateRange.start) {
+        if (new Date(res.checkIn) < new Date(dateRange.start)) return false;
+      }
+      if (dateRange.end) {
+        if (new Date(res.checkIn) > new Date(dateRange.end)) return false;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      if (activeTab === 'arrivals') {
+        return res.checkIn === today && res.status === 'pending';
+      }
+      if (activeTab === 'departures') {
+        return res.checkOut === today && res.status === 'checked_in';
+      }
+      if (activeTab === 'checked_in') {
+        return res.status === 'checked_in';
+      }
+      if (activeTab === 'overstay') {
+        const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
+        const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+        const now = new Date();
+        return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
+      }
+
+      // Automatically hide fully paid (ledgerBalance = 0) checkout reservations from other active tabs
+      if (activeTab === 'all') {
+        const isCompleted = res.status === 'checked_out' && (res.ledgerBalance || 0) <= 0.01;
+        if (isCompleted) return false;
+      }
+
+      return true;
+    }).sort((a, b) => {
+      let result = 0;
+      if (sortBy === 'guestName') result = (a.guestName || '').localeCompare(b.guestName || '');
+      else if (sortBy === 'roomNumber') result = (a.roomNumber || '').localeCompare(b.roomNumber || '');
+      else if (sortBy === 'status') result = (a.status || '').localeCompare(b.status || '');
+      else {
+        const dateA = activeTab === 'checkout_history' ? a.checkOut : a.checkIn;
+        const dateB = activeTab === 'checkout_history' ? b.checkOut : b.checkIn;
+        result = new Date(dateA || '').getTime() - new Date(dateB || '').getTime();
+      }
+      return sortOrder === 'desc' ? -result : result;
+    });
+  }, [
+    activeTab,
+    reservations,
+    checkInHistory,
+    checkOutHistory,
+    searchTerm,
+    historyPeriod,
+    dateRange,
+    statusFilter,
+    paymentStatusFilter,
+    rooms,
+    roomTypeFilter,
+    staffFilter,
+    hotel,
+    sortBy,
+    sortOrder
+  ]);
 
   const roomStats = {
     total: rooms.length,
@@ -339,6 +415,14 @@ export function FrontDesk() {
       setRoomBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
     });
 
+    const unsubCheckInHist = onSnapshot(collection(db, 'hotels', hotel.id, 'checkin_history'), (snap) => {
+      setCheckInHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubCheckOutHist = onSnapshot(collection(db, 'hotels', hotel.id, 'checkout_history'), (snap) => {
+      setCheckOutHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubRes();
       unsubRooms();
@@ -347,6 +431,8 @@ export function FrontDesk() {
       unsubCorp();
       unsubStaff();
       unsubBlockings();
+      unsubCheckInHist();
+      unsubCheckOutHist();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -992,6 +1078,30 @@ export function FrontDesk() {
             checkInTime: new Date().toISOString()
           });
 
+          // Write to Check-In History
+          type ReservationStatusType = 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
+          batch.set(doc(db, 'hotels', hotel.id, 'checkin_history', resId), {
+            id: res.id,
+            reservationId: res.id,
+            guestId: res.guestId || 'unknown_guest',
+            guestName: res.guestName,
+            guestEmail: res.guestEmail || '',
+            guestPhone: res.guestPhone || '',
+            roomNumber: res.roomNumber,
+            roomId: res.roomId,
+            checkIn: res.checkIn,
+            checkInTime: res.checkInTime || '14:00',
+            checkOut: res.checkOut,
+            checkInTimestamp: new Date().toISOString(),
+            bookedBy: res.bookedBy || '',
+            checkedInBy: profile.email || 'System',
+            status: 'checked_in' as ReservationStatusType,
+            ledgerBalance: res.ledgerBalance || 0,
+            totalAmount: res.totalAmount || 0,
+            paidAmount: res.paidAmount || 0,
+            paymentStatus: res.paymentStatus || 'unpaid'
+          });
+
           // Update room status
           if (res.roomId) {
             batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
@@ -1463,6 +1573,34 @@ export function FrontDesk() {
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
+        // Write to Check-In History
+        try {
+          const checkInHistoryRef = doc(db, 'hotels', hotel.id, 'checkin_history', res.id);
+          await setDoc(checkInHistoryRef, {
+            id: res.id,
+            reservationId: res.id,
+            guestId: res.guestId || 'unknown_guest',
+            guestName: res.guestName,
+            guestEmail: res.guestEmail || '',
+            guestPhone: res.guestPhone || '',
+            roomNumber: res.roomNumber,
+            roomId: res.roomId,
+            checkIn: res.checkIn,
+            checkInTime: res.checkInTime || '14:00',
+            checkOut: res.checkOut,
+            checkInTimestamp: new Date().toISOString(),
+            bookedBy: res.bookedBy || '',
+            checkedInBy: profile.email || 'System',
+            status: 'checked_in',
+            ledgerBalance: res.ledgerBalance || 0,
+            totalAmount: res.totalAmount || 0,
+            paidAmount: res.paidAmount || 0,
+            paymentStatus: res.paymentStatus || 'unpaid'
+          });
+        } catch (err) {
+          console.error("Failed to write to checkin_history:", err);
+        }
+
         // Mark room as occupied
         const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
         await database.safeUpdate(roomRef, { status: 'occupied' }, {
@@ -1729,6 +1867,38 @@ export function FrontDesk() {
         } catch (surveyErr) {
           console.error("Failed to automatically schedule post-stay survey:", surveyErr);
         }
+
+        // Write to Check-Out History
+        try {
+          // Compute outstanding balance using fresh billing data
+          const freshResSnapForHist = await getDoc(resRef);
+          const freshData = freshResSnapForHist.data() || res;
+          
+          const checkoutHistoryRef = doc(db, 'hotels', hotel.id, 'checkout_history', res.id);
+          await setDoc(checkoutHistoryRef, {
+            id: res.id,
+            reservationId: res.id,
+            guestId: res.guestId || 'unknown_guest',
+            guestName: res.guestName,
+            guestEmail: res.guestEmail || '',
+            guestPhone: res.guestPhone || '',
+            roomNumber: res.roomNumber,
+            roomId: res.roomId,
+            checkIn: res.checkIn,
+            checkOut: format(now, 'yyyy-MM-dd'),
+            checkOutTime: format(now, 'HH:mm'),
+            checkOutTimestamp: now.toISOString(),
+            bookedBy: res.bookedBy || '',
+            checkedOutBy: profile.email || 'System',
+            status: 'checked_out',
+            ledgerBalance: freshData.ledgerBalance || 0,
+            totalAmount: totalDebits,
+            paidAmount: freshData.paidAmount || 0,
+            paymentStatus: (freshData.paidAmount || 0) >= totalDebits ? 'paid' : (freshData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+          });
+        } catch (err) {
+          console.error("Failed to write to checkout_history:", err);
+        }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
         const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
@@ -1771,6 +1941,39 @@ export function FrontDesk() {
           profile.uid,
           res.corporateId
         );
+
+        try {
+          const freshResSnapForPay = await getDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id));
+          if (freshResSnapForPay.exists()) {
+            const freshData = freshResSnapForPay.data() as Reservation;
+            if (freshData.status === 'checked_out') {
+              const checkoutHistoryRef = doc(db, 'hotels', hotel.id, 'checkout_history', res.id);
+              await setDoc(checkoutHistoryRef, {
+                id: res.id,
+                reservationId: res.id,
+                guestId: res.guestId || 'unknown_guest',
+                guestName: res.guestName,
+                guestEmail: res.guestEmail || '',
+                guestPhone: res.guestPhone || '',
+                roomNumber: res.roomNumber,
+                roomId: res.roomId,
+                checkIn: res.checkIn,
+                checkOut: freshData.checkOut || res.checkOut,
+                checkOutTime: freshData.checkOutTime || '11:00',
+                checkOutTimestamp: new Date().toISOString(),
+                bookedBy: res.bookedBy || '',
+                checkedOutBy: profile.email || 'System',
+                status: 'checked_out',
+                ledgerBalance: freshData.ledgerBalance || 0,
+                totalAmount: freshData.totalAmount || res.totalAmount,
+                paidAmount: freshData.paidAmount || 0,
+                paymentStatus: freshData.paymentStatus || 'paid'
+              }, { merge: true });
+            }
+          }
+        } catch (syncErr) {
+          console.error("Failed to sync checkout history after payment:", syncErr);
+        }
       }
 
       // Log action handled by settleLedger internals
@@ -3231,8 +3434,8 @@ export function FrontDesk() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <h3 className="font-bold text-zinc-50 text-sm">{selectedReservations.length > 0 ? `Selected: ${selectedReservations.length}` : 'Reservations'}</h3>
-              <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-                {(['all', 'arrivals', 'departures', 'checked_in', 'overstay'] as const).map((tab) => (
+              <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 flex-wrap gap-1">
+                {(['all', 'arrivals', 'departures', 'checked_in', 'overstay', 'checkin_history', 'checkout_history'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => {
@@ -3240,13 +3443,13 @@ export function FrontDesk() {
                       setSelectedReservations([]);
                     }}
                     className={cn(
-                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all",
+                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all whitespace-nowrap",
                       activeTab === tab 
                         ? "bg-emerald-500 text-black shadow-lg" 
                         : "text-zinc-500 hover:text-zinc-300"
                     )}
                   >
-                    {tab === 'checked_in' ? 'In-House' : tab}
+                    {tab === 'checked_in' ? 'In-House' : tab === 'checkin_history' ? 'Check-In History' : tab === 'checkout_history' ? 'Check-Out History' : tab}
                   </button>
                 ))}
               </div>
@@ -3277,19 +3480,32 @@ export function FrontDesk() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500"
-            >
-              <option value="all">Status: All</option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="checked_in">In-House</option>
-              <option value="checked_out">Departed</option>
-              <option value="cancelled">Cancelled</option>
-              <option value="no_show">No Show</option>
-            </select>
+            {(activeTab === 'checkin_history' || activeTab === 'checkout_history') ? (
+              <select
+                value={historyPeriod}
+                onChange={(e) => setHistoryPeriod(e.target.value as any)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">Period: All</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            ) : (
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">Status: All</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="checked_in">In-House</option>
+                <option value="checked_out">Departed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="no_show">No Show</option>
+              </select>
+            )}
 
             <select
               value={paymentStatusFilter}
@@ -3589,185 +3805,216 @@ export function FrontDesk() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
-                      {res.status === 'checked_in' && (
+                      {(activeTab === 'checkin_history' || activeTab === 'checkout_history') ? (
                         <>
                           <button 
-                            type="button"
-                            onClick={() => setShowTransferModal(res)}
-                            className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                            title="Transfer Room"
-                          >
-                            <RefreshCw size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              setNewCheckOutDate(res.checkOut);
-                              setShowPostponeModal(res);
-                            }}
-                            className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
-                            title="Postpone Stay / Extend"
-                          >
-                            <Calendar size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setShowDiscountModal(res)}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                            title="Apply Discount"
-                          >
-                            <Tag size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setShowChargeModal(res)}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
-                            title="Post Charge to Room"
-                          >
-                            <Plus size={18} />
-                          </button>
-                          <button 
-                            type="button"
                             onClick={() => setShowFolioModal(res)}
-                            className="p-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                            title="Guest Folio"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                            title="View Guest Folio"
                           >
-                            <FileText size={18} />
+                            <Receipt size={14} />
+                            View Folio
                           </button>
-                          <button 
-                            type="button"
-                            onClick={() => setShowDigitalKeyModal(res)}
-                            className="p-2 text-purple-400 hover:bg-purple-500/10 rounded-lg transition-all active:scale-90"
-                            title="Room Digital SmartKey"
-                          >
-                            <QrCode size={18} />
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => updateReservationStatus(res, 'checked_out')}
-                            className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={(() => {
-                              const policy = canCheckout(hotel, profile, res);
-                              return policy.allowed ? "Check Out" : policy.message;
-                            })()}
-                            disabled={loading || !canCheckout(hotel, profile, res).allowed}
-                          >
-                            <LogOut size={18} />
-                          </button>
-                        </>
-                      )}
-                      
-                      {res.status === 'pending' && (
-                        <>
-                          <button 
-                            onClick={() => {
-                              const amount = prompt("Enter payment amount:");
-                              if (amount && !isNaN(Number(amount))) {
-                                updatePayment(res, Number(amount));
-                              }
-                            }}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                            title="Take Prepayment / Deposit"
-                          >
-                            <DollarSign size={18} />
-                          </button>
-                           <button 
-                            onClick={() => updateReservationStatus(res, 'checked_in')}
-                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={(() => {
-                              const room = rooms.find(r => r.id === res.roomId);
-                              const guest = guests.find(g => g.id === res.guestId);
-                              const policy = canCheckIn(hotel, profile, res, room, guest);
-                              return policy.allowed ? "Check In" : policy.message;
-                            })()}
-                            disabled={loading || !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId)).allowed}
-                          >
-                            <CheckCircle2 size={18} />
-                          </button>
-                          <button 
-                            onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
-                            className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={(() => {
-                              const policy = canCancelReservation(hotel, profile, res); // No-show uses same cancel policy
-                              return policy.allowed ? "Mark No-Show" : policy.message;
-                            })()}
-                            disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
-                          >
-                            <UserX size={18} />
-                          </button>
-                          <button 
-                            onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
-                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={(() => {
-                              const policy = canCancelReservation(hotel, profile, res);
-                              return policy.allowed ? "Cancel" : policy.message;
-                            })()}
-                            disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
-                          >
-                            <XCircle size={18} />
-                          </button>
-                        </>
-                      )}
-
-                      {(profile && hasPermission(profile, 'edit_reservation')) && (
-                        <button 
-                          onClick={() => {
-                            const policy = canEditReservation(hotel, profile, res);
-                            if (!policy.allowed) {
-                              toast.error(policy.message || 'Editing disabled');
-                              return;
-                            }
-                            setEditingReservation(res);
-                            setEditForm({
-                              checkIn: res.checkIn,
-                              checkOut: res.checkOut,
-                              totalAmount: res.totalAmount,
-                              notes: res.notes || ''
-                            });
-                          }}
-                          className={cn(
-                            "p-2 rounded-lg transition-all active:scale-90",
-                            !canEditReservation(hotel, profile, res).allowed
-                              ? "text-zinc-600 cursor-not-allowed"
-                              : "text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
+                          {res.status === 'checked_out' && (res.ledgerBalance || 0) > 0.01 && (
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                const amount = prompt(`Enter payment amount to settle outstanding balance (max ${res.ledgerBalance}):`, String(res.ledgerBalance));
+                                if (amount && !isNaN(Number(amount)) && Number(amount) > 0) {
+                                  updatePayment(res, Number(amount));
+                                }
+                              }}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                              title="Settle Outstanding Balance"
+                            >
+                              <DollarSign size={14} />
+                              Settle Balance
+                            </button>
                           )}
-                          title={(() => {
-                            const policy = canEditReservation(hotel, profile, res);
-                            return policy.allowed ? "Edit Reservation" : policy.message;
-                          })()}
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                      )}
+                        </>
+                      ) : (
+                        <>
+                          {res.status === 'checked_in' && (
+                            <>
+                              <button 
+                                type="button"
+                                onClick={() => setShowTransferModal(res)}
+                                className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                                title="Transfer Room"
+                              >
+                                <RefreshCw size={18} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setNewCheckOutDate(res.checkOut);
+                                  setShowPostponeModal(res);
+                                }}
+                                className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                                title="Postpone Stay / Extend"
+                              >
+                                <Calendar size={18} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => setShowDiscountModal(res)}
+                                className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                title="Apply Discount"
+                              >
+                                <Tag size={18} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => setShowChargeModal(res)}
+                                className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                                title="Post Charge to Room"
+                              >
+                                <Plus size={18} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => setShowFolioModal(res)}
+                                className="p-2 text-zinc-500 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                                title="Guest Folio"
+                              >
+                                <FileText size={18} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => setShowDigitalKeyModal(res)}
+                                className="p-2 text-purple-400 hover:bg-purple-500/10 rounded-lg transition-all active:scale-90"
+                                title="Room Digital SmartKey"
+                              >
+                                <QrCode size={18} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => updateReservationStatus(res, 'checked_out')}
+                                className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={(() => {
+                                  const policy = canCheckout(hotel, profile, res);
+                                  return policy.allowed ? "Check Out" : policy.message;
+                                })()}
+                                disabled={loading || !canCheckout(hotel, profile, res).allowed}
+                              >
+                                <LogOut size={18} />
+                              </button>
+                            </>
+                          )}
+                          
+                          {res.status === 'pending' && (
+                            <>
+                              <button 
+                                onClick={() => {
+                                  const amount = prompt("Enter payment amount:");
+                                  if (amount && !isNaN(Number(amount))) {
+                                    updatePayment(res, Number(amount));
+                                  }
+                                }}
+                                className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                title="Take Prepayment / Deposit"
+                              >
+                                <DollarSign size={18} />
+                              </button>
+                               <button 
+                                onClick={() => updateReservationStatus(res, 'checked_in')}
+                                className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={(() => {
+                                  const room = rooms.find(r => r.id === res.roomId);
+                                  const guest = guests.find(g => g.id === res.guestId);
+                                  const policy = canCheckIn(hotel, profile, res, room, guest);
+                                  return policy.allowed ? "Check In" : policy.message;
+                                })()}
+                                disabled={loading || !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId)).allowed}
+                              >
+                                <CheckCircle2 size={18} />
+                              </button>
+                              <button 
+                                onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
+                                className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={(() => {
+                                  const policy = canCancelReservation(hotel, profile, res); // No-show uses same cancel policy
+                                  return policy.allowed ? "Mark No-Show" : policy.message;
+                                })()}
+                                disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
+                              >
+                                <UserX size={18} />
+                              </button>
+                              <button 
+                                onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
+                                className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={(() => {
+                                  const policy = canCancelReservation(hotel, profile, res);
+                                  return policy.allowed ? "Cancel" : policy.message;
+                                })()}
+                                disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
+                              >
+                                <XCircle size={18} />
+                              </button>
+                            </>
+                          )}
 
-                      <button 
-                        onClick={() => setShowFolioModal(res)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
-                        title="View Guest Folio"
-                      >
-                        <Receipt size={14} />
-                        View Folio
-                      </button>
+                          {(profile && hasPermission(profile, 'edit_reservation')) && (
+                            <button 
+                              onClick={() => {
+                                const policy = canEditReservation(hotel, profile, res);
+                                if (!policy.allowed) {
+                                  toast.error(policy.message || 'Editing disabled');
+                                  return;
+                                }
+                                setEditingReservation(res);
+                                setEditForm({
+                                  checkIn: res.checkIn,
+                                  checkOut: res.checkOut,
+                                  totalAmount: res.totalAmount,
+                                  notes: res.notes || ''
+                                });
+                              }}
+                              className={cn(
+                                "p-2 rounded-lg transition-all active:scale-90",
+                                !canEditReservation(hotel, profile, res).allowed
+                                  ? "text-zinc-600 cursor-not-allowed"
+                                  : "text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
+                              )}
+                              title={(() => {
+                                const policy = canEditReservation(hotel, profile, res);
+                                return policy.allowed ? "Edit Reservation" : policy.message;
+                              })()}
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                          )}
 
-                      <button 
-                        onClick={() => setShowDigitalKeyModal(res)}
-                        style={{ cursor: 'pointer' }}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
-                        title="Generate and view Room Digital SmartKey QR Code"
-                      >
-                        <QrCode size={14} />
-                        SmartKey
-                      </button>
+                          <button 
+                            onClick={() => setShowFolioModal(res)}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                            title="View Guest Folio"
+                          >
+                            <Receipt size={14} />
+                            View Folio
+                          </button>
 
-                      {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
-                        <button 
-                          onClick={() => setShowConfirmAction({ res, action: 'delete' })}
-                          className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
-                          title="Delete Reservation"
-                          disabled={loading}
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                          <button 
+                            onClick={() => setShowDigitalKeyModal(res)}
+                            style={{ cursor: 'pointer' }}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                            title="Generate and view Room Digital SmartKey QR Code"
+                          >
+                            <QrCode size={14} />
+                            SmartKey
+                          </button>
+
+                          {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
+                            <button 
+                              onClick={() => setShowConfirmAction({ res, action: 'delete' })}
+                              className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
+                              title="Delete Reservation"
+                              disabled={loading}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </td>
