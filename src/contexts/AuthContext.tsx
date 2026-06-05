@@ -6,6 +6,7 @@ import { database } from '../utils/database';
 import { UserProfile, Hotel, SystemSettings, OperationType, HotelSettings } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 import { safeStringify } from '../utils';
+import { settingsManager } from '../services/settingsManager';
 
 const SUPER_ADMIN_EMAILS = ['admin@tyyltech.com', 'smartwavetechcompany@gmail.com'];
 
@@ -252,6 +253,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setHotel(null);
     }
 
+    settingsManager.initialize(hotelId);
+
     const hotelRef = doc(db, 'hotels', hotelId);
     const unsub = onSnapshot(hotelRef, (snap) => {
       // Guard against profile changes during fetching
@@ -275,6 +278,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
         
+        settingsManager.setSettings(settings);
         setHotel({ id: snap.id, ...data, settings } as Hotel);
       } else {
         setHotel(null);

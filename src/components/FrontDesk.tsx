@@ -350,6 +350,72 @@ export function FrontDesk() {
     };
   }, [hotel?.id, profile?.uid]);
 
+  // Evaluate Live Automated Policies (auto-release, auto-cancel)
+  useEffect(() => {
+    if (!hotel || !hotel.id || !hotel.settings?.reservations || reservations.length === 0) return;
+    const rules = hotel.settings.reservations;
+    const now = new Date();
+    const batchUpdates: Promise<any>[] = [];
+
+    reservations.forEach((res) => {
+      // 1. Auto Cancel Unpaid Buffer
+      if (
+        (res.status === 'pending' || res.status === 'confirmed') &&
+        res.paymentStatus === 'unpaid' &&
+        rules.autoCancelUnpaidTimeMinutes &&
+        rules.autoCancelUnpaidTimeMinutes > 0
+      ) {
+        const createdDate = new Date(res.createdAt);
+        const minutesDiff = (now.getTime() - createdDate.getTime()) / (1000 * 60);
+        if (minutesDiff > rules.autoCancelUnpaidTimeMinutes) {
+          const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+            status: 'cancelled',
+            notes: (res.notes || '') + `\n[System Policy] Automatically cancelled due to unpaid buffer timeout of ${rules.autoCancelUnpaidTimeMinutes} mins.`,
+            updatedAt: now.toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'Reservation Automation',
+            action: 'AUTO_CANCEL_UNPAID',
+            details: `Auto-cancelled unpaid reservation ${res.id} after buffer expiry`
+          });
+          batchUpdates.push(p);
+        }
+      }
+
+      // 2. Auto Release No-Shows
+      if (
+        (res.status === 'pending' || res.status === 'confirmed') &&
+        rules.autoReleaseNoShow
+      ) {
+        const resCheckInStr = res.checkIn.split('T')[0];
+        const todayStr = now.toISOString().split('T')[0];
+        if (resCheckInStr < todayStr) {
+          const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+            status: 'no_show',
+            notes: (res.notes || '') + '\n[System Policy] Automatically marked as No-Show due to failure to check-in on scheduled arrival date.',
+            updatedAt: now.toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'Reservation Automation',
+            action: 'AUTO_NO_SHOW',
+            details: `Auto-marked reservation ${res.id} as No-Show`
+          });
+          batchUpdates.push(p);
+        }
+      }
+    });
+
+    if (batchUpdates.length > 0) {
+      Promise.all(batchUpdates)
+        .then(() => {
+          toast.success(`[System Policy] Executed automation for ${batchUpdates.length} bookings.`);
+        })
+        .catch(err => {
+          console.error("Failed automated policies execution:", err);
+        });
+    }
+  }, [hotel?.id, reservations, hotel?.settings?.reservations]);
+
   // Fetch rates when corporate account is selected
   useEffect(() => {
     if (!hotel?.id || !newBooking.corporateId) {

@@ -31,21 +31,24 @@ import {
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
+import { useSettings } from '../hooks/useSettings';
+
 const DEFAULT_SETTINGS_LOCAL = DEFAULT_SETTINGS;
 
 export function AdminSettings() {
   const { hotel, profile } = useAuth();
   const [activeTab, setActiveTab ] = useState<keyof HotelSettings>('checkout');
-  const [settings, setSettings] = useState<HotelSettings>(hotel?.settings || DEFAULT_SETTINGS);
+  const { settings, setSettings } = useSettings();
+  const [localSettings, setLocalSettings] = useState<HotelSettings>(settings);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Sync with hotel settings from context if it's updated elsewhere (e.g. from another admin)
+  // Sync with remote settings from real-time hook when no pending local edits
   useEffect(() => {
-    if (hotel?.settings) {
-      setSettings(hotel.settings);
+    if (!hasChanges) {
+      setLocalSettings(settings);
     }
-  }, [hotel?.settings]);
+  }, [settings, hasChanges]);
 
   const saveSettings = async (updatedSettings: HotelSettings, group?: keyof HotelSettings, key? : string) => {
     if (!hotel?.id) return;
@@ -72,6 +75,7 @@ export function AdminSettings() {
           value: group && key ? (updatedSettings[group] as any)[key] : undefined
         }
       });
+      setSettings(updatedSettings);
       toast.success('Settings updated in real-time');
       setHasChanges(false);
     } catch (err: any) {
@@ -84,31 +88,30 @@ export function AdminSettings() {
 
   const handleToggle = (group: keyof HotelSettings, key: string) => {
     const updated = {
-      ...settings,
+      ...localSettings,
       [group]: {
-        ...(settings[group] as any),
-        [key]: !(settings[group] as any)[key]
+        ...(localSettings[group] as any),
+        [key]: !(localSettings[group] as any)[key]
       }
     };
-    setSettings(updated);
+    setLocalSettings(updated);
     saveSettings(updated, group, key);
   };
 
   const handleInputChange = (group: keyof HotelSettings, key: string, value: any) => {
-    const updated = {
-      ...settings,
+    setLocalSettings((prev) => ({
+      ...prev,
       [group]: {
-        ...(settings[group] as any),
+        ...(prev[group] as any),
         [key]: value
       }
-    };
-    setSettings(updated);
+    }));
     setHasChanges(true); // Inputs wait for manual save or blur
   };
 
   const handleInputBlur = (group: keyof HotelSettings, key: string) => {
     if (hasChanges) {
-      saveSettings(settings, group, key);
+      saveSettings(localSettings, group, key);
     }
   };
 
@@ -129,7 +132,7 @@ export function AdminSettings() {
   ];
 
   const renderToggle = (group: keyof HotelSettings, key: string, label: string, description?: string) => {
-    const isEnabled = (settings[group] as any)[key];
+    const isEnabled = (localSettings?.[group] as any)?.[key] ?? (DEFAULT_SETTINGS_LOCAL?.[group] as any)?.[key] ?? false;
     return (
       <div className="flex items-start justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl hover:bg-zinc-900/50 transition-colors">
         <div className="space-y-1">
@@ -155,6 +158,7 @@ export function AdminSettings() {
   };
 
   const renderInput = (group: keyof HotelSettings, key: string, label: string, type: string = 'number', description?: string) => {
+    const rawVal = (localSettings?.[group] as any)?.[key] ?? (DEFAULT_SETTINGS_LOCAL?.[group] as any)?.[key];
     return (
       <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
         <div className="space-y-1">
@@ -163,7 +167,7 @@ export function AdminSettings() {
         </div>
         <input
           type={type}
-          value={(settings[group] as any)[key]}
+          value={rawVal !== undefined && rawVal !== null ? rawVal : ''}
           onChange={(e) => handleInputChange(group, key, type === 'number' ? parseFloat(e.target.value) : e.target.value)}
           onBlur={() => handleInputBlur(group, key)}
           className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-50 outline-none focus:border-emerald-500 w-24 text-right"
@@ -183,7 +187,7 @@ export function AdminSettings() {
           <p className="text-zinc-400">Configure operational rules and system-wide policies</p>
         </div>
         <button
-          onClick={() => saveSettings(settings)}
+          onClick={() => saveSettings(localSettings)}
           disabled={isSaving}
           className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-6 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
         >

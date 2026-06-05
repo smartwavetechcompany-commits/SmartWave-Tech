@@ -382,16 +382,20 @@ export const settleLedger = async (
   amount: number,
   paymentMethod: 'cash' | 'card' | 'transfer',
   postedBy: string,
-  corporateId?: string
+  corporateId?: string,
+  referenceCode?: string,
+  proofUrl?: string
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
     type: 'credit',
     category: 'payment',
-    description: `Payment via ${paymentMethod}`,
+    description: `Payment via ${paymentMethod.toUpperCase()}${referenceCode ? ` (Ref: ${referenceCode})` : ''}`,
     referenceId: reservationId,
-    postedBy
-  }, postedBy, corporateId, paymentMethod);
+    postedBy,
+    referenceCode,
+    proofUrl
+  } as any, postedBy, corporateId, paymentMethod);
 };
 
 export const transferLedgerBalance = async (

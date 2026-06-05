@@ -748,6 +748,8 @@ export interface LedgerEntry {
   quantity?: number;
   price?: number;
   idempotencyKey?: string;
+  referenceCode?: string;
+  proofUrl?: string;
 }
 
 export interface CorporateAccount {

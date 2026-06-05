@@ -25,6 +25,7 @@ import {
   Settings,
   X
 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 
@@ -216,12 +217,12 @@ export function CommandPalette() {
     setIsOpen(false);
   };
 
-  return (
+  const overlayContent = (
     <>
       {/* Universal Floating Shortcut Hint */}
       {showNotificationBadge && (
-        <div className="fixed bottom-4 right-4 z-[99] hidden md:block">
-          <div className="bg-zinc-900/95 border border-zinc-800 text-zinc-400 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1.5 shadow-2xl shadow-black">
+        <div className="fixed bottom-4 right-4 z-[9999] hidden md:block">
+          <div className="bg-zinc-900/95 border border-zinc-800 text-zinc-400 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-bold tracking-wider flex items-center gap-1.5 shadow-2xl shadow-black select-none">
             <span className="text-zinc-500">SHORTCUT:</span>
             <kbd className="px-1.5 py-0.5 bg-zinc-950 border border-zinc-800 rounded font-mono text-zinc-300">Ctrl + K</kbd>
             <span className="text-zinc-500">FOR COMMAND PALETTE</span>
@@ -241,7 +242,7 @@ export function CommandPalette() {
 
       <AnimatePresence>
         {isOpen && (
-          <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[10vh] p-4">
+          <div className="fixed inset-0 z-[10000] flex items-start justify-center pt-[10vh] p-4 pointer-events-auto">
             {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
@@ -256,7 +257,7 @@ export function CommandPalette() {
               initial={{ opacity: 0, scale: 0.97, y: -8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.97, y: -8 }}
-              className="relative w-full max-w-lg bg-zinc-900 border border-zinc-805 rounded-xl flex flex-col overflow-hidden max-h-[70vh] shadow-2xl shadow-black/90"
+              className="relative w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col overflow-hidden max-h-[70vh] shadow-2xl shadow-black/90"
             >
               <div className="p-4 border-b border-zinc-800 flex items-center gap-3 bg-zinc-950/40 relative">
                 <Search className="text-zinc-500 shrink-0" size={18} />
@@ -305,7 +306,7 @@ export function CommandPalette() {
                         onClick={() => handleSelect(item)}
                         onMouseEnter={() => setSelectedIndex(index)}
                         className={cn(
-                          "w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all text-left",
+                          "w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all text-left cursor-pointer",
                           isSelected ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "text-zinc-300 border border-transparent",
                           isActive && !isSelected && "bg-zinc-850/30 text-emerald-500",
                           isDisabled && "opacity-40 cursor-not-allowed"
@@ -346,4 +347,6 @@ export function CommandPalette() {
       </AnimatePresence>
     </>
   );
+
+  return typeof document !== 'undefined' ? createPortal(overlayContent, document.body) : overlayContent;
 }

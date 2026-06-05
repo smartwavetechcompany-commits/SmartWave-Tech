@@ -8,6 +8,7 @@ import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount 
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger } from '../services/ledgerService';
 import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
 import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
+import { DiscountApplication } from './DiscountApplication';
 import { ConfirmModal } from './ConfirmModal';
 import { 
   Receipt, 
@@ -95,7 +96,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
   const [settleData, setSettleData] = useState({ 
-    splits: [{ amount: 0, method: 'cash' }] as { amount: number; method: 'cash' | 'card' | 'transfer' }[], 
+    splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }] as { amount: number; method: 'cash' | 'card' | 'transfer'; referenceCode?: string; proofUrl?: string }[], 
     notes: '' 
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -107,6 +108,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     target: 'room' as 'room' | 'folio',
     reason: ''
   });
+  const [discountingEntry, setDiscountingEntry] = useState<LedgerEntry | null>(null);
 
   const handleApplyFolioDiscount = async () => {
     if (!hotel?.id || !profile || !currentReservation) return;
@@ -262,7 +264,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             split.amount, 
             split.method, 
             profile.uid, 
-            activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined
+            activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined,
+            (split as any).referenceCode,
+            (split as any).proofUrl
           );
         }
       }
@@ -270,7 +274,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       toast.success('Payment recorded successfully');
       setShowSettlePayment(false);
       setShowOverpaymentWarning(false);
-      setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
+      setSettleData({ splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }], notes: '' });
     } catch (err: any) {
       console.error("Settle payment error:", err.message || safeStringify(err));
       toast.error('Failed to record payment');
@@ -293,6 +297,24 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (totalAmount <= 0) {
       toast.error('Payment amount must be greater than zero');
       return;
+    }
+
+    // Enforce payment reference and proof upload settings
+    const paymentSettings = hotel.settings?.payments;
+    if (paymentSettings) {
+      for (let i = 0; i < settleData.splits.length; i++) {
+        const split = settleData.splits[i];
+        if (split.method !== 'cash') {
+          if (paymentSettings.requireTransactionReference && !split.referenceCode?.trim()) {
+            toast.error(`For split #${i + 1} (${split.method.toUpperCase()}): A transaction reference number is required by hotel policy.`);
+            return;
+          }
+          if (paymentSettings.requirePaymentProofUpload && split.method === 'transfer' && !split.proofUrl) {
+            toast.error(`For split #${i + 1} (Bank Transfer): An uploaded proof of payment image/receipt is required by hotel policy.`);
+            return;
+          }
+        }
+      }
     }
 
     // Validation hook: Detect when a payment amount exceeds the calculated net total (balance)
@@ -1832,6 +1854,58 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 </select>
                               </div>
                             </div>
+
+                            {split.method !== 'cash' && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center justify-between">
+                                    <span>Ref Code {hotel.settings?.payments?.requireTransactionReference && <span className="text-red-500 font-bold">*</span>}</span>
+                                    {split.referenceCode && <span className="text-[9px] text-emerald-500">Registered</span>}
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. TXN9481"
+                                    value={split.referenceCode || ''}
+                                    onChange={(e) => {
+                                      const newSplits = [...settleData.splits];
+                                      newSplits[index].referenceCode = e.target.value;
+                                      setSettleData({ ...settleData, splits: newSplits });
+                                    }}
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                  />
+                                </div>
+                                {split.method === 'transfer' && (
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center justify-between">
+                                      <span>Proof receipt {hotel.settings?.payments?.requirePaymentProofUpload && <span className="text-red-500 font-bold">*</span>}</span>
+                                      {split.proofUrl && <span className="text-[9px] text-emerald-400">Attached</span>}
+                                    </label>
+                                    <div className="relative">
+                                      <input
+                                        type="file"
+                                        accept="image/*,.pdf"
+                                        onChange={(e) => {
+                                          if (e.target.files && e.target.files.length > 0) {
+                                            const file = e.target.files[0];
+                                            const newSplits = [...settleData.splits];
+                                            newSplits[index].proofUrl = `uploads/receipts/${Date.now()}_${file.name}`;
+                                            setSettleData({ ...settleData, splits: newSplits });
+                                            toast.success('Payment proof receipt registered in memory.');
+                                          }
+                                        }}
+                                        className="absolute inset-x-0 inset-y-0 opacity-0 w-full h-full cursor-pointer z-10"
+                                      />
+                                      <div className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-400 flex items-center justify-between hover:border-zinc-700 transition-colors">
+                                        <span className="truncate max-w-[120px]">
+                                          {split.proofUrl ? split.proofUrl.split('_').slice(1).join('_') : 'Upload Receipt'}
+                                        </span>
+                                        <PlusCircle size={14} className="text-zinc-650" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1949,22 +2023,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <th className="px-6 py-3 text-right">Debit</th>
                     <th className="px-6 py-3 text-right">Credit</th>
                     <th className="px-6 py-3 text-right">Running Balance</th>
-                    {hasPermission(profile?.role, 'void_transaction') && (
-                      <th className="px-6 py-3 text-right">Actions</th>
-                    )}
+                    <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800">
                   {loading ? (
                     <tr>
-                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 7 : 6} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={7} className="px-6 py-12 text-center text-zinc-500">
                         <Clock size={24} className="mx-auto mb-2 animate-spin opacity-20" />
                         Loading transactions...
                       </td>
                     </tr>
                   ) : sortedHistoryForDisplay.length === 0 ? (
                     <tr>
-                      <td colSpan={hasPermission(profile?.role, 'void_transaction') ? 7 : 6} className="px-6 py-12 text-center text-zinc-500">
+                      <td colSpan={7} className="px-6 py-12 text-center text-zinc-500">
                         No transactions recorded for this folio.
                       </td>
                     </tr>
@@ -2020,21 +2092,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                               {runningInfo?.calculation}
                             </div>
                           </td>
-                          {hasPermission(profile?.role, 'void_transaction') && (
-                            <td className="px-6 py-4 text-right">
-                              {!entry.isVirtual ? (
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {entry.type === 'debit' && entry.category !== 'tax' && !entry.isVirtual && (
+                                <button
+                                  onClick={() => setDiscountingEntry(entry)}
+                                  className="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                  title="Apply Line Discount"
+                                >
+                                  <Tag size={13} />
+                                </button>
+                              )}
+                              {hasPermission(profile?.role, 'void_transaction') && !entry.isVirtual && (
                                 <button
                                   onClick={() => setConfirmDelete(entry)}
-                                  className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                                  className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
                                   title="Void Transaction"
                                 >
-                                  <Trash2 size={14} />
+                                  <Trash2 size={13} />
                                 </button>
-                              ) : (
+                              )}
+                              {entry.isVirtual && (
                                 <span className="text-[10px] text-zinc-650 italic">n/a</span>
                               )}
-                            </td>
-                          )}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })
@@ -2110,6 +2192,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </button>
         </div>
       </div>
+
+      {discountingEntry && (
+        <DiscountApplication
+          entry={discountingEntry}
+          hotel={hotel}
+          profile={profile}
+          reservation={currentReservation}
+          currency={currency}
+          exchangeRate={exchangeRate}
+          onClose={() => setDiscountingEntry(null)}
+          onSuccess={() => {
+            // Real-time snapshot takes care of local states, just dismiss
+            setDiscountingEntry(null);
+          }}
+        />
+      )}
 
       {showFolioDiscountModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
