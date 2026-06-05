@@ -327,7 +327,7 @@ export function FrontDesk() {
 
       // Automatically hide fully paid (ledgerBalance = 0) checkout reservations from other active tabs
       if (activeTab === 'all') {
-        const isCompleted = res.status === 'checked_out' && (res.ledgerBalance || 0) <= 0.01;
+        const isCompleted = res.status === 'checked_out' && Math.abs(res.ledgerBalance || 0) < 0.01;
         if (isCompleted) return false;
       }
 
@@ -1428,37 +1428,36 @@ export function FrontDesk() {
       const now = new Date();
       const todayStr = format(now, 'yyyy-MM-dd');
       
-      const overstayingRes = reservations.filter(res => {
-        if (res.status !== 'checked_in' || !res.autoNightDeduction || !res.guestId) return false;
-        
-        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
-        
-        return res.checkOut < todayStr || (res.checkOut === todayStr && now > checkOutDateTime);
+      const activeCheckedInRes = reservations.filter(res => {
+        return res.status === 'checked_in' && res.autoNightDeduction && res.guestId;
       });
 
-      if (overstayingRes.length === 0) return;
+      if (activeCheckedInRes.length === 0) return;
 
       let chargedCount = 0;
       let totalAmountCharged = 0;
 
-      for (const res of overstayingRes) {
+      for (const res of activeCheckedInRes) {
         const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
         
-        // Calculate nights spent vs already charged
-        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
-        let targetCharges = actualCalendarNightsPaid;
-
-        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
-        
-        if (isAfter(now, todayOverstayThreshold)) {
-          targetCharges += 1;
-        }
-
-        // Ensure we don't accidentally charge less than scheduled stay
+        // Calculate nights elapsed since check-in
+        const checkInDate = startOfDay(checkInDateTime);
+        const today = startOfDay(now);
+        const nightsElapsed = differenceInDays(today, checkInDate);
         const scheduledNights = res.nights || 1;
-        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
+
+        // Base target charges is up to nights elapsed + 1, capped at scheduled nights
+        let targetCharges = Math.min(scheduledNights, nightsElapsed + 1);
+
+        // Check if currently overstaying (past check-out date, or today is checkout date and past check-out time)
+        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+        const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+        const isOverstaying = res.checkOut < todayStr || (res.checkOut === todayStr && now > checkOutDateTime);
+
+        if (isOverstaying) {
+          // If overstaying, target charges rises to cover nights elapsed + 1 (additional overstay nights)
+          targetCharges = Math.max(targetCharges, nightsElapsed + 1);
+        }
 
         // Fetch ledger entries for this reservation
         const ledgerRef = collection(db, 'hotels', hotel.id, 'ledger');
@@ -1497,10 +1496,10 @@ export function FrontDesk() {
       }
 
       if (chargedCount > 0) {
-        toast.info(`Auto-charged ${chargedCount} overstay night(s) totaling ${formatCurrency(totalAmountCharged, currency, exchangeRate)} based on initial rate & time settings.`);
+        toast.info(`Auto-charged ${chargedCount} night(s) totaling ${formatCurrency(totalAmountCharged, currency, exchangeRate)} dynamically based on elapsed stay metrics.`);
       }
     } catch (err) {
-      console.error("Error auto-charging active overstays:", err);
+      console.error("Error auto-charging active stays:", err);
     }
   };
 
@@ -3756,34 +3755,53 @@ export function FrontDesk() {
                         </span>
                       )}
                     </div>
-                    <div className={cn(
-                      "text-[10px] font-bold uppercase flex items-center gap-1 mt-1",
-                      res.paymentStatus === 'paid' ? "text-emerald-500" :
-                      res.paymentStatus === 'partial' ? "text-amber-500" : "text-red-500"
-                    )}>
-                      {res.paymentStatus} ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)})
+                    <div className="flex flex-col gap-1.5 mt-1.5">
+                      {(() => {
+                        const bal = res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0));
+                        const isSettled = Math.abs(bal) <= 0.01;
+                        const isCredit = bal < -0.01;
+                        const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;
+                        const isPartial = bal > 0.01 && (res.paidAmount || 0) > 0;
+
+                        let label = 'Outstanding';
+                        let badgeStyle = "bg-red-500/10 text-red-400 border-red-500/20";
+                        if (isSettled || isCredit) {
+                          label = 'Settled';
+                          badgeStyle = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                        } else if (isPartial) {
+                          label = 'Partial';
+                          badgeStyle = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                        }
+
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={cn("px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border", badgeStyle)}>
+                                {label}
+                              </span>
+                              <span className="text-[10px] text-zinc-500 font-medium">
+                                ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)} paid)
+                              </span>
+                            </div>
+                            <div className={cn(
+                              "text-[10px] font-mono px-1.5 py-0.5 rounded border w-fit",
+                              isCredit 
+                                ? "text-emerald-400 bg-emerald-500/5 border-emerald-500/10" 
+                                : isSettled 
+                                  ? "text-zinc-500 bg-zinc-500/5 border-zinc-500/10" 
+                                  : "text-red-400 bg-red-500/5 border-red-500/10"
+                            )}>
+                              {isCredit 
+                                ? `Credit: ${formatCurrency(Math.abs(bal), currency, exchangeRate)}` 
+                                : isSettled 
+                                  ? `Owed: ${formatCurrency(0, currency, exchangeRate)}`
+                                  : `Owed: ${formatCurrency(bal, currency, exchangeRate)}`
+                              }
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
-                    {res.guestId && (() => {
-                      const outstanding = (res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0);
-                      const isNegative = outstanding < -0.01;
-                      const isZero = Math.abs(outstanding) <= 0.01;
-                      
-                      return (
-                        <div className={cn(
-                          "text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded border inline-block",
-                          isNegative 
-                            ? "text-emerald-400 bg-emerald-500/5 border-emerald-500/10" 
-                            : isZero 
-                              ? "text-zinc-400 bg-zinc-500/5 border-zinc-500/10" 
-                              : "text-red-400 bg-red-500/5 border-red-500/10"
-                        )}>
-                          {isNegative 
-                            ? `Credit: ${formatCurrency(Math.abs(outstanding), currency, exchangeRate)}` 
-                            : `Owed: ${formatCurrency(isZero ? 0 : outstanding, currency, exchangeRate)}`
-                          }
-                        </div>
-                      );
-                    })()}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
