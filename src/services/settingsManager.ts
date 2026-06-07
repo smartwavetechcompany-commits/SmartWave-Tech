@@ -2,6 +2,7 @@ import { doc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/f
 import { db, auth } from '../firebase';
 import { HotelSettings, Tax } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
+import { safeStringify } from '../utils';
 
 type SettingsSubscriber = (settings: HotelSettings) => void;
 type EventCallback = (data: any) => void;
@@ -146,19 +147,19 @@ class CentralSettingsManager {
             Object.keys(nextGroup).forEach(key => {
               const prevVal = prevGroup[key];
               const newVal = nextGroup[key];
-              if (JSON.stringify(prevVal) !== JSON.stringify(newVal)) {
+              if (safeStringify(prevVal) !== safeStringify(newVal)) {
                 differences.push({
                   path: `settings.${groupKey}.${key}`,
                   from: prevVal === undefined ? null : prevVal,
                   to: newVal === undefined ? null : newVal,
-                  description: `Operational setting '${groupKey}.${key}' changed from ${JSON.stringify(prevVal)} to ${JSON.stringify(newVal)}`
+                  description: `Operational setting '${groupKey}.${key}' changed from ${safeStringify(prevVal)} to ${safeStringify(newVal)}`
                 });
               }
             });
           });
 
           // Compare Taxes list
-          if (this.lastTaxes && JSON.stringify(this.lastTaxes) !== JSON.stringify(taxes)) {
+          if (this.lastTaxes && safeStringify(this.lastTaxes) !== safeStringify(taxes)) {
             differences.push({
               path: 'taxes',
               from: this.lastTaxes,
@@ -172,12 +173,12 @@ class CentralSettingsManager {
             Object.keys(hotelDetails).forEach(key => {
               const prevVal = this.lastHotelDetails[key];
               const newVal = (hotelDetails as any)[key];
-              if (JSON.stringify(prevVal) !== JSON.stringify(newVal)) {
+              if (safeStringify(prevVal) !== safeStringify(newVal)) {
                 differences.push({
                   path: `hotel.${key}`,
                   from: prevVal === undefined ? null : prevVal,
                   to: newVal === undefined ? null : newVal,
-                  description: `Hotel ${key} changed from ${JSON.stringify(prevVal)} to ${JSON.stringify(newVal)}`
+                  description: `Hotel ${key} changed from ${safeStringify(prevVal)} to ${safeStringify(newVal)}`
                 });
               }
             });
@@ -265,7 +266,7 @@ class CentralSettingsManager {
         // Updated rules
         rates.forEach((newRate: any) => {
           const oldRate = this.lastRateConfigs?.find((r: any) => r.id === newRate.id);
-          if (oldRate && JSON.stringify(oldRate) !== JSON.stringify(newRate)) {
+          if (oldRate && safeStringify(oldRate) !== safeStringify(newRate)) {
             differences.push({
               path: `rate_configurations.${newRate.id}`,
               from: oldRate,
