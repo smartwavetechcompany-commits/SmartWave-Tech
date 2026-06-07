@@ -1734,7 +1734,7 @@ export function Finance() {
 
                   // 5. SETTLEMENT ANALYSIS
                   const paymentCredits = diagLedgerEntries.filter(e => e.type === 'credit' && e.category !== 'discount');
-                  const totalPaymentsAccrued = paymentCredits.reduce((acc, e) => acc + e.amount, 0);
+                  const totalPaymentsAccrued = Math.max(resInstance.paidAmount || 0, paymentCredits.reduce((acc, e) => acc + e.amount, 0));
 
                   // Real Ledger totals
                   const ledgerDebitsSum = diagLedgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);

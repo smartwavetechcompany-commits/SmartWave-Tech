@@ -735,12 +735,43 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const projectedRoomCharge = Math.max(0, (expectedNightsCount * nightlyRateCalculated) - postedRoomChargesSum);
 
   const totalDebits = processedDisplayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalCredits = processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const ledgerCreditsSum = processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const unpostedPrepayment = Math.max(0, (currentReservation.paidAmount || 0) - ledgerCreditsSum);
+  const totalCredits = ledgerCreditsSum + unpostedPrepayment;
   const balance = (totalDebits + projectedRoomCharge) - totalCredits;
 
   // Combine real entries and a virtual projected room charge if room stay is unposted
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
   
+  if (unpostedPrepayment > 0.01) {
+    const prepaymentTimestamp = (() => {
+      if (currentReservation.createdAt) {
+        try {
+          return new Date(currentReservation.createdAt).toISOString();
+        } catch (e) {}
+      }
+      if (currentReservation.checkIn) {
+        try {
+          const d = new Date(currentReservation.checkIn);
+          d.setHours(d.getHours() - 1);
+          return d.toISOString();
+        } catch (e) {}
+      }
+      return new Date().toISOString();
+    })();
+
+    allHistoryItems.push({
+      id: 'prepayment_deposit_virtual',
+      timestamp: prepaymentTimestamp,
+      description: 'Prepayment / Deposit Applied at Booking',
+      category: 'payment',
+      type: 'credit',
+      amount: unpostedPrepayment,
+      postedBy: 'system',
+      isVirtual: true
+    } as any);
+  }
+
   if (projectedRoomCharge > 0.01) {
     allHistoryItems.push({
       id: 'projected_room_stay_charge_virtual',
