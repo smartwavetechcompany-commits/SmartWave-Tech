@@ -66,6 +66,12 @@ export const canCheckIn = (
       }
     }
 
+    if (settings.preventCheckInMaintenance && (room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order')) {
+      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
+        return { allowed: false, message: 'Cannot check-in. This room is currently down for maintenance or out of order.' };
+      }
+    }
+
     if (settings.requireRoomInspection && room.status !== 'inspected') {
       if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
         return { allowed: false, message: 'Room must be inspected before check-in.' };

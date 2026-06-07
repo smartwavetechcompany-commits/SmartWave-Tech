@@ -4108,8 +4108,12 @@ export function FrontDesk() {
                     }
                   }}
                 >
-                  <option value="">Select a clean room</option>
-                  {rooms.filter(r => r.status === 'clean').map(room => (
+                  <option value="">Select clean / ready room</option>
+                  {rooms.filter(r => {
+                    if (r.id === showTransferModal.roomId) return false;
+                    const policy = canCheckIn(hotel, profile, showTransferModal, r, null);
+                    return policy.allowed && r.status !== 'occupied';
+                  }).map(room => (
                     <option key={room.id} value={room.id}>
                       Room {room.roomNumber} ({room.type})
                     </option>

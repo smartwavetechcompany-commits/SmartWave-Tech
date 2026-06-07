@@ -72,6 +72,7 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     allowEarlyCheckIn: true,
     requireRoomInspection: true,
     preventCheckInDirty: true,
+    preventCheckInMaintenance: true,
     allowManualRoomOverride: false,
     requirePaymentBeforeCheckIn: false,
     allowCheckInPendingBalance: true,

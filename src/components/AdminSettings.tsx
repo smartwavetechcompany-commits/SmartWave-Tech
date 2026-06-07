@@ -303,6 +303,7 @@ export function AdminSettings() {
                 {renderToggle('checkIn', 'allowEarlyCheckIn', 'Permit Early Check-In', 'Allow staff to check in guests before the default check-in time.')}
                 {renderToggle('checkIn', 'requireRoomInspection', 'Room Inspection Lock', 'Only allow check-in to rooms marked as "Inspected".')}
                 {renderToggle('checkIn', 'preventCheckInDirty', 'Strict Hygiene Check', 'Block check-in attempts to "Dirty" rooms.')}
+                {renderToggle('checkIn', 'preventCheckInMaintenance', 'Block Maintenance Check-In', 'Prevent check-in attempts to "Maintenance" or out-of-service rooms.')}
                 {renderToggle('checkIn', 'allowManualRoomOverride', 'Manual Room Assignment', 'Allow changing the assigned room during the check-in process.')}
                 {renderToggle('checkIn', 'requirePaymentBeforeCheckIn', 'Pre-payment Requirement', 'Enforce a minimum or full payment before the guest record is activated.')}
                 {renderToggle('checkIn', 'allowCheckInPendingBalance', 'Allow Pending Balance Check-In', 'Permit guests to check in with zero upfront payment.')}

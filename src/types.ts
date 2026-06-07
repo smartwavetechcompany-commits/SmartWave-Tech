@@ -146,6 +146,7 @@ export interface HotelSettings {
     allowEarlyCheckIn: boolean;
     requireRoomInspection: boolean;
     preventCheckInDirty: boolean;
+    preventCheckInMaintenance: boolean;
     allowManualRoomOverride: boolean;
     requirePaymentBeforeCheckIn: boolean;
     allowCheckInPendingBalance: boolean;
