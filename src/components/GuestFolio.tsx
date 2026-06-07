@@ -703,18 +703,36 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
-  const hasRoomChargeInLedger = processedDisplayedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  let expectedNightsCount = currentReservation.nights || 1;
+  const originalNightsCount = currentReservation.nights || 1;
 
-  const postedExtraCharges = processedDisplayedEntries
-    .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes(e.category?.toLowerCase()))
+  if (currentReservation.status === 'checked_in') {
+    const today = startOfDay(new Date());
+    const checkInDate = startOfDay(parseISO(currentReservation.checkIn));
+    const elapsedNights = differenceInDays(today, checkInDate);
+
+    expectedNightsCount = Math.max(expectedNightsCount, elapsedNights);
+
+    const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
+    const checkOutDateStr = currentReservation.checkOut;
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
+    const isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
+
+    if (isOverstaying) {
+      expectedNightsCount = Math.max(expectedNightsCount, elapsedNights + 1);
+    }
+  }
+
+  const grossBaseStayAmount = currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
+  const nightlyRateCalculated = currentReservation.nightlyRate || (originalNightsCount > 0 ? (grossBaseStayAmount / originalNightsCount) : 0) || 0;
+
+  const postedRoomChargesSum = processedDisplayedEntries
+    .filter(e => e.category?.toLowerCase() === 'room' && e.type === 'debit')
     .reduce((acc, e) => acc + e.amount, 0);
 
-  // Projected Room Charge should be the original room stay cost that hasn't been posted yet.
-  // Since extra charges posted to the ledger have already incremented currentReservation.totalAmount,
-  // we subtract those posted ledger extra-charges to get the pure unposted room stay cost.
-  const projectedRoomCharge = !hasRoomChargeInLedger 
-    ? Math.max(0, (currentReservation.totalAmount || 0) - postedExtraCharges)
-    : 0;
+  // Projected Room Charge should represent any remaining unposted stays (difference between expected stay charge liability and what's already in the ledger)
+  const projectedRoomCharge = Math.max(0, (expectedNightsCount * nightlyRateCalculated) - postedRoomChargesSum);
 
   const totalDebits = processedDisplayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
@@ -723,7 +741,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   // Combine real entries and a virtual projected room charge if room stay is unposted
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
   
-  if (!hasRoomChargeInLedger && projectedRoomCharge > 0) {
+  if (projectedRoomCharge > 0.01) {
     allHistoryItems.push({
       id: 'projected_room_stay_charge_virtual',
       timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
@@ -989,7 +1007,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   else acc[cat].credit += entry.amount;
                   return acc;
                 }, {
-                  room: !hasRoomChargeInLedger ? { debit: projectedRoomCharge, credit: 0 } : { debit: 0, credit: 0 }
+                  room: { debit: projectedRoomCharge, credit: 0 }
                 })
               ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
                 <div key={cat} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">

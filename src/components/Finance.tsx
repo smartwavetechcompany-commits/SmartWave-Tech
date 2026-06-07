@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
-import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay } from 'date-fns';
+import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay, differenceInDays, isAfter, parseISO } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
@@ -1690,10 +1690,32 @@ export function Finance() {
                     );
                   }
 
-                  // 1. CALCULATE QUANTIFIABLE ACCRUED PRE-TAX BASE RATE:
-                  const grossStayAmount = resInstance.totalAmount - (resInstance.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
-                  const nightlyRateCalculated = resInstance.nightlyRate || (grossStayAmount / (resInstance.nights || 1)) || 0;
-                  const totalNightsExpected = resInstance.nights || 1;
+                  // 1. CALCULATE QUANTIFIABLE ACCRUED PRE-TAX BASE RATE WITH OVERSTAY SUPPORT:
+                  let expectedNightsCount = resInstance.nights || 1;
+                  const originalNightsCount = resInstance.nights || 1;
+                  
+                  if (resInstance.status === 'checked_in') {
+                    const today = startOfDay(new Date());
+                    const checkInDate = startOfDay(parseISO(resInstance.checkIn));
+                    const elapsedNights = differenceInDays(today, checkInDate);
+                    
+                    expectedNightsCount = Math.max(expectedNightsCount, elapsedNights);
+                    
+                    const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
+                    const checkOutDateStr = resInstance.checkOut;
+                    const todayStr = format(new Date(), 'yyyy-MM-dd');
+                    const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
+                    const isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
+                    
+                    if (isOverstaying) {
+                      expectedNightsCount = Math.max(expectedNightsCount, elapsedNights + 1);
+                    }
+                  }
+
+                  const grossBaseStayAmount = resInstance.totalAmount - (resInstance.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
+                  const nightlyRateCalculated = resInstance.nightlyRate || (originalNightsCount > 0 ? (grossBaseStayAmount / originalNightsCount) : 0) || 0;
+                  const totalNightsExpected = expectedNightsCount;
+                  const grossStayAmount = nightlyRateCalculated * expectedNightsCount;
                   
                   // 2. QUERY DETAILED ACCRUED ANCILLARY FEES
                   const serviceDebits = diagLedgerEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax');
@@ -1716,13 +1738,11 @@ export function Finance() {
 
                   // Real Ledger totals
                   const ledgerDebitsSum = diagLedgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-                  const isFolioRoomCharged = diagLedgerEntries.some(e => e.category === 'room' && e.type === 'debit');
-                  const postedExtraCharges = diagLedgerEntries
-                    .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes((e.category || '').toLowerCase()))
+                  const postedRoomChargesSum = diagLedgerEntries
+                    .filter(e => e.category === 'room' && e.type === 'debit')
                     .reduce((acc, e) => acc + (e.amount || 0), 0);
-                  const unpostedStayAccrual = !isFolioRoomCharged 
-                    ? Math.max(0, (resInstance.totalAmount || 0) - postedExtraCharges)
-                    : 0;
+
+                  const unpostedStayAccrual = Math.max(0, (expectedNightsCount * nightlyRateCalculated) - postedRoomChargesSum);
                   
                   const calculatedNetBill = ledgerDebitsSum + unpostedStayAccrual - totalAdjustmentsDiscount;
                   const outstandingDisparityBalance = calculatedNetBill - totalPaymentsAccrued;
