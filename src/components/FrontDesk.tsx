@@ -1715,33 +1715,14 @@ export function FrontDesk() {
         const totalDebits = (freshResData.totalAmount || 0);
 
         // Determine check-out permission based on dynamic hotel settings
-        const checkoutSettings = hotel.settings?.checkout;
         let blockCheckout = false;
         let blockMessage = '';
 
         if (!res.corporateId && outstandingBalance > 0.01) {
-          if (checkoutSettings) {
-            if (checkoutSettings.allowBalanceOutstanding) {
-              // Allowed to check out with balance
-              blockCheckout = false;
-            } else if (checkoutSettings.requireFullPaymentBeforeCheckout) {
-              blockCheckout = true;
-              blockMessage = `Full payment is required before checkout as per hotel policy. Outstanding balance is ${formatCurrency(outstandingBalance, currency, exchangeRate)}.`;
-            } else if (checkoutSettings.preventOwingGuestCheckout) {
-              if (!hasPermission(profile, 'void_transaction')) {
-                blockCheckout = true;
-                blockMessage = `Zero-balance checkout is enforced. Policy prevents checkout for owing guests without manager approval.`;
-              }
-            } else if (checkoutSettings.requireApprovalForDebtCheckout) {
-              if (!hasPermission(profile, 'void_transaction')) {
-                blockCheckout = true;
-                blockMessage = `Manager approval is required to checkout a guest with debt.`;
-              }
-            }
-          } else {
-            // Default legacy/strict behavior
+          const policyResult = canCheckout(hotel, profile, { ...freshResData, ledgerBalance: outstandingBalance });
+          if (!policyResult.allowed) {
             blockCheckout = true;
-            blockMessage = `Cannot check out. Outstanding balance: ${formatCurrency(outstandingBalance, currency, exchangeRate)}`;
+            blockMessage = policyResult.message || `Full payment is required before checkout. Outstanding balance is ${formatCurrency(outstandingBalance, currency, exchangeRate)}.`;
           }
         }
 

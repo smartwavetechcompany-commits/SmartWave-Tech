@@ -13,24 +13,31 @@ export const canCheckout = (
   if (!settings) return { allowed: true }; // Default behavior
 
   const balance = reservation.ledgerBalance || 0;
-  const isOwing = balance > 0;
+  const isOwing = balance > 0.01;
 
   if (isOwing) {
     if (settings.allowBalanceOutstanding) {
       return { allowed: true };
     }
 
-    if (settings.requireFullPaymentBeforeCheckout && !settings.allowBalanceOutstanding) {
+    if (settings.requireFullPaymentBeforeCheckout) {
       return { allowed: false, message: 'Full payment is required before checkout as per hotel policy.' };
     }
     
-    if (settings.preventOwingGuestCheckout && !hasPermission(profile, 'void_transaction')) {
-      return { allowed: false, message: 'Policy prevents checkout for guests with outstanding balances without admin approval.' };
+    if (settings.preventOwingGuestCheckout) {
+      if (!hasPermission(profile, 'void_transaction')) {
+        return { allowed: false, message: 'Policy prevents checkout for guests with outstanding balances without admin approval.' };
+      }
     }
 
-    if (settings.requireApprovalForDebtCheckout && !hasPermission(profile, 'void_transaction')) {
-      return { allowed: false, message: 'Manager approval is required to checkout a guest with debt.' };
+    if (settings.requireApprovalForDebtCheckout) {
+      if (!hasPermission(profile, 'void_transaction')) {
+        return { allowed: false, message: 'Manager approval is required to checkout a guest with debt.' };
+      }
     }
+
+    // If Allow Checkout with Outstanding Balance is disabled, and no override matched, block checkout.
+    return { allowed: false, message: 'Policy restricts checkout with outstanding balances. Please settle guest ledger first.' };
   }
 
   return { allowed: true };
@@ -61,15 +68,11 @@ export const canCheckIn = (
     }
 
     if (settings.preventCheckInDirty && (room.status === 'dirty' || room.status === 'cleaning')) {
-      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
-        return { allowed: false, message: 'Cannot check-in to a dirty room. Housekeeping must clear it first.' };
-      }
+      return { allowed: false, message: 'Cannot check-in to a dirty / readying room. Housekeeping must clear it first.' };
     }
 
     if (settings.preventCheckInMaintenance && (room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order')) {
-      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
-        return { allowed: false, message: 'Cannot check-in. This room is currently down for maintenance or out of order.' };
-      }
+      return { allowed: false, message: 'Cannot check-in. This room is currently down for maintenance or out of order.' };
     }
 
     if (settings.requireRoomInspection && room.status !== 'inspected') {
