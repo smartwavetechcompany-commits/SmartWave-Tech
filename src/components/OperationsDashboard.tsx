@@ -417,7 +417,7 @@ export function OperationsDashboard() {
 
   const arrivals = reservations.filter(r => r.checkIn === today && r.status === 'pending');
   const checkins = reservations.filter(r => r.checkIn === today && r.status === 'checked_in');
-  const checkouts = reservations.filter(r => r.checkOut === today && r.status === 'checked_in');
+  const checkouts = reservations.filter(r => r.checkOut === today && (r.status === 'checked_in' || r.status === 'checked_out'));
   const inhouse = reservations.filter(r => r.status === 'checked_in');
 
   const filteredData = () => {
@@ -1054,12 +1054,51 @@ export function OperationsDashboard() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className={cn(
-                        "text-sm font-bold",
-                        (res.totalAmount - res.paidAmount) > 0 ? "text-red-400" : "text-emerald-400"
-                      )}>
-                        {formatCurrency(res.totalAmount - res.paidAmount, currency, exchangeRate)}
-                      </div>
+                      {(() => {
+                        const bal = res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0));
+                        const isSettled = Math.abs(bal) <= 0.01;
+                        const isCredit = bal < -0.01;
+                        const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;
+                        const isPartial = bal > 0.01 && (res.paidAmount || 0) > 0;
+
+                        let label = 'Outstanding';
+                        let badgeStyle = "bg-red-500/10 text-red-400 border-red-500/20";
+                        if (isSettled || isCredit) {
+                          label = 'Settled';
+                          badgeStyle = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                        } else if (isPartial) {
+                          label = 'Partial';
+                          badgeStyle = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                        }
+
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={cn("px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border", badgeStyle)}>
+                                {label}
+                              </span>
+                              <span className="text-[10px] text-zinc-500 font-medium whitespace-nowrap">
+                                ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)} paid)
+                              </span>
+                            </div>
+                            <div className={cn(
+                              "text-[10px] font-mono px-1.5 py-0.5 rounded border w-fit whitespace-nowrap",
+                              isCredit 
+                                ? "text-emerald-400 bg-emerald-500/5 border-emerald-500/10" 
+                                : isSettled 
+                                  ? "text-zinc-500 bg-zinc-500/5 border-zinc-500/10" 
+                                  : "text-red-400 bg-red-500/5 border-red-500/10"
+                            )}>
+                              {isCredit 
+                                ? `Credit: ${formatCurrency(Math.abs(bal), currency, exchangeRate)}` 
+                                : isSettled 
+                                  ? `Owed: ${formatCurrency(0, currency, exchangeRate)}`
+                                  : `Owed: ${formatCurrency(bal, currency, exchangeRate)}`
+                              }
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </motion.tr>
                 ))

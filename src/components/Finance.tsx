@@ -1717,7 +1717,12 @@ export function Finance() {
                   // Real Ledger totals
                   const ledgerDebitsSum = diagLedgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
                   const isFolioRoomCharged = diagLedgerEntries.some(e => e.category === 'room' && e.type === 'debit');
-                  const unpostedStayAccrual = !isFolioRoomCharged ? resInstance.totalAmount : 0;
+                  const postedExtraCharges = diagLedgerEntries
+                    .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes((e.category || '').toLowerCase()))
+                    .reduce((acc, e) => acc + (e.amount || 0), 0);
+                  const unpostedStayAccrual = !isFolioRoomCharged 
+                    ? Math.max(0, (resInstance.totalAmount || 0) - postedExtraCharges)
+                    : 0;
                   
                   const calculatedNetBill = ledgerDebitsSum + unpostedStayAccrual - totalAdjustmentsDiscount;
                   const outstandingDisparityBalance = calculatedNetBill - totalPaymentsAccrued;

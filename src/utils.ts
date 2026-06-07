@@ -19,6 +19,17 @@ export function deepCloneSafe(obj: any): any {
   function isPlainObject(val: any): boolean {
     if (typeof val !== 'object' || val === null) return false;
     
+    // Explicitly reject known non-plain objects, SDK classes, or custom instances
+    try {
+      if (val.constructor && typeof val.constructor === 'function') {
+        const name = val.constructor.name || '';
+        // If it has a non-standard constructor name (not Object, not Array, etc.), it is not a plain object
+        if (name && name !== 'Object' && name !== 'Array' && name !== 'Date' && name !== 'Error' && name !== 'RegExp') {
+          return false;
+        }
+      }
+    } catch (e) {}
+
     const proto = Object.getPrototypeOf(val);
     if (proto === null) return true;
     
@@ -147,7 +158,16 @@ export function safeStringify(obj: any): string {
 
   try {
     const safeTarget = deepCloneSafe(obj);
-    return JSON.stringify(safeTarget, null, 2);
+    const seen = new WeakSet();
+    return JSON.stringify(safeTarget, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular Reference]';
+        }
+        seen.add(value);
+      }
+      return value;
+    }, 2);
   } catch (e) {
     try {
       // Final desperation fallback: serialize top level properties as strings
@@ -157,7 +177,11 @@ export function safeStringify(obj: any): string {
         try {
           const val = obj[key];
           if (typeof val === 'function') continue;
-          fallback[key] = String(val).slice(0, 100);
+          if (typeof val === 'object' && val !== null) {
+            fallback[key] = '[Object]';
+          } else {
+            fallback[key] = String(val).slice(0, 100);
+          }
         } catch (inner) {
           fallback[key] = '[Error]';
         }

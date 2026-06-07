@@ -165,16 +165,17 @@ export const postToLedger = async (
     const resData = resSnap.data() as Reservation;
     const resUpdates: any = {};
     
-    // Total payments received (credits) minus refunds (debit category 'refund')
+    // Real cash/transfer payments: Credit payment entries increase paidAmount,
+    // debit payment/refund entries decrease paidAmount
     const creditsSum = entries
-      .filter(e => e.type === 'credit')
+      .filter(e => e.type === 'credit' && e.category === 'payment')
       .reduce((acc, e) => acc + e.amount, 0);
 
-    const refundDebitsSum = entries
-      .filter(e => e.type === 'debit' && e.category === 'refund')
+    const debitsSum = entries
+      .filter(e => e.type === 'debit' && (e.category === 'payment' || e.category === 'refund'))
       .reduce((acc, e) => acc + e.amount, 0);
 
-    const totalPaidAmountAdj = creditsSum - refundDebitsSum;
+    const totalPaidAmountAdj = creditsSum - debitsSum;
 
     // Debit charges that are room, payment, refund, or transfer should NOT increase the reservation's totalAmount.
     // Additionally, if the main posted charge is room-related or non-total, any automatic taxes generated for it should also not increase totalAmount.
@@ -261,7 +262,7 @@ export const voidLedgerEntry = async (
     corporateId,
     amount: amount, // Reversal has the same amount but opposite effect
     type: type === 'debit' ? 'credit' : 'debit', // FLIP THE TYPE
-    category: 'other',
+    category: category || 'other',
     description: `REVERSAL: ${description} (Ref: ${firestoreId || id})`,
     timestamp: new Date().toISOString(),
     postedBy: voidedBy
