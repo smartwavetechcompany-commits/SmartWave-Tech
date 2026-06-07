@@ -48,6 +48,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { calculateBilling } from '../utils/billingEngine';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
 
@@ -292,7 +293,7 @@ export function Reports() {
             Arrival: res.checkIn,
             Departure: res.checkOut,
             Nights: res.nights || 0,
-            Balance: res.totalAmount - (res.paidAmount || 0),
+            Balance: calculateBilling(res, hotel).outstandingBalance,
             _id: res.id,
             _collection: 'reservations',
             _label: `In-House Reservation: ${res.guestName}`
@@ -425,13 +426,14 @@ export function Reports() {
           .filter(res => res.status === 'checked_in')
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
+            const billingState = calculateBilling(res, hotel);
             return {
               'Guest Name': res.guestName,
               Room: res.roomNumber,
               Phone: guest?.phone || 'N/A',
-              'Total Charges': res.totalAmount,
-              'Total Paid': res.paidAmount || 0,
-              Balance: res.totalAmount - (res.paidAmount || 0),
+              'Total Charges': billingState.totalCharges,
+              'Total Paid': billingState.totalPayments,
+              Balance: billingState.outstandingBalance,
               _id: res.id,
               _collection: 'reservations',
               _label: `Balance Record: ${res.guestName}`

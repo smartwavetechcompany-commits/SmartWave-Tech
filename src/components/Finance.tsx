@@ -46,6 +46,7 @@ import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, s
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
+import { calculateBilling } from '../utils/billingEngine';
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1690,30 +1691,10 @@ export function Finance() {
                     );
                   }
 
-                  // 1. CALCULATE QUANTIFIABLE ACCRUED PRE-TAX BASE RATE WITH OVERSTAY SUPPORT:
-                  let expectedNightsCount = resInstance.nights || 1;
-                  const originalNightsCount = resInstance.nights || 1;
-                  
-                  if (resInstance.status === 'checked_in') {
-                    const today = startOfDay(new Date());
-                    const checkInDate = startOfDay(parseISO(resInstance.checkIn));
-                    const elapsedNights = differenceInDays(today, checkInDate);
-                    
-                    expectedNightsCount = Math.max(expectedNightsCount, elapsedNights);
-                    
-                    const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-                    const checkOutDateStr = resInstance.checkOut;
-                    const todayStr = format(new Date(), 'yyyy-MM-dd');
-                    const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
-                    const isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
-                    
-                    if (isOverstaying) {
-                      expectedNightsCount = Math.max(expectedNightsCount, elapsedNights + 1);
-                    }
-                  }
-
-                  const grossBaseStayAmount = resInstance.totalAmount - (resInstance.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
-                  const nightlyRateCalculated = resInstance.nightlyRate || (originalNightsCount > 0 ? (grossBaseStayAmount / originalNightsCount) : 0) || 0;
+                  const billingState = calculateBilling(resInstance, hotel, diagLedgerEntries);
+                  const expectedNightsCount = billingState.nightsCount;
+                  const originalNightsCount = billingState.originalNights;
+                  const nightlyRateCalculated = billingState.nightlyRate;
                   const totalNightsExpected = expectedNightsCount;
                   const grossStayAmount = nightlyRateCalculated * expectedNightsCount;
                   
@@ -1734,7 +1715,7 @@ export function Finance() {
 
                   // 5. SETTLEMENT ANALYSIS
                   const paymentCredits = diagLedgerEntries.filter(e => e.type === 'credit' && e.category !== 'discount');
-                  const totalPaymentsAccrued = Math.max(resInstance.paidAmount || 0, paymentCredits.reduce((acc, e) => acc + e.amount, 0));
+                  const totalPaymentsAccrued = billingState.totalPayments;
 
                   // Real Ledger totals
                   const ledgerDebitsSum = diagLedgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
@@ -1742,10 +1723,10 @@ export function Finance() {
                     .filter(e => e.category === 'room' && e.type === 'debit')
                     .reduce((acc, e) => acc + (e.amount || 0), 0);
 
-                  const unpostedStayAccrual = Math.max(0, (expectedNightsCount * nightlyRateCalculated) - postedRoomChargesSum);
+                  const unpostedStayAccrual = billingState.projectedRoomCharge;
                   
-                  const calculatedNetBill = ledgerDebitsSum + unpostedStayAccrual - totalAdjustmentsDiscount;
-                  const outstandingDisparityBalance = calculatedNetBill - totalPaymentsAccrued;
+                  const calculatedNetBill = billingState.totalCharges;
+                  const outstandingDisparityBalance = billingState.outstandingBalance;
 
                   // TRACING COMMENTARIES
                   const diagnosticsComments: string[] = [];

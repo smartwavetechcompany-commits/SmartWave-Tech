@@ -35,6 +35,7 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
+import { calculateBilling } from '../utils/billingEngine';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -703,42 +704,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
-  let expectedNightsCount = currentReservation.nights || 1;
-  const originalNightsCount = currentReservation.nights || 1;
-
-  if (currentReservation.status === 'checked_in') {
-    const today = startOfDay(new Date());
-    const checkInDate = startOfDay(parseISO(currentReservation.checkIn));
-    const elapsedNights = differenceInDays(today, checkInDate);
-
-    expectedNightsCount = Math.max(expectedNightsCount, elapsedNights);
-
-    const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-    const checkOutDateStr = currentReservation.checkOut;
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
-    const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
-    const isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
-
-    if (isOverstaying) {
-      expectedNightsCount = Math.max(expectedNightsCount, elapsedNights + 1);
-    }
-  }
-
-  const grossBaseStayAmount = currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
-  const nightlyRateCalculated = currentReservation.nightlyRate || (originalNightsCount > 0 ? (grossBaseStayAmount / originalNightsCount) : 0) || 0;
-
-  const postedRoomChargesSum = processedDisplayedEntries
-    .filter(e => e.category?.toLowerCase() === 'room' && e.type === 'debit')
-    .reduce((acc, e) => acc + e.amount, 0);
-
-  // Projected Room Charge should represent any remaining unposted stays (difference between expected stay charge liability and what's already in the ledger)
-  const projectedRoomCharge = Math.max(0, (expectedNightsCount * nightlyRateCalculated) - postedRoomChargesSum);
+  const billingState = calculateBilling(currentReservation, hotel, processedDisplayedEntries);
+  const expectedNightsCount = billingState.nightsCount;
+  const originalNightsCount = billingState.originalNights;
+  const nightlyRateCalculated = billingState.nightlyRate;
+  const projectedRoomCharge = billingState.projectedRoomCharge;
 
   const totalDebits = processedDisplayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   const ledgerCreditsSum = processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const unpostedPrepayment = Math.max(0, (currentReservation.paidAmount || 0) - ledgerCreditsSum);
+  const unpostedPrepayment = billingState.unpostedPrepayment;
   const totalCredits = ledgerCreditsSum + unpostedPrepayment;
-  const balance = (totalDebits + projectedRoomCharge) - totalCredits;
+  const balance = billingState.outstandingBalance;
 
   // Combine real entries and a virtual projected room charge if room stay is unposted
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));

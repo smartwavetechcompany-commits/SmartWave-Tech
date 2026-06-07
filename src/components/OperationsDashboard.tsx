@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
+import { calculateBilling } from '../utils/billingEngine';
 import { 
   ResponsiveContainer, 
   AreaChart, 
@@ -1055,37 +1056,8 @@ export function OperationsDashboard() {
                     </td>
                     <td className="px-6 py-4">
                       {(() => {
-                        let expectedNightsCount = res.nights || 1;
-                        const originalNightsCount = res.nights || 1;
-                        
-                        if (res.status === 'checked_in') {
-                          try {
-                            const today = startOfDay(new Date());
-                            const checkInDate = startOfDay(parseISO(res.checkIn));
-                            const elapsedNights = differenceInDays(today, checkInDate);
-                            
-                            expectedNightsCount = Math.max(expectedNightsCount, elapsedNights);
-                            
-                            const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-                            const checkOutDateStr = res.checkOut;
-                            const todayStr = format(new Date(), 'yyyy-MM-dd');
-                            const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
-                            const isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
-                            
-                            if (isOverstaying) {
-                               expectedNightsCount = Math.max(expectedNightsCount, elapsedNights + 1);
-                            }
-                          } catch (e) {
-                            console.error("Error computing dynamic overstay in OperationsDashboard:", e);
-                          }
-                        }
-
-                        const grossBaseStayVal = res.totalAmount - (res.taxDetails?.reduce((acc: number, t: any) => acc + t.amount, 0) || 0);
-                        const nightlyRateVal = res.nightlyRate || (originalNightsCount > 0 ? (grossBaseStayVal / originalNightsCount) : 0) || 0;
-                        const extraNights = Math.max(0, expectedNightsCount - originalNightsCount);
-                        const overstayBillAdjustment = extraNights * nightlyRateVal;
-
-                        const bal = ((res.totalAmount || 0) + overstayBillAdjustment - (res.paidAmount || 0) - (res.totalDiscount || 0));
+                        const billingState = calculateBilling(res, hotel);
+                        const bal = billingState.outstandingBalance;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;

@@ -54,6 +54,7 @@ import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
+import { calculateBilling } from '../utils/billingEngine';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1439,25 +1440,9 @@ export function FrontDesk() {
 
       for (const res of activeCheckedInRes) {
         const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
-        
-        // Calculate nights elapsed since check-in
         const checkInDate = startOfDay(checkInDateTime);
-        const today = startOfDay(now);
-        const nightsElapsed = differenceInDays(today, checkInDate);
-        const scheduledNights = res.nights || 1;
-
-        // Base target charges is up to nights elapsed + 1, capped at scheduled nights
-        let targetCharges = Math.min(scheduledNights, nightsElapsed + 1);
-
-        // Check if currently overstaying (past check-out date, or today is checkout date and past check-out time)
-        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
-        const isOverstaying = res.checkOut < todayStr || (res.checkOut === todayStr && now > checkOutDateTime);
-
-        if (isOverstaying) {
-          // If overstaying, target charges rises to cover nights elapsed + 1 (additional overstay nights)
-          targetCharges = Math.max(targetCharges, nightsElapsed + 1);
-        }
+        const billingState = calculateBilling(res, hotel);
+        const targetCharges = billingState.nightsCount;
 
         // Fetch ledger entries for this reservation
         const ledgerRef = collection(db, 'hotels', hotel.id, 'ledger');
@@ -1668,24 +1653,10 @@ export function FrontDesk() {
         // 1. Ensure all nights stayed are charged
         const now = new Date();
         
-        // Refined overstay logic for checkout:
-        // Use calendar days as base.
+        // Refined overstay logic for checkout derived from central billing engine:
+        const billingState = calculateBilling(res, hotel);
+        const nightsStayed = billingState.nightsCount;
         const checkInDate = startOfDay(new Date(res.checkIn));
-        const today = startOfDay(now);
-        const nightsElapsed = differenceInDays(today, checkInDate);
-        
-        let nightsToFinalize = Math.max(1, nightsElapsed);
-        
-        // Check for late checkout (Overstay)
-        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const deadline = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
-        
-        if (isAfter(now, deadline)) {
-          // If checking out past the overstay time, add an extra night charge
-          nightsToFinalize += 1;
-        }
-
-        const nightsStayed = nightsToFinalize;
         
         const ledgerQ = query(
           collection(db, 'hotels', hotel.id, 'ledger'),
