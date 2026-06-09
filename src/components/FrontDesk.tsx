@@ -1069,73 +1069,40 @@ export function FrontDesk() {
 
     try {
       setLoading(true);
-      const batch = writeBatch(db);
+      let checkedInCount = 0;
+      let skippedCount = 0;
       
       for (const resId of selectedReservations) {
         const res = reservations.find(r => r.id === resId);
         if (res && (res.status === 'pending' || res.status === 'confirmed')) {
-          batch.update(doc(db, 'hotels', hotel.id, 'reservations', resId), {
-            status: 'checked_in',
-            checkInTime: new Date().toISOString()
-          });
-
-          // Write to Check-In History
-          type ReservationStatusType = 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
-          batch.set(doc(db, 'hotels', hotel.id, 'checkin_history', resId), {
-            id: res.id,
-            reservationId: res.id,
-            guestId: res.guestId || 'unknown_guest',
-            guestName: res.guestName,
-            guestEmail: res.guestEmail || '',
-            guestPhone: res.guestPhone || '',
-            roomNumber: res.roomNumber,
-            roomId: res.roomId,
-            checkIn: res.checkIn,
-            checkInTime: res.checkInTime || '14:00',
-            checkOut: res.checkOut,
-            checkInTimestamp: new Date().toISOString(),
-            bookedBy: res.bookedBy || '',
-            checkedInBy: profile.email || 'System',
-            status: 'checked_in' as ReservationStatusType,
-            ledgerBalance: res.ledgerBalance || 0,
-            totalAmount: res.totalAmount || 0,
-            paidAmount: res.paidAmount || 0,
-            paymentStatus: res.paymentStatus || 'unpaid'
-          });
-
-          // Update room status
-          if (res.roomId) {
-            batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
-              status: 'occupied'
-            });
+          const room = rooms.find(r => r.id === res.roomId);
+          const guest = guests.find(g => g.id === res.guestId);
+          const policy = canCheckIn(hotel, profile, res, room, guest);
+          
+          if (!policy.allowed) {
+            skippedCount++;
+            continue;
           }
 
-          // Log action
-          batch.set(doc(collection(db, 'hotels', hotel.id, 'activityLogs')), {
-            timestamp: new Date().toISOString(),
-            userId: profile.uid,
-            userEmail: profile.email,
-            userRole: profile.role,
-            action: 'BULK_CHECK_IN',
-            resource: `Reservation: ${res.guestName}`,
-            hotelId: hotel.id,
-            module: 'Front Desk'
-          });
+          await updateReservationStatus(res, 'checked_in');
+          checkedInCount++;
         }
       }
 
-      await database.commitBatch(hotel.id, batch, {
-        module: 'Front Desk',
-        action: 'BULK_CHECK_IN',
-        details: `Bulk checked in ${selectedReservations.length} reservations`
-      });
-      toast.success(`Successfully checked in ${selectedReservations.length} guests`);
-      setSelectedReservations([]);
+      if (checkedInCount > 0) {
+        if (skippedCount > 0) {
+          toast.success(`Successfully checked in ${checkedInCount} guests (skipped ${skippedCount} due to policies).`);
+        } else {
+          toast.success(`Successfully checked in ${checkedInCount} guests.`);
+        }
+        setSelectedReservations([]);
+      } else if (skippedCount > 0) {
+        toast.error(`Check-in failed for all selected guests due to hotel policies.`);
+      }
     } catch (err: any) {
       console.error("Bulk check-in error:", err.message || safeStringify(err));
       toast.error('Failed to perform bulk check-in');
     } finally {
-      setLoading(true); // Wait, should be false
       setLoading(false);
     }
   };

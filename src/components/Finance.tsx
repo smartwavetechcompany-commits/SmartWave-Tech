@@ -1115,7 +1115,7 @@ export function Finance() {
                               <div className="text-xs text-zinc-400">{guest.email}</div>
                               <div className="text-[10px] text-zinc-500">{guest.phone}</div>
                             </td>
-                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
+                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500")}>
                               {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
                             </td>
                             <td className="px-6 py-4 text-right space-x-3">
@@ -1217,8 +1217,8 @@ export function Finance() {
                       <p className="text-xs font-bold text-zinc-500 uppercase">Total Receivables</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (g.ledgerBalance < 0 ? Math.abs(g.ledgerBalance) : 0), 0) +
-                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance < 0 ? Math.abs(c.currentBalance) : 0), 0),
+                          guests.reduce((acc, g) => acc + (g.ledgerBalance > 0 ? g.ledgerBalance : 0), 0) +
+                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance > 0 ? c.currentBalance : 0), 0),
                           currency, exchangeRate
                         )}
                       </h3>
@@ -1235,7 +1235,7 @@ export function Finance() {
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {/* Simplified calculation for now */}
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (g.ledgerBalance < -100000 ? Math.abs(g.ledgerBalance) : 0), 0),
+                          guests.reduce((acc, g) => acc + (g.ledgerBalance > 100000 ? g.ledgerBalance : 0), 0),
                           currency, exchangeRate
                         )}
                       </h3>
@@ -1251,8 +1251,8 @@ export function Finance() {
                       <p className="text-xs font-bold text-zinc-500 uppercase">Credit Available</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (g.ledgerBalance > 0 ? g.ledgerBalance : 0), 0) +
-                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance > 0 ? c.currentBalance : 0), 0),
+                          guests.reduce((acc, g) => acc + (g.ledgerBalance < 0 ? Math.abs(g.ledgerBalance) : 0), 0) +
+                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance < 0 ? Math.abs(c.currentBalance) : 0), 0),
                           currency, exchangeRate
                         )}
                       </h3>
@@ -1267,7 +1267,7 @@ export function Finance() {
                   <button 
                     onClick={() => exportToCSV(
                       [...guests, ...corporateAccounts]
-                        .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) < 0)
+                        .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) > 0)
                         .map(a => ({
                           Name: a.name,
                           Type: 'ledgerBalance' in a ? 'Individual' : 'Corporate',
@@ -1297,7 +1297,11 @@ export function Finance() {
                     <tbody className="divide-y divide-zinc-800">
                       {[...guests, ...corporateAccounts]
                         .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) !== 0)
-                        .sort((a, b) => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) - ('ledgerBalance' in b ? b.ledgerBalance : b.currentBalance))
+                        .sort((a, b) => {
+                          const balA = 'ledgerBalance' in a ? (a.ledgerBalance || 0) : (a.currentBalance || 0);
+                          const balB = 'ledgerBalance' in b ? (b.ledgerBalance || 0) : (b.currentBalance || 0);
+                          return balB - balA; // Sort larger debts (positive) first
+                        })
                         .map((account) => {
                           const balance = 'ledgerBalance' in account ? account.ledgerBalance : account.currentBalance;
                           return (
@@ -1316,7 +1320,7 @@ export function Finance() {
                               </td>
                               <td className={cn(
                                 "px-6 py-4 text-right font-bold",
-                                balance < 0 ? "text-red-500" : "text-emerald-500"
+                                balance > 0 ? "text-red-500" : "text-emerald-500"
                               )}>
                                 {formatCurrency(balance, currency, exchangeRate)}
                               </td>

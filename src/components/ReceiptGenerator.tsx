@@ -4,6 +4,7 @@ import { formatCurrency, cn } from '../utils';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
+import { calculateBilling } from '../utils/billingEngine';
 
 export function processLedgerTaxes(
   entries: LedgerEntry[],
@@ -105,18 +106,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = processedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   
-  // Calculate exclusive taxes from reservation for when ledger is empty
-  const resExclusiveTaxAmount = reservation?.taxDetails?.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0) || 0;
+  // Detailed billing and overstay analytics from central billing engine
+  const billingState = reservation 
+    ? calculateBilling(reservation, hotel, filteredEntries)
+    : null;
 
-  // Calculate posted extra charges (excluding room, payments, refunds, transfers, city_ledger, etc.)
-  const postedExtraCharges = processedEntries
-    .filter(e => e.type === 'debit' && !['room', 'payment', 'refund', 'transfer', 'city_ledger'].includes(e.category?.toLowerCase()))
-    .reduce((acc, e) => acc + e.amount, 0);
-
-  // Unposted room stay cost (the virtual accommodation charge)
-  // Like GuestFolio, it is computed as reservation.totalAmount - postedExtraCharges - resExclusiveTaxAmount
-  const projectedRoomCharge = !hasRoomChargeInLedger && reservation
-    ? Math.max(0, (reservation.totalAmount || 0) - postedExtraCharges - resExclusiveTaxAmount)
+  const projectedRoomCharge = billingState 
+    ? billingState.projectedRoomCharge
     : 0;
 
   // Find exclusive tax debits in the ledger (tax debits with description not containing "inclusive")
@@ -168,7 +164,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       // Use reservation details if available
       const storedTax = reservation?.taxDetails?.find(t => t.name === tax.name);
       if (storedTax) {
-        amount = storedTax.amount;
+        const baseTaxAmount = storedTax.amount;
+        const overstayCharge = billingState ? billingState.overstayCharge : 0;
+        const overstayTaxAmount = tax.isInclusive
+          ? overstayCharge - (overstayCharge / (1 + (tax.percentage / 100)))
+          : overstayCharge * (tax.percentage / 100);
+        amount = baseTaxAmount + overstayTaxAmount;
       } else {
         amount = tax.isInclusive 
           ? subtotal - (subtotal / (1 + (tax.percentage / 100)))
@@ -347,11 +348,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             ))
           ) : (
             <>
-              {reservation && !hasRoomChargeInLedger && (
+              {reservation && projectedRoomCharge > 0.01 && (
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <p className="text-sm font-bold">Room Charges (Base)</p>
-                    <p className="text-[10px] text-zinc-400">Accommodation for {reservation.roomNumber}</p>
+                    <p className="text-sm font-bold">
+                      {hasRoomChargeInLedger ? 'Projected Overstay / Extra Room Charges' : 'Room Charges (Estimated / Projected)'}
+                    </p>
+                    <p className="text-[10px] text-zinc-400">Accommodation for Room {reservation.roomNumber}</p>
                   </div>
                   <span className="font-bold text-sm text-right">{formatCurrency(projectedRoomCharge, currency, exchangeRate)}</span>
                 </div>
