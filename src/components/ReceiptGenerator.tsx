@@ -1,7 +1,7 @@
 import React from 'react';
 import { Reservation, Hotel, LedgerEntry, CorporateAccount, Tax } from '../types';
 import { formatCurrency, cn } from '../utils';
-import { format } from 'date-fns';
+import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
 import { calculateBilling } from '../utils/billingEngine';
@@ -329,15 +329,15 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       <div className="border-t border-zinc-100 my-6" />
 
       {/* Charges Section */}
-      <div className="space-y-4 mb-8">
-        <div className="flex justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-100 pb-2">
+      <div className="mt-8 space-y-6">
+        <div className="flex justify-between text-[10px] font-black text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-2">
           <span>Charges / Description</span>
           <span className="text-right">Amount</span>
         </div>
         
-        <div className="space-y-3">
-          {type === 'restaurant' ? (
-            ledgerEntries.filter(e => e.category === 'restaurant' && e.type === 'debit').map(e => (
+        {type === 'restaurant' ? (
+          <div className="space-y-3">
+            {ledgerEntries.filter(e => e.category === 'restaurant' && e.type === 'debit').map(e => (
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-sm font-bold">{e.description}</p>
@@ -345,42 +345,177 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                 </div>
                 <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>
-            ))
-          ) : (
-            <>
-              {reservation && projectedRoomCharge > 0.01 && (
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <p className="text-sm font-bold">
-                      {hasRoomChargeInLedger ? 'Projected Overstay & Unposted Room Charges' : 'Room Charges (Scheduled + Overstay)'}
-                    </p>
-                    <div className="text-[10px] text-zinc-400 space-y-0.5 mt-0.5">
-                      <p>Accommodation for Room {reservation.roomNumber}</p>
-                      {billingState && (
-                        <div className="pl-2 border-l border-zinc-200 mt-1 space-y-0.5 text-[9px] text-zinc-400">
-                          <div>• Scheduled Booking: {billingState.originalNights} {billingState.originalNights === 1 ? 'night' : 'nights'} @ {formatCurrency(billingState.nightlyRate, currency, exchangeRate)}/night</div>
-                          {billingState.extraNights > 0 && (
-                            <div className="text-red-600 font-semibold">• Overstay Duration: {billingState.extraNights} {billingState.extraNights === 1 ? 'night' : 'nights'} @ {formatCurrency(billingState.nightlyRate, currency, exchangeRate)}/night (Auto-charge Triggered)</div>
-                          )}
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* 1. ACCOMMODATION & DAILY BASE RATES BREAKDOWN */}
+            <div className="space-y-3">
+              <div className="border-l-2 border-zinc-900 pl-2.5">
+                <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">1. Accommodation & Nightly Rates</span>
+              </div>
+              <div className="pl-3 space-y-3">
+                {(() => {
+                  const roomDebits = debits.filter(e => e.category?.toLowerCase() === 'room');
+                  const renderedNights: React.ReactNode[] = [];
+                  
+                  // Render already posted room charges from the ledger
+                  roomDebits.forEach((e, index) => {
+                    renderedNights.push(
+                      <div key={e.id || `posted-room-${index}`} className="flex justify-between items-start py-0.5">
+                        <div className="flex-1">
+                          <p className="text-sm font-bold">{e.description}</p>
+                          <p className="text-[10px] text-zinc-500 font-medium">Posted Charge • Room {reservation?.roomNumber || 'N/A'}</p>
                         </div>
-                      )}
+                        <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                      </div>
+                    );
+                  });
+
+                  // Generate unposted/projected room charges chronologically (including overstays)
+                  if (reservation) {
+                    const postedNightsCount = roomDebits.length;
+                    const totalNights = billingState ? billingState.nightsCount : 1;
+                    const nightlyRate = billingState ? billingState.nightlyRate : 0;
+                    
+                    if (totalNights > postedNightsCount && nightlyRate > 0) {
+                      const unpostedNights = totalNights - postedNightsCount;
+                      
+                      for (let i = 0; i < unpostedNights; i++) {
+                        const nightIndex = postedNightsCount + i;
+                        const checkInDate = parseISO(reservation.checkIn);
+                        const nightDate = addDays(checkInDate, nightIndex);
+                        const isOverstay = billingState ? (nightIndex >= billingState.originalNights) : false;
+                        
+                        const title = isOverstay 
+                          ? `Projected Overstay Room Charge (Night of ${format(nightDate, 'MMM dd, yyyy')})`
+                          : `Projected Room Charge (Night of ${format(nightDate, 'MMM dd, yyyy')})`;
+                        
+                        // Last night absorbs remainder to assure exact match
+                        const rateForThisNight = (i === unpostedNights - 1)
+                          ? projectedRoomCharge - (i * nightlyRate)
+                          : nightlyRate;
+                        
+                        if (rateForThisNight <= 0.01 && unpostedNights > 1 && i === unpostedNights - 1) {
+                          continue;
+                        }
+
+                        renderedNights.push(
+                          <div key={`projected-room-${nightIndex}`} className="flex justify-between items-start py-0.5 text-zinc-600">
+                            <div className="flex-1">
+                              <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                                {title}
+                                <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
+                              </p>
+                              <p className="text-[10px] text-zinc-400">Night {nightIndex + 1} of stay • Rate: {formatCurrency(nightlyRate, currency, exchangeRate)} / night</p>
+                            </div>
+                            <span className="font-bold text-sm text-right">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
+                          </div>
+                        );
+                      }
+                    }
+                  }
+
+                  if (renderedNights.length === 0) {
+                    return <p className="text-xs text-zinc-400 italic pl-1">No accommodation charges recorded for this period.</p>;
+                  }
+
+                  return <div className="divide-y divide-zinc-100/60">{renderedNights}</div>;
+                })()}
+              </div>
+            </div>
+
+            {/* 2. ADDITIONAL CHARGES & SERVICES BREAKDOWN */}
+            <div className="space-y-3 mt-4">
+              <div className="border-l-2 border-zinc-900 pl-2.5">
+                <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">2. Additional Services & Incidentals</span>
+              </div>
+              <div className="pl-3 space-y-3">
+                {(() => {
+                  const incidentalDebits = debits.filter(e => e.category?.toLowerCase() !== 'room' && e.category?.toLowerCase() !== 'tax');
+                  
+                  if (incidentalDebits.length === 0) {
+                    return <p className="text-xs text-zinc-400 italic pl-1">No additional services or incidental charges recorded.</p>;
+                  }
+
+                  return (
+                    <div className="divide-y divide-zinc-100/60">
+                      {incidentalDebits.map((e, index) => (
+                        <div key={e.id || `incidental-${index}`} className="flex justify-between items-start py-1">
+                          <div className="flex-1">
+                            <p className="text-sm font-bold">{e.description}</p>
+                            <p className="text-[10px] text-zinc-500 font-medium">
+                              Category: {e.category?.toUpperCase() || 'OTHER'} • Posted {format(new Date(e.timestamp), 'MMM dd, HH:mm')}
+                            </p>
+                          </div>
+                          <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  <span className="font-bold text-sm text-right">{formatCurrency(projectedRoomCharge, currency, exchangeRate)}</span>
-                </div>
-              )}
-              {debits.map(e => (
-                <div key={e.id} className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <p className="text-sm font-bold">{e.description}</p>
-                    <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
-                  </div>
-                  <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* 3. TAXES & LEVIES BREAKDOWN */}
+            <div className="space-y-3 mt-4">
+              <div className="border-l-2 border-zinc-900 pl-2.5">
+                <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">3. Taxes & Hotel Levies</span>
+              </div>
+              <div className="pl-3 space-y-3">
+                {(() => {
+                  const items: React.ReactNode[] = [];
+                  
+                  taxBreakdown.filter(t => t.showOnReceipt).forEach((tax, index) => {
+                    items.push(
+                      <div key={tax.id || `tax-${index}`} className="flex justify-between items-start py-1.5">
+                        <div className="flex-1">
+                          <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                            {tax.name} ({tax.percentage}%)
+                            {tax.isInclusive ? (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-[8px] text-emerald-600 font-extrabold uppercase rounded border border-emerald-100 leading-none">
+                                Inclusive of Room Price
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 bg-amber-50 text-[8px] text-amber-600 font-extrabold uppercase rounded border border-amber-100 leading-none">
+                                Exclusive of Room Price
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">
+                            {tax.isInclusive 
+                              ? `Inclusive of room price: This ${tax.name} rate of ${tax.percentage}% is already included in the daily base rate.`
+                              : `Exclusive of room price: This ${tax.name} rate of ${tax.percentage}% is applied in addition to the daily base rate.`
+                            }
+                          </p>
+                        </div>
+                        <span className="font-bold text-sm text-right">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                      </div>
+                    );
+                  });
+
+                  if (otherTaxAmount > 0.01) {
+                    items.push(
+                      <div key="other-tax" className="flex justify-between items-start py-0.5">
+                        <div className="flex-1">
+                          <p className="text-sm font-bold">Other Posted / Transferred Taxes</p>
+                          <p className="text-[10px] text-zinc-500">Additional taxes posted directly through guest folio</p>
+                        </div>
+                        <span className="font-bold text-sm text-right">{formatCurrency(otherTaxAmount, currency, exchangeRate)}</span>
+                      </div>
+                    );
+                  }
+
+                  if (items.length === 0) {
+                    return <p className="text-xs text-zinc-400 italic pl-1">No applicable taxes or service levies on this statement.</p>;
+                  }
+
+                  return <div className="divide-y divide-zinc-100/60">{items}</div>;
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Payments Section */}

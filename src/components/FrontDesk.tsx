@@ -3744,10 +3744,16 @@ export function FrontDesk() {
                       )}>
                         {res.status.replace('_', ' ')}
                       </span>
-                      {res.status === 'checked_in' && new Date() > new Date(res.checkOut) && (
-                        <span className="px-2 py-0.5 bg-red-500/10 text-red-500 text-[8px] font-bold uppercase rounded w-fit animate-pulse">
-                          Overstay
-                        </span>
+                      {res.status === 'checked_in' && (
+                        billing.isOverstaying ? (
+                          <span className="px-2 py-0.5 bg-red-500/10 text-red-500 text-[8px] font-bold uppercase rounded w-fit animate-pulse">
+                            Overstay
+                          </span>
+                        ) : new Date().toISOString().split('T')[0] === res.checkOut ? (
+                          <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[8px] font-bold uppercase rounded w-fit">
+                            Due Out Today
+                          </span>
+                        ) : null
                       )}
                     </div>
                   </td>
