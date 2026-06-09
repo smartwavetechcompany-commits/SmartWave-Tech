@@ -3540,8 +3540,10 @@ export function FrontDesk() {
                   </td>
                 </tr>
               ) : (
-                filteredReservations.map(res => (
-                  <tr key={res.id} className={cn(
+                filteredReservations.map(res => {
+                  const billing = calculateBilling(res, hotel);
+                  return (
+                    <tr key={res.id} className={cn(
                   "hover:bg-zinc-800/50 transition-colors",
                   selectedReservations.includes(res.id) && "bg-emerald-500/5"
                 )}>
@@ -3666,17 +3668,26 @@ export function FrontDesk() {
                   <td className="px-6 py-4 text-sm">
                     <div className="flex flex-col">
                       <span className="font-bold text-zinc-50">
-                        {formatCurrency(Math.max(res.totalAmount || 0, (res.ledgerBalance || 0) + (res.paidAmount || 0)), currency, exchangeRate)}
+                        {formatCurrency(billing.totalCharges, currency, exchangeRate)}
                       </span>
-                      {res.status === 'checked_in' && (
-                        <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter mt-0.5">
-                          Daily Rate: {formatCurrency(res.nightlyRate || ((res.totalAmount || 0) / (differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn)) || 1)), currency, exchangeRate)}
-                        </span>
-                      )}
+                      <div className="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter mt-1 space-y-0.5 leading-tight">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>Rate: {formatCurrency(billing.nightlyRate, currency, exchangeRate)} / night</span>
+                          <span className="text-zinc-600">•</span>
+                          <span>Base ({billing.originalNights} {billing.originalNights === 1 ? 'night' : 'nights'}): {formatCurrency((billing.originalNights * billing.nightlyRate), currency, exchangeRate)}</span>
+                        </div>
+                        {billing.extraNights > 0 && (
+                          <div className="text-red-400 font-semibold flex items-center gap-1 flex-wrap">
+                            <span>Overstay (+{billing.extraNights} {billing.extraNights === 1 ? 'night' : 'nights'}):</span>
+                            <span>{formatCurrency(billing.overstayCharge, currency, exchangeRate)}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-1.5 mt-1.5">
+                    <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
-                        const bal = res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0));
+                        const overstayCharge = res.status === 'checked_in' ? billing.overstayCharge : 0;
+                        const bal = (res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0))) + overstayCharge;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;
@@ -3703,7 +3714,7 @@ export function FrontDesk() {
                               </span>
                             </div>
                             <div className={cn(
-                              "text-[10px] font-mono px-1.5 py-0.5 rounded border w-fit",
+                              "text-[10px] font-mono px-1.5 py-0.5 rounded border w-fit font-bold",
                               isCredit 
                                 ? "text-emerald-400 bg-emerald-500/5 border-emerald-500/10" 
                                 : isSettled 
@@ -3956,7 +3967,8 @@ export function FrontDesk() {
                     </div>
                   </td>
                 </tr>
-              )))}
+              );
+            }))}
             </tbody>
           </table>
         </div>

@@ -352,9 +352,19 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <p className="text-sm font-bold">
-                      {hasRoomChargeInLedger ? 'Projected Overstay / Extra Room Charges' : 'Room Charges (Estimated / Projected)'}
+                      {hasRoomChargeInLedger ? 'Projected Overstay & Unposted Room Charges' : 'Room Charges (Scheduled + Overstay)'}
                     </p>
-                    <p className="text-[10px] text-zinc-400">Accommodation for Room {reservation.roomNumber}</p>
+                    <div className="text-[10px] text-zinc-400 space-y-0.5 mt-0.5">
+                      <p>Accommodation for Room {reservation.roomNumber}</p>
+                      {billingState && (
+                        <div className="pl-2 border-l border-zinc-200 mt-1 space-y-0.5 text-[9px] text-zinc-400">
+                          <div>• Scheduled Booking: {billingState.originalNights} {billingState.originalNights === 1 ? 'night' : 'nights'} @ {formatCurrency(billingState.nightlyRate, currency, exchangeRate)}/night</div>
+                          {billingState.extraNights > 0 && (
+                            <div className="text-red-600 font-semibold">• Overstay Duration: {billingState.extraNights} {billingState.extraNights === 1 ? 'night' : 'nights'} @ {formatCurrency(billingState.nightlyRate, currency, exchangeRate)}/night (Auto-charge Triggered)</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <span className="font-bold text-sm text-right">{formatCurrency(projectedRoomCharge, currency, exchangeRate)}</span>
                 </div>
