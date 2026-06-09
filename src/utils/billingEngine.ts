@@ -48,7 +48,15 @@ export function calculateBilling(
       isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
       
       if (isOverstaying) {
-        expectedNightsCount = Math.max(expectedNightsCount, elapsedNights + 1);
+        const todayCheckOutDateTime = new Date(`${todayStr}T${overstayTime}`);
+        const pastTodayCheckoutHour = new Date() > todayCheckOutDateTime;
+        if (pastTodayCheckoutHour) {
+          expectedNightsCount = Math.max(originalNights, elapsedNights + 1);
+        } else {
+          expectedNightsCount = Math.max(originalNights, elapsedNights);
+        }
+      } else {
+        expectedNightsCount = originalNights;
       }
     } catch (e) {
       console.error("Error computing billing expected nights:", e);

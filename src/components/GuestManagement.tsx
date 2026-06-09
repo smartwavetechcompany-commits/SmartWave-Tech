@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
+import { calculateBilling } from '../utils/billingEngine';
 import { 
   Users, 
   Plus, 
@@ -103,6 +104,17 @@ export function GuestManagement() {
       !newGuest.tags.includes(t)
     );
   }, [tagInput, allExistingTags, newGuest.tags]);
+
+  const getGuestLiveBalance = (guest: Guest) => {
+    const resList = allReservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail === guest.email));
+    const liveOwed = resList
+      .filter(r => r.status === 'checked_in' || r.status === 'checked_out')
+      .reduce((sum, r) => {
+        const billing = calculateBilling(r, hotel);
+        return sum + billing.outstandingBalance;
+      }, 0);
+    return Math.abs(liveOwed) > 0.01 ? liveOwed : (guest.ledgerBalance || 0);
+  };
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -320,21 +332,33 @@ export function GuestManagement() {
 
         return matchesType && matchesDate;
       })
-      .map(g => ({
-        Name: g.name,
-        Email: g.email,
-        Phone: g.phone,
-        'Guest Type': g.corporateId ? 'Corporate' : 'Individual',
-        'ID Type': g.idType,
-        'ID Number': g.idNumber,
-        Address: g.address,
-        'Total Stays': g.totalStays || 0,
-        'Total Spent': g.totalSpent || 0,
-        'Balance': g.ledgerBalance || 0,
-        'Tags': (g.tags || []).join(', '),
-        'Preferences': (g.preferences || []).join(', '),
-        'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
-      }));
+      .map(g => {
+        const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
+        const completedStays = resList.filter(r => r.status === 'checked_out').length;
+        const activeStays = resList.filter(r => r.status === 'checked_in').length;
+        const visitsCount = completedStays + activeStays;
+
+        const calculatedSpent = resList
+          .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+          .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+        const totalSpentVal = Math.max(g.totalSpent || 0, calculatedSpent);
+
+        return {
+          Name: g.name,
+          Email: g.email,
+          Phone: g.phone,
+          'Guest Type': g.corporateId ? 'Corporate' : 'Individual',
+          'ID Type': g.idType,
+          'ID Number': g.idNumber,
+          Address: g.address,
+          'Total Stays': visitsCount || g.totalStays || 0,
+          'Total Spent': totalSpentVal,
+          'Balance': getGuestLiveBalance(g),
+          'Tags': (g.tags || []).join(', '),
+          'Preferences': (g.preferences || []).join(', '),
+          'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
+        };
+      });
 
     if (data.length === 0) {
       toast.info("No guests found for the selected report filters");
@@ -367,7 +391,7 @@ export function GuestManagement() {
         
       // Balance filter
       const matchesBalance = balanceFilter === 'all' || 
-        (balanceFilter === 'yes' ? (guest.ledgerBalance || 0) > 0 : (guest.ledgerBalance || 0) <= 0);
+        (balanceFilter === 'yes' ? getGuestLiveBalance(guest) > 0.01 : getGuestLiveBalance(guest) <= 0.01);
 
       // VIP filter
       const matchesVip = vipFilter === 'all' || 
@@ -386,7 +410,7 @@ export function GuestManagement() {
     }).sort((a, b) => {
       let result = 0;
       if (sortBy === 'name') result = a.name.localeCompare(b.name);
-      else if (sortBy === 'ledgerBalance') result = (a.ledgerBalance || 0) - (b.ledgerBalance || 0);
+      else if (sortBy === 'ledgerBalance') result = getGuestLiveBalance(a) - getGuestLiveBalance(b);
       else if (sortBy === 'totalSpent') {
         const getSpentSum = (g: typeof a) => {
           const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
@@ -518,12 +542,18 @@ export function GuestManagement() {
           </div>
           <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Lifetime Revenue</div>
           <div className="text-lg sm:text-xl font-bold text-blue-500 font-mono tracking-tight truncate">
-            {formatCurrency(guests.reduce((acc, g) => acc + (g.totalSpent || 0), 0), currency, exchangeRate)}
+            {formatCurrency(guests.reduce((acc, g) => {
+              const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
+              const calculatedSpent = resList
+                .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+                .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+              return acc + Math.max(g.totalSpent || 0, calculatedSpent);
+            }, 0), currency, exchangeRate)}
           </div>
         </div>
 
         {(() => {
-          const totalNetOutstanding = guests.reduce((acc, g) => acc + (g.ledgerBalance || 0), 0);
+          const totalNetOutstanding = guests.reduce((acc, g) => acc + getGuestLiveBalance(g), 0);
           const isNegative = totalNetOutstanding < -0.01;
           const isZero = Math.abs(totalNetOutstanding) <= 0.01;
           
@@ -547,9 +577,9 @@ export function GuestManagement() {
                 )}>
                   <CreditCard size={14} />
                 </div>
-                {guests.filter(g => (g.ledgerBalance || 0) > 0).length > 0 && (
+                {guests.filter(g => getGuestLiveBalance(g) > 0.01).length > 0 && (
                   <div className="p-0.5 bg-red-500 text-white rounded text-[7px] font-black px-1.5 uppercase shadow-sm">
-                    {guests.filter(g => (g.ledgerBalance || 0) > 0).length} Owed
+                    {guests.filter(g => getGuestLiveBalance(g) > 0.01).length} Owed
                   </div>
                 )}
               </div>
@@ -824,21 +854,21 @@ export function GuestManagement() {
                         </div>
                         <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                           <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">
-                            {(guest.ledgerBalance || 0) > 0.01 
+                            {getGuestLiveBalance(guest) > 0.01 
                               ? "Owed" 
-                              : (guest.ledgerBalance || 0) < -0.01 
+                              : getGuestLiveBalance(guest) < -0.01 
                                 ? "Credit / Deposit" 
                                 : "Owed"}
                           </div>
                           <div className={cn(
                             "text-sm font-bold",
-                            (guest.ledgerBalance || 0) > 0.01 
+                            getGuestLiveBalance(guest) > 0.01 
                               ? "text-red-500" 
-                              : (guest.ledgerBalance || 0) < -0.01 
+                              : getGuestLiveBalance(guest) < -0.01 
                                 ? "text-emerald-500" 
                                 : "text-zinc-500"
                           )}>
-                            {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
+                            {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}
                           </div>
                         </div>
                       </div>
@@ -933,21 +963,21 @@ export function GuestManagement() {
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">
-                          {(viewingHistory.ledgerBalance || 0) > 0.01 
+                          {getGuestLiveBalance(viewingHistory) > 0.01 
                             ? "Account Balance (Owed)" 
-                            : (viewingHistory.ledgerBalance || 0) < -0.01 
+                            : getGuestLiveBalance(viewingHistory) < -0.01 
                               ? "Account Balance (Credit)" 
                               : "Account Balance"}
                         </div>
                         <div className={cn(
                           "text-lg font-bold leading-tight",
-                          (viewingHistory.ledgerBalance || 0) > 0.01 
+                          getGuestLiveBalance(viewingHistory) > 0.01 
                             ? "text-red-500" 
-                            : (viewingHistory.ledgerBalance || 0) < -0.01 
+                            : getGuestLiveBalance(viewingHistory) < -0.01 
                               ? "text-emerald-500" 
                               : "text-zinc-500"
                         )}>
-                          {formatCurrency(Math.abs(viewingHistory.ledgerBalance || 0), currency, exchangeRate)}
+                          {formatCurrency(Math.abs(getGuestLiveBalance(viewingHistory)), currency, exchangeRate)}
                         </div>
                       </div>
                     </div>
