@@ -826,10 +826,13 @@ export function GuestManagement() {
                     guestRes.forEach(r => {
                       if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
                         try {
+                          const billing = calculateBilling(r, hotel);
+                          calculatedDays += (billing.nightsCount || 1) + 1;
+                        } catch (e) {
                           const cin = parseISO(r.checkIn);
                           const cout = parseISO(r.checkOut);
-                          calculatedDays += Math.max(1, differenceInDays(cout, cin));
-                        } catch (e) {}
+                          calculatedDays += Math.max(1, differenceInDays(cout, cin)) + 1;
+                        }
                       }
                     });
 
@@ -1052,8 +1055,14 @@ export function GuestManagement() {
                                 {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
                                 <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded lowercase">
                                   {(() => {
-                                    const n = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
-                                    const d = n + 1;
+                                    let d = 1;
+                                    try {
+                                      const billing = calculateBilling(res, hotel);
+                                      d = (billing.nightsCount || 1) + 1;
+                                    } catch (e) {
+                                      const n = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
+                                      d = n + 1;
+                                    }
                                     return `${d} ${d === 1 ? 'day' : 'days'}`;
                                   })()}
                                 </span>
