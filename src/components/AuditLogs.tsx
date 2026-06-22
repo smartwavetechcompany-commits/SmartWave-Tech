@@ -26,6 +26,118 @@ import { cn, exportToCSV, formatCurrency, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 
+const renderPrettyValue = (value: any): React.ReactNode => {
+  if (value === null || value === undefined) {
+    return (
+      <span className="text-zinc-600 text-[10px] bg-zinc-900 px-2 py-0.5 rounded font-mono uppercase">
+        None
+      </span>
+    );
+  }
+  if (typeof value === 'boolean') {
+    return (
+      <span className={cn(
+        "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
+        value 
+          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
+          : "bg-zinc-800/80 text-zinc-400 border border-zinc-700/50"
+      )}>
+        {value ? 'Enabled' : 'Disabled'}
+      </span>
+    );
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return (
+          <span className="text-zinc-500 text-[10px] font-mono italic">
+            Empty List
+          </span>
+        );
+      }
+      // Check if it's an array of objects (like taxes)
+      const isArrayOfObjects = value.every(item => item && typeof item === 'object' && !Array.isArray(item));
+      if (isArrayOfObjects) {
+        return (
+          <div className="space-y-4 font-sans text-left w-full mt-1">
+            {value.map((item: any, idx: number) => {
+              const displayName = item.name || item.title || item.label || `Item #${idx + 1}`;
+              return (
+                <div key={idx} className="bg-zinc-900 border border-zinc-800/80 p-4 rounded-2xl flex flex-col gap-2.5 shadow-md">
+                  <div className="flex items-center justify-between border-b border-zinc-800/65 pb-2">
+                    <span className="font-bold text-zinc-200 text-xs">{displayName}</span>
+                    {item.status && (
+                      <span className={cn(
+                        "text-[8px] font-bold uppercase px-2 py-0.5 rounded-full tracking-wider",
+                        item.status === 'active' || item.status === 'enabled'
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
+                          : "bg-zinc-850 text-zinc-500 border border-zinc-800"
+                      )}>
+                        {item.status}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
+                    {Object.entries(item)
+                      .filter(([k]) => k !== 'id' && k !== 'name' && k !== 'status' && k !== 'label' && k !== 'title')
+                      .map(([k, v]) => (
+                        <div key={k} className="flex justify-between items-center gap-4 bg-zinc-950/20 px-2 py-1.5 rounded-lg border border-zinc-800/10">
+                          <span className="text-zinc-500 font-medium capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}:</span>
+                          <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]" title={String(typeof v === 'object' ? JSON.stringify(v) : v)}>
+                            {typeof v === 'boolean' 
+                              ? (v ? 'Yes' : 'No') 
+                              : typeof v === 'object' 
+                                ? JSON.stringify(v) 
+                                : String(v)}
+                          </span>
+                        </div>
+                    ))}
+                  </div>
+                  {item.id && (
+                    <div className="text-[8px] text-zinc-650 font-mono self-end opacity-50">
+                      ID: {String(item.id).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      } else {
+        // Simple array of primitives
+        return (
+          <div className="flex flex-wrap gap-2 text-left mt-1">
+            {value.map((val, idx) => (
+              <span key={idx} className="bg-zinc-905 border border-zinc-800 px-2.5 py-1 rounded-xl text-xs font-mono text-zinc-300">
+                {String(val)}
+              </span>
+            ))}
+          </div>
+        );
+      }
+    } else {
+      // Single object
+      return (
+        <div className="grid grid-cols-1 gap-2 font-sans text-left mt-1">
+          {Object.entries(value).map(([k, v]) => (
+            <div key={k} className="bg-zinc-900/60 border border-zinc-800/40 p-3 rounded-2xl flex items-center justify-between gap-4 text-xs font-sans">
+              <span className="text-zinc-500 font-bold uppercase text-[9px] tracking-wider">{k.replace(/([A-Z])/g, ' $1').trim()}</span>
+              <span className="text-zinc-200 font-mono font-medium break-all text-right max-w-[65%]">
+                {typeof v === 'boolean' 
+                  ? (v ? 'Yes' : 'No') 
+                  : typeof v === 'object' 
+                    ? JSON.stringify(v) 
+                    : String(v)}
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+  }
+  return <span className="text-zinc-200 font-mono break-all mt-1 block">{String(value)}</span>;
+};
+
 export function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [hotels, setHotels] = useState<Record<string, string>>({});
@@ -34,6 +146,7 @@ export function AuditLogs() {
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState<string>('all');
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [metadataTab, setMetadataTab] = useState<'visual' | 'raw'>('visual');
   const [currentPage, setCurrentPage] = useState(1);
   const [logsPerPage] = useState(50);
   const [dateRange, setDateRange] = useState({
@@ -631,65 +744,132 @@ export function AuditLogs() {
 
                 {selectedLog.metadata && (
                   <div className="space-y-6">
-                    <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Data Change Tracking</h4>
+                    <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+                      <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Data Change Tracking</h4>
+                      <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+                        <button
+                          type="button"
+                          onClick={() => setMetadataTab('visual')}
+                          className={cn(
+                            "px-3 py-1 text-[10px] font-bold uppercase rounded-lg transition-all",
+                            metadataTab === 'visual'
+                              ? "bg-zinc-800 text-zinc-50 shadow-sm"
+                              : "text-zinc-500 hover:text-zinc-400"
+                          )}
+                        >
+                          Visual View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMetadataTab('raw')}
+                          className={cn(
+                            "px-3 py-1 text-[10px] font-bold uppercase rounded-lg transition-all",
+                            metadataTab === 'raw'
+                              ? "bg-zinc-800 text-zinc-50 shadow-sm"
+                              : "text-zinc-500 hover:text-zinc-400"
+                          )}
+                        >
+                          Raw JSON
+                        </button>
+                      </div>
+                    </div>
                     
-                    {/* Diff View */}
-                    {(selectedLog.metadata.oldData || selectedLog.metadata.newData || selectedLog.metadata.changes) ? (
+                    {metadataTab === 'visual' ? (
                       <div className="space-y-6">
-                        {selectedLog.metadata.changes && typeof selectedLog.metadata.changes === 'object' && (
+                        {/* 1. Differences array (e.g. operational settings or taxes) */}
+                        {selectedLog.metadata.differences && Array.isArray(selectedLog.metadata.differences) && selectedLog.metadata.differences.length > 0 && (
                           <div className="grid grid-cols-1 gap-4">
-                            {Object.entries(selectedLog.metadata.changes).map(([key, value]: [string, any]) => (
-                                <div key={key} className="bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-sm">
-                                  <div className="bg-zinc-900/50 px-6 py-3 border-b border-zinc-800 flex items-center justify-between">
-                                    <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">{key}</span>
-                                    <span className="text-[8px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase">Modified</span>
-                                  </div>
-                                  <div className="p-6 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-6">
-                                    <div className="flex flex-col gap-2">
-                                      <span className="text-[9px] text-red-500 font-bold uppercase tracking-tight">Previous Value</span>
-                                      <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-2xl text-xs text-red-400 font-mono break-all line-clamp-6">
-                                        {typeof value.from === 'object' ? safeStringify(value.from) : String(value.from ?? 'None')}
-                                      </div>
+                            {selectedLog.metadata.differences.map((diff: any, idx: number) => (
+                              <div key={idx} className="bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-sm">
+                                <div className="bg-zinc-900/50 px-6 py-3 border-b border-zinc-800 flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">{diff.path || 'Configuration'}</span>
+                                  <span className="text-[8px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase">Modified</span>
+                                </div>
+                                <div className="px-6 pt-4 text-xs font-semibold text-zinc-300">
+                                  {diff.description}
+                                </div>
+                                <div className="p-6 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-6">
+                                  <div className="flex flex-col gap-2">
+                                    <span className="text-[9px] text-red-500 font-bold uppercase tracking-tight">Previous Value</span>
+                                    <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-2xl text-xs text-red-400 font-mono break-all max-h-72 overflow-y-auto custom-scrollbar">
+                                      {renderPrettyValue(diff.from)}
                                     </div>
-                                    <ArrowRight className="text-zinc-700 hidden md:block" />
-                                    <div className="flex flex-col gap-2">
-                                      <span className="text-[9px] text-emerald-500 font-bold uppercase tracking-tight">New Value</span>
-                                      <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl text-xs text-emerald-400 font-mono break-all line-clamp-6">
-                                        {typeof value.to === 'object' ? safeStringify(value.to) : String(value.to ?? 'None')}
-                                      </div>
+                                  </div>
+                                  <ArrowRight className="text-zinc-750 hidden md:block rotate-90 md:rotate-0" />
+                                  <div className="flex flex-col gap-2">
+                                    <span className="text-[9px] text-emerald-500 font-bold uppercase tracking-tight">New Value</span>
+                                    <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl text-xs text-emerald-400 font-mono break-all max-h-72 overflow-y-auto custom-scrollbar">
+                                      {renderPrettyValue(diff.to)}
                                     </div>
                                   </div>
                                 </div>
+                              </div>
                             ))}
                           </div>
                         )}
 
-                        {!selectedLog.metadata.changes && (selectedLog.metadata.oldData || selectedLog.metadata.newData) && (
+                        {/* 2. Standard changes object */}
+                        {selectedLog.metadata.changes && typeof selectedLog.metadata.changes === 'object' && Object.keys(selectedLog.metadata.changes).length > 0 && (
+                          <div className="grid grid-cols-1 gap-4">
+                            {Object.entries(selectedLog.metadata.changes).map(([key, value]: [string, any]) => (
+                              <div key={key} className="bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-sm">
+                                <div className="bg-zinc-900/50 px-6 py-3 border-b border-zinc-800 flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">{key}</span>
+                                  <span className="text-[8px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase">Modified</span>
+                                </div>
+                                <div className="p-6 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-6">
+                                  <div className="flex flex-col gap-2">
+                                    <span className="text-[9px] text-red-500 font-bold uppercase tracking-tight">Previous Value</span>
+                                    <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-2xl text-xs text-red-400 font-mono break-all max-h-72 overflow-y-auto custom-scrollbar">
+                                      {renderPrettyValue(value?.from)}
+                                    </div>
+                                  </div>
+                                  <ArrowRight className="text-zinc-750 hidden md:block rotate-90 md:rotate-0" />
+                                  <div className="flex flex-col gap-2">
+                                    <span className="text-[9px] text-emerald-500 font-bold uppercase tracking-tight">New Value</span>
+                                    <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl text-xs text-emerald-400 font-mono break-all max-h-72 overflow-y-auto custom-scrollbar">
+                                      {renderPrettyValue(value?.to)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 3. OldData and/or NewData objects directly */}
+                        {!selectedLog.metadata.changes && !selectedLog.metadata.differences && (selectedLog.metadata.oldData || selectedLog.metadata.newData) && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {selectedLog.metadata.oldData && (
                               <div className="space-y-2">
                                 <span className="text-[10px] text-red-500 font-bold uppercase tracking-tight">Original Data</span>
-                                <pre className="bg-zinc-950 p-6 rounded-3xl text-[10px] text-red-400 font-mono overflow-auto border border-zinc-800">
-                                  {safeStringify(selectedLog.metadata.oldData)}
-                                </pre>
+                                <div className="bg-zinc-950 p-6 rounded-3xl border border-zinc-800 max-h-96 overflow-y-auto custom-scrollbar">
+                                  {renderPrettyValue(selectedLog.metadata.oldData)}
+                                </div>
                               </div>
                             )}
                             {selectedLog.metadata.newData && (
                               <div className="space-y-2">
                                 <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-tight">Replacement Data</span>
-                                <pre className="bg-zinc-950 p-6 rounded-3xl text-[10px] text-emerald-400 font-mono overflow-auto border border-zinc-800">
-                                  {safeStringify(selectedLog.metadata.newData)}
-                                </pre>
+                                <div className="bg-zinc-950 p-6 rounded-3xl border border-zinc-800 max-h-96 overflow-y-auto custom-scrollbar">
+                                  {renderPrettyValue(selectedLog.metadata.newData)}
+                                </div>
                               </div>
                             )}
+                          </div>
+                        )}
+
+                        {/* 4. Catch-all for basic metadata object properties that don't fit above */}
+                        {!selectedLog.metadata.changes && !selectedLog.metadata.differences && !selectedLog.metadata.oldData && !selectedLog.metadata.newData && (
+                          <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-3xl">
+                            {renderPrettyValue(selectedLog.metadata)}
                           </div>
                         )}
                       </div>
                     ) : (
                       <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-3xl">
-                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight mb-2 block">Raw Metadata</span>
-                        <pre className="text-[10px] text-zinc-400 font-mono overflow-auto">
-                          {safeStringify(selectedLog.metadata)}
+                        <pre className="text-[10px] text-zinc-400 font-mono overflow-auto max-h-[450px] custom-scrollbar">
+                          {JSON.stringify(selectedLog.metadata, null, 2)}
                         </pre>
                       </div>
                     )}
