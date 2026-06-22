@@ -1679,7 +1679,7 @@ export function FrontDesk() {
         
         // Calculate current ledger balance
         const outstandingBalance = freshResData.ledgerBalance || 0;
-        const totalDebits = (freshResData.totalAmount || 0);
+        const totalDebits = billingState.totalCharges;
 
         // Determine check-out permission based on dynamic hotel settings
         let blockCheckout = false;
@@ -1727,6 +1727,7 @@ export function FrontDesk() {
         // 3. Update reservation total and checkout details
         await database.safeUpdate(resRef, { 
           totalAmount: totalDebits,
+          nights: nightsStayed,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
           paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'

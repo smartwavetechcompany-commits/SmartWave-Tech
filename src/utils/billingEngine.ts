@@ -31,32 +31,39 @@ export function calculateBilling(
   let expectedNightsCount = originalNights;
   let isOverstaying = false;
 
-  if (res.status === 'checked_in') {
+  if (res.status === 'checked_in' || res.status === 'checked_out') {
     try {
-      const today = startOfDay(new Date());
+      const today = res.status === 'checked_out' 
+        ? startOfDay(parseISO(res.checkOut)) 
+        : startOfDay(new Date());
       const checkInDate = startOfDay(parseISO(res.checkIn));
       const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
       
       expectedNightsCount = Math.max(expectedNightsCount, elapsedNights);
       
-      const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-      const checkOutDateStr = res.checkOut;
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
-      
-      // Overstay occurs if today's date is past scheduled checkOut date, OR if today is scheduled checkOut date but we are past checked-out/overstay hour
-      isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
-      
-      if (isOverstaying) {
-        const todayCheckOutDateTime = new Date(`${todayStr}T${overstayTime}`);
-        const pastTodayCheckoutHour = new Date() > todayCheckOutDateTime;
-        if (pastTodayCheckoutHour) {
-          expectedNightsCount = Math.max(originalNights, elapsedNights + 1);
+      if (res.status === 'checked_in') {
+        const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
+        const checkOutDateStr = res.checkOut;
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const checkOutDateTime = new Date(`${checkOutDateStr}T${overstayTime}`);
+        
+        // Overstay occurs if today's date is past scheduled checkOut date, OR if today is scheduled checkOut date but we are past checked-out/overstay hour
+        isOverstaying = checkOutDateStr < todayStr || (checkOutDateStr === todayStr && new Date() > checkOutDateTime);
+        
+        if (isOverstaying) {
+          const todayCheckOutDateTime = new Date(`${todayStr}T${overstayTime}`);
+          const pastTodayCheckoutHour = new Date() > todayCheckOutDateTime;
+          if (pastTodayCheckoutHour) {
+            expectedNightsCount = Math.max(originalNights, elapsedNights + 1);
+          } else {
+            expectedNightsCount = Math.max(originalNights, elapsedNights);
+          }
         } else {
-          expectedNightsCount = Math.max(originalNights, elapsedNights);
+          expectedNightsCount = originalNights;
         }
       } else {
-        expectedNightsCount = originalNights;
+        // For checked out status, expected nights is exactly what was stayed (which is elapsedNights)
+        expectedNightsCount = Math.max(originalNights, elapsedNights);
       }
     } catch (e) {
       console.error("Error computing billing expected nights:", e);
