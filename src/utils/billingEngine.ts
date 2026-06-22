@@ -83,7 +83,15 @@ export function calculateBilling(
     const ledgerCreditsSum = credits.reduce((acc, e) => acc + e.amount, 0);
 
     const postedRoomChargesSum = debits
-      .filter(e => e.category?.toLowerCase() === 'room')
+      .filter(e => {
+        const cat = e.category?.toLowerCase();
+        if (cat === 'room') return true;
+        if (cat === 'tax') {
+          const desc = e.description?.toLowerCase() || '';
+          return desc.includes('inclusive') && (desc.includes('room') || desc.includes('stay'));
+        }
+        return false;
+      })
       .reduce((acc, e) => acc + e.amount, 0);
 
     // Dynamic unposted stay cost is the expected stay liability minus room charges already posted in ledger

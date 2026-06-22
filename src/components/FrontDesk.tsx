@@ -3686,8 +3686,8 @@ export function FrontDesk() {
                     </div>
                     <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
-                        const overstayCharge = res.status === 'checked_in' ? billing.overstayCharge : 0;
-                        const bal = (res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0))) + overstayCharge;
+                        const projectedCharge = res.status === 'checked_in' ? billing.projectedRoomCharge : 0;
+                        const bal = (res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0))) + projectedCharge;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;

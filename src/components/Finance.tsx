@@ -1724,7 +1724,15 @@ export function Finance() {
                   // Real Ledger totals
                   const ledgerDebitsSum = diagLedgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
                   const postedRoomChargesSum = diagLedgerEntries
-                    .filter(e => e.category === 'room' && e.type === 'debit')
+                    .filter(e => {
+                      const cat = e.category?.toLowerCase();
+                      if (cat === 'room') return true;
+                      if (cat === 'tax' && e.type === 'debit') {
+                        const desc = e.description?.toLowerCase() || '';
+                        return desc.includes('inclusive') && (desc.includes('room') || desc.includes('stay'));
+                      }
+                      return false;
+                    })
                     .reduce((acc, e) => acc + (e.amount || 0), 0);
 
                   const unpostedStayAccrual = billingState.projectedRoomCharge;
