@@ -102,6 +102,33 @@ export function calculateBilling(
 
     totalCharges = totalPostedDebits + projectedRoomCharge;
     totalPayments = ledgerCreditsSum + unpostedPrepayment;
+  } else {
+    // Estimate posted room charges based on elapsed nights (matching the autoNightDeduction logic)
+    let postedRoomChargesSum = 0;
+    if (res.status === 'checked_in' && res.autoNightDeduction) {
+      try {
+        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
+        const now = new Date();
+        const scheduledNights = res.nights || 1;
+        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
+        
+        let targetCharges = actualCalendarNightsPaid;
+        if (hotel && hotel.autoChargeOverstays !== false) {
+          const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+          const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
+          if (isAfter(now, todayOverstayThreshold)) {
+            targetCharges += 1;
+          }
+        }
+        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
+        
+        // Compute postedRoomChargesSum from targetCharges
+        postedRoomChargesSum = targetCharges * nightlyRate;
+      } catch (e) {
+        console.error("Error estimating posted room charges:", e);
+      }
+    }
+    projectedRoomCharge = Math.max(0, (expectedNightsCount * nightlyRate) - postedRoomChargesSum);
   }
 
   const outstandingBalance = totalCharges - totalPayments;
