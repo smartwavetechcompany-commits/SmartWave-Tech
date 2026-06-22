@@ -124,10 +124,18 @@ export function Finance() {
   };
 
   const [showSettleModal, setShowSettleModal] = useState<Guest | CorporateAccount | null>(null);
+  const [settleType, setSettleType] = useState<'payment' | 'refund'>('payment');
   const [settleData, setSettleData] = useState({ 
     splits: [{ amount: 0, method: 'cash' as const }] as { amount: number; method: 'cash' | 'card' | 'transfer' }[], 
     notes: '' 
   });
+
+  useEffect(() => {
+    if (showSettleModal) {
+      const balance = 'ledgerBalance' in showSettleModal ? showSettleModal.ledgerBalance : showSettleModal.currentBalance;
+      setSettleType(balance > 0 ? 'payment' : 'refund');
+    }
+  }, [showSettleModal]);
   const [showFolio, setShowFolio] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
 
@@ -354,8 +362,8 @@ export function Finance() {
         return;
       }
 
-      // Check refund policy if entity has credit and we are refunding
-      if (currentBalance < 0) {
+      // Check refund policy if we are processing a refund
+      if (settleType === 'refund') {
         const policy = canProcessRefund(hotel, profile, totalAmount);
         if (!policy.allowed) {
           toast.error(policy.message || 'Refund denied by policy');
@@ -366,12 +374,17 @@ export function Finance() {
       // Process each split
       for (const split of settleData.splits) {
         if (split.amount > 0) {
-          if (currentBalance > 0) {
-            // Entity owes money: Post a payment (credit)
+          if (settleType === 'payment') {
+            // Settle outstanding debt: Post a payment (credit)
             await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
           } else {
-            // Entity has credit: Post a refund/settlement (debit)
-            await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
+            // Post a refund (debit)
+            const reason = settleData.notes || `Refund (${split.method.toUpperCase()})`;
+            if (currentBalance < 0) {
+              await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
+            } else {
+              await refundGuest(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, reason, profile.uid, isCorporate ? entityId : undefined);
+            }
           }
         }
       }
@@ -2122,7 +2135,7 @@ export function Finance() {
                 <>
                   <div className="p-6 border-b border-zinc-800">
                     <h2 className="text-xl font-bold text-zinc-50">
-                      {balance > 0 ? 'Settle Outstanding Debt' : 'Settle Overpayment/Credit'}
+                      {settleType === 'payment' ? 'Settle Outstanding Debt' : 'Process Refund / Overpayment'}
                     </h2>
                     <p className="text-sm text-zinc-500 mt-1">
                       {'ledgerBalance' in showSettleModal ? 'Guest' : 'Corporate'}: {showSettleModal.name}
@@ -2130,6 +2143,7 @@ export function Finance() {
                   </div>
                   <form onSubmit={handleSettleBalance}>
                     <div className="p-6 space-y-4">
+                      {/* Balance Banner */}
                       <div className={cn(
                         "p-4 rounded-2xl border flex items-center gap-4",
                         balance > 0 ? "bg-red-500/5 border-red-500/20" : "bg-emerald-500/5 border-emerald-500/20"
@@ -2151,22 +2165,60 @@ export function Finance() {
                         </div>
                       </div>
 
+                      {/* Dynamic Action Selector Segment */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-505 uppercase tracking-widest">Transaction Action</label>
+                        <div className="grid grid-cols-2 gap-2 bg-zinc-950 p-1 rounded-2xl border border-zinc-800">
+                          <button
+                            type="button"
+                            onClick={() => setSettleType('payment')}
+                            className={cn(
+                              "py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5",
+                              settleType === 'payment'
+                                ? "bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-extrabold"
+                                : "text-zinc-500 hover:text-zinc-300 border border-transparent"
+                            )}
+                          >
+                            <span className={cn("w-1.5 h-1.5 rounded-full", settleType === 'payment' ? "bg-emerald-400" : "bg-zinc-700")} />
+                            Post Payment
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSettleType('refund')}
+                            className={cn(
+                              "py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5",
+                              settleType === 'refund'
+                                ? "bg-red-500/10 border border-red-500/25 text-red-400 font-extrabold"
+                                : "text-zinc-500 hover:text-zinc-300 border border-transparent"
+                            )}
+                          >
+                            <span className={cn("w-1.5 h-1.5 rounded-full", settleType === 'refund' ? "bg-red-400" : "bg-zinc-700")} />
+                            Post Refund
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Payment Splits</label>
+                          <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                            {settleType === 'payment' ? 'Payment Splits' : 'Refund Splits'}
+                          </label>
                           <button
                             type="button"
                             onClick={() => setSettleData({
                               ...settleData,
                               splits: [...settleData.splits, { amount: 0, method: 'cash' }]
                             })}
-                            className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                            className={cn(
+                              "flex items-center gap-1 text-[10px] font-bold uppercase transition-colors",
+                              settleType === 'payment' ? "text-emerald-500 hover:text-emerald-400" : "text-red-500 hover:text-red-400"
+                            )}
                           >
                             <PlusCircle size={12} /> Add Split
                           </button>
                         </div>
 
-                        <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        <div className="space-y-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
                           {settleData.splits.map((split, index) => (
                             <div key={index} className="p-4 bg-zinc-950/50 border border-zinc-800 rounded-2xl space-y-3 relative group">
                               {settleData.splits.length > 1 && (
@@ -2177,7 +2229,7 @@ export function Finance() {
                                     newSplits.splice(index, 1);
                                     setSettleData({ ...settleData, splits: newSplits });
                                   }}
-                                  className="absolute top-2 right-2 p-1.5 text-zinc-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                  className="absolute top-2 right-2 p-1.5 text-zinc-650 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
                                 >
                                   <Trash2 size={14} />
                                 </button>
@@ -2195,7 +2247,7 @@ export function Finance() {
                                       newSplits[index].amount = currency === 'USD' ? val * exchangeRate : val;
                                       setSettleData({ ...settleData, splits: newSplits });
                                     }}
-                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-zinc-700"
                                     step="0.01"
                                   />
                                 </div>
@@ -2208,7 +2260,7 @@ export function Finance() {
                                       newSplits[index].method = e.target.value as any;
                                       setSettleData({ ...settleData, splits: newSplits });
                                     }}
-                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none"
                                   >
                                     <option value="cash">Cash</option>
                                     <option value="card">Card</option>
@@ -2221,7 +2273,9 @@ export function Finance() {
                         </div>
 
                         <div className="p-3 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-800 flex justify-between items-center text-xs">
-                          <span className="text-zinc-500 font-bold uppercase">Total Settlement</span>
+                          <span className="text-zinc-500 font-bold uppercase">
+                            {settleType === 'payment' ? 'Total Settlement' : 'Total Refund'}
+                          </span>
                           <span className="text-zinc-50 font-black">
                             {formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}
                           </span>
@@ -2233,8 +2287,8 @@ export function Finance() {
                         <textarea
                           value={settleData.notes}
                           onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
-                          placeholder="e.g. Guest paid cash at front desk"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none min-h-[80px]"
+                          placeholder={settleType === 'payment' ? "e.g. Guest paid cash at front desk" : "e.g. Refund of deposit / overpayment"}
                         />
                       </div>
                     </div>
@@ -2251,10 +2305,10 @@ export function Finance() {
                         disabled={settleData.splits.reduce((acc, s) => acc + s.amount, 0) <= 0 || isSaving}
                         className={cn(
                           "flex-1 px-4 py-2 text-zinc-50 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
-                          balance < 0 ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
+                          settleType === 'payment' ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
                         )}
                       >
-                        {isSaving ? 'Processing...' : balance < 0 ? 'Post Payment' : 'Post Refund'}
+                        {isSaving ? 'Processing...' : settleType === 'payment' ? 'Post Payment' : 'Post Refund'}
                       </button>
                     </div>
                   </form>

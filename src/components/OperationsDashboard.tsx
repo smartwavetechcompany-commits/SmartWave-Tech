@@ -23,10 +23,12 @@ import {
   BrainCircuit,
   AreaChart as ChartIcon,
   HelpCircle,
-  Maximize2
+  Maximize2,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
+import { toast } from 'sonner';
 import { calculateBilling } from '../utils/billingEngine';
 import { 
   ResponsiveContainer, 
@@ -46,6 +48,21 @@ export function OperationsDashboard() {
   const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'checkouts' | 'inhouse'>('arrivals');
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(format(new Date(), 'yyyy-MM-dd'));
+  const [showAlerts, setShowAlerts] = useState<boolean>(() => {
+    const saved = localStorage.getItem('show_occupancy_alerts');
+    return saved !== 'false';
+  });
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
+  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>(() => {
+    const saved = localStorage.getItem('dismissed_occupancy_alerts');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const dismissAlert = (alertKey: string) => {
+    const nextDismissed = [...dismissedAlerts, alertKey];
+    setDismissedAlerts(nextDismissed);
+    localStorage.setItem('dismissed_occupancy_alerts', JSON.stringify(nextDismissed));
+  };
 
   const handlePrevMonth = () => {
     setCurrentMonth(prev => {
@@ -444,60 +461,148 @@ export function OperationsDashboard() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
-      <header>
-        <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
-        <p className="text-xs text-zinc-400">Manage today's guest movements and room status</p>
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
+          <p className="text-xs text-zinc-400">Manage today's guest movements and room status</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {occupancyAlerts.length > 0 && (
+            <button
+              onClick={() => {
+                const nextVal = !showAlerts;
+                setShowAlerts(nextVal);
+                localStorage.setItem('show_occupancy_alerts', String(nextVal));
+                toast.success(nextVal ? 'Occupancy & yield alerts enabled' : 'Occupancy & yield alerts hidden');
+              }}
+              className={cn(
+                "px-3 py-1.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5",
+                showAlerts 
+                  ? "bg-amber-500/5 border-amber-500/20 text-amber-400 hover:bg-amber-500/10" 
+                  : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-850"
+              )}
+              type="button"
+            >
+              <AlertTriangle size={12} />
+              {showAlerts ? 'Hide Yield Alerts' : 'Show Yield Alerts'}
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Operational Threshold Notification Alerts */}
-      {occupancyAlerts.length > 0 && (
-        <div className="space-y-3">
-          {occupancyAlerts.map((alert, index) => (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              key={index}
-              className={cn(
-                "p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border shadow-sm",
-                alert.type === 'peak' 
-                  ? "bg-red-500/10 border-red-500/20 text-red-200"
-                  : "bg-amber-500/5 border-amber-500/10 text-amber-200"
-              )}
-            >
-              <div className="flex items-start gap-3">
-                <div className={cn(
-                  "p-2 rounded-lg mt-0.5",
-                  alert.type === 'peak' ? "bg-red-950/60 text-red-400" : "bg-amber-950/60 text-amber-400"
-                )}>
-                  <AlertTriangle size={16} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{alert.date}</span>
-                    <span className={cn(
-                      "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded",
-                      alert.type === 'peak' ? "bg-red-500/20 text-red-450" : "bg-amber-500/15 text-amber-400"
-                    )}>
-                      {alert.type === 'peak' ? 'Peak Strain Alert' : 'Yield Under-Run'}
-                    </span>
-                  </div>
-                  <h4 className="text-xs sm:text-sm font-bold text-zinc-100 mt-1">{alert.title}</h4>
-                  <p className="text-xs text-zinc-450 mt-0.5 max-w-2xl leading-relaxed">{alert.description}</p>
-                </div>
-              </div>
+      {showAlerts && occupancyAlerts.length > 0 && (() => {
+        const activeAlerts = occupancyAlerts.filter(alert => !dismissedAlerts.includes(`${alert.type}-${alert.date}`));
+        const visibleAlerts = showAllAlerts ? activeAlerts : activeAlerts.slice(0, 3);
+        const hiddenCount = activeAlerts.length - visibleAlerts.length;
 
-              <span className={cn(
-                "px-3 py-1 text-[10px] font-black uppercase rounded-lg border tracking-wider",
-                alert.type === 'peak' 
-                  ? "bg-red-950/40 border-red-900/40 text-red-300"
-                  : "bg-amber-950/40 border-amber-900/40 text-amber-300"
-              )}>
-                {alert.actionText}
+        if (activeAlerts.length === 0) return null;
+
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">
+                Active alerts ({activeAlerts.length})
               </span>
-            </motion.div>
-          ))}
-        </div>
-      )}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAlerts(false);
+                  localStorage.setItem('show_occupancy_alerts', 'false');
+                  toast.success('Yield alerts hidden. Toggle them back on anytime in the header.');
+                }}
+                className="text-[9px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-widest transition-colors"
+              >
+                Hide All Alerts
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              {visibleAlerts.map((alert, index) => (
+                <motion.div
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  key={index}
+                  className={cn(
+                    "p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border shadow-sm relative pr-10 sm:pr-12",
+                    alert.type === 'peak' 
+                      ? "bg-red-500/10 border-red-500/20 text-red-200"
+                      : "bg-amber-500/5 border-amber-500/10 text-amber-200"
+                  )}
+                >
+                  {/* Close/Dismiss individual button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dismissAlert(`${alert.type}-${alert.date}`);
+                      toast.success('Alert dismissed');
+                    }}
+                    className="absolute top-3 right-3 p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/50 transition-all"
+                    title="Dismiss alert"
+                  >
+                    <X size={12} />
+                  </button>
+
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      "p-2 rounded-lg mt-0.5",
+                      alert.type === 'peak' ? "bg-red-950/60 text-red-450" : "bg-amber-950/60 text-amber-450"
+                    )}>
+                      <AlertTriangle size={16} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{alert.date}</span>
+                        <span className={cn(
+                          "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded",
+                          alert.type === 'peak' ? "bg-red-500/20 text-red-400" : "bg-amber-500/15 text-amber-400"
+                        )}>
+                          {alert.type === 'peak' ? 'Peak Strain Alert' : 'Yield Under-Run'}
+                        </span>
+                      </div>
+                      <h4 className="text-xs sm:text-sm font-bold text-zinc-100 mt-1">{alert.title}</h4>
+                      <p className="text-xs text-zinc-400 mt-0.5 max-w-2xl leading-relaxed">{alert.description}</p>
+                    </div>
+                  </div>
+
+                  <span className={cn(
+                    "px-3 py-1 text-[10px] font-black uppercase rounded-lg border tracking-wider shrink-0",
+                    alert.type === 'peak' 
+                      ? "bg-red-950/40 border-red-900/40 text-red-300"
+                      : "bg-amber-950/40 border-amber-900/40 text-amber-300"
+                  )}>
+                    {alert.actionText}
+                  </span>
+                </motion.div>
+              ))}
+            </div>
+
+            {hiddenCount > 0 && (
+              <div className="flex justify-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAllAlerts(true)}
+                  className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-widest bg-zinc-950/40 border border-zinc-800 px-4 py-2 rounded-xl transition-all"
+                >
+                  Show {hiddenCount} More Alerts
+                </button>
+              </div>
+            )}
+
+            {showAllAlerts && activeAlerts.length > 3 && (
+              <div className="flex justify-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAllAlerts(false)}
+                  className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300 uppercase tracking-widest bg-zinc-950/40 border border-zinc-800 px-4 py-2 rounded-xl transition-all"
+                >
+                  Show Fewer Alerts
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
         {stats.map((stat) => (
