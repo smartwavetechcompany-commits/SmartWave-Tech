@@ -107,20 +107,23 @@ export function calculateBilling(
     let postedRoomChargesSum = 0;
     if (res.status === 'checked_in' && res.autoNightDeduction) {
       try {
-        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
-        const now = new Date();
+        const today = startOfDay(new Date());
+        const checkInDate = startOfDay(parseISO(res.checkIn));
+        const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
         const scheduledNights = res.nights || 1;
-        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
         
-        let targetCharges = actualCalendarNightsPaid;
+        let targetCharges = elapsedNights;
         if (hotel && hotel.autoChargeOverstays !== false) {
           const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
-          if (isAfter(now, todayOverstayThreshold)) {
+          const [hours, minutes] = overstayTime.split(':').map(Number);
+          const now = new Date();
+          const todayOverstayThreshold = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours || 12, minutes || 0, 0, 0);
+          
+          if (now.getTime() > todayOverstayThreshold.getTime()) {
             targetCharges += 1;
           }
         }
-        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
+        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, elapsedNights + 1));
         
         // Compute postedRoomChargesSum from targetCharges
         postedRoomChargesSum = targetCharges * nightlyRate;
@@ -131,7 +134,19 @@ export function calculateBilling(
     projectedRoomCharge = Math.max(0, (expectedNightsCount * nightlyRate) - postedRoomChargesSum);
   }
 
+  // Fallbacks to prevent NaN
+  if (isNaN(projectedRoomCharge) || projectedRoomCharge < 0) {
+    projectedRoomCharge = 0;
+  }
+  if (isNaN(totalCharges)) {
+    totalCharges = 0;
+  }
+  if (isNaN(totalPayments)) {
+    totalPayments = 0;
+  }
+
   const outstandingBalance = totalCharges - totalPayments;
+  const safeOutstandingBalance = isNaN(outstandingBalance) ? 0 : outstandingBalance;
 
   return {
     nightsCount: expectedNightsCount,
@@ -139,11 +154,11 @@ export function calculateBilling(
     nightlyRate,
     originalNights,
     overstayCharge,
-    totalCharges: Number(totalCharges.toFixed(2)),
-    totalPayments: Number(totalPayments.toFixed(2)),
-    outstandingBalance: Number(outstandingBalance.toFixed(2)),
+    totalCharges: Number((isNaN(totalCharges) ? 0 : totalCharges).toFixed(2)),
+    totalPayments: Number((isNaN(totalPayments) ? 0 : totalPayments).toFixed(2)),
+    outstandingBalance: Number(safeOutstandingBalance.toFixed(2)),
     isOverstaying,
     projectedRoomCharge: Number(projectedRoomCharge.toFixed(2)),
-    unpostedPrepayment: Number(unpostedPrepayment.toFixed(2))
+    unpostedPrepayment: Number((isNaN(unpostedPrepayment) ? 0 : unpostedPrepayment).toFixed(2))
   };
 }

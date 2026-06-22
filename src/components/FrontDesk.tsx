@@ -3687,7 +3687,8 @@ export function FrontDesk() {
                     <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
                         const projectedCharge = res.status === 'checked_in' ? billing.projectedRoomCharge : 0;
-                        const bal = (res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0))) + projectedCharge;
+                        const rawBal = (res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0))) + projectedCharge;
+                        const bal = isNaN(rawBal) ? 0 : rawBal;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;
