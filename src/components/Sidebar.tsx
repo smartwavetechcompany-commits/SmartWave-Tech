@@ -72,6 +72,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       if (!isModuleEnabled(hotel, item.module)) return false;
     }
 
+    // Check dynamic visibility for Finance
+    if (item.path === '/finance') {
+      const allowed = hotel?.settings?.financial?.allowFinancialReportViewing ?? true;
+      if (!allowed && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+        return false;
+      }
+    }
+
     // 3. Check Department-based Restriction from Hotel Admin Settings
     if (hotel?.settings?.staff?.restrictByDepartment && profile?.department && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
       const dep = profile.department.toLowerCase();

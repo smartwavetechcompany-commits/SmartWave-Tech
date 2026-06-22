@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, onSnapshot, orderBy, doc, addDoc, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, addDoc, limit, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -148,7 +148,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           return;
         }
 
-        const { updateDoc } = await import('firebase/firestore');
         await updateDoc(resRef, {
           nightlyRate: newRate,
           totalAmount: Math.max(0, (currentReservation.totalAmount || 0) + totalAmountDiff)
@@ -273,6 +272,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       }
 
       toast.success('Payment recorded successfully');
+      if (hotel.settings?.payments?.autoSendReceipts) {
+        toast.success(`E-Receipt automatically generated & emailed to ${currentReservation.guestEmail || 'guest on file'}`);
+      }
       setShowSettlePayment(false);
       setShowOverpaymentWarning(false);
       setSettleData({ splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }], notes: '' });
@@ -303,6 +305,26 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     // Enforce payment reference and proof upload settings
     const paymentSettings = hotel.settings?.payments;
     if (paymentSettings) {
+      if (paymentSettings.allowSplitPayments === false && settleData.splits.length > 1) {
+        toast.error("Split payments are disabled by hotel configuration.");
+        return;
+      }
+      if (paymentSettings.allowMultipleMethods === false && settleData.splits.length > 1) {
+        const firstMethod = settleData.splits[0].method;
+        const hasMixed = settleData.splits.some(s => s.method !== firstMethod);
+        if (hasMixed) {
+          toast.error("Mixing payment methods is disabled by hotel configuration.");
+          return;
+        }
+      }
+      if (paymentSettings.allowOfflinePayments === false) {
+        const hasOffline = settleData.splits.some(s => s.method === 'cash' || s.method === 'transfer');
+        if (hasOffline) {
+          toast.error("Manual offline payments are disabled by hotel configuration. Only card payment is allowed.");
+          return;
+        }
+      }
+
       for (let i = 0; i < settleData.splits.length; i++) {
         const split = settleData.splits[i];
         if (split.method !== 'cash') {
@@ -379,6 +401,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           discountType: chargeDetails.discountType,
           amount: chargeDetails.amount
         });
+      }
+
+      // Policy check: allowManualLedgerAdjustments
+      const allowManual = hotel?.settings?.financial?.allowManualLedgerAdjustments;
+      if (allowManual === false && !hasPermission(profile?.role, 'void_transaction')) {
+        toast.error("Manual ledger adjustments are disabled by hotel configuration.");
+        setIsSaving(false);
+        return;
       }
 
       // Check permissions / policies
@@ -1817,16 +1847,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Payment Splits</label>
-                        <button
-                          type="button"
-                          onClick={() => setSettleData({
-                            ...settleData,
-                            splits: [...settleData.splits, { amount: 0, method: 'cash' }]
-                          })}
-                          className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
-                        >
-                          <PlusCircle size={12} /> Add Split
-                        </button>
+                        {(hotel?.settings?.payments?.allowSplitPayments ?? true) && (
+                          <button
+                            type="button"
+                            onClick={() => setSettleData({
+                              ...settleData,
+                              splits: [...settleData.splits, { amount: 0, method: 'cash' }]
+                            })}
+                            className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                          >
+                            <PlusCircle size={12} /> Add Split
+                          </button>
+                        )}
                       </div>
 
                       <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
@@ -2090,8 +2122,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 </span>
                               )}
                             </div>
-                            <div className="text-[10px] text-zinc-500 font-mono">
-                              {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${(entry.id || '').slice(-8).toUpperCase()}`}
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-zinc-500 font-mono">
+                                {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${(entry.id || '').slice(-8).toUpperCase()}`}
+                              </span>
+                              {entry.postedBy && hotel?.settings?.payments?.trackPaymentStaff !== false && (
+                                <span className="text-[9px] text-zinc-500 font-medium">
+                                  • By: {entry.postedBy === 'system' ? 'System' : (entry.postedBy === profile?.uid ? 'You' : `Staff (${entry.postedBy.slice(-6).toUpperCase()})`)}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4">

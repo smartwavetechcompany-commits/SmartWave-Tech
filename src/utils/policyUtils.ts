@@ -16,8 +16,18 @@ export const canCheckout = (
   const isOwing = balance > 0.01;
 
   if (isOwing) {
+    if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
+      return { allowed: true };
+    }
+
     if (settings.allowBalanceOutstanding) {
       return { allowed: true };
+    }
+
+    if (!settings.allowPartialPaymentCheckout && reservation.paidAmount > 0 && reservation.paidAmount < (reservation.totalAmount || 0)) {
+      if (!hasPermission(profile, 'void_transaction')) {
+        return { allowed: false, message: 'Partial payment checkout is disabled by hotel configuration.' };
+      }
     }
 
     if (settings.requireFullPaymentBeforeCheckout) {
@@ -96,6 +106,12 @@ export const canCheckIn = (
   if (guestSettings?.requireIdVerification) {
     if (!reservation.idNumber || !reservation.idType) {
       return { allowed: false, message: 'Guest ID verification is required for check-in. Please update the reservation with ID details.' };
+    }
+  }
+
+  if (guestSettings?.requirePhoneVerification) {
+    if (!reservation.guestPhone) {
+      return { allowed: false, message: 'Guest phone verification is required for check-in. Please update reservation with guest phone number.' };
     }
   }
 
@@ -242,7 +258,9 @@ export const canBlockRoom = (
   profile: UserProfile | null,
   startDate: string,
   endDate: string,
-  reason: string
+  reason: string,
+  frequency?: string,
+  hasPartialTimes?: boolean
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
@@ -259,6 +277,18 @@ export const canBlockRoom = (
 
   if (reason === 'maintenance' && !settings.allowMaintenanceBlocks && !hasPermission(profile, 'manage_rooms')) {
     return { allowed: false, message: 'Maintenance blocks are currently disabled.' };
+  }
+
+  if (reason === 'housekeeping' && !settings.allowHousekeepingBlocks && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Housekeeping cleaning blocks are currently disabled.' };
+  }
+
+  if (frequency && frequency !== 'once' && !settings.allowRecurringBlocks && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Recurring room blocks are disabled by configuration.' };
+  }
+
+  if (hasPartialTimes && !settings.allowPartialDayBlocks && !hasPermission(profile, 'manage_rooms')) {
+    return { allowed: false, message: 'Partial-day room blocking is disabled by configuration.' };
   }
 
   const duration = differenceInDays(new Date(endDate), new Date(startDate)) + 1;

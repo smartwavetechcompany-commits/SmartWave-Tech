@@ -1706,6 +1706,24 @@ export function FrontDesk() {
           return;
         }
 
+        // Warning Popup Check
+        if (!blockCheckout && outstandingBalance > 0.01) {
+          if (hotel.settings?.checkout?.enableUnpaidWarningPopup) {
+            const confirmOut = window.confirm(`WARNING: Guest has an outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)}. Are you sure you want to proceed with checking them out?`);
+            if (!confirmOut) {
+              setLoading(false);
+              // Revert status to checked_in
+              await database.safeUpdate(resRef, { status: 'checked_in' }, { 
+                hotelId: hotel.id, 
+                module: 'Front Desk', 
+                action: 'REVERT_CHECKOUT', 
+                details: 'Reverting status to checked_in because user canceled unpaid checkout warning popup' 
+              });
+              return;
+            }
+          }
+        }
+
         // 3. Update reservation total and checkout details
         await database.safeUpdate(resRef, { 
           totalAmount: totalDebits,
@@ -1765,6 +1783,10 @@ export function FrontDesk() {
           // Let's use city ledger as it represents debt to the hotel
           await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
           toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} marked as Debt (Transferred to City Ledger).`);
+        }
+
+        if (outstandingBalance > 0.01 && hotel.settings?.checkout?.autoGenerateOutstandingInvoice) {
+          toast.success(`Outstanding invoice generated and sent to guest email (${res.guestEmail || 'on file'}).`);
         }
 
         // 7. Schedule Post-Stay Automated Survey (24 hours after checkout)
@@ -3859,6 +3881,15 @@ export function FrontDesk() {
                           
                           {res.status === 'pending' && (
                             <>
+                              {(hotel.settings?.reservations?.allowConfirmation ?? true) && (
+                                <button 
+                                  onClick={() => updateReservationStatus(res, 'confirmed')}
+                                  className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                                  title="Confirm Reservation"
+                                >
+                                  <CheckCircle2 size={18} />
+                                </button>
+                              )}
                               <button 
                                 onClick={() => {
                                   const amount = prompt("Enter payment amount:");

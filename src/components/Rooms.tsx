@@ -1106,7 +1106,7 @@ export function Rooms() {
                       data.daysOfWeek = days;
                     }
 
-                    const policy = canBlockRoom(hotel, profile, startDate, endDate, reason);
+                    const policy = canBlockRoom(hotel, profile, startDate, endDate, reason, data.frequency, !!(data.startTime || data.endTime));
                     if (!policy.allowed) {
                       toast.error(policy.message || 'Room blocking denied by hotel policy');
                       setIsBlockingRoom(false);

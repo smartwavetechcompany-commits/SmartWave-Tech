@@ -623,6 +623,10 @@ export function Finance() {
   };
 
   const handleDownloadReport = (reportTitle: string) => {
+    if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Exporting financial reports is disabled by hotel configuration.');
+      return;
+    }
     let data: any[] = [];
     let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`;
 
@@ -711,6 +715,11 @@ export function Finance() {
     e.preventDefault();
     if (!hotel?.id) return;
 
+    if (newRecord.type === 'expense' && hotel.settings?.financial?.allowExpenseManagement === false) {
+      toast.error("Expense management is disabled by hotel configuration.");
+      return;
+    }
+
     try {
       await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
         ...newRecord,
@@ -777,6 +786,10 @@ export function Finance() {
   );
 
   const handleExport = () => {
+    if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Exporting financial reports is disabled by hotel configuration.');
+      return;
+    }
     const dataToExport = activeTab === 'transactions' ? filteredRecords : filteredLedger;
     const filename = activeTab === 'transactions' ? `transactions_${format(new Date(), 'yyyy-MM-dd')}.csv` : `ledger_${format(new Date(), 'yyyy-MM-dd')}.csv`;
     
@@ -1265,18 +1278,24 @@ export function Finance() {
                 <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                   <h3 className="font-bold text-zinc-50">Aging Report (Accounts Receivable)</h3>
                   <button 
-                    onClick={() => exportToCSV(
-                      [...guests, ...corporateAccounts]
-                        .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) > 0)
-                        .map(a => ({
-                          Name: a.name,
-                          Type: 'ledgerBalance' in a ? 'Individual' : 'Corporate',
-                          Balance: 'ledgerBalance' in a ? a.ledgerBalance : a.currentBalance,
-                          CreditLimit: a.creditLimit || 0,
-                          Terms: 'paymentTerms' in a ? a.paymentTerms : 'N/A'
-                        })),
-                      'aging_report'
-                    )}
+                    onClick={() => {
+                      if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+                        toast.error('Exporting financial reports is disabled by hotel configuration.');
+                        return;
+                      }
+                      exportToCSV(
+                        [...guests, ...corporateAccounts]
+                          .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) > 0)
+                          .map(a => ({
+                            Name: a.name,
+                            Type: 'ledgerBalance' in a ? 'Individual' : 'Corporate',
+                            Balance: 'ledgerBalance' in a ? a.ledgerBalance : a.currentBalance,
+                            CreditLimit: a.creditLimit || 0,
+                            Terms: 'paymentTerms' in a ? a.paymentTerms : 'N/A'
+                          })),
+                        'aging_report'
+                      );
+                    }}
                     className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
                   >
                     <Download size={14} /> Export Aging

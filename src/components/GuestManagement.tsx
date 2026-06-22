@@ -82,7 +82,9 @@ export function GuestManagement() {
     tags: [] as string[],
     preferences: [] as string[],
     ledgerBalance: 0,
-    corporateId: ''
+    corporateId: '',
+    totalStays: 0,
+    totalSpent: 0
   });
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -205,10 +207,22 @@ export function GuestManagement() {
       }
     }
 
+    if (hotel?.settings?.guests?.requirePhoneVerification) {
+      const phoneRegex = /^\+?[0-9\s\-()]{7,20}$/;
+      if (!phoneRegex.test(newGuest.phone)) {
+        toast.error('Invalid phone format. Please enter a valid phone number (e.g., +1 234 567 8900).');
+        return;
+      }
+    }
+
     try {
       if (editingGuest) {
-        // Exclude read-only financial fields from update to prevent clearing them
+        // Exclude read-only financial fields from update to prevent clearing them unless loyalty editing is enabled
         const { ledgerBalance, totalStays, totalSpent, stayHistory, createdAt, ...updateData } = newGuest as any;
+        if (hotel?.settings?.guests?.allowLoyaltyEditing) {
+          (updateData as any).totalStays = newGuest.totalStays || 0;
+          (updateData as any).totalSpent = newGuest.totalSpent || 0;
+        }
         await database.safeUpdate(doc(db, 'hotels', hotel.id, 'guests', editingGuest.id), updateData, {
           hotelId: hotel.id,
           module: 'Guests',
@@ -218,9 +232,9 @@ export function GuestManagement() {
       } else {
         await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,
-          totalStays: 0,
+          totalStays: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalStays || 0) : 0,
           totalNights: 0,
-          totalSpent: 0,
+          totalSpent: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalSpent || 0) : 0,
           ledgerBalance: 0,
           stayHistory: [],
           createdAt: new Date().toISOString()
@@ -262,7 +276,9 @@ export function GuestManagement() {
         tags: [],
         preferences: [],
         ledgerBalance: 0,
-        corporateId: ''
+        corporateId: '',
+        totalStays: 0,
+        totalSpent: 0
       });
       toast.success(editingGuest ? 'Guest profile updated' : 'Guest profile created');
     } catch (err) {
@@ -475,14 +491,16 @@ export function GuestManagement() {
               <option value="corporate">Corporate</option>
             </select>
           </div>
-          <button
-            onClick={exportGuests}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-100 px-3 py-2 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700"
-          >
-            <Download size={14} />
-            <span className="hidden sm:inline">Export</span>
-            <span className="sm:hidden">Export</span>
-          </button>
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (
+            <button
+              onClick={exportGuests}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-100 px-3 py-2 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700"
+            >
+              <Download size={14} />
+              <span className="hidden sm:inline">Export</span>
+              <span className="sm:hidden">Export</span>
+            </button>
+          )}
           <button
             onClick={() => {
               setEditingGuest(null);
@@ -497,7 +515,9 @@ export function GuestManagement() {
               tags: [],
               preferences: [],
               ledgerBalance: 0,
-              corporateId: ''
+              corporateId: '',
+              totalStays: 0,
+              totalSpent: 0
             });
             setShowAddModal(true);
           }}
@@ -738,16 +758,33 @@ export function GuestManagement() {
                       </div>
                     </div>
                     <div className="flex gap-0.5">
-                      <a 
-                        href={`mailto:${guest.email}?subject=Hotel Communication for ${guest.name}`}
-                        className="p-1.5 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
-                        title="Email Guest"
-                      >
-                        <Mail size={14} />
-                      </a>
+                      {(hotel?.settings?.guests?.allowEmailCommunication ?? true) ? (
+                        <a 
+                          href={`mailto:${guest.email}?subject=Hotel Communication for ${guest.name}`}
+                          className="p-1.5 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
+                          title="Email Guest"
+                        >
+                          <Mail size={14} />
+                        </a>
+                      ) : (
+                        <button 
+                          type="button"
+                          onClick={() => toast.error('CRM email communication is disabled by hotel administrator')}
+                          className="p-1.5 text-zinc-700 cursor-not-allowed rounded-lg transition-all"
+                          title="Email communication disabled"
+                        >
+                          <Mail size={14} className="opacity-30" />
+                        </button>
+                      )}
                       <button 
                         type="button"
-                        onClick={() => setViewingHistory(guest)}
+                        onClick={() => {
+                          if (hotel?.settings?.guests?.allowHistoryViewing === false && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+                            toast.error('Past stay history access is restricted to administrators.');
+                            return;
+                          }
+                          setViewingHistory(guest);
+                        }}
                         className="p-1.5 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
                         title="View History"
                       >
@@ -768,7 +805,9 @@ export function GuestManagement() {
                             tags: guest.tags || [],
                             preferences: guest.preferences || [],
                             ledgerBalance: guest.ledgerBalance || 0,
-                            corporateId: guest.corporateId || ''
+                            corporateId: guest.corporateId || '',
+                            totalStays: guest.totalStays || 0,
+                            totalSpent: guest.totalSpent || 0
                           });
                           setShowAddModal(true);
                         }}
@@ -1291,6 +1330,31 @@ export function GuestManagement() {
                     ))}
                   </select>
                 </div>
+                {hotel?.settings?.guests?.allowLoyaltyEditing && (
+                  <div className="grid grid-cols-2 gap-4 bg-zinc-950/40 p-3 rounded-xl border border-zinc-800/80">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Loyalty Stays Count</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newGuest.totalStays || 0}
+                        onChange={(e) => setNewGuest({ ...newGuest, totalStays: parseInt(e.target.value) || 0 })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-500 uppercase">Loyalty Spent Amount ({currency})</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={newGuest.totalSpent || 0}
+                        onChange={(e) => setNewGuest({ ...newGuest, totalSpent: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Tags</label>
                   <div className="flex flex-wrap gap-2 mb-2">

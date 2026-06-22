@@ -359,13 +359,15 @@ export function Housekeeping() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
-          >
-            <Download size={18} />
-            Export
-          </button>
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (
+            <button 
+              onClick={handleExport}
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            >
+              <Download size={18} />
+              Export
+            </button>
+          )}
         </div>
       </header>
 
