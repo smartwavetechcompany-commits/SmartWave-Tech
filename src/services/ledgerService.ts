@@ -1,7 +1,9 @@
 import { db } from '../firebase';
 import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { LedgerEntry, Reservation, FinanceRecord } from '../types';
+import { LedgerEntry, Reservation, FinanceRecord, Hotel } from '../types';
 import { database, createAuditLog } from '../utils/database';
+import { addDays, format } from 'date-fns';
+import { parseLocalDateTime, BillingService } from '../utils/billingEngine';
 
 export const postToLedger = async (
   hotelId: string,
@@ -12,6 +14,24 @@ export const postToLedger = async (
   corporateId?: string,
   paymentMethod: 'cash' | 'card' | 'transfer' = 'cash'
 ) => {
+  // 0. Prevent duplicate room / overstay charges
+  if (entry.chargePeriodStart && entry.chargePeriodEnd && entry.chargeType) {
+    const q = query(
+      collection(db, 'hotels', hotelId, 'ledger'),
+      where('reservationId', '==', reservationId),
+      where('chargePeriodStart', '==', entry.chargePeriodStart),
+      where('chargePeriodEnd', '==', entry.chargePeriodEnd),
+      where('chargeType', '==', entry.chargeType),
+      where('type', '==', 'debit')
+    );
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const errMsg = `Duplicate charge detected and rejected: ${entry.chargeType} from ${entry.chargePeriodStart} to ${entry.chargePeriodEnd}.`;
+      console.warn(errMsg);
+      throw new Error(errMsg);
+    }
+  }
+
   const timestamp = new Date().toISOString();
   
   // 1. Prepare entries list
@@ -559,4 +579,176 @@ export const transferCorporateBalance = async (
     action: 'CORP_TRANSFER_LOG',
     details: `Logged in-transfer for corporate account`
   });
+};
+
+export const processAutomatedBillingForReservation = async (
+  hotel: Hotel,
+  res: Reservation,
+  profileUid: string,
+  currentTime: Date = new Date()
+) => {
+  if (!res.guestId || !res.autoNightDeduction || res.status !== 'checked_in') {
+    return { chargedCount: 0, totalAmount: 0 };
+  }
+
+  const { checkInDateTime, checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
+  const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
+  const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
+
+  if (nightlyRate <= 0) {
+    return { chargedCount: 0, totalAmount: 0 };
+  }
+
+  // Fetch ledger entries for this reservation
+  const ledgerQ = query(
+    collection(db, 'hotels', hotel.id, 'ledger'),
+    where('reservationId', '==', res.id)
+  );
+  const ledgerSnap = await getDocs(ledgerQ);
+  const ledgerEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+
+  let chargedCount = 0;
+  let totalAmountCharged = 0;
+  let lastChargeTime = res.lastChargeDateTime;
+  let nextChargeTime = res.nextChargeDateTime;
+
+  // 1. Process Base Stay Nights
+  for (let i = 1; i <= originalNights; i++) {
+    const Start = i === 1 
+      ? checkInDateTime 
+      : parseLocalDateTime(format(addDays(checkInDateTime, i - 1), 'yyyy-MM-dd'), checkOutTime);
+    const End = parseLocalDateTime(format(addDays(checkInDateTime, i), 'yyyy-MM-dd'), checkOutTime);
+
+    // This night is chargeable if currentTime is past its start time
+    if (currentTime >= Start) {
+      const startStr = Start.toISOString();
+      const endStr = End.toISOString();
+
+      // Check if already posted
+      const exists = ledgerEntries.some(e => 
+        e.chargePeriodStart === startStr && 
+        e.chargePeriodEnd === endStr && 
+        e.chargeType === 'room_rate' && 
+        e.type === 'debit'
+      );
+
+      if (!exists) {
+        await postToLedger(hotel.id, res.guestId, res.id, {
+          amount: nightlyRate,
+          type: 'debit',
+          category: 'room',
+          description: `Nightly Room Charge: ${res.roomNumber} (Night ${i} of ${originalNights})`,
+          referenceId: res.id,
+          postedBy: profileUid,
+          chargePeriodStart: startStr,
+          chargePeriodEnd: endStr,
+          chargeType: 'room_rate'
+        } as any, profileUid, res.corporateId);
+
+        chargedCount++;
+        totalAmountCharged += nightlyRate;
+        lastChargeTime = currentTime.toISOString();
+        nextChargeTime = BillingService.calculateNextChargeDateTime(res, hotel, i).toISOString();
+      }
+    }
+  }
+
+  // 2. Process Overstay Nights
+  if (currentTime > checkOutDateTime && hotel.autoChargeOverstays !== false) {
+    const policy = hotel?.overstayPolicy || 'grace';
+    const graceHours = hotel?.overstayGraceHours ?? 2;
+    const partialHours = hotel?.overstayPartialHours ?? 3;
+    const partialPercentage = hotel?.overstayPartialPercentage ?? 50;
+    const fullHours = hotel?.overstayFullHours ?? 6;
+
+    const hoursPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60);
+    const maxOverstayDays = Math.ceil(hoursPast / 24);
+
+    for (let j = 1; j <= maxOverstayDays; j++) {
+      const Start = addDays(checkOutDateTime, j - 1);
+      const End = addDays(checkOutDateTime, j);
+
+      if (currentTime >= Start) {
+        const startStr = Start.toISOString();
+        const endStr = End.toISOString();
+
+        const hoursPastPeriod = Math.min(24, (currentTime.getTime() - Start.getTime()) / (1000 * 60 * 60));
+        let targetAmount = 0;
+
+        if (policy === 'grace') {
+          if (hoursPastPeriod > graceHours) {
+            targetAmount = nightlyRate;
+          }
+        } else if (policy === 'partial') {
+          if (hoursPastPeriod > fullHours) {
+            targetAmount = nightlyRate;
+          } else if (hoursPastPeriod > partialHours) {
+            targetAmount = nightlyRate * (partialPercentage / 100);
+          }
+        } else if (policy === 'full') {
+          if (hoursPastPeriod > fullHours) {
+            targetAmount = nightlyRate;
+          }
+        } else if (policy === 'full_night' || policy === 'immediate_full') {
+          targetAmount = nightlyRate;
+        } else {
+          if (hoursPastPeriod > graceHours) {
+            targetAmount = nightlyRate;
+          }
+        }
+
+        if (targetAmount > 0) {
+          const postedAmount = ledgerEntries
+            .filter(e => 
+              e.chargePeriodStart === startStr && 
+              e.chargePeriodEnd === endStr && 
+              e.chargeType === 'overstay' && 
+              e.type === 'debit'
+            )
+            .reduce((sum, e) => sum + e.amount, 0);
+
+          if (postedAmount < targetAmount - 0.01) {
+            const dueAmount = targetAmount - postedAmount;
+            
+            await postToLedger(hotel.id, res.guestId, res.id, {
+              amount: dueAmount,
+              type: 'debit',
+              category: 'room',
+              description: `Overstay Room Charge: ${res.roomNumber} (Period ${j} past checkout)${postedAmount > 0 ? ' [Upgrade to Full]' : ''}`,
+              referenceId: res.id,
+              postedBy: profileUid,
+              chargePeriodStart: startStr,
+              chargePeriodEnd: endStr,
+              chargeType: 'overstay'
+            } as any, profileUid, res.corporateId);
+
+            chargedCount++;
+            totalAmountCharged += dueAmount;
+            lastChargeTime = currentTime.toISOString();
+            nextChargeTime = BillingService.calculateNextChargeDateTime(res, hotel, originalNights + j).toISOString();
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Update the Reservation fields in the database
+  const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
+  const updates: any = {};
+  
+  if (!res.checkInDateTime) updates.checkInDateTime = checkInDateTime.toISOString();
+  if (!res.checkOutDateTime) updates.checkOutDateTime = checkOutDateTime.toISOString();
+  if (lastChargeTime && res.lastChargeDateTime !== lastChargeTime) updates.lastChargeDateTime = lastChargeTime;
+  if (nextChargeTime && res.nextChargeDateTime !== nextChargeTime) updates.nextChargeDateTime = nextChargeTime;
+
+  if (Object.keys(updates).length > 0) {
+    await database.safeUpdate(resRef, updates, {
+      hotelId: hotel.id,
+      module: 'Reservation',
+      action: 'UPDATE_BILLING_TIMESTAMPS',
+      details: 'Automated billing fields and timestamps updated'
+    });
+  }
+
+  return { chargedCount, totalAmount: totalAmountCharged };
 };

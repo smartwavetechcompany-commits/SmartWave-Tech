@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, wr
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking } from '../types';
-import { postToLedger, settleLedger, transferToCityLedger } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -54,7 +54,7 @@ import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
-import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, parseLocalDateTime } from '../utils/billingEngine';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -321,7 +321,7 @@ export function FrontDesk() {
       }
       if (activeTab === 'overstay') {
         const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+        const checkOutDateTime = parseLocalDateTime(res.checkOut, overstayTime);
         const now = new Date();
         return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
       }
@@ -557,8 +557,8 @@ export function FrontDesk() {
         }
       }
 
-      const checkInDateTime = new Date(`${newBooking.checkIn}T${newBooking.checkInTime || '14:00'}`);
-      const checkOutDateTime = new Date(`${newBooking.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+      const checkInDateTime = parseLocalDateTime(newBooking.checkIn, newBooking.checkInTime || '14:00');
+      const checkOutDateTime = parseLocalDateTime(newBooking.checkOut, newBooking.checkOutTime || '12:00');
       const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
       const nights = Math.max(1, Math.ceil(hours / 24));
       
@@ -621,8 +621,8 @@ export function FrontDesk() {
           if (dynamicRate > 0) stayPrice = dynamicRate;
         }
         
-        const sCheckInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
-        const sCheckOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+        const sCheckInDateTime = parseLocalDateTime(stay.checkIn, newBooking.checkInTime || '14:00');
+        const sCheckOutDateTime = parseLocalDateTime(stay.checkOut, newBooking.checkOutTime || '12:00');
         const sHours = (sCheckOutDateTime.getTime() - sCheckInDateTime.getTime()) / (1000 * 60 * 60);
         const sNights = Math.max(1, Math.ceil(sHours / 24));
         const stayTotal = stayPrice * sNights;
@@ -756,8 +756,8 @@ export function FrontDesk() {
           if (activeRate) pricePerNight = activeRate.rate;
         }
 
-        const checkInDateTime = new Date(`${stay.checkIn}T${newBooking.checkInTime || '14:00'}`);
-        const checkOutDateTime = new Date(`${stay.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+        const checkInDateTime = parseLocalDateTime(stay.checkIn, newBooking.checkInTime || '14:00');
+        const checkOutDateTime = parseLocalDateTime(stay.checkOut, newBooking.checkOutTime || '12:00');
         const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
         const nights = Math.max(1, Math.ceil(hours / 24));
         const baseAmount = pricePerNight * nights;
@@ -1287,63 +1287,10 @@ export function FrontDesk() {
         const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
         if (!res.guestId || !res.autoNightDeduction) continue;
 
-        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
-        const now = new Date();
-        
-        // Calculate nights based on calendar dates
-        const scheduledNights = res.nights || 1;
-        const actualCalendarNightsPaid = Math.max(1, differenceInDays(startOfDay(now), startOfDay(checkInDateTime)));
-        
-        let targetCharges = actualCalendarNightsPaid;
-
-        // Overstay logic: If past overstayChargeTime on any date past arrival, add an extra charge if it's the current day
-        if (hotel.autoChargeOverstays !== false) {
-          const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const todayOverstayThreshold = new Date(`${format(now, 'yyyy-MM-dd')}T${overstayTime}`);
-          
-          if (isAfter(now, todayOverstayThreshold)) {
-            // If they are checking out late TODAY, they get charged for tonight as well
-            targetCharges += 1;
-          }
-        }
-        
-        // Ensure we don't accidentally charge LESS than scheduled nights if they are still in-house
-        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, actualCalendarNightsPaid + 1));
-        
-        // Fetch ledger entries for this reservation to see what's already charged
-        const ledgerQ = query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        );
-        const ledgerSnap = await getDocs(ledgerQ);
-        
-        // Client-side filtering to avoid composite indexes
-        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
-          const data = doc.data();
-          return data.category === 'room' && data.type === 'debit';
-        });
-        const existingCharges = roomChargeEntries.length;
-        
-        if (existingCharges < targetCharges) {
-          const nightsToCharge = targetCharges - existingCharges;
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          
-          for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-            const isOverstay = isAfter(chargeDate, startOfDay(new Date(res.checkOut)));
-            
-            await postToLedger(hotel.id, res.guestId, res.id, {
-              amount: rate,
-              type: 'debit',
-              category: 'room',
-              description: `${isOverstay ? 'Overstay' : 'Nightly'} Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
-              referenceId: res.id,
-              postedBy: profile.uid
-            }, profile.uid, res.corporateId);
-            
-            auditCount++;
-            totalCharged += rate;
-          }
+        const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
+        if (result.chargedCount > 0) {
+          auditCount += result.chargedCount;
+          totalCharged += result.totalAmount;
         }
       }
 
@@ -1393,9 +1340,6 @@ export function FrontDesk() {
     if (!canChange) return;
 
     try {
-      const now = new Date();
-      const todayStr = format(now, 'yyyy-MM-dd');
-      
       const activeCheckedInRes = reservations.filter(res => {
         return res.status === 'checked_in' && res.autoNightDeduction && res.guestId;
       });
@@ -1406,44 +1350,10 @@ export function FrontDesk() {
       let totalAmountCharged = 0;
 
       for (const res of activeCheckedInRes) {
-        const checkInDateTime = new Date(`${res.checkIn}T${res.checkInTime || '14:00'}`);
-        const checkInDate = startOfDay(checkInDateTime);
-        const billingState = calculateBilling(res, hotel);
-        const targetCharges = billingState.nightsCount;
-
-        // Fetch ledger entries for this reservation
-        const ledgerRef = collection(db, 'hotels', hotel.id, 'ledger');
-        const qDoc = query(ledgerRef, where('reservationId', '==', res.id));
-        const ledgerSnap = await getDocs(qDoc);
-        
-        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
-          const data = doc.data();
-          return data.category === 'room' && data.type === 'debit';
-        });
-        const existingCharges = roomChargeEntries.length;
-
-        if (existingCharges < targetCharges) {
-          const nightsToCharge = targetCharges - existingCharges;
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          
-          if (rate <= 0) continue;
-
-          for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
-            const isOverstay = isAfter(chargeDate, startOfDay(new Date(res.checkOut)));
-            
-            await postToLedger(hotel.id, res.guestId, res.id, {
-              amount: rate,
-              type: 'debit',
-              category: 'room',
-              description: `${isOverstay ? 'Overstay' : 'Nightly'} Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
-              referenceId: res.id,
-              postedBy: profile.uid
-            }, profile.uid, res.corporateId);
-
-            chargedCount++;
-            totalAmountCharged += rate;
-          }
+        const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
+        if (result.chargedCount > 0) {
+          chargedCount += result.chargedCount;
+          totalAmountCharged += result.totalAmount;
         }
       }
 
@@ -3025,8 +2935,8 @@ export function FrontDesk() {
                     });
                   });
 
-                  const checkInDateTime = new Date(`${newBooking.checkIn}T${newBooking.checkInTime || '14:00'}`);
-                  const checkOutDateTime = new Date(`${newBooking.checkOut}T${newBooking.checkOutTime || '12:00'}`);
+                  const checkInDateTime = parseLocalDateTime(newBooking.checkIn, newBooking.checkInTime || '14:00');
+                  const checkOutDateTime = parseLocalDateTime(newBooking.checkOut, newBooking.checkOutTime || '12:00');
                   const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
                   const nightsCount = Math.max(1, Math.ceil(hours / 24));
 

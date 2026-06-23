@@ -227,6 +227,11 @@ export interface Hotel {
   defaultCheckOutTime?: string;
   overstayChargeTime?: string; // Time after which an extra night is charged
   autoChargeOverstays?: boolean;
+  overstayPolicy?: 'grace' | 'partial' | 'full' | 'full_night' | string;
+  overstayGraceHours?: number;
+  overstayPartialHours?: number;
+  overstayPartialPercentage?: number;
+  overstayFullHours?: number;
   lastAuditDate?: string; // Tracks the last time the global nightly audit was run
   settings?: HotelSettings;
   planHistory?: {
@@ -374,6 +379,10 @@ export interface Reservation {
   advanceDeposit?: number;
   autoNightDeduction: boolean; // Mandatory toggle for automatic nightly charges
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
+  checkInDateTime?: string; // Complete ISO timestamp for actual check-in
+  checkOutDateTime?: string; // Complete ISO timestamp for scheduled/actual checkout
+  nextChargeDateTime?: string; // Complete ISO timestamp of next expected charge boundary
+  lastChargeDateTime?: string; // Complete ISO timestamp of the last generated charge
   bookedBy?: string; // Added for tracking who made the reservation
   processedBy?: {
     uid: string;
@@ -751,6 +760,9 @@ export interface LedgerEntry {
   idempotencyKey?: string;
   referenceCode?: string;
   proofUrl?: string;
+  chargePeriodStart?: string; // Metadata for duplicate charge prevention
+  chargePeriodEnd?: string; // Metadata for duplicate charge prevention
+  chargeType?: 'room_rate' | 'overstay' | string; // Metadata for duplicate charge prevention
 }
 
 export interface CorporateAccount {

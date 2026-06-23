@@ -58,6 +58,11 @@ export function Settings() {
     defaultCheckOutTime: hotel?.defaultCheckOutTime || '12:00',
     overstayChargeTime: hotel?.overstayChargeTime || '14:00',
     autoChargeOverstays: hotel?.autoChargeOverstays ?? true,
+    overstayPolicy: hotel?.overstayPolicy || 'grace',
+    overstayGraceHours: hotel?.overstayGraceHours ?? 2,
+    overstayPartialHours: hotel?.overstayPartialHours ?? 3,
+    overstayPartialPercentage: hotel?.overstayPartialPercentage ?? 50,
+    overstayFullHours: hotel?.overstayFullHours ?? 6,
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -103,6 +108,11 @@ export function Settings() {
         defaultCheckOutTime: hotel.defaultCheckOutTime || prev.defaultCheckOutTime,
         overstayChargeTime: hotel.overstayChargeTime || prev.overstayChargeTime,
         autoChargeOverstays: hotel.autoChargeOverstays ?? prev.autoChargeOverstays,
+        overstayPolicy: hotel.overstayPolicy || prev.overstayPolicy,
+        overstayGraceHours: hotel.overstayGraceHours ?? prev.overstayGraceHours,
+        overstayPartialHours: hotel.overstayPartialHours ?? prev.overstayPartialHours,
+        overstayPartialPercentage: hotel.overstayPartialPercentage ?? prev.overstayPartialPercentage,
+        overstayFullHours: hotel.overstayFullHours ?? prev.overstayFullHours,
         branding: {
           ...prev.branding,
           logoUrl: hotel.branding?.logoUrl || prev.branding.logoUrl,
@@ -357,6 +367,11 @@ export function Settings() {
         defaultCheckOutTime: formData.defaultCheckOutTime,
         overstayChargeTime: formData.overstayChargeTime,
         autoChargeOverstays: formData.autoChargeOverstays,
+        overstayPolicy: formData.overstayPolicy,
+        overstayGraceHours: Number(formData.overstayGraceHours),
+        overstayPartialHours: Number(formData.overstayPartialHours),
+        overstayPartialPercentage: Number(formData.overstayPartialPercentage),
+        overstayFullHours: Number(formData.overstayFullHours),
         branding: formData.branding,
       };
 
@@ -823,27 +838,111 @@ export function Settings() {
                         onChange={(e) => setFormData({ ...formData, defaultCheckOutTime: e.target.value })}
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Overstay Charge Trigger Time</label>
-                      <input 
-                        type="time" 
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                        value={formData.overstayChargeTime}
-                        onChange={(e) => setFormData({ ...formData, overstayChargeTime: e.target.value })}
-                      />
-                      <p className="text-[10px] text-zinc-500 mt-1 italic">Guests still checked in after this time on their check-out date will be charged for an extra night.</p>
-                    </div>
-                    <div className="flex items-center gap-3 pt-2">
-                      <input 
-                        type="checkbox"
-                        id="autoChargeOverstays"
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                        checked={formData.autoChargeOverstays}
-                        onChange={(e) => setFormData({ ...formData, autoChargeOverstays: e.target.checked })}
-                      />
-                      <label htmlFor="autoChargeOverstays" className="text-sm text-zinc-400 font-medium cursor-pointer">
-                        Auto-charge extra night for overstays
-                      </label>
+                    <div className="md:col-span-2 p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-semibold text-zinc-50">Overstay Policy Configuration</label>
+                        <div className="flex items-center gap-3">
+                          <input 
+                            type="checkbox"
+                            id="autoChargeOverstays"
+                            className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                            checked={formData.autoChargeOverstays}
+                            onChange={(e) => setFormData({ ...formData, autoChargeOverstays: e.target.checked })}
+                          />
+                          <label htmlFor="autoChargeOverstays" className="text-sm text-zinc-400 font-medium cursor-pointer">
+                            Enable Automated Overstay Billing
+                          </label>
+                        </div>
+                      </div>
+
+                      {formData.autoChargeOverstays && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/60">
+                          <div>
+                            <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Select Active Overstay Policy</label>
+                            <select
+                              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                              value={formData.overstayPolicy}
+                              onChange={(e) => setFormData({ ...formData, overstayPolicy: e.target.value })}
+                            >
+                              <option value="grace">Policy A: Grace Period (No charge within limit)</option>
+                              <option value="partial">Policy B: 50% Rate / Dynamic thresholds</option>
+                              <option value="full">Policy C: Full Room Rate after limit</option>
+                              <option value="immediate_full">Policy D: Full Additional Night after Checkout</option>
+                            </select>
+                          </div>
+
+                          {formData.overstayPolicy === 'grace' && (
+                            <div>
+                              <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Grace Period (Hours)</label>
+                              <input 
+                                type="number" 
+                                min="0"
+                                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                                value={formData.overstayGraceHours}
+                                onChange={(e) => setFormData({ ...formData, overstayGraceHours: Number(e.target.value) })}
+                              />
+                              <p className="text-[10px] text-zinc-500 mt-1">Guests can stay up to {formData.overstayGraceHours} hours past check-out without additional charge. After that, a full additional night is charged.</p>
+                            </div>
+                          )}
+
+                          {formData.overstayPolicy === 'partial' && (
+                            <>
+                              <div>
+                                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Partial Charge Threshold (Hours)</label>
+                                <input 
+                                  type="number" 
+                                  min="0"
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={formData.overstayPartialHours}
+                                  onChange={(e) => setFormData({ ...formData, overstayPartialHours: Number(e.target.value) })}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Partial Charge Rate (%)</label>
+                                <input 
+                                  type="number" 
+                                  min="0"
+                                  max="100"
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={formData.overstayPartialPercentage}
+                                  onChange={(e) => setFormData({ ...formData, overstayPartialPercentage: Number(e.target.value) })}
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Full Charge Threshold (Hours)</label>
+                                <input 
+                                  type="number" 
+                                  min="0"
+                                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={formData.overstayFullHours}
+                                  onChange={(e) => setFormData({ ...formData, overstayFullHours: Number(e.target.value) })}
+                                />
+                                <p className="text-[10px] text-zinc-500 mt-1">No charge up to {formData.overstayPartialHours} hours. {formData.overstayPartialPercentage}% charge between {formData.overstayPartialHours} and {formData.overstayFullHours} hours. Full charge after {formData.overstayFullHours} hours.</p>
+                              </div>
+                            </>
+                          )}
+
+                          {formData.overstayPolicy === 'full' && (
+                            <div>
+                              <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Full Charge Threshold (Hours)</label>
+                              <input 
+                                type="number" 
+                                min="0"
+                                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                                value={formData.overstayFullHours}
+                                onChange={(e) => setFormData({ ...formData, overstayFullHours: Number(e.target.value) })}
+                              />
+                              <p className="text-[10px] text-zinc-500 mt-1">Guests can stay up to {formData.overstayFullHours} hours past check-out for free. After {formData.overstayFullHours} hours, a full additional night is charged.</p>
+                            </div>
+                          )}
+
+                          {formData.overstayPolicy === 'immediate_full' && (
+                            <div className="md:col-span-2">
+                              <p className="text-xs text-zinc-400">Policy D: A full additional night's rate will be charged automatically immediately past the scheduled checkout time.</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -32,6 +32,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { postToLedger } from '../services/ledgerService';
+import { parseLocalDateTime } from '../utils/billingEngine';
 
 import { CorporateFolio } from './CorporateFolio';
 import { ConfirmModal } from './ConfirmModal';
@@ -184,7 +185,7 @@ export function CorporateManagement() {
       for (const res of activeReservations) {
         // If it's checkout day, only charge if past overstay time
         if (res.checkOut === todayStr) {
-          const checkOutDateTime = new Date(`${res.checkOut}T${overstayTime}`);
+          const checkOutDateTime = parseLocalDateTime(res.checkOut, overstayTime);
           if (now <= checkOutDateTime) continue;
         }
 

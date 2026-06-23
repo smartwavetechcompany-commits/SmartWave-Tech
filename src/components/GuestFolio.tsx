@@ -35,7 +35,7 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -203,7 +203,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     
     try {
       setIsAuditing(true);
-      const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
+      const checkInDateTime = parseLocalDateTime(currentReservation.checkIn, currentReservation.checkInTime || '14:00');
       const now = new Date();
       const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
       let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
@@ -211,7 +211,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
       if (hotel.autoChargeOverstays !== false) {
         const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
+        const checkOutDateTime = parseLocalDateTime(currentReservation.checkOut, overstayTime);
         if (isAfter(now, checkOutDateTime)) {
           // Calculate how many days past checkout they are
           const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
@@ -677,7 +677,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
     
     try {
-      const checkInDateTime = new Date(`${currentReservation.checkIn}T${currentReservation.checkInTime || '14:00'}`);
+      const checkInDateTime = parseLocalDateTime(currentReservation.checkIn, currentReservation.checkInTime || '14:00');
       const now = new Date();
       const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
       let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
@@ -685,7 +685,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
       if (hotel.autoChargeOverstays !== false) {
         const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = new Date(`${currentReservation.checkOut}T${overstayTime}`);
+        const checkOutDateTime = parseLocalDateTime(currentReservation.checkOut, overstayTime);
         if (isAfter(now, checkOutDateTime)) {
           const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
           const expectedTotalNights = (currentReservation.nights || 1) + daysPastCheckout;
