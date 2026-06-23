@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -125,47 +125,66 @@ export function OperationsDashboard() {
     return [...prevMonthList, ...currentMonthList, ...nextMonthList];
   };
 
-  const getOccupancyInfo = (dateString: string) => {
-    const totalRoomsCount = rooms.length || 10;
-    const activeRes = reservations.filter(r => 
-      r.status !== 'cancelled' && 
-      r.status !== 'no_show' && 
-      r.checkIn <= dateString && 
-      dateString < r.checkOut
-    );
-    const count = activeRes.length;
-    const rate = Math.round((count / totalRoomsCount) * 100);
+  const calendarDays = useMemo(() => {
+    return getCalendarDays();
+  }, [currentMonth]);
 
-    let colorClass = '';
-    let textClass = '';
-    let level: 'none' | 'low' | 'moderate' | 'high' | 'peak' = 'none';
+  const occupancyMap = useMemo(() => {
+    const map: Record<string, { count: number; rate: number; colorClass: string; textClass: string; level: 'none' | 'low' | 'moderate' | 'high' | 'peak' }> = {};
+    const totalRoomsCount = Math.max(1, rooms.length);
+    
+    calendarDays.forEach(day => {
+      const dateString = day.dateString;
+      const activeRes = reservations.filter(r => 
+        r.status !== 'cancelled' && 
+        r.status !== 'no_show' && 
+        r.checkIn <= dateString && 
+        dateString < r.checkOut
+      );
+      const count = activeRes.length;
+      const rate = Math.round((count / totalRoomsCount) * 100);
 
-    if (rate === 0) {
-      colorClass = 'bg-zinc-950/40 text-zinc-650 border border-zinc-900 hover:border-zinc-805';
-      textClass = 'text-zinc-650';
-      level = 'none';
-    } else if (rate <= 30) {
-      colorClass = 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40';
-      textClass = 'text-emerald-400 font-bold';
-      level = 'low';
-    } else if (rate <= 60) {
-      colorClass = 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 border border-yellow-500/20 hover:border-yellow-500/40';
-      textClass = 'text-yellow-400 font-bold';
-      level = 'moderate';
-    } else if (rate <= 85) {
-      colorClass = 'bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/25 hover:border-orange-500/50';
-      textClass = 'text-orange-400 font-bold';
-      level = 'high';
-    } else {
-      colorClass = 'bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 hover:border-red-500/50';
-      textClass = 'text-red-400 font-black';
-      level = 'peak';
-    }
+      let colorClass = '';
+      let textClass = '';
+      let level: 'none' | 'low' | 'moderate' | 'high' | 'peak' = 'none';
 
-    return { count, rate, colorClass, textClass, level };
-  };
+      if (rate === 0) {
+        colorClass = 'bg-zinc-950/40 text-zinc-650 border border-zinc-900 hover:border-zinc-805';
+        textClass = 'text-zinc-650';
+        level = 'none';
+      } else if (rate <= 30) {
+        colorClass = 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40';
+        textClass = 'text-emerald-400 font-bold';
+        level = 'low';
+      } else if (rate <= 60) {
+        colorClass = 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 border border-yellow-500/20 hover:border-yellow-500/40';
+        textClass = 'text-yellow-400 font-bold';
+        level = 'moderate';
+      } else if (rate <= 85) {
+        colorClass = 'bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/25 hover:border-orange-500/50';
+        textClass = 'text-orange-400 font-bold';
+        level = 'high';
+      } else {
+        colorClass = 'bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 hover:border-red-500/50';
+        textClass = 'text-red-400 font-black';
+        level = 'peak';
+      }
 
-  const calendarDays = getCalendarDays();
+      map[dateString] = { count, rate, colorClass, textClass, level };
+    });
+    
+    return map;
+  }, [calendarDays, reservations, rooms.length]);
+
+  const getOccupancyInfo = useCallback((dateString: string) => {
+    return occupancyMap[dateString] || { 
+      count: 0, 
+      rate: 0, 
+      colorClass: 'bg-zinc-950/40 text-zinc-650 border border-zinc-900 hover:border-zinc-805', 
+      textClass: 'text-zinc-650', 
+      level: 'none' as const
+    };
+  }, [occupancyMap]);
 
   const [hoveredDay, setHoveredDay] = useState<{
     dateString: string;
@@ -433,10 +452,10 @@ export function OperationsDashboard() {
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  const arrivals = reservations.filter(r => r.checkIn === today && r.status === 'pending');
-  const checkins = reservations.filter(r => r.checkIn === today && r.status === 'checked_in');
-  const checkouts = reservations.filter(r => (r.checkOut === today && (r.status === 'checked_in' || r.status === 'checked_out')) || (r.checkOut < today && r.status === 'checked_in'));
-  const inhouse = reservations.filter(r => r.status === 'checked_in');
+  const arrivals = useMemo(() => reservations.filter(r => r.checkIn === today && r.status === 'pending'), [reservations, today]);
+  const checkins = useMemo(() => reservations.filter(r => r.checkIn === today && r.status === 'checked_in'), [reservations, today]);
+  const checkouts = useMemo(() => reservations.filter(r => (r.checkOut === today && (r.status === 'checked_in' || r.status === 'checked_out')) || (r.checkOut < today && r.status === 'checked_in')), [reservations, today]);
+  const inhouse = useMemo(() => reservations.filter(r => r.status === 'checked_in'), [reservations]);
 
   const filteredData = () => {
     let data: Reservation[] = [];

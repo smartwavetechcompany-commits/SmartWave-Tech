@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from './components/Sidebar';
 import { WifiOff, RefreshCw } from 'lucide-react';
 import { AuthPage } from './components/AuthPage';
@@ -222,14 +223,25 @@ function AppContent() {
 );
 }
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // 5 minutes cache
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
 export default function App() {
   return (
-    <GlobalErrorBoundary>
-      <AuthProvider>
-        <Router>
-          <AppContent />
-        </Router>
-      </AuthProvider>
-    </GlobalErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <GlobalErrorBoundary>
+        <AuthProvider>
+          <Router>
+            <AppContent />
+          </Router>
+        </AuthProvider>
+      </GlobalErrorBoundary>
+    </QueryClientProvider>
   );
 }

@@ -8,7 +8,7 @@ type SettingsSubscriber = (settings: HotelSettings) => void;
 type EventCallback = (data: any) => void;
 
 class CentralSettingsManager {
-  private currentSettings: HotelSettings = { ...DEFAULT_SETTINGS };
+  private currentSettings: HotelSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
   private currentTaxes: Tax[] = [];
   private currentRateConfigs: any[] = [];
   private currentHotelDetails: any = null;
@@ -103,7 +103,7 @@ class CentralSettingsManager {
         this.currentHotelDetails = data;
         
         // Assemble and merge settings safely with defaults to prevent broken / old properties
-        const settings = { ...DEFAULT_SETTINGS };
+        const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as HotelSettings;
         if (data && data.settings) {
           Object.keys(data.settings).forEach(group => {
             const groupKey = group as keyof HotelSettings;

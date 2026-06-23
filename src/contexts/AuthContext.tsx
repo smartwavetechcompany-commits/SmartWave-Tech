@@ -265,7 +265,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // Deep merge settings with defaults to ensure all keys exist
         // This prevents "reset" issues if DB has partial settings
-        const settings = { ...DEFAULT_SETTINGS };
+        const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as HotelSettings;
         if (data.settings) {
           Object.keys(data.settings).forEach(group => {
             const groupKey = group as keyof HotelSettings;

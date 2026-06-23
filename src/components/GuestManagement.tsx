@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
@@ -46,12 +47,38 @@ import { QrCode, Key as LucideKey } from 'lucide-react';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
-  const [guests, setGuests] = useState<Guest[]>([]);
+  const queryClient = useQueryClient();
+
+  // Load guests with TanStack Query (caching and optimized state)
+  const { data: guests = [], isLoading: isGuestsLoading } = useQuery<Guest[]>({
+    queryKey: ['guests', hotel?.id],
+    queryFn: async () => {
+      if (!hotel?.id) return [];
+      const q = query(collection(db, 'hotels', hotel.id, 'guests'), orderBy('name', 'asc'));
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
+    },
+    enabled: !!hotel?.id && !!profile,
+    staleTime: 1000 * 60 * 5, // 5 minutes cache
+  });
+
+  // Load reservations with TanStack Query
+  const { data: allReservations = [] } = useQuery<Reservation[]>({
+    queryKey: ['reservations', hotel?.id],
+    queryFn: async () => {
+      if (!hotel?.id) return [];
+      const q = query(collection(db, 'hotels', hotel.id, 'reservations'));
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+    },
+    enabled: !!hotel?.id && !!profile,
+    staleTime: 1000 * 60 * 5,
+  });
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
   const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
-  const [allReservations, setAllReservations] = useState<Reservation[]>([]);
   const [guestLedger, setGuestLedger] = useState<LedgerEntry[]>([]);
   const [historyTab, setHistoryTab] = useState<'reservations' | 'ledger'>('reservations');
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
@@ -64,6 +91,8 @@ export function GuestManagement() {
   const [sortBy, setSortBy] = useState<'name' | 'ledgerBalance' | 'totalSpent' | 'totalStays'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [isLoading, setIsLoading] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(24);
+  const [isSavingGuest, setIsSavingGuest] = useState(false);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [reportFilter, setReportFilter] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
@@ -107,15 +136,146 @@ export function GuestManagement() {
     );
   }, [tagInput, allExistingTags, newGuest.tags]);
 
-  const getGuestLiveBalance = (guest: Guest) => {
-    const resList = allReservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail === guest.email));
-    const liveOwed = resList
-      .filter(r => r.status === 'checked_in' || r.status === 'checked_out')
-      .reduce((sum, r) => {
+  const guestLiveBalances = useMemo(() => {
+    const balanceMap: Record<string, number> = {};
+    if (!guests.length) return balanceMap;
+
+    // Group active reservations by guestId and email for efficient O(1) matching
+    const resByGuestId: Record<string, Reservation[]> = {};
+    const resByEmail: Record<string, Reservation[]> = {};
+
+    allReservations.forEach(r => {
+      if (r.status === 'checked_in' || r.status === 'checked_out') {
+        if (r.guestId) {
+          if (!resByGuestId[r.guestId]) resByGuestId[r.guestId] = [];
+          resByGuestId[r.guestId].push(r);
+        }
+        if (r.guestEmail) {
+          const emailKey = r.guestEmail.toLowerCase().trim();
+          if (!resByEmail[emailKey]) resByEmail[emailKey] = [];
+          resByEmail[emailKey].push(r);
+        }
+      }
+    });
+
+    guests.forEach(guest => {
+      const matchingResSet = new Set<Reservation>();
+
+      const resByIdList = resByGuestId[guest.id] || [];
+      resByIdList.forEach(r => matchingResSet.add(r));
+
+      if (guest.email) {
+        const emailKey = guest.email.toLowerCase().trim();
+        const resByEmailList = resByEmail[emailKey] || [];
+        resByEmailList.forEach(r => matchingResSet.add(r));
+      }
+
+      const liveOwed = Array.from(matchingResSet).reduce((sum, r) => {
         return sum + getReservationLiveBalance(r, hotel);
       }, 0);
-    return Math.abs(liveOwed) > 0.01 ? liveOwed : (guest.ledgerBalance || 0);
-  };
+
+      balanceMap[guest.id] = Math.abs(liveOwed) > 0.01 ? liveOwed : (guest.ledgerBalance || 0);
+    });
+
+    return balanceMap;
+  }, [guests, allReservations, hotel]);
+
+  const getGuestLiveBalance = useCallback((guest: Guest) => {
+    return guestLiveBalances[guest.id] ?? (guest.ledgerBalance || 0);
+  }, [guestLiveBalances]);
+
+  // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
+  const guestStatsMap = useMemo(() => {
+    const statsMap: Record<string, { visitsCount: number; calculatedDays: number; totalSpentVal: number }> = {};
+    if (!guests.length) return statsMap;
+
+    // Group reservations by guestId and email for fast access
+    const resByGuestId: Record<string, Reservation[]> = {};
+    const resByEmail: Record<string, Reservation[]> = {};
+
+    allReservations.forEach(r => {
+      if (r.guestId) {
+        if (!resByGuestId[r.guestId]) resByGuestId[r.guestId] = [];
+        resByGuestId[r.guestId].push(r);
+      }
+      if (r.guestEmail) {
+        const emailKey = r.guestEmail.toLowerCase().trim();
+        if (!resByEmail[emailKey]) resByEmail[emailKey] = [];
+        resByEmail[emailKey].push(r);
+      }
+    });
+
+    guests.forEach(g => {
+      const matchingResSet = new Set<Reservation>();
+
+      const resByIdList = resByGuestId[g.id] || [];
+      resByIdList.forEach(r => matchingResSet.add(r));
+
+      if (g.email) {
+        const emailKey = g.email.toLowerCase().trim();
+        const resByEmailList = resByEmail[emailKey] || [];
+        resByEmailList.forEach(r => matchingResSet.add(r));
+      }
+
+      const guestRes = Array.from(matchingResSet);
+
+      const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
+      const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
+      const visitsCount = completedCount + activeCount;
+
+      let calculatedDays = 0;
+      guestRes.forEach(r => {
+        if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
+          try {
+            const billing = calculateBilling(r, hotel);
+            calculatedDays += (billing.nightsCount || 1) + 1;
+          } catch (e) {
+            const cin = parseISO(r.checkIn);
+            const cout = parseISO(r.checkOut);
+            calculatedDays += Math.max(1, differenceInDays(cout, cin)) + 1;
+          }
+        }
+      });
+
+      const calculatedSpentVal = guestRes
+        .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
+        .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
+      const totalSpentVal = Math.max(g.totalSpent || 0, calculatedSpentVal);
+
+      statsMap[g.id] = {
+        visitsCount,
+        calculatedDays,
+        totalSpentVal
+      };
+    });
+
+    return statsMap;
+  }, [guests, allReservations, hotel]);
+
+  // Reset pagination on filter changes
+  useEffect(() => {
+    setVisibleCount(24);
+  }, [searchQuery, guestTypeFilter, balanceFilter, vipFilter, sortBy, sortOrder, dateRange]);
+
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const currentBottom = bottomRef.current;
+    if (!currentBottom) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount(prev => Math.min(prev + 24, guests.length));
+      }
+    }, {
+      rootMargin: '200px',
+    });
+
+    observer.observe(currentBottom);
+    return () => {
+      if (currentBottom) observer.unobserve(currentBottom);
+    };
+  }, [guests.length]);
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -123,7 +283,8 @@ export function GuestManagement() {
     setIsLoading(true);
     const q = query(collection(db, 'hotels', hotel.id, 'guests'), orderBy('name', 'asc'));
     const unsub = onSnapshot(q, (snap) => {
-      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+      const updatedGuests = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
+      queryClient.setQueryData(['guests', hotel.id], updatedGuests);
       setIsLoading(false);
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
@@ -132,20 +293,21 @@ export function GuestManagement() {
     });
 
     return () => unsub();
-  }, [hotel?.id, profile?.uid]);
+  }, [hotel?.id, profile?.uid, queryClient]);
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
     
     const qReservations = query(collection(db, 'hotels', hotel.id, 'reservations'));
     const unsubReservations = onSnapshot(qReservations, (snap) => {
-      setAllReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      const updatedReservations = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+      queryClient.setQueryData(['reservations', hotel.id], updatedReservations);
     }, (error: any) => {
       console.error("Failed to fetch all reservations in GuestManagement:", error);
     });
 
     return () => unsubReservations();
-  }, [hotel?.id, profile?.uid]);
+  }, [hotel?.id, profile?.uid, queryClient]);
 
   useEffect(() => {
     if (!viewingHistory || !hotel?.id) return;
@@ -214,6 +376,7 @@ export function GuestManagement() {
       }
     }
 
+    setIsSavingGuest(true);
     try {
       if (editingGuest) {
         // Exclude read-only financial fields from update to prevent clearing them unless loyalty editing is enabled
@@ -283,6 +446,8 @@ export function GuestManagement() {
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/guests`);
       toast.error('Failed to save guest profile');
+    } finally {
+      setIsSavingGuest(false);
     }
   };
 
@@ -348,15 +513,7 @@ export function GuestManagement() {
         return matchesType && matchesDate;
       })
       .map(g => {
-        const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
-        const completedStays = resList.filter(r => r.status === 'checked_out').length;
-        const activeStays = resList.filter(r => r.status === 'checked_in').length;
-        const visitsCount = completedStays + activeStays;
-
-        const calculatedSpent = resList
-          .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-          .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-        const totalSpentVal = Math.max(g.totalSpent || 0, calculatedSpent);
+        const stats = guestStatsMap[g.id] || { visitsCount: g.totalStays || 0, totalSpentVal: g.totalSpent || 0 };
 
         return {
           Name: g.name,
@@ -366,8 +523,8 @@ export function GuestManagement() {
           'ID Type': g.idType,
           'ID Number': g.idNumber,
           Address: g.address,
-          'Total Stays': visitsCount || g.totalStays || 0,
-          'Total Spent': totalSpentVal,
+          'Total Stays': stats.visitsCount || g.totalStays || 0,
+          'Total Spent': stats.totalSpentVal,
           'Balance': getGuestLiveBalance(g),
           'Tags': (g.tags || []).join(', '),
           'Preferences': (g.preferences || []).join(', '),
@@ -427,27 +584,22 @@ export function GuestManagement() {
       if (sortBy === 'name') result = a.name.localeCompare(b.name);
       else if (sortBy === 'ledgerBalance') result = getGuestLiveBalance(a) - getGuestLiveBalance(b);
       else if (sortBy === 'totalSpent') {
-        const getSpentSum = (g: typeof a) => {
-          const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
-          const calculatedSpent = resList
-            .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-            .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-          return Math.max(g.totalSpent || 0, calculatedSpent);
-        };
-        result = getSpentSum(a) - getSpentSum(b);
+        const spentA = guestStatsMap[a.id]?.totalSpentVal ?? 0;
+        const spentB = guestStatsMap[b.id]?.totalSpentVal ?? 0;
+        result = spentA - spentB;
       }
       else if (sortBy === 'totalStays') {
-        const getStaysCount = (g: typeof a) => {
-          const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
-          const completedStays = resList.filter(r => r.status === 'checked_out').length;
-          const activeStays = resList.filter(r => r.status === 'checked_in').length;
-          return completedStays + activeStays;
-        };
-        result = getStaysCount(a) - getStaysCount(b);
+        const staysA = guestStatsMap[a.id]?.visitsCount ?? 0;
+        const staysB = guestStatsMap[b.id]?.visitsCount ?? 0;
+        result = staysA - staysB;
       }
       return sortOrder === 'desc' ? -result : result;
     });
-  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder, allReservations]);
+  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder, guestStatsMap, guestLiveBalances]);
+
+  const visibleGuests = useMemo(() => {
+    return filteredGuests.slice(0, visibleCount);
+  }, [filteredGuests, visibleCount]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
@@ -727,218 +879,202 @@ export function GuestManagement() {
               <p>No guest profiles found matching your criteria</p>
             </div>
           ) : (
-            filteredGuests.map((guest) => (
-              <motion.div
-                key={guest.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col group"
-              >
-                <div className="p-4 flex-1">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 bg-zinc-800 rounded-full flex items-center justify-center text-emerald-500 font-bold text-base border border-zinc-700">
-                        {guest.name.charAt(0)}
+            visibleGuests.map((guest) => {
+              const stats = guestStatsMap[guest.id] || { visitsCount: 0, calculatedDays: 0, totalSpentVal: 0 };
+              const visitsCount = stats.visitsCount;
+              const calculatedDays = stats.calculatedDays;
+              const totalSpentVal = stats.totalSpentVal;
+
+              return (
+                <motion.div
+                  key={guest.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col group"
+                >
+                  <div className="p-4 flex-1">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 bg-zinc-800 rounded-full flex items-center justify-center text-emerald-500 font-bold text-base border border-zinc-700">
+                          {guest.name.charAt(0)}
+                        </div>
+                        <div>
+                          <h3 className="text-zinc-50 text-sm font-bold leading-tight truncate max-w-[120px]">{guest.name}</h3>
+                          <div className="flex items-center gap-1">
+                            {(guest.tags || []).map(tag => (
+                              <span key={tag} className={cn(
+                                "px-1 py-0.5 rounded-[4px] text-[7px] font-black uppercase tracking-tighter",
+                                tag === 'VIP' ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-zinc-800 text-zinc-500"
+                              )}>
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="text-zinc-50 text-sm font-bold leading-tight truncate max-w-[120px]">{guest.name}</h3>
-                        <div className="flex items-center gap-1">
-                          {(guest.tags || []).map(tag => (
-                            <span key={tag} className={cn(
-                              "px-1 py-0.5 rounded-[4px] text-[7px] font-black uppercase tracking-tighter",
-                              tag === 'VIP' ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-zinc-800 text-zinc-500"
-                            )}>
-                              {tag}
-                            </span>
-                          ))}
+                      <div className="flex gap-0.5">
+                        {(hotel?.settings?.guests?.allowEmailCommunication ?? true) ? (
+                          <a 
+                            href={`mailto:${guest.email}?subject=Hotel Communication for ${guest.name}`}
+                            className="p-1.5 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
+                            title="Email Guest"
+                          >
+                            <Mail size={14} />
+                          </a>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={() => toast.error('CRM email communication is disabled by hotel administrator')}
+                            className="p-1.5 text-zinc-700 cursor-not-allowed rounded-lg transition-all"
+                            title="Email communication disabled"
+                          >
+                            <Mail size={14} className="opacity-30" />
+                          </button>
+                        )}
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (hotel?.settings?.guests?.allowHistoryViewing === false && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+                              toast.error('Past stay history access is restricted to administrators.');
+                              return;
+                            }
+                            setViewingHistory(guest);
+                          }}
+                          className="p-1.5 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
+                          title="View History"
+                        >
+                          <History size={14} />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setEditingGuest(guest);
+                            setNewGuest({
+                              name: guest.name,
+                              email: guest.email,
+                              phone: guest.phone,
+                              idType: guest.idType || 'Passport',
+                              idNumber: guest.idNumber || '',
+                              address: guest.address || '',
+                              notes: guest.notes || '',
+                              tags: guest.tags || [],
+                              preferences: guest.preferences || [],
+                              ledgerBalance: guest.ledgerBalance || 0,
+                              corporateId: guest.corporateId || '',
+                              totalStays: guest.totalStays || 0,
+                              totalSpent: guest.totalSpent || 0
+                            });
+                            setShowAddModal(true);
+                          }}
+                          className="p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+                              toast.error('Only administrators can delete guest profiles');
+                              return;
+                            }
+                            setConfirmDelete(guest.id);
+                          }}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all",
+                            (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') 
+                              ? "text-zinc-500 hover:text-red-500" 
+                              : "text-zinc-800 cursor-not-allowed"
+                          )}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 mb-4">
+                      <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                        <Mail size={12} className="text-zinc-600" />
+                        <span className="truncate">{guest.email}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                        <Phone size={12} className="text-zinc-600" />
+                        {guest.phone}
+                      </div>
+                      {guest.corporateId && (
+                        <div className="flex items-center gap-2 text-[10px] text-emerald-500 font-bold uppercase tracking-wider">
+                          <Building2 size={12} />
+                          <span className="truncate max-w-[150px]">
+                            {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
+                        <div className="text-sm font-bold text-zinc-100">{visitsCount}</div>
+                      </div>
+                      <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
+                        <div className="text-sm font-bold text-amber-500">{calculatedDays || ((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
+                      </div>
+                      <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
+                        <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
+                      </div>
+                      <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">
+                          {getGuestLiveBalance(guest) > 0.01 
+                            ? "Owed" 
+                            : getGuestLiveBalance(guest) < -0.01 
+                              ? "Credit / Deposit" 
+                              : "Owed"}
+                        </div>
+                        <div className={cn(
+                          "text-sm font-bold",
+                          getGuestLiveBalance(guest) > 0.01 
+                            ? "text-red-500" 
+                            : getGuestLiveBalance(guest) < -0.01 
+                              ? "text-emerald-500" 
+                              : "text-zinc-500"
+                        )}>
+                          {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-0.5">
-                      {(hotel?.settings?.guests?.allowEmailCommunication ?? true) ? (
-                        <a 
-                          href={`mailto:${guest.email}?subject=Hotel Communication for ${guest.name}`}
-                          className="p-1.5 text-zinc-500 hover:text-blue-500 rounded-lg transition-all"
-                          title="Email Guest"
-                        >
-                          <Mail size={14} />
-                        </a>
-                      ) : (
-                        <button 
-                          type="button"
-                          onClick={() => toast.error('CRM email communication is disabled by hotel administrator')}
-                          className="p-1.5 text-zinc-700 cursor-not-allowed rounded-lg transition-all"
-                          title="Email communication disabled"
-                        >
-                          <Mail size={14} className="opacity-30" />
-                        </button>
-                      )}
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          if (hotel?.settings?.guests?.allowHistoryViewing === false && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
-                            toast.error('Past stay history access is restricted to administrators.');
-                            return;
-                          }
-                          setViewingHistory(guest);
-                        }}
-                        className="p-1.5 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
-                        title="View History"
-                      >
-                        <History size={14} />
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          setEditingGuest(guest);
-                          setNewGuest({
-                            name: guest.name,
-                            email: guest.email,
-                            phone: guest.phone,
-                            idType: guest.idType || 'Passport',
-                            idNumber: guest.idNumber || '',
-                            address: guest.address || '',
-                            notes: guest.notes || '',
-                            tags: guest.tags || [],
-                            preferences: guest.preferences || [],
-                            ledgerBalance: guest.ledgerBalance || 0,
-                            corporateId: guest.corporateId || '',
-                            totalStays: guest.totalStays || 0,
-                            totalSpent: guest.totalSpent || 0
-                          });
-                          setShowAddModal(true);
-                        }}
-                        className="p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
-                            toast.error('Only administrators can delete guest profiles');
-                            return;
-                          }
-                          setConfirmDelete(guest.id);
-                        }}
-                        className={cn(
-                          "p-1.5 rounded-lg transition-all",
-                          (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') 
-                            ? "text-zinc-500 hover:text-red-500" 
-                            : "text-zinc-800 cursor-not-allowed"
-                        )}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
 
-                  <div className="space-y-1.5 mb-4">
-                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                      <Mail size={12} className="text-zinc-600" />
-                      <span className="truncate">{guest.email}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                      <Phone size={12} className="text-zinc-600" />
-                      {guest.phone}
-                    </div>
-                    {guest.corporateId && (
-                      <div className="flex items-center gap-2 text-[10px] text-emerald-500 font-bold uppercase tracking-wider">
-                        <Building2 size={12} />
-                        <span className="truncate max-w-[150px]">
-                          {corporateAccounts.find(c => c.id === guest.corporateId)?.name || 'Corporate'}
-                        </span>
+                    {guest.preferences && guest.preferences.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-zinc-800/50">
+                        <div className="flex flex-wrap gap-1">
+                          {guest.preferences.slice(0, 3).map(pref => (
+                            <span key={pref} className="px-1.5 py-0.5 bg-blue-500/5 text-blue-400 rounded text-[8px] border border-blue-500/10">
+                              {pref}
+                            </span>
+                          ))}
+                          {guest.preferences.length > 3 && (
+                            <span className="text-[8px] text-zinc-600 font-bold ml-1">+{guest.preferences.length - 3}</span>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
-
-                  {(() => {
-                    const guestRes = allReservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail === guest.email));
-                    const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
-                    const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
-                    const visitsCount = completedCount + activeCount;
-                    
-                    let calculatedDays = 0;
-                    guestRes.forEach(r => {
-                      if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
-                        try {
-                          const billing = calculateBilling(r, hotel);
-                          calculatedDays += (billing.nightsCount || 1) + 1;
-                        } catch (e) {
-                          const cin = parseISO(r.checkIn);
-                          const cout = parseISO(r.checkOut);
-                          calculatedDays += Math.max(1, differenceInDays(cout, cin)) + 1;
-                        }
-                      }
-                    });
-
-                    const calculatedSpentVal = guestRes
-                      .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-                      .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-                    const totalSpentVal = Math.max(guest.totalSpent || 0, calculatedSpentVal);
-                    
-                    return (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
-                          <div className="text-sm font-bold text-zinc-100">{visitsCount}</div>
-                        </div>
-                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
-                          <div className="text-sm font-bold text-amber-500">{calculatedDays || ((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
-                        </div>
-                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
-                          <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
-                        </div>
-                        <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                          <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">
-                            {getGuestLiveBalance(guest) > 0.01 
-                              ? "Owed" 
-                              : getGuestLiveBalance(guest) < -0.01 
-                                ? "Credit / Deposit" 
-                                : "Owed"}
-                          </div>
-                          <div className={cn(
-                            "text-sm font-bold",
-                            getGuestLiveBalance(guest) > 0.01 
-                              ? "text-red-500" 
-                              : getGuestLiveBalance(guest) < -0.01 
-                                ? "text-emerald-500" 
-                                : "text-zinc-500"
-                          )}>
-                            {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {guest.preferences && guest.preferences.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-zinc-800/50">
-                      <div className="flex flex-wrap gap-1">
-                        {guest.preferences.slice(0, 3).map(pref => (
-                          <span key={pref} className="px-1.5 py-0.5 bg-blue-500/5 text-blue-400 rounded text-[8px] border border-blue-500/10">
-                            {pref}
-                          </span>
-                        ))}
-                        {guest.preferences.length > 3 && (
-                          <span className="text-[8px] text-zinc-600 font-bold ml-1">+{guest.preferences.length - 3}</span>
-                        )}
-                      </div>
+                  <div className="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
+                    <div className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">
+                      Last: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yy') : 'Never'}
                     </div>
-                  )}
-                </div>
-                <div className="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
-                  <div className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">
-                    Last: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yy') : 'Never'}
+                    <ChevronRight size={12} className="text-zinc-800" />
                   </div>
-                  <ChevronRight size={12} className="text-zinc-800" />
-                </div>
-              </motion.div>
-            ))
+                </motion.div>
+              );
+            })
+          )}
+          {filteredGuests.length > visibleCount && (
+            <div ref={bottomRef} className="col-span-full h-8 flex items-center justify-center text-zinc-500 text-xs font-bold uppercase tracking-widest animate-pulse">
+              Loading more guests...
+            </div>
           )}
         </AnimatePresence>
       </div>
@@ -1474,9 +1610,17 @@ export function GuestManagement() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95"
+                  disabled={isSavingGuest}
+                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
                 >
-                  {editingGuest ? 'Update Guest' : 'Add Guest'}
+                  {isSavingGuest ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    editingGuest ? 'Update Guest' : 'Add Guest'
+                  )}
                 </button>
               </div>
             </form>
