@@ -220,26 +220,35 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         }
       }
       
-      const existingCharges = ledgerEntries.filter(e => e.category === 'room' && e.type === 'debit').length;
-      
-      if (existingCharges < targetCharges) {
-        const nightsToCharge = targetCharges - existingCharges;
-        const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
+      let nightsPosted = 0;
+      for (let i = 0; i < targetCharges; i++) {
+        const chargeDate = addDays(startOfDay(checkInDateTime), i);
+        const dateStr = format(chargeDate, 'MMM dd, yyyy');
         
-        for (let i = 0; i < nightsToCharge; i++) {
-          const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+        const alreadyCharged = ledgerEntries.some(e => 
+          e.category === 'room' && 
+          e.type === 'debit' && 
+          e.description?.includes(dateStr)
+        );
+        
+        if (!alreadyCharged) {
           const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
+          const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
           
           await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
             amount: rate,
             type: 'debit',
             category: 'room',
-            description: `${isOverstay ? 'Overstay' : 'Manual Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+            description: `${isOverstay ? 'Overstay' : 'Manual Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${dateStr})`,
             referenceId: currentReservation.id,
             postedBy: profile.uid
           }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+          nightsPosted++;
         }
-        toast.success(`Posted ${nightsToCharge} nightly charge(s)`);
+      }
+      
+      if (nightsPosted > 0) {
+        toast.success(`Posted ${nightsPosted} nightly charge(s)`);
       } else {
         toast.info('All nights are already charged up to date.');
       }
@@ -684,26 +693,35 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         }
       }
       
-      const existingCharges = ledgerEntries.filter(e => e.category === 'room' && e.type === 'debit').length;
-      
-      if (existingCharges < targetCharges) {
-        const nightsToCharge = targetCharges - existingCharges;
-        const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
+      let nightsPosted = 0;
+      for (let i = 0; i < targetCharges; i++) {
+        const chargeDate = addDays(startOfDay(checkInDateTime), i);
+        const dateStr = format(chargeDate, 'MMM dd, yyyy');
         
-        for (let i = 0; i < nightsToCharge; i++) {
-          const chargeDate = addDays(startOfDay(checkInDateTime), existingCharges + i);
+        const alreadyCharged = ledgerEntries.some(e => 
+          e.category === 'room' && 
+          e.type === 'debit' && 
+          e.description?.includes(dateStr)
+        );
+        
+        if (!alreadyCharged) {
           const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
+          const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
           
           await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
             amount: rate,
             type: 'debit',
             category: 'room',
-            description: `${isOverstay ? 'Overstay' : 'Automated Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+            description: `${isOverstay ? 'Overstay' : 'Automated Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${dateStr})`,
             referenceId: currentReservation.id,
             postedBy: profile.uid
           }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+          nightsPosted++;
         }
-        toast.info(`Accrued ${nightsToCharge} night stays automatically.`);
+      }
+      
+      if (nightsPosted > 0) {
+        toast.info(`Accrued ${nightsPosted} night stays automatically.`);
       }
     } catch (err: any) {
       console.error("Auto sync nightly charges error:", err);

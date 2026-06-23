@@ -48,7 +48,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
 
@@ -235,7 +235,7 @@ export function Reports() {
         case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
         case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Transaction ID'];
         case 'balance': return ['Guest Name', 'Room', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
-        case 'rooms': return ['Room #', 'Type', 'Status', 'Total Revenue', 'Occupancy Count'];
+        case 'rooms': return ['Room #', 'Type', 'Status', 'Expected Revenue', 'Paid Revenue', 'Outstanding Balance', 'Occupancy Count'];
         case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Visits', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
@@ -293,7 +293,7 @@ export function Reports() {
             Arrival: res.checkIn,
             Departure: res.checkOut,
             Nights: res.nights || 0,
-            Balance: calculateBilling(res, hotel).outstandingBalance,
+            Balance: getReservationLiveBalance(res, hotel),
             _id: res.id,
             _collection: 'reservations',
             _label: `In-House Reservation: ${res.guestName}`
@@ -433,7 +433,7 @@ export function Reports() {
               Phone: guest?.phone || 'N/A',
               'Total Charges': billingState.totalCharges,
               'Total Paid': billingState.totalPayments,
-              Balance: billingState.outstandingBalance,
+              Balance: getReservationLiveBalance(res, hotel),
               _id: res.id,
               _collection: 'reservations',
               _label: `Balance Record: ${res.guestName}`

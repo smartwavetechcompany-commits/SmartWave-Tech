@@ -29,7 +29,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { 
   ResponsiveContainer, 
   AreaChart, 
@@ -1161,8 +1161,7 @@ export function OperationsDashboard() {
                     </td>
                     <td className="px-6 py-4">
                       {(() => {
-                        const billingState = calculateBilling(res, hotel);
-                        const bal = billingState.outstandingBalance;
+                        const bal = getReservationLiveBalance(res, hotel);
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;

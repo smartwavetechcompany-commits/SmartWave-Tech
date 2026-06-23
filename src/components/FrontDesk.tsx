@@ -54,7 +54,7 @@ import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1639,38 +1639,42 @@ export function FrontDesk() {
         const existingCharges = roomChargeEntries.length;
         
         let finalTotalDebits = roomChargeEntries.reduce((acc, doc) => acc + doc.data().amount, 0);
+        const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
 
-        if (existingCharges < nightsStayed) {
-          const nightsToCharge = nightsStayed - existingCharges;
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          
-          for (let i = 0; i < nightsToCharge; i++) {
-            const chargeDate = addDays(startOfDay(checkInDate), existingCharges + i);
+        for (let i = 0; i < nightsStayed; i++) {
+          const chargeDate = addDays(startOfDay(checkInDate), i);
+          const dateStr = format(chargeDate, 'MMM dd, yyyy');
+
+          const alreadyCharged = roomChargeEntries.some(doc => {
+            const data = doc.data();
+            return data.description?.includes(dateStr);
+          });
+
+          if (!alreadyCharged) {
             await postToLedger(hotel.id, res.guestId!, res.id, {
               amount: rate,
               type: 'debit',
               category: 'room',
-              description: `Final Room Charge: ${res.roomNumber} (Night of ${format(chargeDate, 'MMM dd, yyyy')})`,
+              description: `Final Room Charge: ${res.roomNumber} (Night of ${dateStr})`,
               referenceId: res.id,
               postedBy: profile.uid
             }, profile.uid, res.corporateId);
             finalTotalDebits += rate;
           }
-        } else if (existingCharges > nightsStayed) {
-          const nightsToRefund = existingCharges - nightsStayed;
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          
-          for (let i = 0; i < nightsToRefund; i++) {
-            await postToLedger(hotel.id, res.guestId!, res.id, {
-              amount: rate,
-              type: 'credit',
-              category: 'refund',
-              description: `Room Charge Refund: ${res.roomNumber} (Early Checkout)`,
-              referenceId: res.id,
-              postedBy: profile.uid
-            }, profile.uid, res.corporateId);
-            finalTotalDebits -= rate;
-          }
+        }
+
+        const expectedTotalCharges = nightsStayed * rate;
+        if (finalTotalDebits > expectedTotalCharges + 0.01) {
+          const excessAmount = finalTotalDebits - expectedTotalCharges;
+          await postToLedger(hotel.id, res.guestId!, res.id, {
+            amount: excessAmount,
+            type: 'credit',
+            category: 'refund',
+            description: `Room Charge Refund: ${res.roomNumber} (Early Checkout adjustment)`,
+            referenceId: res.id,
+            postedBy: profile.uid
+          }, profile.uid, res.corporateId);
+          finalTotalDebits -= excessAmount;
         }
 
         // 2. Check if ledger is settled (for individual guests)
@@ -3709,9 +3713,7 @@ export function FrontDesk() {
                     </div>
                     <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
-                        const projectedCharge = res.status === 'checked_in' ? billing.projectedRoomCharge : 0;
-                        const rawBal = (res.ledgerBalance !== undefined ? res.ledgerBalance : ((res.totalAmount || 0) - (res.paidAmount || 0) - (res.totalDiscount || 0))) + projectedCharge;
-                        const bal = isNaN(rawBal) ? 0 : rawBal;
+                        const bal = getReservationLiveBalance(res, hotel);
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;

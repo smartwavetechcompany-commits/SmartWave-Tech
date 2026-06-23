@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { 
   Users, 
   Plus, 
@@ -112,8 +112,7 @@ export function GuestManagement() {
     const liveOwed = resList
       .filter(r => r.status === 'checked_in' || r.status === 'checked_out')
       .reduce((sum, r) => {
-        const billing = calculateBilling(r, hotel);
-        return sum + billing.outstandingBalance;
+        return sum + getReservationLiveBalance(r, hotel);
       }, 0);
     return Math.abs(liveOwed) > 0.01 ? liveOwed : (guest.ledgerBalance || 0);
   };

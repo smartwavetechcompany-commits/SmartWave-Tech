@@ -1150,9 +1150,14 @@ export function Finance() {
                                   setShowSettleModal(guest);
                                   setSettleData({ ...settleData, splits: [{ amount: Math.abs(guest.ledgerBalance || 0), method: 'cash' }] });
                                 }}
-                                className="text-xs font-bold text-emerald-500 hover:text-emerald-400"
+                                className={cn(
+                                  "text-xs font-bold",
+                                  (guest.ledgerBalance || 0) < -0.01 
+                                    ? "text-red-400 hover:text-red-300" 
+                                    : "text-emerald-500 hover:text-emerald-400"
+                                )}
                               >
-                                Settle
+                                {(guest.ledgerBalance || 0) < -0.01 ? 'Refund' : 'Settle'}
                               </button>
                               <button
                                 onClick={() => {

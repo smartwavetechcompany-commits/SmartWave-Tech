@@ -169,3 +169,40 @@ export function calculateBilling(
     unpostedPrepayment: Number((isNaN(unpostedPrepayment) ? 0 : unpostedPrepayment).toFixed(2))
   };
 }
+
+/**
+ * Calculates a live reservation balance by combining the ledger balance (actual posted debits/credits)
+ * and the unposted room charges (based on expected vs posted room charges) to ensure no double-counting occurs.
+ */
+export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null): number {
+  const billing = calculateBilling(res, hotel);
+  
+  if (res.ledgerBalance === undefined) {
+    return billing.outstandingBalance;
+  }
+  
+  const originalNights = res.nights || 1;
+  let postedRoomNights = 0;
+  
+  if (res.status === 'checked_in') {
+    try {
+      const today = startOfDay(new Date());
+      const checkInDate = startOfDay(parseISO(res.checkIn));
+      const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
+      
+      // We always post at least 1 night on check-in, up to the expected nights played
+      postedRoomNights = Math.min(billing.nightsCount, Math.max(1, elapsedNights));
+    } catch (e) {
+      postedRoomNights = originalNights;
+    }
+  } else if (res.status === 'checked_out') {
+    postedRoomNights = billing.nightsCount;
+  } else {
+    postedRoomNights = 0;
+  }
+  
+  const estimatedPostedRoomCharges = postedRoomNights * billing.nightlyRate;
+  const postedExtraCharges = Math.max(0, res.ledgerBalance + (res.paidAmount || 0) - estimatedPostedRoomCharges);
+  
+  return billing.outstandingBalance + postedExtraCharges;
+}
