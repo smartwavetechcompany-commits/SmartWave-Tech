@@ -66,7 +66,7 @@ export const BillingService = {
     const { checkInDateTime, originalNights } = this.calculateStayWindow(res, hotel);
     const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
 
-    if (currentTime < checkInDateTime) {
+    if (currentTime < checkInDateTime && res.status !== 'checked_in' && res.status !== 'checked_out') {
       return 0;
     }
 

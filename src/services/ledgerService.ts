@@ -619,18 +619,24 @@ export const processAutomatedBillingForReservation = async (
       : parseLocalDateTime(format(addDays(checkInDateTime, i - 1), 'yyyy-MM-dd'), checkOutTime);
     const End = parseLocalDateTime(format(addDays(checkInDateTime, i), 'yyyy-MM-dd'), checkOutTime);
 
-    // This night is chargeable if currentTime is past its start time
-    if (currentTime >= Start) {
+    // This night is chargeable if currentTime is past its start time, OR if it's the first night (since guest has checked in)
+    const isNightChargeable = i === 1 || currentTime >= Start;
+    if (isNightChargeable) {
       const startStr = Start.toISOString();
       const endStr = End.toISOString();
 
       // Check if already posted
-      const exists = ledgerEntries.some(e => 
-        e.chargePeriodStart === startStr && 
-        e.chargePeriodEnd === endStr && 
-        e.chargeType === 'room_rate' && 
-        e.type === 'debit'
-      );
+      const exists = ledgerEntries.some(e => {
+        // Match exact period if available
+        if (e.chargePeriodStart === startStr && e.chargePeriodEnd === endStr && e.chargeType === 'room_rate' && e.type === 'debit') {
+          return true;
+        }
+        // Fallback: if i === 1 and there is ANY room debit in the ledger, treat it as representing Night 1
+        if (i === 1 && e.category === 'room' && e.type === 'debit') {
+          return true;
+        }
+        return false;
+      });
 
       if (!exists) {
         await postToLedger(hotel.id, res.guestId, res.id, {

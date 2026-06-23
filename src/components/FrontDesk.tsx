@@ -54,7 +54,7 @@ import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
-import { calculateBilling, getReservationLiveBalance, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1488,18 +1488,40 @@ export function FrontDesk() {
           const roomType = roomTypes.find(t => t.id === selectedRoom?.roomTypeId || t.name === selectedRoom?.type);
           await roomService.triggerInventoryConsumption(hotel.id, roomType?.id || '', 'check_in', profile.uid);
 
-          // Post ONLY the first night's charge at check-in
+          // Post ONLY the first night's charge at check-in, if not already posted
           const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          const checkInDate = new Date(res.checkIn);
-          
-          await postToLedger(hotel.id, res.guestId, res.id, {
-            amount: rate,
-            type: 'debit',
-            category: 'room',
-            description: `Room Charge: Room ${res.roomNumber} (Night of ${format(checkInDate, 'MMM dd, yyyy')})`,
-            referenceId: res.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId);
+          const { checkInDateTime } = BillingService.calculateStayWindow(res, hotel);
+          const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
+          const Start = checkInDateTime;
+          const End = parseLocalDateTime(format(addDays(checkInDateTime, 1), 'yyyy-MM-dd'), checkOutTime);
+          const startStr = Start.toISOString();
+          const endStr = End.toISOString();
+
+          // Query to see if any room charge already exists for this reservation to avoid duplicates
+          const ledgerQ = query(
+            collection(db, 'hotels', hotel.id, 'ledger'),
+            where('reservationId', '==', res.id),
+            where('category', '==', 'room'),
+            where('type', '==', 'debit')
+          );
+          const ledgerSnap = await getDocs(ledgerQ);
+          const alreadyHasRoomCharge = !ledgerSnap.empty;
+
+          if (!alreadyHasRoomCharge) {
+            await postToLedger(hotel.id, res.guestId, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Room Charge: Room ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')})`,
+              referenceId: res.id,
+              postedBy: profile.uid,
+              chargePeriodStart: startStr,
+              chargePeriodEnd: endStr,
+              chargeType: 'room_rate'
+            }, profile.uid, res.corporateId);
+          } else {
+            console.log(`[CheckIn] Skipped room charge for reservation ${res.id} because one already exists.`);
+          }
 
           // Taxes are automatically posted by postToLedger if it's a room charge
 
