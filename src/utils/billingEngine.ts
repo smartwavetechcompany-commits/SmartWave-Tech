@@ -70,8 +70,8 @@ export function calculateBilling(
     }
   }
 
-  const grossBaseStayAmount = res.totalAmount - (res.taxDetails?.reduce((acc, t) => acc + (t.amount || 0), 0) || 0);
-  const nightlyRate = res.nightlyRate || (originalNights > 0 ? (grossBaseStayAmount / originalNights) : 0) || 0;
+  // Inclusive Taxes: Rule 1 dictates all room rates are inclusive of tax. Do not subtract taxes to compute nightly rate.
+  const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
   const extraNights = Math.max(0, expectedNightsCount - originalNights);
   const overstayCharge = extraNights * nightlyRate;
 
@@ -110,32 +110,45 @@ export function calculateBilling(
     totalCharges = totalPostedDebits + projectedRoomCharge;
     totalPayments = ledgerCreditsSum + unpostedPrepayment;
   } else {
-    // Estimate posted room charges based on elapsed nights (matching the autoNightDeduction logic)
+    // Estimate posted room charges based on physical stay status in the database to prevent double counting
     let postedRoomChargesSum = 0;
-    if (res.status === 'checked_in' && res.autoNightDeduction) {
-      try {
-        const today = startOfDay(new Date());
-        const checkInDate = startOfDay(parseISO(res.checkIn));
-        const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
-        const scheduledNights = res.nights || 1;
-        
-        let targetCharges = elapsedNights;
-        if (hotel && hotel.autoChargeOverstays !== false) {
-          const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-          const [hours, minutes] = overstayTime.split(':').map(Number);
-          const now = new Date();
-          const todayOverstayThreshold = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours || 12, minutes || 0, 0, 0);
+    if (res.status === 'checked_out') {
+      postedRoomChargesSum = expectedNightsCount * nightlyRate;
+    } else if (res.status === 'checked_in') {
+      if (res.autoNightDeduction) {
+        try {
+          const today = startOfDay(new Date());
+          const checkInDate = startOfDay(parseISO(res.checkIn));
+          const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
+          const scheduledNights = res.nights || 1;
           
-          if (now.getTime() > todayOverstayThreshold.getTime()) {
-            targetCharges += 1;
+          let targetCharges = elapsedNights;
+          if (hotel && hotel.autoChargeOverstays !== false) {
+            const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
+            const [hours, minutes] = overstayTime.split(':').map(Number);
+            const now = new Date();
+            const todayOverstayThreshold = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours || 12, minutes || 0, 0, 0);
+            
+            if (now.getTime() > todayOverstayThreshold.getTime()) {
+              targetCharges += 1;
+            }
           }
+          targetCharges = Math.max(targetCharges, Math.min(scheduledNights, elapsedNights + 1));
+          
+          postedRoomChargesSum = targetCharges * nightlyRate;
+        } catch (e) {
+          console.error("Error estimating posted room charges:", e);
         }
-        targetCharges = Math.max(targetCharges, Math.min(scheduledNights, elapsedNights + 1));
-        
-        // Compute postedRoomChargesSum from targetCharges
-        postedRoomChargesSum = targetCharges * nightlyRate;
-      } catch (e) {
-        console.error("Error estimating posted room charges:", e);
+      } else {
+        // If autoNightDeduction is disabled, assume at least 1 night (or elapsed) was posted on check-in
+        try {
+          const today = startOfDay(new Date());
+          const checkInDate = startOfDay(parseISO(res.checkIn));
+          const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
+          postedRoomChargesSum = Math.max(1, elapsedNights) * nightlyRate;
+        } catch (e) {
+          postedRoomChargesSum = nightlyRate;
+        }
       }
     }
     projectedRoomCharge = Math.max(0, (expectedNightsCount * nightlyRate) - postedRoomChargesSum);
@@ -172,37 +185,24 @@ export function calculateBilling(
 
 /**
  * Calculates a live reservation balance by combining the ledger balance (actual posted debits/credits)
- * and the unposted room charges (based on expected vs posted room charges) to ensure no double-counting occurs.
+ * and the unposted room charges to ensure no double-counting occurs.
  */
 export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null): number {
-  const billing = calculateBilling(res, hotel);
-  
   if (res.ledgerBalance === undefined) {
+    const billing = calculateBilling(res, hotel);
     return billing.outstandingBalance;
   }
   
-  const originalNights = res.nights || 1;
-  let postedRoomNights = 0;
-  
-  if (res.status === 'checked_in') {
-    try {
-      const today = startOfDay(new Date());
-      const checkInDate = startOfDay(parseISO(res.checkIn));
-      const elapsedNights = Math.max(0, differenceInDays(today, checkInDate));
-      
-      // We always post at least 1 night on check-in, up to the expected nights played
-      postedRoomNights = Math.min(billing.nightsCount, Math.max(1, elapsedNights));
-    } catch (e) {
-      postedRoomNights = originalNights;
-    }
-  } else if (res.status === 'checked_out') {
-    postedRoomNights = billing.nightsCount;
-  } else {
-    postedRoomNights = 0;
+  if (res.status === 'checked_out' || res.status === 'cancelled') {
+    return res.ledgerBalance;
   }
   
-  const estimatedPostedRoomCharges = postedRoomNights * billing.nightlyRate;
-  const postedExtraCharges = Math.max(0, res.ledgerBalance + (res.paidAmount || 0) - estimatedPostedRoomCharges);
+  if (res.status === 'checked_in') {
+    const billing = calculateBilling(res, hotel);
+    return res.ledgerBalance + billing.projectedRoomCharge;
+  }
   
-  return billing.outstandingBalance + postedExtraCharges;
+  // Pending, Confirmed, Cancelled, No Show
+  const billing = calculateBilling(res, hotel);
+  return billing.outstandingBalance;
 }
