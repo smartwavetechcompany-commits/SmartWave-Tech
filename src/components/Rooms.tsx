@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, doc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
+import { collection, getDocs, query, doc, onSnapshot, writeBatch, increment, getDoc, setDoc, arrayUnion, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, OperationType, RoomType, Reservation, UserProfile, RoomBlocking, RateConfiguration, InventoryConsumptionRule, InventoryItem } from '../types';
+import { Room, OperationType, RoomType, Reservation, UserProfile, RoomBlocking, RateConfiguration, InventoryConsumptionRule, InventoryItem, LedgerEntry } from '../types';
 import { 
   Plus, 
   Search, 
@@ -36,10 +36,12 @@ import {
   Package
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
-import { canBlockRoom, canUnblockRoom } from '../utils/policyUtils';
+import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
+import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { postToLedger, transferToCityLedger } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore } from 'date-fns';
+import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
 import { roomService } from '../services/roomService';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
 
@@ -545,6 +547,238 @@ export function Rooms() {
 
   const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
     if (!hotel?.id || !profile) return;
+    
+    // Comprehensive Check-Out logic
+    if (status === 'checked_out') {
+      const policy = canCheckout(hotel, profile, res);
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Check-out denied by hotel policy');
+        return;
+      }
+
+      const toastId = toast.loading("Processing check-out, please wait...");
+      try {
+        const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
+        const now = new Date();
+        const billingState = calculateBilling(res, hotel);
+        const nightsStayed = billingState.nightsCount;
+        const checkInDate = startOfDay(new Date(res.checkIn));
+        
+        // Ensure all room charges are posted
+        const ledgerQ = query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id)
+        );
+        const ledgerSnap = await getDocs(ledgerQ);
+        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
+          const data = doc.data();
+          return data.category === 'room' && data.type === 'debit';
+        });
+        
+        let finalTotalDebits = roomChargeEntries.reduce((acc, doc) => acc + doc.data().amount, 0);
+        const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+
+        for (let i = 0; i < nightsStayed; i++) {
+          const chargeDate = addDays(startOfDay(checkInDate), i);
+          const dateStr = format(chargeDate, 'MMM dd, yyyy');
+
+          const alreadyCharged = roomChargeEntries.some(doc => {
+            const data = doc.data();
+            if (data.description?.includes(dateStr)) return true;
+            if (data.chargePeriodStart) {
+              const pStart = startOfDay(new Date(data.chargePeriodStart));
+              if (format(pStart, 'yyyy-MM-dd') === format(chargeDate, 'yyyy-MM-dd')) return true;
+            }
+            return false;
+          });
+
+          if (!alreadyCharged) {
+            await postToLedger(hotel.id, res.guestId!, res.id, {
+              amount: rate,
+              type: 'debit',
+              category: 'room',
+              description: `Final Room Charge: ${res.roomNumber} (Night of ${dateStr})`,
+              referenceId: res.id,
+              postedBy: profile.uid
+            }, profile.uid, res.corporateId);
+            finalTotalDebits += rate;
+          }
+        }
+
+        const expectedTotalCharges = nightsStayed * rate;
+        if (finalTotalDebits > expectedTotalCharges + 0.01) {
+          const excessAmount = finalTotalDebits - expectedTotalCharges;
+          await postToLedger(hotel.id, res.guestId!, res.id, {
+            amount: excessAmount,
+            type: 'credit',
+            category: 'refund',
+            description: `Room Charge Refund: ${res.roomNumber} (Early Checkout adjustment)`,
+            referenceId: res.id,
+            postedBy: profile.uid
+          }, profile.uid, res.corporateId);
+        }
+
+        // Fetch latest outstanding balance from reservation document
+        const freshResSnap = await getDoc(resRef);
+        const freshResData = freshResSnap.data() as Reservation;
+        const outstandingBalance = freshResData.ledgerBalance || 0;
+        const totalDebits = billingState.totalCharges;
+
+        let blockCheckout = false;
+        let blockMessage = '';
+
+        if (!res.corporateId && outstandingBalance > 0.01) {
+          const policyResult = canCheckout(hotel, profile, { ...freshResData, ledgerBalance: outstandingBalance });
+          if (!policyResult.allowed) {
+            blockCheckout = true;
+            blockMessage = policyResult.message || `Full payment is required before checkout. Outstanding balance is ${formatCurrency(outstandingBalance, currency, exchangeRate)}.`;
+          }
+        }
+
+        if (blockCheckout) {
+          toast.error(blockMessage, { id: toastId });
+          return;
+        }
+
+        if (!res.corporateId && outstandingBalance > 0.01) {
+          if (hotel.settings?.checkout?.enableUnpaidWarningPopup) {
+            const confirmOut = window.confirm(`WARNING: Guest has an outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)}. Are you sure you want to proceed with checking them out?`);
+            if (!confirmOut) {
+              toast.dismiss(toastId);
+              return;
+            }
+          }
+        }
+
+        // Update reservation
+        await database.safeUpdate(resRef, { 
+          status: 'checked_out',
+          totalAmount: totalDebits,
+          nights: nightsStayed,
+          checkOut: format(now, 'yyyy-MM-dd'),
+          checkOutTime: format(now, 'HH:mm'),
+          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+        }, {
+          hotelId: hotel.id,
+          module: 'Rooms',
+          action: 'FINALIZE_CHECKOUT',
+          details: `Finalized checkout for reservation ${res.id}`
+        });
+
+        // Mark room as dirty
+        const syncStatus = hotel.settings?.housekeeping?.autoSyncStatusAfterCheckout ?? true;
+        const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
+        await database.safeUpdate(roomRef, { 
+          status: syncStatus ? 'dirty' : 'clean',
+          housekeepingStatus: syncStatus ? 'dirty' : 'clean',
+          currentGuestId: null,
+          currentReservationId: null
+        }, {
+          hotelId: hotel.id,
+          module: 'Housekeeping',
+          action: 'ROOM_VACATED',
+          details: `Room ${res.roomNumber} vacated and marked ${syncStatus ? 'dirty' : 'clean'}`
+        });
+
+        // Update guest statistics
+        if (res.guestId) {
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
+          const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
+          await database.safeUpdate(guestRef, {
+            totalNights: increment(nights),
+            totalSpent: increment(totalDebits),
+            stayHistory: arrayUnion({
+              reservationId: res.id,
+              roomNumber: res.roomNumber,
+              checkIn: res.checkIn,
+              checkOut: format(now, 'yyyy-MM-dd'),
+              totalAmount: totalDebits
+            })
+          }, {
+            hotelId: hotel.id,
+            module: 'Guests',
+            action: 'UPDATE_GUEST_STATS',
+            details: `Updated stats for guest ${res.guestId} after stay`
+          });
+        }
+
+        // Write to checkout history collection
+        try {
+          const checkoutHistoryRef = doc(db, 'hotels', hotel.id, 'checkout_history', res.id);
+          await setDoc(checkoutHistoryRef, {
+            id: res.id,
+            reservationId: res.id,
+            guestId: res.guestId || 'unknown_guest',
+            guestName: res.guestName,
+            guestEmail: res.guestEmail || '',
+            guestPhone: res.guestPhone || '',
+            roomNumber: res.roomNumber,
+            roomId: res.roomId,
+            checkIn: res.checkIn,
+            checkOut: format(now, 'yyyy-MM-dd'),
+            checkOutTime: format(now, 'HH:mm'),
+            checkOutTimestamp: now.toISOString(),
+            bookedBy: res.bookedBy || '',
+            checkedOutBy: profile.email || 'System',
+            status: 'checked_out',
+            ledgerBalance: outstandingBalance,
+            totalAmount: totalDebits,
+            paidAmount: res.paidAmount || 0,
+            paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+          });
+        } catch (err) {
+          console.error("Failed to write to checkout_history:", err);
+        }
+
+        // Calculate guest balance vs corporate balance
+        const freshLedgerQ = query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id)
+        );
+        const freshLedgerSnap = await getDocs(freshLedgerQ);
+        const freshEntries = freshLedgerSnap.docs.map(doc => doc.data() as LedgerEntry);
+        
+        const guestBalance = freshEntries
+          .filter(e => !e.corporateId)
+          .reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+
+        if (res.corporateId && guestBalance > 0.01) {
+          await transferToCityLedger(hotel.id, res.guestId!, res.id, guestBalance, profile.uid, res.corporateId);
+          toast.success(`Individual guest balance of ${formatCurrency(guestBalance, currency, exchangeRate)} transferred to City Ledger.`, { id: toastId });
+        } else if (!res.corporateId && outstandingBalance > 0 && hotel.settings?.checkout?.autoMarkUnpaidAsDebt) {
+          await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
+          toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} marked as Debt (Transferred to City Ledger).`, { id: toastId });
+        } else {
+          toast.success(`Guest checked out successfully`, { id: toastId });
+        }
+
+        // Log action
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+          timestamp: new Date().toISOString(),
+          userId: profile.uid,
+          userEmail: profile.email,
+          userRole: profile.role,
+          action: 'RESERVATION_STATUS_UPDATE',
+          resource: `Reservation for ${res.guestName} updated to checked_out`,
+          hotelId: hotel.id,
+          module: 'Rooms'
+        }, {
+          hotelId: hotel.id,
+          module: 'Rooms',
+          action: 'ACTIVITY_LOG_CREATE',
+          details: 'Reservation status update activity from Rooms'
+        });
+
+        setShowQuickActionMenu(false);
+        setSelectedReservation(null);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/reservations/${res.id}`);
+        toast.error('Failed to complete checkout', { id: toastId });
+      }
+      return;
+    }
+
+    // Normal non-checkout status update
     try {
       const batch = writeBatch(db);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
@@ -553,8 +787,6 @@ export function Rooms() {
       
       if (status === 'checked_in') {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });
-      } else if (status === 'checked_out') {
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'dirty' });
       }
 
       await database.commitBatch(hotel.id, batch, {

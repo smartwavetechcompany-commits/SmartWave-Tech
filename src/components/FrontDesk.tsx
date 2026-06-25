@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -1739,11 +1739,22 @@ export function FrontDesk() {
           });
         }
 
-        // 6. If corporate, transfer to City Ledger
-        if (res.corporateId && outstandingBalance > 0) {
-          await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid, res.corporateId);
-          toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} transferred to City Ledger.`);
-        } else if (outstandingBalance > 0 && hotel.settings?.checkout?.autoMarkUnpaidAsDebt) {
+        // 6. Calculate guest balance vs corporate balance from latest ledger entries to avoid double transfer/double-debiting
+        const freshLedgerQ = query(
+          collection(db, 'hotels', hotel.id, 'ledger'),
+          where('reservationId', '==', res.id)
+        );
+        const freshLedgerSnap = await getDocs(freshLedgerQ);
+        const freshEntries = freshLedgerSnap.docs.map(doc => doc.data() as LedgerEntry);
+        
+        const guestBalance = freshEntries
+          .filter(e => !e.corporateId)
+          .reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+
+        if (res.corporateId && guestBalance > 0.01) {
+          await transferToCityLedger(hotel.id, res.guestId!, res.id, guestBalance, profile.uid, res.corporateId);
+          toast.success(`Individual guest balance of ${formatCurrency(guestBalance, currency, exchangeRate)} transferred to City Ledger.`);
+        } else if (!res.corporateId && outstandingBalance > 0 && hotel.settings?.checkout?.autoMarkUnpaidAsDebt) {
           // If autoMarkUnpaidAsDebt is enabled, we could transfer to city ledger or just log it as debt
           // Let's use city ledger as it represents debt to the hotel
           await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
@@ -3952,6 +3963,34 @@ export function FrontDesk() {
                               >
                                 <LogOut size={18} />
                               </button>
+                            </>
+                          )}
+
+                          {res.status === 'checked_out' && (
+                            <>
+                              <button 
+                                type="button"
+                                onClick={() => setShowFolioModal(res)}
+                                className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                                title="Guest Folio"
+                              >
+                                <FileText size={18} />
+                              </button>
+                              {(res.ledgerBalance || 0) > 0.01 && (
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    const amount = prompt(`Enter payment amount to settle outstanding balance (max ${res.ledgerBalance}):`, String(res.ledgerBalance));
+                                    if (amount && !isNaN(Number(amount)) && Number(amount) > 0) {
+                                      updatePayment(res, Number(amount));
+                                    }
+                                  }}
+                                  className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                                  title="Settle Outstanding Balance"
+                                >
+                                  <DollarSign size={18} />
+                                </button>
+                              )}
                             </>
                           )}
                           
