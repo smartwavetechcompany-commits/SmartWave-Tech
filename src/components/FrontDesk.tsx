@@ -1602,7 +1602,12 @@ export function FrontDesk() {
 
           const alreadyCharged = roomChargeEntries.some(doc => {
             const data = doc.data();
-            return data.description?.includes(dateStr);
+            if (data.description?.includes(dateStr)) return true;
+            if (data.chargePeriodStart) {
+              const pStart = startOfDay(new Date(data.chargePeriodStart));
+              if (format(pStart, 'yyyy-MM-dd') === format(chargeDate, 'yyyy-MM-dd')) return true;
+            }
+            return false;
           });
 
           if (!alreadyCharged) {

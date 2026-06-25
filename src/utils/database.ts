@@ -150,7 +150,7 @@ export const database = {
           const newVal = (data as any)[key];
           // Use safeStringify for comparison to handle circular structures
           if (safeStringify(oldVal) !== safeStringify(newVal)) {
-            acc[key] = { from: oldVal, to: newVal };
+            acc[key] = { from: deepCloneSafe(oldVal), to: deepCloneSafe(newVal) };
           }
           return acc;
         }, {}) : (options.metadata?.changes || 'New document fields')

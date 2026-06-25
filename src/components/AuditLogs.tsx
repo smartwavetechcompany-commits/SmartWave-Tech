@@ -83,11 +83,11 @@ const renderPrettyValue = (value: any): React.ReactNode => {
                       .map(([k, v]) => (
                         <div key={k} className="flex justify-between items-center gap-4 bg-zinc-950/20 px-2 py-1.5 rounded-lg border border-zinc-800/10">
                           <span className="text-zinc-500 font-medium capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}:</span>
-                          <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]" title={String(typeof v === 'object' ? JSON.stringify(v) : v)}>
+                          <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]" title={String(typeof v === 'object' ? safeStringify(v) : v)}>
                             {typeof v === 'boolean' 
                               ? (v ? 'Yes' : 'No') 
                               : typeof v === 'object' 
-                                ? JSON.stringify(v) 
+                                ? safeStringify(v) 
                                 : String(v)}
                           </span>
                         </div>
@@ -126,7 +126,7 @@ const renderPrettyValue = (value: any): React.ReactNode => {
                 {typeof v === 'boolean' 
                   ? (v ? 'Yes' : 'No') 
                   : typeof v === 'object' 
-                    ? JSON.stringify(v) 
+                    ? safeStringify(v) 
                     : String(v)}
               </span>
             </div>
@@ -869,7 +869,7 @@ export function AuditLogs() {
                     ) : (
                       <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-3xl">
                         <pre className="text-[10px] text-zinc-400 font-mono overflow-auto max-h-[450px] custom-scrollbar">
-                          {JSON.stringify(selectedLog.metadata, null, 2)}
+                          {safeStringify(selectedLog.metadata)}
                         </pre>
                       </div>
                     )}

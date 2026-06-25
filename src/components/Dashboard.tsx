@@ -34,7 +34,7 @@ import {
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
 import { exportToCSV } from '../utils';
-import { format } from 'date-fns';
+import { format, isToday } from 'date-fns';
 import { toast } from 'sonner';
 
 export function Dashboard() {
@@ -91,7 +91,7 @@ export function Dashboard() {
         setBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
       });
  
-      unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), limit(100)), (snap) => {
+      unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(100)), (snap) => {
         const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
         setFinance(records);
  
@@ -153,7 +153,7 @@ export function Dashboard() {
         },
         { 
           label: 'Today Revenue', 
-          value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), 
+          value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp && isToday(new Date(f.timestamp))).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), 
           icon: TrendingUp, 
           color: 'text-amber-500',
           module: 'finance'
