@@ -234,7 +234,7 @@ export const postToLedger = async (
 
 
   // 6. Finance records
-  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.corporateId);
+  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund'));
   const financeRef = collection(db, 'hotels', hotelId, 'finance');
   payments.forEach(p => {
     const financeDocRef = doc(financeRef);
@@ -246,6 +246,7 @@ export const postToLedger = async (
       timestamp,
       paymentMethod,
       guestId,
+      corporateId: p.corporateId || null,
       referenceId: postedIds[entries.indexOf(p)],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()

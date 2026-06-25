@@ -169,6 +169,9 @@ export function FrontDesk() {
     notes: ''
   });
   const [isNegotiatedRate, setIsNegotiatedRate] = useState(false);
+  const [selectedRateType, setSelectedRateType] = useState<'auto' | 'base' | 'weekend' | 'weekday' | 'custom'>('auto');
+  const [customRateAmount, setCustomRateAmount] = useState<number>(0);
+  const [rateConfigs, setRateConfigs] = useState<any[]>([]);
 
   // Dynamic automatic overstay charges based on current time & settings
   useEffect(() => {
@@ -424,6 +427,10 @@ export function FrontDesk() {
       setCheckOutHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    const unsubRateConfigs = onSnapshot(collection(db, 'hotels', hotel.id, 'rate_configurations'), (snap) => {
+      setRateConfigs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubRes();
       unsubRooms();
@@ -434,6 +441,7 @@ export function FrontDesk() {
       unsubBlockings();
       unsubCheckInHist();
       unsubCheckOutHist();
+      unsubRateConfigs();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -545,15 +553,28 @@ export function FrontDesk() {
         }
       }
 
-      // 2. If not negotiated, check dynamic rate configuration
+      // 2. If not negotiated, check chosen rate option
       if (!negotiated) {
-        const dynamicRate = await roomService.calculateCurrentRate(
-          hotel.id, 
-          selectedRoom.roomTypeId || '', 
-          new Date(newBooking.checkIn)
-        );
-        if (dynamicRate > 0) {
-          pricePerNight = dynamicRate;
+        const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
+        
+        if (selectedRateType === 'base') {
+          pricePerNight = matchingConfig?.baseRate || selectedRoom.price;
+        } else if (selectedRateType === 'weekend') {
+          pricePerNight = (matchingConfig?.weekendRate && matchingConfig.weekendRate > 0) ? matchingConfig.weekendRate : selectedRoom.price;
+        } else if (selectedRateType === 'weekday') {
+          pricePerNight = (matchingConfig?.weekdayRate && matchingConfig.weekdayRate > 0) ? matchingConfig.weekdayRate : selectedRoom.price;
+        } else if (selectedRateType === 'custom') {
+          pricePerNight = customRateAmount;
+        } else {
+          // 'auto' - check dynamic rate configuration
+          const dynamicRate = await roomService.calculateCurrentRate(
+            hotel.id, 
+            selectedRoom.roomTypeId || '', 
+            new Date(newBooking.checkIn)
+          );
+          if (dynamicRate > 0) {
+            pricePerNight = dynamicRate;
+          }
         }
       }
 
@@ -672,7 +693,7 @@ export function FrontDesk() {
     };
 
     calculatePrices();
-  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, newBooking.additionalStays, hotel, currency, exchangeRate]);
+  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, newBooking.additionalStays, hotel, currency, exchangeRate, selectedRateType, customRateAmount, rateConfigs]);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -915,6 +936,8 @@ export function FrontDesk() {
       }
 
       setIsBooking(false);
+      setSelectedRateType('auto');
+      setCustomRateAmount(0);
       setNewBooking({
         guestType: 'individual',
         guestId: '',
@@ -2723,6 +2746,119 @@ export function FrontDesk() {
                     );
                   })()}
                 </div>
+
+                {newBooking.roomId && (() => {
+                  const room = rooms.find(r => r.id === newBooking.roomId);
+                  if (!room) return null;
+                  const config = rateConfigs.find(rc => rc.roomTypeId === room.roomTypeId);
+                  
+                  const basePriceVal = config?.baseRate || room.price;
+                  const weekendPriceVal = config?.weekendRate || 0;
+                  const weekdayPriceVal = config?.weekdayRate || 0;
+
+                  return (
+                    <div className="col-span-2 space-y-2 mt-2">
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase">
+                        Select Rate Option
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRateType('auto');
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between h-18",
+                            selectedRateType === 'auto'
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                          )}
+                        >
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Auto (Dynamic)</span>
+                          <span className="text-xs font-semibold text-zinc-200 mt-1">System Managed</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRateType('base');
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between h-18",
+                            selectedRateType === 'base'
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                          )}
+                        >
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Base Rate</span>
+                          <span className="text-sm font-bold text-zinc-50 mt-1">{formatCurrency(basePriceVal, currency, exchangeRate)}</span>
+                        </button>
+                        {weekendPriceVal > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRateType('weekend');
+                            }}
+                            className={cn(
+                              "p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between h-18",
+                              selectedRateType === 'weekend'
+                                ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
+                                : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                            )}
+                          >
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Weekend Rate</span>
+                            <span className="text-sm font-bold text-zinc-50 mt-1">{formatCurrency(weekendPriceVal, currency, exchangeRate)}</span>
+                          </button>
+                        )}
+                        {weekdayPriceVal > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRateType('weekday');
+                            }}
+                            className={cn(
+                              "p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between h-18",
+                              selectedRateType === 'weekday'
+                                ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
+                                : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                            )}
+                          >
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Weekday Rate</span>
+                            <span className="text-sm font-bold text-zinc-50 mt-1">{formatCurrency(weekdayPriceVal, currency, exchangeRate)}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRateType('custom');
+                            if (customRateAmount === 0) setCustomRateAmount(basePriceVal);
+                          }}
+                          className={cn(
+                            "p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between h-18",
+                            selectedRateType === 'custom'
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                          )}
+                        >
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Custom Rate</span>
+                          <span className="text-xs font-semibold text-zinc-200 mt-1">Manual Override</span>
+                        </button>
+                      </div>
+
+                      {selectedRateType === 'custom' && (
+                        <div className="mt-2 flex items-center gap-2 max-w-xs animate-in fade-in slide-in-from-top-1 duration-200">
+                          <span className="text-xs font-semibold text-zinc-500 uppercase">Rate:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={customRateAmount}
+                            onChange={(e) => setCustomRateAmount(Number(e.target.value))}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl space-y-4">

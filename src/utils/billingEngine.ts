@@ -245,14 +245,25 @@ export const BillingService = {
       totalCharges = totalPostedDebits + projectedRoomCharge;
       totalPayments = ledgerCreditsSum + unpostedPrepayment;
     } else {
-      // Estimate based on database fields alone
-      let estimatedPostedCharges = 0;
-      if (res.status === 'checked_out') {
-        estimatedPostedCharges = totalStayCharge;
-      } else if (res.status === 'checked_in') {
-        estimatedPostedCharges = res.autoNightDeduction ? baseRoomCharge : nightlyRate;
+      // If ledgerBalance is available, we can deduce exactly how much room charge has already been posted
+      // Posted Room Charges + Posted Taxes = res.ledgerBalance + res.paidAmount - res.totalAmount + originalRoomStayTotal
+      if (res.ledgerBalance !== undefined) {
+        const originalRoomStayTotal = originalNights * nightlyRate;
+        const paidAmount = res.paidAmount || 0;
+        const totalAmount = res.totalAmount || 0;
+        const ledgerBalance = res.ledgerBalance || 0;
+        const postedRoomChargesSum = Math.max(0, ledgerBalance + paidAmount - totalAmount + originalRoomStayTotal);
+        projectedRoomCharge = Math.max(0, totalStayCharge - postedRoomChargesSum);
+      } else {
+        // Fallback estimate if ledgerBalance is not available
+        let estimatedPostedCharges = 0;
+        if (res.status === 'checked_out') {
+          estimatedPostedCharges = totalStayCharge;
+        } else if (res.status === 'checked_in') {
+          estimatedPostedCharges = res.autoNightDeduction ? baseRoomCharge : nightlyRate;
+        }
+        projectedRoomCharge = Math.max(0, totalStayCharge - estimatedPostedCharges);
       }
-      projectedRoomCharge = Math.max(0, totalStayCharge - estimatedPostedCharges);
     }
 
     // Safety checks
