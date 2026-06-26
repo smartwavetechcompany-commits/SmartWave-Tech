@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, writeBatch, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { LedgerEntry, Reservation, FinanceRecord, Hotel } from '../types';
 import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
@@ -32,6 +32,32 @@ export const postToLedger = async (
     }
   }
 
+  // Resolve finalCorporateId if not specified for a payment
+  let finalCorporateId = corporateId;
+  const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+  if (!finalCorporateId && entry.category === 'payment' && entry.type === 'credit') {
+    const resSnap = await getDoc(resRef);
+    if (resSnap.exists()) {
+      const resData = resSnap.data() as Reservation;
+      if (resData.corporateId) {
+        finalCorporateId = resData.corporateId;
+      } else {
+        // Query to see if there is any city ledger debit transfer entry
+        const q = query(
+          collection(db, 'hotels', hotelId, 'ledger'),
+          where('reservationId', '==', reservationId),
+          where('category', '==', 'city_ledger'),
+          where('type', '==', 'debit')
+        );
+        const querySnap = await getDocs(q);
+        const foundEntry = querySnap.docs.find(doc => doc.data().corporateId);
+        if (foundEntry) {
+          finalCorporateId = foundEntry.data().corporateId;
+        }
+      }
+    }
+  }
+
   const timestamp = new Date().toISOString();
   
   // 1. Prepare entries list
@@ -43,7 +69,7 @@ export const postToLedger = async (
     hotelId,
     guestId,
     reservationId,
-    corporateId,
+    corporateId: finalCorporateId,
     postedBy
   };
   entries.push(mainEntry);
@@ -95,7 +121,7 @@ export const postToLedger = async (
             hotelId,
             guestId,
             reservationId,
-            corporateId,
+            corporateId: finalCorporateId,
             type: 'debit',
             amount: taxAmount,
             description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
@@ -109,7 +135,7 @@ export const postToLedger = async (
             hotelId,
             guestId,
             reservationId,
-            corporateId,
+            corporateId: finalCorporateId,
             type: 'debit',
             amount: taxAmount,
             description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
@@ -128,7 +154,6 @@ export const postToLedger = async (
   }
 
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-  const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
   const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
   const batch = writeBatch(db);
   
@@ -514,6 +539,10 @@ export const transferToCityLedger = async (
       referenceId: reservationId,
       postedBy
     }, postedBy, corporateId);
+
+    // Link the reservation to the corporate account as well
+    const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+    await updateDoc(resRef, { corporateId });
   }
 };
 

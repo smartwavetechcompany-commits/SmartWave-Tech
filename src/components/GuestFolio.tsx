@@ -746,9 +746,34 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     !e.corporateId
   );
 
-  const displayedEntries = currentReservation.corporateId
+  let displayedEntries = currentReservation.corporateId
     ? (activeFolio === 'company' ? companyEntries : guestEntries)
     : ledgerEntries; // Show all for regular guest bookings
+
+  // Adjust guest folio display if the guest balance has been transferred to a corporate account
+  // but the corporate account does not have any money (i.e. corporate payments are zero or less than transferred amount)
+  if (currentReservation.corporateId && activeFolio === 'guest') {
+    const cityLedgerCredits = guestEntries.filter(e => e.category === 'city_ledger' && e.type === 'credit');
+    if (cityLedgerCredits.length > 0) {
+      const corpPayments = companyEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0);
+      const totalTransferred = cityLedgerCredits.reduce((acc, e) => acc + e.amount, 0);
+      const unpaidTransferred = Math.max(0, totalTransferred - corpPayments);
+      
+      if (unpaidTransferred > 0) {
+        // We only apply the paid portion of the corporate account.
+        // This makes sure both show the exact same outstanding balance.
+        let remainingCorpPayments = corpPayments;
+        displayedEntries = displayedEntries.map(entry => {
+          if (entry.category === 'city_ledger' && entry.type === 'credit') {
+            const applicableCredit = Math.min(entry.amount, remainingCorpPayments);
+            remainingCorpPayments -= applicableCredit;
+            return { ...entry, amount: applicableCredit };
+          }
+          return entry;
+        });
+      }
+    }
+  }
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
