@@ -1869,6 +1869,8 @@ export function Settings() {
                 onCancel={() => setShowConfirmSystemReset(false)}
                 type="danger"
                 confirmText="Yes, Reset Everything"
+                requireConfirmationText="CONFIRM PURGE"
+                confirmationPlaceholder="Type CONFIRM PURGE to clear all data"
               />
             </div>
           )}

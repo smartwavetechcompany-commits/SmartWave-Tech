@@ -12,6 +12,8 @@ interface ConfirmModalProps {
   cancelText?: string;
   type?: 'danger' | 'warning' | 'info';
   isLoading?: boolean;
+  requireConfirmationText?: string;
+  confirmationPlaceholder?: string;
 }
 
 export function ConfirmModal({
@@ -23,8 +25,19 @@ export function ConfirmModal({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   type = 'info',
-  isLoading = false
+  isLoading = false,
+  requireConfirmationText,
+  confirmationPlaceholder
 }: ConfirmModalProps) {
+  const [inputText, setInputText] = React.useState('');
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setInputText('');
+    }
+  }, [isOpen]);
+
+  const isConfirmDisabled = isLoading || (!!requireConfirmationText && inputText.trim() !== requireConfirmationText.trim());
   return (
     <AnimatePresence>
       {isOpen && (
@@ -52,7 +65,22 @@ export function ConfirmModal({
               </div>
               
               <h3 className="text-xl font-bold text-zinc-50 mb-2">{title}</h3>
-              <p className="text-zinc-400 text-sm mb-8">{message}</p>
+              <p className="text-zinc-400 text-sm mb-6">{message}</p>
+
+              {requireConfirmationText && (
+                <div className="w-full mb-8 text-left">
+                  <label className="text-xs font-bold text-zinc-500 uppercase block mb-2 text-center">
+                    Type <span className="text-red-400 font-mono select-all font-black bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">"{requireConfirmationText}"</span> to proceed
+                  </label>
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    placeholder={confirmationPlaceholder || "Type confirmation here..."}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-red-500/50 text-center font-bold text-sm tracking-wide"
+                  />
+                </div>
+              )}
 
               <div className="flex gap-3 w-full">
                 <button
@@ -66,12 +94,12 @@ export function ConfirmModal({
                     onConfirm();
                     if (!isLoading) onCancel();
                   }}
-                  disabled={isLoading}
+                  disabled={isConfirmDisabled}
                   className={`flex-1 py-3 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 ${
                     type === 'danger' ? 'bg-red-500 text-zinc-50 hover:bg-red-400' :
                     type === 'warning' ? 'bg-amber-500 text-black hover:bg-amber-400' :
                     'bg-emerald-500 text-black hover:bg-emerald-400'
-                  } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  } ${isConfirmDisabled ? 'opacity-40 cursor-not-allowed scale-100! active:scale-100!' : ''}`}
                 >
                   {isLoading && <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />}
                   {confirmText}

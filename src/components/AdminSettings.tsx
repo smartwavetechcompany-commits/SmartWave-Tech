@@ -477,6 +477,59 @@ export function AdminSettings() {
                 {renderToggle('notifications', 'sendRoomStatusAlerts', 'Cleaning Status Updates', 'Notify Front Desk when housekeeping completes a room.')}
                 {renderToggle('notifications', 'enableEmail', 'Email Bridge', 'Forward critical alerts to admin email address.')}
                 {renderToggle('notifications', 'enableSms', 'SMS Integration', 'Enable Short Message Service for emergency alerts (Requires config).')}
+                <div className="h-px bg-zinc-800 my-4" />
+                {renderToggle('notifications', 'enableLowBalanceAlerts', 'Enable Low Balance Alerts', 'Trigger real-time credit warnings whenever a corporate account available credit dips.')}
+                {renderToggle('notifications', 'lowBalanceAlertMinorDips', 'Alert on Every Minor Dip', 'If enabled, triggers alerts on every minor debt increase. If disabled, alerts only trigger when available credit breaches the major threshold limit.')}
+                
+                {((localSettings?.notifications as any)?.enableLowBalanceAlerts ?? true) && (
+                  <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-3">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-50">Notify Specific Finance Roles</p>
+                      <p className="text-xs text-zinc-500">Only users with the selected roles will receive low balance toast alerts.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'hotelAdmin', label: 'Admin (Full Access)' },
+                        { id: 'manager', label: 'Manager' },
+                        { id: 'accountant', label: 'Accountant' },
+                        { id: 'frontDesk', label: 'Front Desk' },
+                        { id: 'housekeeper', label: 'Housekeeper' },
+                        { id: 'maintenance', label: 'Maintenance' },
+                      ].map((role) => {
+                        const activeRoles = (localSettings?.notifications as any)?.lowBalanceAlertRoles ?? ['hotelAdmin', 'manager', 'accountant'];
+                        const isChecked = activeRoles.includes(role.id);
+                        return (
+                          <button
+                            key={role.id}
+                            type="button"
+                            onClick={() => {
+                              const updatedRoles = isChecked
+                                ? activeRoles.filter((r: string) => r !== role.id)
+                                : [...activeRoles, role.id];
+                              const updated = {
+                                ...localSettings,
+                                notifications: {
+                                  ...localSettings.notifications,
+                                  lowBalanceAlertRoles: updatedRoles,
+                                },
+                              };
+                              setLocalSettings(updated);
+                              saveSettings(updated, 'notifications', 'lowBalanceAlertRoles');
+                            }}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all border",
+                              isChecked
+                                ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 font-black"
+                                : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-300"
+                            )}
+                          >
+                            {role.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

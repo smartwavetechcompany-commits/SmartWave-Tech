@@ -33,12 +33,14 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { postToLedger } from '../services/ledgerService';
 import { parseLocalDateTime } from '../utils/billingEngine';
+import { useSettings } from '../hooks/useSettings';
 
 import { CorporateFolio } from './CorporateFolio';
 import { ConfirmModal } from './ConfirmModal';
 
 export function CorporateManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
   const [alertThreshold, setAlertThreshold] = useState<number>(() => {
@@ -53,6 +55,20 @@ export function CorporateManagement() {
   }, [alertThreshold]);
 
   useEffect(() => {
+    const enableLowBalanceAlerts = settings?.notifications?.enableLowBalanceAlerts ?? true;
+    const lowBalanceAlertRoles = settings?.notifications?.lowBalanceAlertRoles ?? ['hotelAdmin', 'manager', 'accountant'];
+    const lowBalanceAlertMinorDips = settings?.notifications?.lowBalanceAlertMinorDips ?? false;
+    const userRole = profile?.role || 'staff';
+
+    // Only proceed if low balance alerts are globally enabled and the current user's role is in the allowed roles
+    if (!enableLowBalanceAlerts || !lowBalanceAlertRoles.includes(userRole)) {
+      // Just keep track of balances without alerting
+      accounts.forEach(acc => {
+        prevBalancesRef.current[acc.id] = acc.currentBalance || 0;
+      });
+      return;
+    }
+
     accounts.forEach(acc => {
       const prevBal = prevBalancesRef.current[acc.id];
       const currentBal = acc.currentBalance || 0;
@@ -62,15 +78,23 @@ export function CorporateManagement() {
         const prevAvailableCredit = acc.creditLimit - prevBal;
         const currentAvailableCredit = acc.creditLimit - currentBal;
         
-        if (currentAvailableCredit < alertThreshold && prevAvailableCredit >= alertThreshold) {
-          toast.warning(`⚠️ CREDIT ALERT: ${acc.name}'s available credit has dipped below ${formatCurrency(alertThreshold, currency, exchangeRate)}! Current Available Credit: ${formatCurrency(currentAvailableCredit, currency, exchangeRate)}`, {
-            duration: 8000,
+        // Minor dip is any available credit decrease, major threshold breach is when available credit drops below alertThreshold
+        const isMajorBreach = currentAvailableCredit < alertThreshold && prevAvailableCredit >= alertThreshold;
+        const isMinorDip = lowBalanceAlertMinorDips;
+
+        if (isMajorBreach) {
+          toast.warning(`⚠️ CRITICAL CREDIT BREACH: ${acc.name}'s available credit has breached the major threshold of ${formatCurrency(alertThreshold, currency, exchangeRate)}! Current Available Credit: ${formatCurrency(currentAvailableCredit, currency, exchangeRate)}`, {
+            duration: 10000,
+          });
+        } else if (isMinorDip) {
+          toast.warning(`⚠️ CREDIT alert (Minor Dip): ${acc.name}'s available credit dipped to ${formatCurrency(currentAvailableCredit, currency, exchangeRate)} (decreased by ${formatCurrency(currentBal - prevBal, currency, exchangeRate)}).`, {
+            duration: 6000,
           });
         }
       }
       prevBalancesRef.current[acc.id] = currentBal;
     });
-  }, [accounts, alertThreshold, currency, exchangeRate]);
+  }, [accounts, alertThreshold, currency, exchangeRate, settings, profile?.role]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);

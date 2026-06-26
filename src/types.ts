@@ -191,6 +191,9 @@ export interface HotelSettings {
     sendRoomStatusAlerts: boolean;
     enableEmail: boolean;
     enableSms: boolean;
+    enableLowBalanceAlerts: boolean;
+    lowBalanceAlertRoles: string[];
+    lowBalanceAlertMinorDips: boolean;
   };
   security: {
     require2FAForAdmins: boolean;

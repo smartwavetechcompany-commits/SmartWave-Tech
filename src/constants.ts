@@ -117,6 +117,9 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     sendRoomStatusAlerts: true,
     enableEmail: true,
     enableSms: false,
+    enableLowBalanceAlerts: true,
+    lowBalanceAlertRoles: ['hotelAdmin', 'manager', 'accountant'],
+    lowBalanceAlertMinorDips: false,
   },
   security: {
     require2FAForAdmins: false,
