@@ -59,7 +59,7 @@ class ErrorService {
     };
 
     // 1. Log to console for dev
-    console.error(`[${context.module}] Error:`, error);
+    console.error(`[${context.module}] Error:`, error?.message || String(error));
 
     // 2. Log to Firestore if authenticated (background task)
     if (auth.currentUser) {
