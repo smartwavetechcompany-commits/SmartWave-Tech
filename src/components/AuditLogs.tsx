@@ -46,9 +46,20 @@ const renderPrettyValue = (value: any): React.ReactNode => {
       </span>
     );
   }
-  if (typeof value === 'object') {
-    if (Array.isArray(value)) {
-      if (value.length === 0) {
+
+  // Support stringified JSON objects
+  let parsedValue = value;
+  if (typeof value === 'string' && (value.trim().startsWith('{') || value.trim().startsWith('['))) {
+    try {
+      parsedValue = JSON.parse(value);
+    } catch (e) {
+      // Ignore parse failure
+    }
+  }
+
+  if (typeof parsedValue === 'object') {
+    if (Array.isArray(parsedValue)) {
+      if (parsedValue.length === 0) {
         return (
           <span className="text-zinc-500 text-[10px] font-mono italic">
             Empty List
@@ -56,11 +67,11 @@ const renderPrettyValue = (value: any): React.ReactNode => {
         );
       }
       // Check if it's an array of objects (like taxes)
-      const isArrayOfObjects = value.every(item => item && typeof item === 'object' && !Array.isArray(item));
+      const isArrayOfObjects = parsedValue.every(item => item && typeof item === 'object' && !Array.isArray(item));
       if (isArrayOfObjects) {
         return (
           <div className="space-y-4 font-sans text-left w-full mt-1">
-            {value.map((item: any, idx: number) => {
+            {parsedValue.map((item: any, idx: number) => {
               const displayName = item.name || item.title || item.label || `Item #${idx + 1}`;
               return (
                 <div key={idx} className="bg-zinc-900 border border-zinc-800/80 p-4 rounded-2xl flex flex-col gap-2.5 shadow-md">
@@ -84,11 +95,7 @@ const renderPrettyValue = (value: any): React.ReactNode => {
                         <div key={k} className="flex justify-between items-center gap-4 bg-zinc-950/20 px-2 py-1.5 rounded-lg border border-zinc-800/10">
                           <span className="text-zinc-500 font-medium capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}:</span>
                           <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]" title={String(typeof v === 'object' ? safeStringify(v) : v)}>
-                            {typeof v === 'boolean' 
-                              ? (v ? 'Yes' : 'No') 
-                              : typeof v === 'object' 
-                                ? safeStringify(v) 
-                                : String(v)}
+                            {renderPrettyValue(v)}
                           </span>
                         </div>
                     ))}
@@ -107,9 +114,9 @@ const renderPrettyValue = (value: any): React.ReactNode => {
         // Simple array of primitives
         return (
           <div className="flex flex-wrap gap-2 text-left mt-1">
-            {value.map((val, idx) => (
+            {parsedValue.map((val: any, idx: number) => (
               <span key={idx} className="bg-zinc-905 border border-zinc-800 px-2.5 py-1 rounded-xl text-xs font-mono text-zinc-300">
-                {String(val)}
+                {renderPrettyValue(val)}
               </span>
             ))}
           </div>
@@ -118,17 +125,13 @@ const renderPrettyValue = (value: any): React.ReactNode => {
     } else {
       // Single object
       return (
-        <div className="grid grid-cols-1 gap-2 font-sans text-left mt-1">
-          {Object.entries(value).map(([k, v]) => (
-            <div key={k} className="bg-zinc-900/60 border border-zinc-800/40 p-3 rounded-2xl flex items-center justify-between gap-4 text-xs font-sans">
-              <span className="text-zinc-500 font-bold uppercase text-[9px] tracking-wider">{k.replace(/([A-Z])/g, ' $1').trim()}</span>
-              <span className="text-zinc-200 font-mono font-medium break-all text-right max-w-[65%]">
-                {typeof v === 'boolean' 
-                  ? (v ? 'Yes' : 'No') 
-                  : typeof v === 'object' 
-                    ? safeStringify(v) 
-                    : String(v)}
-              </span>
+        <div className="grid grid-cols-1 gap-2 font-sans text-left mt-1 w-full">
+          {Object.entries(parsedValue).map(([k, v]) => (
+            <div key={k} className="bg-zinc-900/60 border border-zinc-800/40 p-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs font-sans">
+              <span className="text-zinc-500 font-bold uppercase text-[9px] tracking-wider shrink-0">{k.replace(/([A-Z])/g, ' $1').trim()}</span>
+              <div className="text-zinc-200 font-mono font-medium break-all text-left sm:text-right max-w-full sm:max-w-[70%]">
+                {renderPrettyValue(v)}
+              </div>
             </div>
           ))}
         </div>
