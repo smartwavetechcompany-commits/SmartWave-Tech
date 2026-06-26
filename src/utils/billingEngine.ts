@@ -99,6 +99,12 @@ export const BillingService = {
     const { checkOutDateTime, originalNights } = this.calculateStayWindow(res, hotel);
     const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
 
+    const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
+    const minutesPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60);
+    if (minutesPast <= gracePeriodMinutes) {
+      return 0;
+    }
+
     const hoursPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60);
     if (hoursPast <= 0) {
       return 0;

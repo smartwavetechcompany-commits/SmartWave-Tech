@@ -31,13 +31,15 @@ import {
   Tag,
   DollarSign,
   X,
+  Receipt,
+  AlertTriangle,
   MoreVertical,
   TrendingUp,
   Package
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
-import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
 import { postToLedger, transferToCityLedger } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -163,6 +165,7 @@ export function Rooms() {
   };
 
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [checkoutPreviewRes, setCheckoutPreviewRes] = useState<Reservation | null>(null);
   const [showQuickActionMenu, setShowQuickActionMenu] = useState(false);
   const [showFolio, setShowFolio] = useState(false);
 
@@ -819,6 +822,36 @@ export function Rooms() {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/reservations/${res.id}`);
       toast.error('Failed to update reservation');
     }
+  };
+
+  const getCheckoutPreviewData = (res: Reservation) => {
+    const billing = calculateBilling(res, hotel);
+    const { checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
+    const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
+    
+    const policy = hotel?.overstayPolicy || 'grace';
+    const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
+    
+    const currentTime = new Date();
+    const minutesPast = Math.max(0, (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60));
+    const hoursPast = minutesPast / 60;
+    
+    const isLateCheckout = minutesPast > gracePeriodMinutes;
+    const overstayCharge = billing.overstayCharge || 0;
+    
+    return {
+      billing,
+      checkOutDateTime,
+      originalNights,
+      nightlyRate,
+      policy,
+      gracePeriodMinutes,
+      currentTime,
+      minutesPast,
+      hoursPast,
+      isLateCheckout,
+      overstayCharge,
+    };
   };
 
   return (
@@ -2621,7 +2654,7 @@ export function Rooms() {
 
                 {selectedReservation.status === 'checked_in' && (
                   <button 
-                    onClick={() => updateReservationStatus(selectedReservation, 'checked_out')}
+                    onClick={() => setCheckoutPreviewRes(selectedReservation)}
                     className="w-full flex items-center gap-3 bg-blue-500 hover:bg-blue-600 text-zinc-50 p-4 rounded-2xl font-bold transition-all active:scale-95"
                   >
                     <LogOut size={20} />
@@ -2826,6 +2859,153 @@ export function Rooms() {
           </div>
         )}
       </AnimatePresence>
+
+      {checkoutPreviewRes && (() => {
+        const preview = getCheckoutPreviewData(checkoutPreviewRes);
+        const bal = getReservationLiveBalance(checkoutPreviewRes, hotel);
+        
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              <header className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
+                    <Receipt size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-50">Preview Checkout Fees</h3>
+                    <p className="text-xs text-zinc-400">Review final folio charges prior to settlement</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setCheckoutPreviewRes(null)}
+                  className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              
+              <main className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+                {/* Guest Info */}
+                <div className="bg-zinc-950 p-4 border border-zinc-800 rounded-xl flex justify-between items-center">
+                  <div>
+                    <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Guest & Room</p>
+                    <p className="text-sm font-bold text-zinc-50 mt-1">{checkoutPreviewRes.guestName}</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">Room {checkoutPreviewRes.roomNumber} ({checkoutPreviewRes.roomId})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Scheduled Checkout</p>
+                    <p className="text-sm font-bold text-zinc-200 mt-1">{checkoutPreviewRes.checkOut}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">{checkoutPreviewRes.checkOutTime || hotel?.defaultCheckOutTime || '12:00'}</p>
+                  </div>
+                </div>
+
+                {/* Rates breakdown */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-zinc-500">Stay Cost Breakdown</h4>
+                  
+                  {/* Standard Rates */}
+                  <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-zinc-50">Standard Room Rate</p>
+                      <p className="text-[10px] text-zinc-500">{preview.originalNights} night{preview.originalNights > 1 ? 's' : ''} at {formatCurrency(preview.nightlyRate, currency, exchangeRate)}/night</p>
+                    </div>
+                    <p className="text-sm font-bold text-zinc-50">{formatCurrency(preview.originalNights * preview.nightlyRate, currency, exchangeRate)}</p>
+                  </div>
+
+                  {/* Late checkout details */}
+                  <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-zinc-50 flex items-center gap-1.5">
+                          Late Checkout Charges
+                          {preview.isLateCheckout && (
+                            <span className="px-1.5 py-0.5 bg-red-500/10 text-red-400 text-[8px] font-black uppercase tracking-widest rounded border border-red-500/20 animate-pulse">
+                              LATE
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-zinc-500">
+                          {preview.hoursPast > 0 
+                            ? `${preview.minutesPast.toFixed(0)} mins (${preview.hoursPast.toFixed(1)} hrs) past check-out time`
+                            : 'On-time checkout'
+                          }
+                        </p>
+                      </div>
+                      <p className={cn("text-sm font-bold", preview.isLateCheckout ? "text-red-400" : "text-zinc-500")}>
+                        {formatCurrency(preview.overstayCharge, currency, exchangeRate)}
+                      </p>
+                    </div>
+
+                    <div className="border-t border-zinc-800/80 pt-2.5 flex items-center justify-between text-[10px] text-zinc-500">
+                      <span>Grace Period: {preview.gracePeriodMinutes} mins</span>
+                      <span className="capitalize">Policy: {preview.policy}</span>
+                    </div>
+
+                    {!preview.isLateCheckout && preview.hoursPast > 0 && (
+                      <p className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/5 border border-emerald-500/10 p-2 rounded">
+                        Guest checked out within the configured {preview.gracePeriodMinutes}-minute grace period. No late fees are applied!
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Final settlement */}
+                <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Subtotal charges:</span>
+                    <span>{formatCurrency(preview.billing.totalCharges, currency, exchangeRate)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Total payments received:</span>
+                    <span className="text-emerald-400">{formatCurrency(preview.billing.totalPayments, currency, exchangeRate)}</span>
+                  </div>
+                  <div className="border-t border-zinc-800 pt-2.5 flex items-center justify-between">
+                    <span className="text-sm font-extrabold text-zinc-100">Outstanding Balance:</span>
+                    <span className={cn("text-lg font-black", bal > 0.01 ? "text-red-400" : "text-emerald-400")}>
+                      {formatCurrency(bal, currency, exchangeRate)}
+                    </span>
+                  </div>
+                </div>
+
+                {bal > 0.01 && !checkoutPreviewRes.corporateId && (
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-3 flex gap-3 text-amber-500">
+                    <AlertTriangle className="shrink-0 mt-0.5" size={16} />
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold">Unpaid Folio Balance</p>
+                      <p className="text-[10px] text-zinc-400 leading-normal">
+                        This guest has an outstanding balance of {formatCurrency(bal, currency, exchangeRate)}. Full payment or authorization is required depending on hotel policy before checkout is finalized.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </main>
+
+              <footer className="p-6 bg-zinc-950 border-t border-zinc-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutPreviewRes(null)}
+                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl text-xs font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const resToCheckout = checkoutPreviewRes;
+                    setCheckoutPreviewRes(null);
+                    await updateReservationStatus(resToCheckout, 'checked_out');
+                  }}
+                  className="px-5 py-2 bg-blue-500 hover:bg-blue-600 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
+                >
+                  <LogOut size={14} />
+                  Confirm & Check Out
+                </button>
+              </footer>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

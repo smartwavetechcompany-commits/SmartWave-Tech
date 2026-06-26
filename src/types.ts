@@ -83,6 +83,7 @@ export interface HotelSettings {
     allowPostpaidCheckout: boolean;
     enableUnpaidWarningPopup: boolean;
     autoGenerateOutstandingInvoice: boolean;
+    gracePeriod?: number;
   };
   reservations: {
     allowEditing: boolean;

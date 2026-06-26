@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     allowPostpaidCheckout: false,
     enableUnpaidWarningPopup: true,
     autoGenerateOutstandingInvoice: true,
+    gracePeriod: 15,
   },
   reservations: {
     allowEditing: true,

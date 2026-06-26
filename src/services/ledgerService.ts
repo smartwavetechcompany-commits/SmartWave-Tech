@@ -661,7 +661,9 @@ export const processAutomatedBillingForReservation = async (
   }
 
   // 2. Process Overstay Nights
-  if (currentTime > checkOutDateTime && hotel.autoChargeOverstays !== false) {
+  const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
+  const minutesPastCheckout = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60);
+  if (currentTime > checkOutDateTime && minutesPastCheckout > gracePeriodMinutes && hotel.autoChargeOverstays !== false) {
     const policy = hotel?.overstayPolicy || 'grace';
     const graceHours = hotel?.overstayGraceHours ?? 2;
     const partialHours = hotel?.overstayPartialHours ?? 3;

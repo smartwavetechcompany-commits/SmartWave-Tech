@@ -239,6 +239,7 @@ export function AdminSettings() {
                 {renderToggle('checkout', 'allowPostpaidCheckout', 'Enable Postpaid Checkout', 'Special flag for contract guests or corporate accounts.')}
                 {renderToggle('checkout', 'enableUnpaidWarningPopup', 'Unpaid Balance Alerts', 'Show a warning notification if checkout is attempted with a pending balance.')}
                 {renderToggle('checkout', 'autoGenerateOutstandingInvoice', 'Auto-generate Outstanding Invoice', 'Automatically create and email an invoice for remaining debt.')}
+                {renderInput('checkout', 'gracePeriod', 'Late Checkout Grace Period (Minutes)', 'number', 'The cushion period in minutes after standard checkout time before late fees apply (e.g. 15-30 minutes).')}
               </div>
             )}
 

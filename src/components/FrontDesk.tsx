@@ -28,6 +28,7 @@ import {
   Building2,
   Tag,
   AlertCircle,
+  AlertTriangle,
   Trash2,
   UserX,
   Download,
@@ -67,6 +68,7 @@ export function FrontDesk() {
   const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
   const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
   const [isBooking, setIsBooking] = useState(false);
+  const [checkoutPreviewRes, setCheckoutPreviewRes] = useState<Reservation | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
 
@@ -768,13 +770,79 @@ export function FrontDesk() {
 
         // Calculate individual stay price
         let pricePerNight = selectedRoom.price;
-        if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-          const activeRate = activeCorporateRates.find(r => 
-            (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-            new Date(stay.checkIn) >= new Date(r.startDate) &&
-            new Date(stay.checkIn) <= new Date(r.endDate)
-          );
-          if (activeRate) pricePerNight = activeRate.rate;
+        let isOverridden = false;
+        let originalRate = selectedRoom.price;
+
+        // Check if there's a rate override selected for the primary stay
+        const isPrimaryStay = createdStays.length === 0;
+        if (isPrimaryStay) {
+          if (selectedRateType === 'custom') {
+            pricePerNight = customRateAmount;
+            isOverridden = pricePerNight !== originalRate;
+          } else if (selectedRateType === 'base') {
+            const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
+            pricePerNight = matchingConfig?.baseRate || selectedRoom.price;
+            isOverridden = pricePerNight !== originalRate;
+          } else if (selectedRateType === 'weekend') {
+            const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
+            pricePerNight = (matchingConfig?.weekendRate && matchingConfig.weekendRate > 0) ? matchingConfig.weekendRate : selectedRoom.price;
+            isOverridden = pricePerNight !== originalRate;
+          } else if (selectedRateType === 'weekday') {
+            const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
+            pricePerNight = (matchingConfig?.weekdayRate && matchingConfig.weekdayRate > 0) ? matchingConfig.weekdayRate : selectedRoom.price;
+            isOverridden = pricePerNight !== originalRate;
+          } else {
+            // Check corporate negotiated rate
+            if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
+              const activeRate = activeCorporateRates.find(r => 
+                (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
+                new Date(stay.checkIn) >= new Date(r.startDate) &&
+                new Date(stay.checkIn) <= new Date(r.endDate)
+              );
+              if (activeRate) pricePerNight = activeRate.rate;
+            }
+          }
+        } else {
+          // Additional stays in batch booking
+          if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
+            const activeRate = activeCorporateRates.find(r => 
+              (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
+              new Date(stay.checkIn) >= new Date(r.startDate) &&
+              new Date(stay.checkIn) <= new Date(r.endDate)
+            );
+            if (activeRate) pricePerNight = activeRate.rate;
+          }
+        }
+
+        if (isOverridden) {
+          // Log manual rate override to activityLogs immediately
+          await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+            timestamp: new Date().toISOString(),
+            userId: profile.uid,
+            userEmail: profile.email,
+            userName: profile.displayName || profile.email,
+            userRole: profile.role,
+            action: 'MANUAL_RATE_OVERRIDE',
+            module: 'Front Desk',
+            resource: `Manual rate override for Room ${selectedRoom.roomNumber}`,
+            details: `Staff member ${profile.email} manually overrode room rate for Room ${selectedRoom.roomNumber} from default of ${originalRate} to ${pricePerNight} (Authorized by: ${profile.email}).`,
+            hotelId: hotel.id,
+            oldValue: originalRate,
+            newValue: pricePerNight,
+            metadata: {
+              roomNumber: selectedRoom.roomNumber,
+              roomId: selectedRoom.id,
+              authorizedBy: profile.email,
+              guestName: stay.guestName,
+              originalRate,
+              newRate: pricePerNight
+            }
+          }, {
+            hotelId: hotel.id,
+            module: 'Front Desk',
+            action: 'ACTIVITY_LOG_CREATE',
+            details: `Log manual rate override from ${originalRate} to ${pricePerNight} during booking/check-in`
+          });
         }
 
         const checkInDateTime = parseLocalDateTime(stay.checkIn, newBooking.checkInTime || '14:00');
@@ -2122,6 +2190,36 @@ export function FrontDesk() {
 
     exportToCSV(dataToExport, filename);
     toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} exported successfully`);
+  };
+
+  const getCheckoutPreviewData = (res: Reservation) => {
+    const billing = calculateBilling(res, hotel);
+    const { checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
+    const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
+    
+    const policy = hotel?.overstayPolicy || 'grace';
+    const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
+    
+    const currentTime = new Date();
+    const minutesPast = Math.max(0, (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60));
+    const hoursPast = minutesPast / 60;
+    
+    const isLateCheckout = minutesPast > gracePeriodMinutes;
+    const overstayCharge = billing.overstayCharge || 0;
+    
+    return {
+      billing,
+      checkOutDateTime,
+      originalNights,
+      nightlyRate,
+      policy,
+      gracePeriodMinutes,
+      currentTime,
+      minutesPast,
+      hoursPast,
+      isLateCheckout,
+      overstayCharge,
+    };
   };
 
   return (
@@ -3953,11 +4051,11 @@ export function FrontDesk() {
                               </button>
                               <button 
                                 type="button"
-                                onClick={() => updateReservationStatus(res, 'checked_out')}
+                                onClick={() => setCheckoutPreviewRes(res)}
                                 className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                                 title={(() => {
                                   const policy = canCheckout(hotel, profile, res);
-                                  return policy.allowed ? "Check Out" : policy.message;
+                                  return policy.allowed ? "Check Out (Preview Fees)" : policy.message;
                                 })()}
                                 disabled={loading || !canCheckout(hotel, profile, res).allowed}
                               >
@@ -4552,6 +4650,153 @@ export function FrontDesk() {
           onClose={() => setShowDigitalKeyModal(null)}
         />
       )}
+
+      {checkoutPreviewRes && (() => {
+        const preview = getCheckoutPreviewData(checkoutPreviewRes);
+        const bal = getReservationLiveBalance(checkoutPreviewRes, hotel);
+        
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+              <header className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
+                    <Receipt size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-50">Preview Checkout Fees</h3>
+                    <p className="text-xs text-zinc-400">Review final folio charges prior to settlement</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setCheckoutPreviewRes(null)}
+                  className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              
+              <main className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+                {/* Guest Info */}
+                <div className="bg-zinc-950 p-4 border border-zinc-800 rounded-xl flex justify-between items-center">
+                  <div>
+                    <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Guest & Room</p>
+                    <p className="text-sm font-bold text-zinc-50 mt-1">{checkoutPreviewRes.guestName}</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">Room {checkoutPreviewRes.roomNumber} ({checkoutPreviewRes.roomId})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Scheduled Checkout</p>
+                    <p className="text-sm font-bold text-zinc-200 mt-1">{checkoutPreviewRes.checkOut}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">{checkoutPreviewRes.checkOutTime || hotel?.defaultCheckOutTime || '12:00'}</p>
+                  </div>
+                </div>
+
+                {/* Rates breakdown */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-zinc-500">Stay Cost Breakdown</h4>
+                  
+                  {/* Standard Rates */}
+                  <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-zinc-50">Standard Room Rate</p>
+                      <p className="text-[10px] text-zinc-500">{preview.originalNights} night{preview.originalNights > 1 ? 's' : ''} at {formatCurrency(preview.nightlyRate, currency, exchangeRate)}/night</p>
+                    </div>
+                    <p className="text-sm font-bold text-zinc-50">{formatCurrency(preview.originalNights * preview.nightlyRate, currency, exchangeRate)}</p>
+                  </div>
+
+                  {/* Late checkout details */}
+                  <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-zinc-50 flex items-center gap-1.5">
+                          Late Checkout Charges
+                          {preview.isLateCheckout && (
+                            <span className="px-1.5 py-0.5 bg-red-500/10 text-red-400 text-[8px] font-black uppercase tracking-widest rounded border border-red-500/20 animate-pulse">
+                              LATE
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[10px] text-zinc-500">
+                          {preview.hoursPast > 0 
+                            ? `${preview.minutesPast.toFixed(0)} mins (${preview.hoursPast.toFixed(1)} hrs) past check-out time`
+                            : 'On-time checkout'
+                          }
+                        </p>
+                      </div>
+                      <p className={cn("text-sm font-bold", preview.isLateCheckout ? "text-red-400" : "text-zinc-500")}>
+                        {formatCurrency(preview.overstayCharge, currency, exchangeRate)}
+                      </p>
+                    </div>
+
+                    <div className="border-t border-zinc-800/80 pt-2.5 flex items-center justify-between text-[10px] text-zinc-500">
+                      <span>Grace Period: {preview.gracePeriodMinutes} mins</span>
+                      <span className="capitalize">Policy: {preview.policy}</span>
+                    </div>
+
+                    {!preview.isLateCheckout && preview.hoursPast > 0 && (
+                      <p className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/5 border border-emerald-500/10 p-2 rounded">
+                        Guest checked out within the configured {preview.gracePeriodMinutes}-minute grace period. No late fees are applied!
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Final settlement */}
+                <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Subtotal charges:</span>
+                    <span>{formatCurrency(preview.billing.totalCharges, currency, exchangeRate)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Total payments received:</span>
+                    <span className="text-emerald-400">{formatCurrency(preview.billing.totalPayments, currency, exchangeRate)}</span>
+                  </div>
+                  <div className="border-t border-zinc-800 pt-2.5 flex items-center justify-between">
+                    <span className="text-sm font-extrabold text-zinc-100">Outstanding Balance:</span>
+                    <span className={cn("text-lg font-black", bal > 0.01 ? "text-red-400" : "text-emerald-400")}>
+                      {formatCurrency(bal, currency, exchangeRate)}
+                    </span>
+                  </div>
+                </div>
+
+                {bal > 0.01 && !checkoutPreviewRes.corporateId && (
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-3 flex gap-3 text-amber-500">
+                    <AlertTriangle className="shrink-0 mt-0.5" size={16} />
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold">Unpaid Folio Balance</p>
+                      <p className="text-[10px] text-zinc-400 leading-normal">
+                        This guest has an outstanding balance of {formatCurrency(bal, currency, exchangeRate)}. Full payment or authorization is required depending on hotel policy before checkout is finalized.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </main>
+
+              <footer className="p-6 bg-zinc-950 border-t border-zinc-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutPreviewRes(null)}
+                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl text-xs font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const resToCheckout = checkoutPreviewRes;
+                    setCheckoutPreviewRes(null);
+                    await updateReservationStatus(resToCheckout, 'checked_out');
+                  }}
+                  className="px-5 py-2 bg-blue-500 hover:bg-blue-600 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
+                >
+                  <LogOut size={14} />
+                  Confirm & Check Out
+                </button>
+              </footer>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
