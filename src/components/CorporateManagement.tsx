@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { collection, getDocs, addDoc, query, orderBy, doc, updateDoc, deleteDoc, onSnapshot, where, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
@@ -41,6 +41,36 @@ export function CorporateManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
+  const [alertThreshold, setAlertThreshold] = useState<number>(() => {
+    const saved = localStorage.getItem('corporate_debt_alert_threshold');
+    return saved ? Number(saved) : 1000;
+  });
+
+  const prevBalancesRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    localStorage.setItem('corporate_debt_alert_threshold', String(alertThreshold));
+  }, [alertThreshold]);
+
+  useEffect(() => {
+    accounts.forEach(acc => {
+      const prevBal = prevBalancesRef.current[acc.id];
+      const currentBal = acc.currentBalance || 0;
+      
+      if (prevBal !== undefined && currentBal > prevBal) {
+        // Balance has increased, meaning outstanding debt went up and available credit dipped
+        const prevAvailableCredit = acc.creditLimit - prevBal;
+        const currentAvailableCredit = acc.creditLimit - currentBal;
+        
+        if (currentAvailableCredit < alertThreshold && prevAvailableCredit >= alertThreshold) {
+          toast.warning(`⚠️ CREDIT ALERT: ${acc.name}'s available credit has dipped below ${formatCurrency(alertThreshold, currency, exchangeRate)}! Current Available Credit: ${formatCurrency(currentAvailableCredit, currency, exchangeRate)}`, {
+            duration: 8000,
+          });
+        }
+      }
+      prevBalancesRef.current[acc.id] = currentBal;
+    });
+  }, [accounts, alertThreshold, currency, exchangeRate]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -615,7 +645,7 @@ export function CorporateManagement() {
         </div>
       </header>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Accounts</div>
           <div className="text-xl font-bold text-zinc-50">{accounts.length}</div>
@@ -623,6 +653,18 @@ export function CorporateManagement() {
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Credit Limit</div>
           <div className="text-xl font-bold text-blue-500">{formatCurrency(accounts.reduce((acc, a) => acc + a.creditLimit, 0), currency, exchangeRate)}</div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Outstanding Debt</div>
+          <div className="text-xl font-bold text-rose-500">
+            {formatCurrency(accounts.reduce((acc, a) => acc + Math.max(0, a.currentBalance || 0), 0), currency, exchangeRate)}
+          </div>
+        </div>
+        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+          <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Available Credit</div>
+          <div className="text-xl font-bold text-emerald-400">
+            {formatCurrency(accounts.reduce((acc, a) => acc + Math.max(0, a.creditLimit - (a.currentBalance || 0)), 0), currency, exchangeRate)}
+          </div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Accrued Debits</div>
@@ -638,6 +680,38 @@ export function CorporateManagement() {
         </div>
       </div>
 
+      {/* Alert Section */}
+      {accounts.some(a => (a.currentBalance || 0) > 0) && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-red-500/20 text-red-400 rounded-xl">
+              <Clock size={20} className="animate-pulse" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white">Pending Collection Alerts ({accounts.filter(a => (a.currentBalance || 0) > 0).length})</h4>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Some accounts have pending transfer debt or outstanding balances. Please follow up for timely collections.
+                {accounts.some(a => (a.currentBalance || 0) > (a.creditLimit || 0)) && (
+                  <span className="text-amber-400 ml-1 font-semibold">⚠️ Warning: One or more accounts exceed their credit limit!</span>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {accounts.filter(a => (a.currentBalance || 0) > 0).slice(0, 3).map(a => (
+              <span key={a.id} className="text-[10px] bg-red-950/40 text-red-400 border border-red-900/30 px-2 py-1 rounded-lg font-bold">
+                {a.name}: {formatCurrency(a.currentBalance, currency, exchangeRate)}
+              </span>
+            ))}
+            {accounts.filter(a => (a.currentBalance || 0) > 0).length > 3 && (
+              <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg font-bold">
+                +{accounts.filter(a => (a.currentBalance || 0) > 0).length - 3} more
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="relative w-full max-w-sm">
@@ -650,7 +724,16 @@ export function CorporateManagement() {
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500 transition-all"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap md:flex-nowrap">
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Min Credit Limit Alert ({currency})</span>
+              <input
+                type="number"
+                value={alertThreshold}
+                onChange={(e) => setAlertThreshold(Math.max(0, Number(e.target.value)))}
+                className="bg-transparent text-[10px] font-bold text-zinc-300 focus:outline-none w-16 text-center border-b border-zinc-800 focus:border-emerald-500"
+              />
+            </div>
             <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
               <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Sort</span>
               <select 
@@ -702,7 +785,30 @@ export function CorporateManagement() {
                     <div className="text-xs text-zinc-500">{account.email}</div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm text-white font-bold">Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn(
+                        "text-sm font-bold",
+                        (account.currentBalance || 0) > 0 ? "text-red-500" : (account.currentBalance || 0) < 0 ? "text-emerald-500" : "text-white"
+                      )}>
+                        Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}
+                      </span>
+                      {(account.currentBalance || 0) > 0 && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                          Pending Collection
+                        </span>
+                      )}
+                      {(account.currentBalance || 0) > (account.creditLimit || 0) && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          Overdrawn
+                        </span>
+                      )}
+                      {(account.currentBalance || 0) < 0 && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Credit Balance
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-zinc-500 uppercase tracking-wider mt-1">
                       Charges: {formatCurrency(account.totalDebits || 0, currency, exchangeRate)} | 
                       Payments: {formatCurrency(account.totalCredits || 0, currency, exchangeRate)}

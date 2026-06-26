@@ -468,6 +468,7 @@ export function Settings() {
         'finance',
         'activityLogs',
         'auditLogs',
+        'AuditLogs',
         'maintenance',
         'housekeeping',
         'inventory',
@@ -475,7 +476,15 @@ export function Settings() {
         'suppliers',
         'accounts',
         'commissions',
-        'corporate_accounts'
+        'corporate_accounts',
+        'surveys',
+        'room_blockings',
+        'checkin_history',
+        'checkout_history',
+        'rate_configurations',
+        'inventory_consumption_rules',
+        'inventory_transactions',
+        'transactions'
       ];
 
       for (const collName of collectionsToClear) {

@@ -539,12 +539,25 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     </tr>
                   ) : (
                     ledgerEntries.map((entry) => (
-                      <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
+                      <tr 
+                        key={entry.id} 
+                        className={cn(
+                          "hover:bg-zinc-900/50 transition-colors",
+                          entry.category === 'refund' ? "bg-amber-500/5 border-l-2 border-l-amber-500/50" : ""
+                        )}
+                      >
                         <td className="px-6 py-4 text-xs text-zinc-400">
                           {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
-                          <div className="text-sm text-white font-medium">{entry.description}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm text-white font-medium">{entry.description}</div>
+                            {entry.category === 'refund' && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                                ↩ Refund Issued
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-zinc-500">Ref: {(entry.id || '').slice(-8).toUpperCase()}</div>
                         </td>
                         <td className="px-6 py-4">

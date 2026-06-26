@@ -556,24 +556,36 @@ export const transferCorporateBalance = async (
 ) => {
   const timestamp = new Date().toISOString();
   
-  await database.safeUpdate(doc(db, 'hotels', hotelId, 'corporate_accounts', fromCorporateId), {
+  // Fetch from and to account names to make the ledger descriptions and logs human-readable
+  const fromRef = doc(db, 'hotels', hotelId, 'corporate_accounts', fromCorporateId);
+  const toRef = doc(db, 'hotels', hotelId, 'corporate_accounts', toCorporateId);
+  
+  const [fromSnap, toSnap] = await Promise.all([
+    getDoc(fromRef),
+    getDoc(toRef)
+  ]);
+  
+  const fromName = fromSnap.exists() ? (fromSnap.data() as any).name : fromCorporateId;
+  const toName = toSnap.exists() ? (toSnap.data() as any).name : toCorporateId;
+  
+  await database.safeUpdate(fromRef, {
     currentBalance: increment(-amount),
     totalCredits: increment(amount)
   }, {
     hotelId,
     module: 'Corporate',
     action: 'TRANSFER_OUT',
-    details: `Transferred ${amount} out to ${toCorporateId}`
+    details: `Transferred ${amount} out to ${toName}`
   });
 
-  await database.safeUpdate(doc(db, 'hotels', hotelId, 'corporate_accounts', toCorporateId), {
+  await database.safeUpdate(toRef, {
     currentBalance: increment(amount),
     totalDebits: increment(amount)
   }, {
     hotelId,
     module: 'Corporate',
     action: 'TRANSFER_IN',
-    details: `Transferred ${amount} in from ${fromCorporateId}`
+    details: `Transferred ${amount} in from ${fromName}`
   });
 
   await database.safeAdd(collection(db, 'hotels', hotelId, 'ledger'), {
@@ -584,7 +596,7 @@ export const transferCorporateBalance = async (
     amount,
     type: 'credit',
     category: 'transfer',
-    description: `Transfer to Corporate Account: ${toCorporateId} ${notes ? `(${notes})` : ''}`,
+    description: `Transfer to Corporate Account: ${toName} ${notes ? `(${notes})` : ''}`,
     postedBy
   }, {
     hotelId,
@@ -601,7 +613,7 @@ export const transferCorporateBalance = async (
     amount,
     type: 'debit',
     category: 'transfer',
-    description: `Transfer from Corporate Account: ${fromCorporateId} ${notes ? `(${notes})` : ''}`,
+    description: `Transfer from Corporate Account: ${fromName} ${notes ? `(${notes})` : ''}`,
     postedBy
   }, {
     hotelId,

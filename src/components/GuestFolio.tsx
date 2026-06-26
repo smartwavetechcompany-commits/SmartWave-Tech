@@ -2150,7 +2150,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           key={entryKey} 
                           className={cn(
                             "hover:bg-zinc-900/50 transition-colors",
-                            entry.isVirtual ? "bg-amber-500/5 border-l-2 border-l-amber-500/50" : ""
+                            entry.category === 'refund' ? "bg-amber-500/5 border-l-2 border-l-amber-500/50" : entry.isVirtual ? "bg-amber-500/5 border-l-2 border-l-amber-500/50" : ""
                           )}
                         >
                           <td className="px-6 py-4 text-xs text-zinc-400">
@@ -2159,6 +2159,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
                               <div className="text-sm font-medium text-zinc-50">{entry.description}</div>
+                              {entry.category === 'refund' && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                                  ↩ Refund Issued
+                                </span>
+                              )}
                               {entry.isVirtual && (
                                 <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-500 text-[8px] font-black uppercase rounded tracking-wide border border-amber-500/30">
                                   Projected
