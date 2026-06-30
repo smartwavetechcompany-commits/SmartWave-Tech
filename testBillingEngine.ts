@@ -200,6 +200,78 @@ async function runTests() {
   assertEqual(billing9.balance, 0, 'Balance must be capped at 0 (max(0, 117.5k - 180k))');
   assertEqual(billing9.outstandingBalance, -62500, 'Outstanding balance can accurately go negative for credits/refunds (-62,500)');
 
+  // Test Case 10: Double Counting & Projected Stay Bug Fix (User scenario)
+  console.log('\nTest Case 10: Split Inclusive Taxes handling (User scenario of 90,000 split)');
+  const res10: Reservation = {
+    id: 'res_010',
+    guestName: 'John Royce',
+    status: 'checked_in',
+    roomId: 'room_102',
+    roomNumber: '102',
+    checkIn: '2026-06-30',
+    checkOut: '2026-07-01',
+    nights: 1,
+    nightlyRate: 90000,
+    totalAmount: 90000,
+    paidAmount: 0,
+    paymentStatus: 'unpaid',
+    autoNightDeduction: true,
+    createdAt: '2026-06-30T10:00:00Z'
+  };
+
+  const splitLedgerEntries: LedgerEntry[] = [
+    {
+      id: 'l_room_1',
+      guestId: 'g_royce',
+      hotelId: 'h_1',
+      type: 'debit',
+      amount: 73016,
+      category: 'room',
+      chargeType: 'room_rate',
+      description: 'Automated Nightly Charge: Room 102 (Night of Jun 30, 2026)',
+      timestamp: '2026-06-30T10:31:00Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'l_sc_1',
+      guestId: 'g_royce',
+      hotelId: 'h_1',
+      type: 'debit',
+      amount: 10705,
+      category: 'tax',
+      description: 'SC (13.5%) [Inclusive] for Automated Nightly Charge: Room 102 (Night of Jun 30, 2026)',
+      timestamp: '2026-06-30T10:31:00Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'l_tax_1',
+      guestId: 'g_royce',
+      hotelId: 'h_1',
+      type: 'debit',
+      amount: 6279,
+      category: 'tax',
+      description: 'Tax (7.5%) [Inclusive] for Automated Nightly Charge: Room 102 (Night of Jun 30, 2026)',
+      timestamp: '2026-06-30T10:31:00Z',
+      postedBy: 'staff'
+    }
+  ];
+
+  const billing10 = BillingEngine.calculateReservation(res10, hotel, splitLedgerEntries, {
+    taxEnabled: true,
+    taxInclusive: true,
+    taxRate: 7.5,
+    serviceChargeEnabled: true,
+    serviceChargeInclusive: true,
+    serviceChargeRate: 13.5,
+    currentTime: new Date('2026-06-30T12:00:00Z')
+  });
+
+  assertEqual(billing10.roomCharge, 90000, 'Expected Room Charge is 90,000');
+  assertEqual(billing10.extraServices, 0, 'Extra services should be 0 (inclusive taxes merged/not incidentals)');
+  assertEqual(billing10.projectedRoomCharge, 0, 'Projected unposted room charge must be 0 (fully posted via split entries)');
+  assertEqual(billing10.grandTotal, 90000, 'Grand total should remain 90,000');
+  assertEqual(billing10.balance, 90000, 'Outstanding balance should be exactly 90,000');
+
   console.log('\n--- ALL ENTERPRISE PMS BILLING ENGINE TESTS PASSED SUCCESSFULLY! ---');
 }
 

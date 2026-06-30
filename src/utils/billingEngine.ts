@@ -82,9 +82,9 @@ export class BillingEngine {
    */
   static calculateExtraServices(res: Reservation, ledgerEntries?: LedgerEntry[]): number {
     if (ledgerEntries) {
-      // Incidentals are debits that are not room rate or overstay charges
+      // Incidentals are debits that are not room rate, overstay charges, or taxes
       return ledgerEntries
-        .filter(e => e.type === 'debit' && e.category !== 'room' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay')
+        .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay')
         .reduce((acc, e) => acc + e.amount, 0);
     }
     // Fallback: Estimate extra charges from original reservation amounts if ledger is not yet populated
@@ -174,6 +174,48 @@ export class BillingEngine {
   }
 
   /**
+   * Helper to reconstruct ledger entries with inclusive taxes merged back to parents.
+   */
+  static reconstructInclusiveTaxes(entries: LedgerEntry[]): LedgerEntry[] {
+    const result = entries.map(e => ({ ...e }));
+    
+    // Find all inclusive tax entries (debits in category 'tax' with '[Inclusive]' in description)
+    const inclusiveTaxes = result.filter(e => 
+      e.type === 'debit' && 
+      e.category === 'tax' && 
+      e.description?.toLowerCase().includes('[inclusive]')
+    );
+    
+    for (const tax of inclusiveTaxes) {
+      const forIndex = tax.description?.toLowerCase().lastIndexOf(' for ');
+      if (forIndex !== undefined && forIndex !== -1) {
+        const parentDesc = tax.description.slice(forIndex + 5).trim().toLowerCase();
+        
+        // Find parent entry (matching description and timestamp)
+        const parent = result.find(p => {
+          if (p.type !== 'debit' || p.category === 'tax') return false;
+          
+          const descMatches = p.description?.toLowerCase() === parentDesc ||
+                              parentDesc.includes(p.description?.toLowerCase() || '') ||
+                              (p.description?.toLowerCase() || '').includes(parentDesc);
+          
+          const timeMatches = p.timestamp === tax.timestamp || 
+                              Math.abs(new Date(p.timestamp).getTime() - new Date(tax.timestamp).getTime()) < 5000;
+          
+          return descMatches && timeMatches;
+        });
+        
+        if (parent) {
+          parent.amount += tax.amount;
+          tax.amount = 0;
+        }
+      }
+    }
+    
+    return result.filter(e => e.amount > 0 || e.type === 'credit');
+  }
+
+  /**
    * Full comprehensive reservation billing calculation using the strict order of operations:
    * 1. Room Charges
    * 2. Overstay Charges
@@ -209,6 +251,8 @@ export class BillingEngine {
     const bookedNights = res.nights || 0;
     const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
 
+    const reconstructedLedger = ledgerEntries ? this.reconstructInclusiveTaxes(ledgerEntries) : undefined;
+
     // 1. Room Charges
     const roomCharge = this.calculateRoomCharges(res);
 
@@ -216,7 +260,7 @@ export class BillingEngine {
     const overstayCharge = this.calculateOverstay(res, hotel, options);
 
     // 3. Extra Services
-    const extraServices = this.calculateExtraServices(res, ledgerEntries);
+    const extraServices = this.calculateExtraServices(res, reconstructedLedger);
 
     // 4. Discounts
     const discount = this.calculateDiscounts(res);
@@ -249,7 +293,7 @@ export class BillingEngine {
     }
 
     // 8. Payments
-    const totalPaid = this.calculatePayments(res, ledgerEntries);
+    const totalPaid = this.calculatePayments(res, reconstructedLedger);
 
     // 9. Balance
     const balance = this.calculateBalance(grandTotal, totalPaid);
@@ -261,8 +305,8 @@ export class BillingEngine {
 
     // Calculate projectedRoomCharge (difference between calculated room charge up to now and what has been posted)
     let projectedRoomCharge = 0;
-    if (ledgerEntries) {
-      const postedRoomChargesSum = ledgerEntries
+    if (reconstructedLedger) {
+      const postedRoomChargesSum = reconstructedLedger
         .filter(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay'))
         .reduce((acc, e) => acc + e.amount, 0);
       projectedRoomCharge = (roomCharge + overstayCharge) - postedRoomChargesSum;
