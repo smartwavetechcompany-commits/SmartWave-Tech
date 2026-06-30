@@ -44,6 +44,7 @@ import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
 import { DigitalKeyModal } from './DigitalKeyModal';
 import { QrCode, Key as LucideKey } from 'lucide-react';
+import { transferToCityLedger } from '../services/ledgerService';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -391,6 +392,36 @@ export function GuestManagement() {
           action: 'GUEST_UPDATED',
           details: `Updated guest: ${newGuest.name}`
         });
+
+        // CHECK IF CORPORATE ACCOUNT HAS CHANGED OR ASSIGNED
+        const oldCorpId = editingGuest.corporateId || '';
+        const newCorpId = newGuest.corporateId || '';
+        if (newCorpId && oldCorpId !== newCorpId) {
+          // Find all matching active, confirmed or checked-in reservations of this guest
+          const matchingRes = allReservations.filter(r => 
+            (r.guestId === editingGuest.id || 
+            (editingGuest.email && r.guestEmail && r.guestEmail.toLowerCase().trim() === editingGuest.email.toLowerCase().trim())) &&
+            r.status !== 'cancelled' && r.status !== 'no_show'
+          );
+
+          for (const res of matchingRes) {
+            const resBalance = getReservationLiveBalance(res, hotel);
+            if (resBalance > 0.01) {
+              // Transfer the existing balance to corporate account
+              await transferToCityLedger(hotel.id, editingGuest.id, res.id, resBalance, profile.uid, newCorpId);
+            } else {
+              // Just link the reservation to the corporate account so future bills are corporate
+              await database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+                corporateId: newCorpId
+              }, {
+                hotelId: hotel.id,
+                module: 'Reservations',
+                action: 'RESERVATION_CORP_LINK',
+                details: `Linked reservation to corporate account on guest corporate assignment`
+              });
+            }
+          }
+        }
       } else {
         await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,
