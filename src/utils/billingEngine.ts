@@ -1,5 +1,5 @@
-import { Reservation, Hotel, LedgerEntry } from '../types';
-import { startOfDay, parseISO, differenceInDays, format, addDays, isAfter } from 'date-fns';
+import { Reservation, Hotel, LedgerEntry, Tax } from '../types';
+import { startOfDay, parseISO, differenceInDays, format, addDays } from 'date-fns';
 
 /**
  * Safely parses a date string (YYYY-MM-DD) and optional time string (HH:MM)
@@ -27,10 +27,276 @@ export interface BillingState {
   unpostedIncidentals?: number; // Difference between reservation totalAmount and base stay not yet posted
 }
 
-export const BillingService = {
+/**
+ * Enterprise Billing Engine - Single Source of Truth
+ */
+export class BillingEngine {
   /**
-   * Calculates the stay window, check-in, and check-out Date objects based on configuration.
+   * 1. Calculates the Room Charge: roomRate * bookedNights
    */
+  static calculateRoomCharges(res: Reservation): number {
+    const bookedNights = res.nights || 0;
+    const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
+    return roomRate * bookedNights;
+  }
+
+  /**
+   * 2. Calculates Overstay Charges: roomRate * overstayNights
+   */
+  static calculateOverstay(res: Reservation, hotel: Hotel | null, options?: any): number {
+    const allowOverstayCharges = options?.allowOverstayCharges ?? hotel?.autoChargeOverstays ?? true;
+    if (!allowOverstayCharges) return 0;
+
+    const bookedNights = res.nights || 0;
+    const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
+
+    // Retrieve manual overstay nights if set, otherwise calculate dynamically
+    let overstayNights = res.overstayNights !== undefined ? (res.overstayNights as number) : 0;
+    
+    if (res.status === 'checked_in') {
+      const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
+      const checkOutDateTime = res.checkOutDateTime 
+        ? new Date(res.checkOutDateTime) 
+        : parseLocalDateTime(res.checkOut, checkOutTime);
+      const currentTime = options?.currentTime || new Date();
+
+      if (currentTime > checkOutDateTime) {
+        const hoursPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60);
+        if (hoursPast > 0) {
+          const graceHours = hotel?.overstayGraceHours ?? 2;
+          const fullDaysPast = Math.floor(hoursPast / 24);
+          const remainingHoursPast = hoursPast % 24;
+          let calculatedOverstayNights = fullDaysPast;
+          if (remainingHoursPast > graceHours) {
+            calculatedOverstayNights += 1;
+          }
+          overstayNights = Math.max(overstayNights, calculatedOverstayNights);
+        }
+      }
+    }
+    return roomRate * overstayNights;
+  }
+
+  /**
+   * 3. Calculates Extra Services (Incidentals / other ledger debits)
+   */
+  static calculateExtraServices(res: Reservation, ledgerEntries?: LedgerEntry[]): number {
+    if (ledgerEntries) {
+      // Incidentals are debits that are not room rate or overstay charges
+      return ledgerEntries
+        .filter(e => e.type === 'debit' && e.category !== 'room' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay')
+        .reduce((acc, e) => acc + e.amount, 0);
+    }
+    // Fallback: Estimate extra charges from original reservation amounts if ledger is not yet populated
+    const baseRoom = this.calculateRoomCharges(res);
+    return Math.max(0, (res.totalAmount || 0) - baseRoom);
+  }
+
+  /**
+   * 4. Calculates Discounts
+   */
+  static calculateDiscounts(res: Reservation): number {
+    if (res.totalDiscount !== undefined && res.totalDiscount > 0) {
+      return res.totalDiscount;
+    }
+    if (res.discountType === 'percentage') {
+      const roomCharges = this.calculateRoomCharges(res);
+      return roomCharges * ((res.discountAmount || 0) / 100);
+    }
+    return res.discountAmount || 0;
+  }
+
+  /**
+   * 5. Calculates Tax based on specific parameters and Inclusive/Exclusive flags
+   */
+  static calculateTax(subtotal: number, hotel: Hotel | null, options?: any): { amount: number; isInclusive: boolean; rate: number } {
+    const taxEnabled = options?.taxEnabled ?? (hotel?.taxes?.some(t => t.status === 'active' && t.category !== 'service') ?? true);
+    if (!taxEnabled) {
+      return { amount: 0, isInclusive: false, rate: 0 };
+    }
+
+    const activeTaxes = (hotel?.taxes || []).filter(t => t.status === 'active' && t.category !== 'service');
+    const taxInclusive = options?.taxInclusive ?? activeTaxes.some(t => t.isInclusive);
+    const taxRate = options?.taxRate ?? activeTaxes.reduce((acc, t) => acc + t.percentage, 0);
+
+    let amount = 0;
+    if (taxInclusive) {
+      // Extract tax from total (subtotal is inclusive of tax)
+      amount = subtotal - (subtotal / (1 + taxRate / 100));
+    } else {
+      // Add tax to subtotal (exclusive tax)
+      amount = subtotal * (taxRate / 100);
+    }
+
+    return { amount, isInclusive: taxInclusive, rate: taxRate };
+  }
+
+  /**
+   * 6. Calculates Service Charge based on subtotal
+   */
+  static calculateServiceCharge(subtotal: number, hotel: Hotel | null, options?: any): { amount: number; isInclusive: boolean; rate: number } {
+    const activeServiceCharges = (hotel?.taxes || []).filter(t => t.status === 'active' && (t.category === 'service' || t.name.toLowerCase().includes('service')));
+    const serviceChargeEnabled = options?.serviceChargeEnabled ?? (activeServiceCharges.length > 0);
+    if (!serviceChargeEnabled) {
+      return { amount: 0, isInclusive: false, rate: 0 };
+    }
+
+    const serviceChargeInclusive = options?.serviceChargeInclusive ?? activeServiceCharges.some(t => t.isInclusive);
+    const serviceChargeRate = options?.serviceChargeRate ?? activeServiceCharges.reduce((acc, t) => acc + t.percentage, 0);
+
+    let amount = 0;
+    if (serviceChargeInclusive) {
+      amount = subtotal - (subtotal / (1 + serviceChargeRate / 100));
+    } else {
+      amount = subtotal * (serviceChargeRate / 100);
+    }
+
+    return { amount, isInclusive: serviceChargeInclusive, rate: serviceChargeRate };
+  }
+
+  /**
+   * 8. Calculates Total Payments stored in payments list or ledger entries
+   */
+  static calculatePayments(res: Reservation, ledgerEntries?: LedgerEntry[]): number {
+    if (ledgerEntries) {
+      return ledgerEntries
+        .filter(e => e.type === 'credit')
+        .reduce((acc, e) => acc + e.amount, 0);
+    }
+    return res.paidAmount || 0;
+  }
+
+  /**
+   * 9. Calculates Balance: max(0, grandTotal - totalPaid)
+   */
+  static calculateBalance(grandTotal: number, totalPaid: number): number {
+    return Math.max(0, grandTotal - totalPaid);
+  }
+
+  /**
+   * Full comprehensive reservation billing calculation using the strict order of operations:
+   * 1. Room Charges
+   * 2. Overstay Charges
+   * 3. Extra Services
+   * 4. Discounts
+   * 5. Tax
+   * 6. Service Charge
+   * 7. Total
+   * 8. Payments
+   * 9. Balance
+   */
+  static calculateReservation(
+    res: Reservation,
+    hotel: Hotel | null,
+    ledgerEntries?: LedgerEntry[],
+    options?: any
+  ): BillingState & {
+    roomCharge: number;
+    overstayCharge: number;
+    extraServices: number;
+    discount: number;
+    subtotal: number;
+    taxAmount: number;
+    serviceChargeAmount: number;
+    grandTotal: number;
+    totalPaid: number;
+    balance: number;
+  } {
+    const roundTotals = options?.roundTotals ?? true;
+    const precision = options?.currencyPrecision ?? 2;
+    const factor = Math.pow(10, precision);
+
+    const bookedNights = res.nights || 0;
+    const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
+
+    // 1. Room Charges
+    const roomCharge = this.calculateRoomCharges(res);
+
+    // 2. Overstay Charges
+    const overstayCharge = this.calculateOverstay(res, hotel, options);
+
+    // 3. Extra Services
+    const extraServices = this.calculateExtraServices(res, ledgerEntries);
+
+    // 4. Discounts
+    const discount = this.calculateDiscounts(res);
+
+    // Subtotal before taxes and service charges
+    const subtotalBeforeDiscount = roomCharge + overstayCharge + extraServices;
+    const subtotalAfterDiscount = Math.max(0, subtotalBeforeDiscount - discount);
+
+    // 5. Tax
+    const taxInfo = this.calculateTax(subtotalAfterDiscount, hotel, options);
+    let taxAmount = taxInfo.amount;
+
+    // 6. Service Charge
+    const serviceChargeInfo = this.calculateServiceCharge(subtotalAfterDiscount, hotel, options);
+    let serviceChargeAmount = serviceChargeInfo.amount;
+
+    // 7. Total
+    let grandTotal = subtotalAfterDiscount;
+    if (taxInfo.rate > 0 && !taxInfo.isInclusive) {
+      grandTotal += taxAmount;
+    }
+    if (serviceChargeInfo.rate > 0 && !serviceChargeInfo.isInclusive) {
+      grandTotal += serviceChargeAmount;
+    }
+
+    if (roundTotals) {
+      grandTotal = Math.round(grandTotal * factor) / factor;
+      taxAmount = Math.round(taxAmount * factor) / factor;
+      serviceChargeAmount = Math.round(serviceChargeAmount * factor) / factor;
+    }
+
+    // 8. Payments
+    const totalPaid = this.calculatePayments(res, ledgerEntries);
+
+    // 9. Balance
+    const balance = this.calculateBalance(grandTotal, totalPaid);
+
+    // Map backwards-compatible fields
+    const overstayNights = roomRate > 0 ? overstayCharge / roomRate : 0;
+    const expectedNightsCount = bookedNights + overstayNights;
+    const isOverstaying = res.status === 'checked_in' && overstayCharge > 0;
+
+    // Calculate projectedRoomCharge (difference between calculated room charge up to now and what has been posted)
+    let projectedRoomCharge = 0;
+    if (ledgerEntries) {
+      const postedRoomChargesSum = ledgerEntries
+        .filter(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay'))
+        .reduce((acc, e) => acc + e.amount, 0);
+      projectedRoomCharge = (roomCharge + overstayCharge) - postedRoomChargesSum;
+    }
+
+    return {
+      nightsCount: Number(expectedNightsCount.toFixed(precision)),
+      extraNights: Number(overstayNights.toFixed(precision)),
+      nightlyRate: roomRate,
+      originalNights: bookedNights,
+      overstayCharge: Number(overstayCharge.toFixed(precision)),
+      totalCharges: Number(grandTotal.toFixed(precision)),
+      totalPayments: Number(totalPaid.toFixed(precision)),
+      outstandingBalance: Number((grandTotal - totalPaid).toFixed(precision)),
+      isOverstaying,
+      projectedRoomCharge: Number(projectedRoomCharge.toFixed(precision)),
+      unpostedPrepayment: 0,
+      unpostedIncidentals: 0,
+      
+      // Extended fields
+      roomCharge: Number(roomCharge.toFixed(precision)),
+      extraServices: Number(extraServices.toFixed(precision)),
+      discount: Number(discount.toFixed(precision)),
+      subtotal: Number(subtotalAfterDiscount.toFixed(precision)),
+      taxAmount: Number(taxAmount.toFixed(precision)),
+      serviceChargeAmount: Number(serviceChargeAmount.toFixed(precision)),
+      grandTotal: Number(grandTotal.toFixed(precision)),
+      totalPaid: Number(totalPaid.toFixed(precision)),
+      balance: Number(balance.toFixed(precision))
+    };
+  }
+}
+
+export const BillingService = {
   calculateStayWindow(res: Reservation, hotel: Hotel | null) {
     const checkInTime = res.checkInTime || hotel?.defaultCheckInTime || '14:00';
     const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
@@ -55,108 +321,14 @@ export const BillingService = {
     };
   },
 
-  /**
-   * Calculates the room rate / base stay charge up to the current time.
-   * Based entirely on the stay window duration, not midnight rollover.
-   */
   calculateRoomCharge(res: Reservation, hotel: Hotel | null, currentTime: Date = new Date()): number {
-    if (res.status === 'pending' || res.status === 'confirmed' || res.status === 'cancelled' || res.status === 'no_show') {
-      return 0;
-    }
-
-    const { checkInDateTime, originalNights } = this.calculateStayWindow(res, hotel);
-    const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
-
-    if (currentTime < checkInDateTime && res.status !== 'checked_in' && res.status !== 'checked_out') {
-      return 0;
-    }
-
-    // Night 1 is immediately charged upon check-in.
-    // Additional base nights are charged sequentially as each subsequent stay period of 24 hours begins (set to checkout hour).
-    const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
-    let nightsCharged = 1;
-
-    for (let i = 2; i <= originalNights; i++) {
-      const targetDateStr = format(addDays(checkInDateTime, i - 1), 'yyyy-MM-dd');
-      const nextChargeTime = parseLocalDateTime(targetDateStr, checkOutTime);
-      if (currentTime >= nextChargeTime) {
-        nightsCharged++;
-      } else {
-        break;
-      }
-    }
-
-    return nightsCharged * nightlyRate;
+    return BillingEngine.calculateRoomCharges(res);
   },
 
-  /**
-   * Evaluates the hotel's configured overstay policy and calculates additional charges.
-   */
   calculateOverstayCharge(res: Reservation, hotel: Hotel | null, currentTime: Date = new Date()): number {
-    if (res.status !== 'checked_in') {
-      return 0;
-    }
-
-    const { checkOutDateTime, originalNights } = this.calculateStayWindow(res, hotel);
-    const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
-
-    const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
-    const minutesPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60);
-    if (minutesPast <= gracePeriodMinutes) {
-      return 0;
-    }
-
-    const hoursPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60);
-    if (hoursPast <= 0) {
-      return 0;
-    }
-
-    const policy = hotel?.overstayPolicy || 'grace';
-    const graceHours = hotel?.overstayGraceHours ?? 2;
-    const partialHours = hotel?.overstayPartialHours ?? 3;
-    const partialPercentage = hotel?.overstayPartialPercentage ?? 50;
-    const fullHours = hotel?.overstayFullHours ?? 6;
-
-    let overstayNights = 0;
-
-    // Split into full 24-hour days past checkout, and the remaining fractional hours of the current day
-    const fullDaysPast = Math.floor(hoursPast / 24);
-    const remainingHoursPast = hoursPast % 24;
-
-    overstayNights += fullDaysPast;
-
-    if (remainingHoursPast > 0) {
-      if (policy === 'grace') {
-        if (remainingHoursPast > graceHours) {
-          overstayNights += 1;
-        }
-      } else if (policy === 'partial') {
-        if (remainingHoursPast > fullHours) {
-          overstayNights += 1;
-        } else if (remainingHoursPast > partialHours) {
-          overstayNights += (partialPercentage / 100);
-        }
-      } else if (policy === 'full') {
-        if (remainingHoursPast > fullHours) {
-          overstayNights += 1;
-        }
-      } else if (policy === 'full_night' || policy === 'immediate_full') {
-        overstayNights += 1;
-      } else {
-        // Fallback default: Grace Period
-        if (remainingHoursPast > graceHours) {
-          overstayNights += 1;
-        }
-      }
-    }
-
-    return overstayNights * nightlyRate;
+    return BillingEngine.calculateOverstay(res, hotel, { currentTime });
   },
 
-  /**
-   * Determines the exact timestamp of the next expected charge boundary.
-   * Used by automated billing deduction systems instead of midnight cron jobs.
-   */
   calculateNextChargeDateTime(res: Reservation, hotel: Hotel | null, nightsChargedCount?: number): Date {
     const { checkInDateTime, checkOutDateTime, originalNights } = this.calculateStayWindow(res, hotel);
     const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
@@ -166,11 +338,9 @@ export const BillingService = {
       : (res.lastChargeDateTime ? (res.nights || 1) : 1);
 
     if (charged < originalNights) {
-      // Base nights are charged relative to the check-in date
       const targetDateStr = format(addDays(checkInDateTime, charged), 'yyyy-MM-dd');
       return parseLocalDateTime(targetDateStr, checkOutTime);
     } else {
-      // All original nights are charged. The next charge is an overstay charge.
       const policy = hotel?.overstayPolicy || 'grace';
       const graceHours = hotel?.overstayGraceHours ?? 2;
       const partialHours = hotel?.overstayPartialHours ?? 3;
@@ -195,142 +365,15 @@ export const BillingService = {
     }
   },
 
-  /**
-   * Returns a complete calculation of stay limits, expected charges, payments, and outstanding balance.
-   */
   calculateOutstandingBalance(
     res: Reservation,
     hotel: Hotel | null,
     ledgerEntries?: LedgerEntry[],
     currentTime: Date = new Date()
   ): BillingState {
-    const { checkInDateTime, checkOutDateTime, originalNights } = this.calculateStayWindow(res, hotel);
-    const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
-
-    const baseRoomCharge = this.calculateRoomCharge(res, hotel, currentTime);
-    const overstayCharge = this.calculateOverstayCharge(res, hotel, currentTime);
-    const totalStayCharge = baseRoomCharge + overstayCharge;
-
-    const isOverstaying = res.status === 'checked_in' && currentTime > checkOutDateTime;
-
-    // Total nights stayed / expected
-    const expectedNightsCount = nightlyRate > 0 ? (totalStayCharge / nightlyRate) : originalNights;
-    const extraNights = Math.max(0, expectedNightsCount - originalNights);
-
-    // Calculate exclusive tax on base stay
-    let baseExclusiveTax = 0;
-    const activeTaxes = (hotel?.taxes || []).filter((t: any) => {
-      const status = (t.status || '').toLowerCase().trim();
-      const taxCat = (t.category || '').toLowerCase().trim();
-      return status === 'active' && (taxCat === 'all' || taxCat === 'room' || taxCat === 'service');
-    });
-
-    for (const tax of activeTaxes) {
-      if (!tax.isInclusive) {
-        baseExclusiveTax += baseRoomCharge * (tax.percentage / 100);
-      }
-    }
-
-    const baseStayWithTaxes = baseRoomCharge + baseExclusiveTax;
-
-    // Calculate exclusive tax on overstay charge
-    let overstayExclusiveTax = 0;
-    for (const tax of activeTaxes) {
-      if (!tax.isInclusive) {
-        overstayExclusiveTax += overstayCharge * (tax.percentage / 100);
-      }
-    }
-
-    let incidentalCharges = 0;
-    let totalCharges = 0;
-    let totalPayments = 0;
-    let projectedRoomCharge = 0;
-    let unpostedPrepayment = 0;
-    let unpostedIncidentals = 0;
-
-    if (ledgerEntries !== undefined) {
-      const debits = ledgerEntries.filter(e => e.type === 'debit');
-      const credits = ledgerEntries.filter(e => e.type === 'credit');
-
-      const totalPostedDebits = debits.reduce((acc, e) => acc + e.amount, 0);
-      const ledgerCreditsSum = credits.reduce((acc, e) => acc + e.amount, 0);
-
-      const postedRoomChargesSum = debits
-        .filter(e => {
-          const cat = e.category?.toLowerCase();
-          if (cat === 'room') return true;
-          if (e.chargeType === 'room_rate' || e.chargeType === 'overstay') return true;
-          return false;
-        })
-        .reduce((acc, e) => acc + e.amount, 0);
-
-      // We allow projectedRoomCharge to go negative to support nightly rate corrections and reductions on active stays
-      projectedRoomCharge = totalStayCharge - postedRoomChargesSum;
-      const projectedRoomTax = Math.max(0, (projectedRoomCharge * overstayExclusiveTax) / (overstayCharge || 1));
-      
-      unpostedPrepayment = Math.max(0, (res.paidAmount || 0) - ledgerCreditsSum);
-
-      const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger'];
-      const postedIncidentals = debits
-        .filter(e => !nonTotalDebits.includes(e.category?.toLowerCase()))
-        .reduce((acc, e) => acc + e.amount, 0);
-
-      const expectedIncidentals = (res.totalAmount !== undefined) ? (res.totalAmount - baseStayWithTaxes) : 0;
-      unpostedIncidentals = expectedIncidentals - postedIncidentals;
-
-      totalCharges = totalPostedDebits + projectedRoomCharge + projectedRoomTax + unpostedIncidentals;
-      totalPayments = ledgerCreditsSum + unpostedPrepayment + (res.totalDiscount || 0);
-    } else {
-      // Deduce incidental charges from reservation totalAmount (can be negative for corrections/discounts)
-      incidentalCharges = (res.totalAmount !== undefined) ? (res.totalAmount - baseStayWithTaxes) : 0;
-
-      // Total charges is the base stay + exclusive overstay + exclusive taxes + incidentals
-      totalCharges = baseStayWithTaxes + overstayCharge + overstayExclusiveTax + incidentalCharges;
-      totalPayments = (res.paidAmount || 0) + (res.totalDiscount || 0);
-
-      // Deduce projected/unposted room charge based on ledgerBalance if available
-      if (res.ledgerBalance !== undefined) {
-        const postedRoomChargesSum = Math.max(0, (res.ledgerBalance || 0) + (res.paidAmount || 0) - (res.totalAmount || 0) + baseStayWithTaxes);
-        projectedRoomCharge = totalStayCharge - postedRoomChargesSum;
-      } else {
-        let estimatedPostedCharges = 0;
-        if (res.status === 'checked_out') {
-          estimatedPostedCharges = totalStayCharge;
-        } else if (res.status === 'checked_in') {
-          estimatedPostedCharges = res.autoNightDeduction ? baseRoomCharge : nightlyRate;
-        }
-        projectedRoomCharge = totalStayCharge - estimatedPostedCharges;
-      }
-      unpostedIncidentals = incidentalCharges;
-    }
-
-    // Safety checks
-    if (isNaN(projectedRoomCharge)) projectedRoomCharge = 0;
-    if (isNaN(unpostedIncidentals)) unpostedIncidentals = 0;
-    if (isNaN(totalCharges) || totalCharges < 0) totalCharges = 0;
-    if (isNaN(totalPayments) || totalPayments < 0) totalPayments = 0;
-
-    const outstandingBalance = totalCharges - totalPayments;
-
-    return {
-      nightsCount: Number(expectedNightsCount.toFixed(2)),
-      extraNights: Number(extraNights.toFixed(2)),
-      nightlyRate,
-      originalNights,
-      overstayCharge: Number(overstayCharge.toFixed(2)),
-      totalCharges: Number(totalCharges.toFixed(2)),
-      totalPayments: Number(totalPayments.toFixed(2)),
-      outstandingBalance: Number((isNaN(outstandingBalance) ? 0 : outstandingBalance).toFixed(2)),
-      isOverstaying,
-      projectedRoomCharge: Number(projectedRoomCharge.toFixed(2)),
-      unpostedPrepayment: Number(unpostedPrepayment.toFixed(2)),
-      unpostedIncidentals: Number(unpostedIncidentals.toFixed(2))
-    };
+    return BillingEngine.calculateReservation(res, hotel, ledgerEntries, { currentTime });
   },
 
-  /**
-   * Duplicate charge check.
-   */
   isChargeDuplicate(
     ledgerEntries: LedgerEntry[],
     reservationId: string,
@@ -356,7 +399,7 @@ export function calculateBilling(
   hotel: Hotel | null,
   ledgerEntries?: LedgerEntry[]
 ): BillingState {
-  return BillingService.calculateOutstandingBalance(res, hotel, ledgerEntries);
+  return BillingEngine.calculateReservation(res, hotel, ledgerEntries);
 }
 
 /**
@@ -366,6 +409,6 @@ export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null)
   if (res.status === 'checked_out' || res.status === 'cancelled') {
     return res.ledgerBalance !== undefined ? res.ledgerBalance : 0;
   }
-  const billing = BillingService.calculateOutstandingBalance(res, hotel);
+  const billing = BillingEngine.calculateReservation(res, hotel);
   return billing.outstandingBalance;
 }

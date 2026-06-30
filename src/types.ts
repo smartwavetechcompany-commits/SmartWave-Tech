@@ -378,6 +378,9 @@ export interface Reservation {
   taxAmount?: number;
   taxDetails?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
   ledgerBalance?: number; // Added to track current balance on the reservation level
+  overstayNights?: number; // Stored overstay nights
+  charges?: any[]; // Stored charges / incidentals
+  payments?: any[]; // Stored payments list
   idNumber?: string;
   idType?: string;
   advanceDeposit?: number;
