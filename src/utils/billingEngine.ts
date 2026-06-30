@@ -24,6 +24,7 @@ export interface BillingState {
   isOverstaying: boolean;      // True if the guest is currently overstaying
   projectedRoomCharge: number; // Charges that are due but not yet posted
   unpostedPrepayment: number;  // Paid amount not yet reflected in ledger credits
+  unpostedIncidentals?: number; // Difference between reservation totalAmount and base stay not yet posted
 }
 
 export const BillingService = {
@@ -245,6 +246,7 @@ export const BillingService = {
     let totalPayments = 0;
     let projectedRoomCharge = 0;
     let unpostedPrepayment = 0;
+    let unpostedIncidentals = 0;
 
     if (ledgerEntries !== undefined) {
       const debits = ledgerEntries.filter(e => e.type === 'debit');
@@ -262,16 +264,25 @@ export const BillingService = {
         })
         .reduce((acc, e) => acc + e.amount, 0);
 
-      projectedRoomCharge = Math.max(0, totalStayCharge - postedRoomChargesSum);
+      // We allow projectedRoomCharge to go negative to support nightly rate corrections and reductions on active stays
+      projectedRoomCharge = totalStayCharge - postedRoomChargesSum;
       const projectedRoomTax = Math.max(0, (projectedRoomCharge * overstayExclusiveTax) / (overstayCharge || 1));
       
       unpostedPrepayment = Math.max(0, (res.paidAmount || 0) - ledgerCreditsSum);
 
-      totalCharges = totalPostedDebits + projectedRoomCharge + projectedRoomTax;
+      const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger'];
+      const postedIncidentals = debits
+        .filter(e => !nonTotalDebits.includes(e.category?.toLowerCase()))
+        .reduce((acc, e) => acc + e.amount, 0);
+
+      const expectedIncidentals = (res.totalAmount !== undefined) ? (res.totalAmount - baseStayWithTaxes) : 0;
+      unpostedIncidentals = expectedIncidentals - postedIncidentals;
+
+      totalCharges = totalPostedDebits + projectedRoomCharge + projectedRoomTax + unpostedIncidentals;
       totalPayments = ledgerCreditsSum + unpostedPrepayment + (res.totalDiscount || 0);
     } else {
-      // Deduce incidental charges from reservation totalAmount
-      incidentalCharges = Math.max(0, (res.totalAmount || 0) - baseStayWithTaxes);
+      // Deduce incidental charges from reservation totalAmount (can be negative for corrections/discounts)
+      incidentalCharges = (res.totalAmount !== undefined) ? (res.totalAmount - baseStayWithTaxes) : 0;
 
       // Total charges is the base stay + exclusive overstay + exclusive taxes + incidentals
       totalCharges = baseStayWithTaxes + overstayCharge + overstayExclusiveTax + incidentalCharges;
@@ -280,7 +291,7 @@ export const BillingService = {
       // Deduce projected/unposted room charge based on ledgerBalance if available
       if (res.ledgerBalance !== undefined) {
         const postedRoomChargesSum = Math.max(0, (res.ledgerBalance || 0) + (res.paidAmount || 0) - (res.totalAmount || 0) + baseStayWithTaxes);
-        projectedRoomCharge = Math.max(0, totalStayCharge - postedRoomChargesSum);
+        projectedRoomCharge = totalStayCharge - postedRoomChargesSum;
       } else {
         let estimatedPostedCharges = 0;
         if (res.status === 'checked_out') {
@@ -288,12 +299,14 @@ export const BillingService = {
         } else if (res.status === 'checked_in') {
           estimatedPostedCharges = res.autoNightDeduction ? baseRoomCharge : nightlyRate;
         }
-        projectedRoomCharge = Math.max(0, totalStayCharge - estimatedPostedCharges);
+        projectedRoomCharge = totalStayCharge - estimatedPostedCharges;
       }
+      unpostedIncidentals = incidentalCharges;
     }
 
     // Safety checks
-    if (isNaN(projectedRoomCharge) || projectedRoomCharge < 0) projectedRoomCharge = 0;
+    if (isNaN(projectedRoomCharge)) projectedRoomCharge = 0;
+    if (isNaN(unpostedIncidentals)) unpostedIncidentals = 0;
     if (isNaN(totalCharges) || totalCharges < 0) totalCharges = 0;
     if (isNaN(totalPayments) || totalPayments < 0) totalPayments = 0;
 
@@ -310,7 +323,8 @@ export const BillingService = {
       outstandingBalance: Number((isNaN(outstandingBalance) ? 0 : outstandingBalance).toFixed(2)),
       isOverstaying,
       projectedRoomCharge: Number(projectedRoomCharge.toFixed(2)),
-      unpostedPrepayment: Number(unpostedPrepayment.toFixed(2))
+      unpostedPrepayment: Number(unpostedPrepayment.toFixed(2)),
+      unpostedIncidentals: Number(unpostedIncidentals.toFixed(2))
     };
   },
 

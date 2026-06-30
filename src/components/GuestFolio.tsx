@@ -832,6 +832,42 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       postedBy: 'system',
       isVirtual: true
     } as any);
+  } else if (projectedRoomCharge < -0.01) {
+    allHistoryItems.push({
+      id: 'projected_room_stay_charge_virtual_reduction',
+      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
+      description: 'Projected Room Rate Adjustment / Correction Credit',
+      category: 'room',
+      type: 'credit',
+      amount: Math.abs(projectedRoomCharge),
+      postedBy: 'system',
+      isVirtual: true
+    } as any);
+  }
+
+  const unpostedIncidentals = billingState.unpostedIncidentals || 0;
+  if (unpostedIncidentals > 0.01) {
+    allHistoryItems.push({
+      id: 'projected_incidental_adjustment_virtual',
+      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
+      description: 'Projected Incidental / Manual Adjustment Charge',
+      category: 'other',
+      type: 'debit',
+      amount: unpostedIncidentals,
+      postedBy: 'system',
+      isVirtual: true
+    } as any);
+  } else if (unpostedIncidentals < -0.01) {
+    allHistoryItems.push({
+      id: 'projected_incidental_adjustment_virtual_reduction',
+      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
+      description: 'Manual Adjustment / Correction Credit',
+      category: 'other',
+      type: 'credit',
+      amount: Math.abs(unpostedIncidentals),
+      postedBy: 'system',
+      isVirtual: true
+    } as any);
   }
 
   // Sort chronologically (oldest first) to compute running balance correctly
