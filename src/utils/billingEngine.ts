@@ -169,6 +169,10 @@ export class BillingEngine {
               return false;
             }
           }
+          // Exclude general folio discounts / service adjustment credits to prevent double counting
+          if (e.category === 'discount' || e.category === 'service') {
+            return false;
+          }
           return true;
         })
         .reduce((acc, e) => acc + e.amount, 0);

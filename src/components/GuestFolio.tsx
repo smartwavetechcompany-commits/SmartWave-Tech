@@ -1914,7 +1914,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         </div>
                         <div className="flex-1">
                           <p className="text-xs font-bold text-zinc-500 uppercase truncate">Remaining Stay Total</p>
-                          <p className="text-lg font-bold text-red-500">{formatCurrency(Math.max(balance, currentReservation.totalAmount - (currentReservation.paidAmount || 0)), currency, exchangeRate)}</p>
+                          <p className="text-lg font-bold text-red-500">{formatCurrency(balance, currency, exchangeRate)}</p>
                         </div>
                       </div>
                       
