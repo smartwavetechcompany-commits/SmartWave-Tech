@@ -222,6 +222,17 @@ export const postToLedger = async (
 
     const totalPaidAmountAdj = creditsSum - debitsSum;
 
+    // Track discounts (credit adjustments of category discount or service, minus debit adjustments of the same)
+    const discountCreditsSum = entries
+      .filter(e => e.type === 'credit' && (e.category === 'discount' || e.category === 'service'))
+      .reduce((acc, e) => acc + e.amount, 0);
+
+    const discountDebitsSum = entries
+      .filter(e => e.type === 'debit' && (e.category === 'discount' || e.category === 'service'))
+      .reduce((acc, e) => acc + e.amount, 0);
+
+    const totalDiscountAdj = discountCreditsSum - discountDebitsSum;
+
     // Debit charges that are room, payment, refund, or transfer should NOT increase the reservation's totalAmount.
     // Additionally, if the main posted charge is room-related or non-total, any automatic taxes generated for it should also not increase totalAmount.
     const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger'];
@@ -234,6 +245,7 @@ export const postToLedger = async (
 
     if (projectedTotalAdj !== 0) resUpdates.totalAmount = increment(projectedTotalAdj);
     if (totalPaidAmountAdj !== 0) resUpdates.paidAmount = increment(totalPaidAmountAdj);
+    if (totalDiscountAdj !== 0) resUpdates.totalDiscount = increment(totalDiscountAdj);
     
     const totalBalanceAdj = guestBalanceAdj + corpBalanceAdj;
     if (totalBalanceAdj !== 0) resUpdates.ledgerBalance = increment(totalBalanceAdj);
@@ -241,15 +253,16 @@ export const postToLedger = async (
     // Calculate new status
     const freshTotalAmount = (resData.totalAmount || 0) + projectedTotalAdj;
     const freshPaidAmount = (resData.paidAmount || 0) + totalPaidAmountAdj;
+    const freshDiscountAmount = (resData.totalDiscount || 0) + totalDiscountAdj;
 
     let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
     if (freshTotalAmount > 0) {
-      if (freshPaidAmount >= freshTotalAmount - 0.01) {
+      if (freshPaidAmount + freshDiscountAmount >= freshTotalAmount - 0.01) {
         newPaymentStatus = 'paid';
-      } else if (freshPaidAmount > 0) {
+      } else if (freshPaidAmount + freshDiscountAmount > 0) {
         newPaymentStatus = 'partial';
       }
-    } else if (freshPaidAmount > 0) {
+    } else if (freshPaidAmount + freshDiscountAmount > 0) {
       newPaymentStatus = 'paid';
     }
 

@@ -929,14 +929,10 @@ export function FrontDesk() {
 
         // Apply discount to the first reservation in the batch
         if (createdStays.length === 0 && newBooking.discountAmount > 0) {
-          let discountVal = newBooking.discountAmount;
-          if (newBooking.discountType === 'percentage') {
-            discountVal = (totalAmount * newBooking.discountAmount) / 100;
-          }
           resData.discountAmount = newBooking.discountAmount;
           resData.discountType = newBooking.discountType;
           resData.discountReason = newBooking.discountReason;
-          resData.totalDiscount = discountVal;
+          resData.totalDiscount = 0; // Initialize to 0; postToLedger will update it via increment
         }
 
         // Note: We don't set paidAmount here anymore because settleLedger 
