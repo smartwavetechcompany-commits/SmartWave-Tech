@@ -784,7 +784,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const projectedRoomCharge = billingState.projectedRoomCharge;
 
   const totalDebits = processedDisplayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const ledgerCreditsSum = processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+  const ledgerCreditsSum = processedDisplayedEntries
+    .filter(e => {
+      if (e.type !== 'credit') return false;
+      // Exclude room rate discount/adjustment credits to prevent double counting
+      if (e.category === 'room') {
+        const desc = (e.description || '').toLowerCase();
+        if (desc.includes('discount') || desc.includes('adjust') || desc.includes('correction') || desc.includes('rate')) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .reduce((acc, e) => acc + e.amount, 0);
   const unpostedPrepayment = billingState.unpostedPrepayment;
   const totalCredits = ledgerCreditsSum + unpostedPrepayment;
   const balance = billingState.outstandingBalance;
@@ -1918,7 +1930,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         </div>
                         <div className="flex justify-between text-[10px]">
                           <span className="text-zinc-500 uppercase">Total Payments</span>
-                          <span className="text-emerald-500">-{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                          <span className="text-emerald-500">-{formatCurrency(totalCredits, currency, exchangeRate)}</span>
                         </div>
                       </div>
                     </div>

@@ -160,7 +160,17 @@ export class BillingEngine {
   static calculatePayments(res: Reservation, ledgerEntries?: LedgerEntry[]): number {
     if (ledgerEntries) {
       return ledgerEntries
-        .filter(e => e.type === 'credit')
+        .filter(e => {
+          if (e.type !== 'credit') return false;
+          // Exclude room rate discount/adjustment credits to prevent double counting
+          if (e.category === 'room') {
+            const desc = (e.description || '').toLowerCase();
+            if (desc.includes('discount') || desc.includes('adjust') || desc.includes('correction') || desc.includes('rate')) {
+              return false;
+            }
+          }
+          return true;
+        })
         .reduce((acc, e) => acc + e.amount, 0);
     }
     return res.paidAmount || 0;
