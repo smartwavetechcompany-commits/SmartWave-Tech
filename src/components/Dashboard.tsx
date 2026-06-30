@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
+import { getReservationLiveBalance } from '../utils/billingEngine';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
 import { 
   Users, 
@@ -163,7 +164,7 @@ export function Dashboard() {
           value: formatCurrency(rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').reduce((acc, r) => {
             const res = activeReservations.find(res => res.roomId === r.id && res.status === 'checked_in');
             if (res) {
-              const balance = res.totalAmount - (res.paidAmount || 0);
+              const balance = getReservationLiveBalance(res, hotel);
               return acc + Math.max(0, balance);
             }
             return acc;

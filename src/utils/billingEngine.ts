@@ -464,9 +464,6 @@ export function calculateBilling(
  * Backward compatibility wrapper for getReservationLiveBalance.
  */
 export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null): number {
-  if (res.ledgerBalance !== undefined) {
-    return res.ledgerBalance;
-  }
   const billing = BillingEngine.calculateReservation(res, hotel);
   return billing.outstandingBalance;
 }
