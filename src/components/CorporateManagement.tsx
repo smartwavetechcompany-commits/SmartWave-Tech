@@ -23,7 +23,9 @@ import {
   Download,
   Clock,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Printer,
+  XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
@@ -100,6 +102,30 @@ export function CorporateManagement() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showRatesModal, setShowRatesModal] = useState<CorporateAccount | null>(null);
   const [showFolioModal, setShowFolioModal] = useState<CorporateAccount | null>(null);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [showBulkSettleModal, setShowBulkSettleModal] = useState(false);
+  const [bulkSettleAccounts, setBulkSettleAccounts] = useState<{
+    accountId: string;
+    accountName: string;
+    currentBalance: number;
+    paymentAmount: number;
+  }[]>([]);
+  const [bulkPaymentMethod, setBulkPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'cheque' | 'other'>('transfer');
+  const [bulkDescription, setBulkDescription] = useState('Bulk debt settlement');
+  const [bulkSettleReceipt, setBulkSettleReceipt] = useState<{
+    invoiceNumber: string;
+    date: string;
+    paymentMethod: string;
+    description: string;
+    processedBy: string;
+    settlements: {
+      accountName: string;
+      originalBalance: number;
+      settledAmount: number;
+      remainingBalance: number;
+    }[];
+    totalSettled: number;
+  } | null>(null);
   const [rates, setRates] = useState<CorporateRate[]>([]);
   const [editingAccount, setEditingAccount] = useState<CorporateAccount | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -386,6 +412,132 @@ export function CorporateManagement() {
     }
   };
 
+  const handleBulkSettle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || bulkSettleAccounts.length === 0) return;
+
+    try {
+      setLoading(true);
+      const timestamp = new Date().toISOString();
+      const invoiceNumber = `INV-CORP-SETTLE-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
+      const settlementsSummary: {
+        accountName: string;
+        originalBalance: number;
+        settledAmount: number;
+        remainingBalance: number;
+      }[] = [];
+      let totalSettled = 0;
+
+      for (const item of bulkSettleAccounts) {
+        if (item.paymentAmount <= 0) continue;
+
+        const originalBalance = item.currentBalance;
+        const settledAmount = item.paymentAmount;
+        const remainingBalance = originalBalance - settledAmount;
+        totalSettled += settledAmount;
+
+        settlementsSummary.push({
+          accountName: item.accountName,
+          originalBalance,
+          settledAmount,
+          remainingBalance,
+        });
+
+        // 1. Update Corporate Account Balance & totalCredits
+        const accountRef = doc(db, 'hotels', hotel.id, 'corporate_accounts', item.accountId);
+        await database.safeUpdate(accountRef, {
+          currentBalance: increment(-settledAmount),
+          totalCredits: increment(settledAmount)
+        }, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'CORPORATE_BALANCE_UPDATE',
+          details: `Bulk settlement of ${settledAmount} for ${item.accountName}`
+        });
+
+        // 2. Add to Ledger
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
+          hotelId: hotel.id,
+          corporateId: item.accountId,
+          reservationId: 'BULK_SETTLEMENT',
+          timestamp,
+          amount: settledAmount,
+          type: 'credit',
+          category: 'payment',
+          description: bulkDescription || 'Bulk debt settlement',
+          paymentMethod: bulkPaymentMethod,
+          postedBy: profile.uid,
+          referenceId: invoiceNumber
+        }, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'LEDGER_ENTRY_CREATE',
+          details: `Ledger entry for bulk settlement of ${item.accountName}`
+        });
+
+        // 3. Log to finance (income)
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'income',
+          amount: settledAmount,
+          category: 'Corporate Payment',
+          description: `Bulk Settlement Payment: ${item.accountName} - ${bulkDescription}`,
+          timestamp,
+          paymentMethod: bulkPaymentMethod,
+          referenceId: item.accountId,
+          invoiceId: invoiceNumber
+        }, {
+          hotelId: hotel.id,
+          module: 'Corporate',
+          action: 'FINANCE_ENTRY_CREATE',
+          details: `Corporate payment finance entry from bulk settlement of ${item.accountName}`
+        });
+      }
+
+      if (settlementsSummary.length === 0) {
+        toast.error('No payments were processed. Settle amount must be greater than zero.');
+        setLoading(false);
+        return;
+      }
+
+      // Log general action to activityLogs
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp,
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'CORPORATE_BULK_SETTLEMENT',
+        resource: `Bulk settled debt for ${settlementsSummary.length} accounts. Total: ${formatCurrency(totalSettled, currency, exchangeRate)}`,
+        hotelId: hotel.id,
+        module: 'Corporate'
+      }, {
+        hotelId: hotel.id,
+        module: 'Corporate',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Corporate bulk settlement activity'
+      });
+
+      // Update local receipt state
+      setBulkSettleReceipt({
+        invoiceNumber,
+        date: format(new Date(), 'MMM dd, yyyy HH:mm'),
+        paymentMethod: bulkPaymentMethod,
+        description: bulkDescription,
+        processedBy: profile.email || profile.uid,
+        settlements: settlementsSummary,
+        totalSettled,
+      });
+
+      // Clear selection
+      setSelectedAccountIds([]);
+      toast.success(`Successfully settled debt across ${settlementsSummary.length} accounts!`);
+    } catch (err) {
+      console.error("Bulk settlement error:", err);
+      toast.error('Failed to process bulk settlement');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
@@ -650,6 +802,30 @@ export function CorporateManagement() {
                 {loading ? <RefreshCw size={18} className="animate-spin" /> : <Clock size={18} />}
                 {loading ? 'Posting...' : 'Post Daily Charges'}
               </button>
+              {selectedAccountIds.length > 0 && (
+                <button
+                  onClick={() => {
+                    const initialSettleData = selectedAccountIds.map(id => {
+                      const acc = accounts.find(a => a.id === id);
+                      return {
+                        accountId: id,
+                        accountName: acc?.name || '',
+                        currentBalance: acc?.currentBalance || 0,
+                        paymentAmount: acc?.currentBalance || 0,
+                      };
+                    });
+                    setBulkSettleAccounts(initialSettleData);
+                    setBulkPaymentMethod('transfer');
+                    setBulkDescription('Bulk debt settlement');
+                    setBulkSettleReceipt(null);
+                    setShowBulkSettleModal(true);
+                  }}
+                  className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-black px-4 py-2 rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-emerald-500/10"
+                >
+                  <CreditCard size={18} />
+                  Bulk Settle Debt ({selectedAccountIds.length})
+                </button>
+              )}
               <button 
                 onClick={() => {
                   setEditingAccount(null);
@@ -783,6 +959,24 @@ export function CorporateManagement() {
           <table className="w-full text-left">
             <thead>
               <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
+                <th className="px-6 py-4 w-12 text-center">
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredAccounts.filter(a => (a.currentBalance || 0) > 0).length > 0 &&
+                      filteredAccounts.filter(a => (a.currentBalance || 0) > 0).every(a => selectedAccountIds.includes(a.id))
+                    }
+                    onChange={(e) => {
+                      const eligibleAccounts = filteredAccounts.filter(a => (a.currentBalance || 0) > 0);
+                      if (e.target.checked) {
+                        setSelectedAccountIds(eligibleAccounts.map(a => a.id));
+                      } else {
+                        setSelectedAccountIds([]);
+                      }
+                    }}
+                    className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500/30 w-4 h-4 cursor-pointer"
+                  />
+                </th>
                 <th className="px-6 py-4">Company</th>
                 <th className="px-6 py-4">Contact</th>
                 <th className="px-6 py-4">Credit Info</th>
@@ -793,6 +987,24 @@ export function CorporateManagement() {
             <tbody className="divide-y divide-zinc-800">
               {filteredAccounts.map(account => (
                 <tr key={account.id} className="hover:bg-zinc-800/50 transition-colors">
+                  <td className="px-6 py-4 w-12 text-center">
+                    {(account.currentBalance || 0) > 0 ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedAccountIds.includes(account.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedAccountIds(prev => [...prev, account.id]);
+                          } else {
+                            setSelectedAccountIds(prev => prev.filter(id => id !== account.id));
+                          }
+                        }}
+                        className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500/30 w-4 h-4 cursor-pointer"
+                      />
+                    ) : (
+                      <div className="w-4 h-4 mx-auto" />
+                    )}
+                  </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-500">
@@ -998,6 +1210,300 @@ export function CorporateManagement() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Bulk Settle Debt Modal */}
+      {showBulkSettleModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl"
+          >
+            {bulkSettleReceipt ? (
+              /* Receipt View (Invoice) */
+              <div>
+                <style>{`
+                  @media print {
+                    body * {
+                      visibility: hidden;
+                    }
+                    #bulk-settle-invoice, #bulk-settle-invoice * {
+                      visibility: visible;
+                    }
+                    #bulk-settle-invoice {
+                      position: absolute;
+                      left: 0;
+                      top: 0;
+                      width: 100%;
+                      background: white !important;
+                      color: black !important;
+                      padding: 24px !important;
+                    }
+                    .no-print {
+                      display: none !important;
+                    }
+                  }
+                `}</style>
+                <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-950 no-print">
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Settlement Successful</h2>
+                    <p className="text-sm text-zinc-500">Unified corporate debt clearance processed and invoice generated.</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setShowBulkSettleModal(false);
+                      setBulkSettleReceipt(null);
+                    }}
+                    className="text-zinc-400 hover:text-white hover:bg-zinc-800 p-1 rounded-full transition-all"
+                  >
+                    <XCircle size={24} />
+                  </button>
+                </div>
+
+                <div className="p-8 max-h-[70vh] overflow-y-auto bg-zinc-900">
+                  {/* Printable Invoice Container */}
+                  <div id="bulk-settle-invoice" className="bg-white text-zinc-900 p-8 rounded-2xl border border-zinc-200 shadow-sm font-sans">
+                    <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pb-6 border-b border-zinc-200">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Building2 size={28} className="text-emerald-600" />
+                          <span className="text-xl font-extrabold uppercase tracking-wider text-zinc-950">
+                            {hotel.name}
+                          </span>
+                        </div>
+                        <div className="text-xs text-zinc-500 space-y-0.5">
+                          {hotel.branding?.address && <p>{hotel.branding.address}</p>}
+                          {hotel.branding?.phone && <p>Tel: {hotel.branding.phone}</p>}
+                          {hotel.branding?.email && <p>Email: {hotel.branding.email}</p>}
+                          {hotel.branding?.website && <p>Web: {hotel.branding.website}</p>}
+                        </div>
+                      </div>
+                      <div className="text-left sm:text-right">
+                        <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 mb-3 uppercase tracking-wider">
+                          PAID & CLEARED
+                        </span>
+                        <h1 className="text-lg font-bold text-zinc-950 uppercase tracking-tight">Unified Settle Receipt</h1>
+                        <p className="text-sm font-semibold text-zinc-600 mt-1">Invoice: {bulkSettleReceipt.invoiceNumber}</p>
+                        <p className="text-xs text-zinc-500 mt-0.5">Date: {bulkSettleReceipt.date}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6 border-b border-zinc-200 text-xs">
+                      <div>
+                        <h3 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Settlement Summary</h3>
+                        <p className="font-semibold text-zinc-800">Prepared For: Multiple Selected Corporate Accounts</p>
+                        <p className="text-zinc-600 mt-1">Processed By: {bulkSettleReceipt.processedBy}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Payment Metadata</h3>
+                        <p className="font-semibold text-zinc-800">Method: <span className="uppercase">{bulkSettleReceipt.paymentMethod}</span></p>
+                        <p className="text-zinc-600 mt-1">Ref / Description: {bulkSettleReceipt.description}</p>
+                      </div>
+                    </div>
+
+                    <div className="py-6">
+                      <h3 className="text-xs font-bold text-zinc-950 uppercase tracking-wider mb-3">Settlement Ledger Details</h3>
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-zinc-300 text-zinc-500 font-bold uppercase tracking-wider">
+                            <th className="py-2.5">Corporate Account</th>
+                            <th className="py-2.5 text-right">Original Debt</th>
+                            <th className="py-2.5 text-right">Amount Settled</th>
+                            <th className="py-2.5 text-right">Remaining Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200 text-zinc-800">
+                          {bulkSettleReceipt.settlements.map((item, index) => (
+                            <tr key={index}>
+                              <td className="py-3 font-semibold text-zinc-900">{item.accountName}</td>
+                              <td className="py-3 text-right text-zinc-600">{formatCurrency(item.originalBalance, currency, exchangeRate)}</td>
+                              <td className="py-3 text-right text-emerald-600 font-bold">-{formatCurrency(item.settledAmount, currency, exchangeRate)}</td>
+                              <td className="py-3 text-right text-zinc-900 font-semibold">{formatCurrency(item.remainingBalance, currency, exchangeRate)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-zinc-300 font-extrabold text-sm text-zinc-950">
+                            <td colSpan={2} className="py-4 text-left uppercase tracking-wider">Total Settled</td>
+                            <td colSpan={2} className="py-4 text-right text-emerald-600">
+                              {formatCurrency(bulkSettleReceipt.totalSettled, currency, exchangeRate)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    <div className="pt-6 border-t border-zinc-200 text-[10px] text-zinc-400 text-center uppercase tracking-widest">
+                      Thank you for your business. Certified Unified corporate ledger update complete.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 justify-end no-print">
+                  <button
+                    onClick={() => {
+                      setShowBulkSettleModal(false);
+                      setBulkSettleReceipt(null);
+                    }}
+                    className="px-6 py-2.5 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="px-6 py-2.5 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 flex items-center gap-2"
+                  >
+                    <Printer size={18} />
+                    Print Invoice
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Configuration View */
+              <form onSubmit={handleBulkSettle}>
+                <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-950">
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Bulk Settle Debt</h2>
+                    <p className="text-xs text-zinc-500 mt-0.5">Settle outstanding balances for {bulkSettleAccounts.length} selected accounts simultaneously.</p>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setShowBulkSettleModal(false)}
+                    className="text-zinc-500 hover:text-white"
+                  >
+                    <XCircle size={22} />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto bg-zinc-900/40">
+                  {/* List of Accounts with Inputs */}
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Selected Corporate Accounts</h3>
+                    <div className="border border-zinc-800 rounded-2xl overflow-hidden divide-y divide-zinc-800">
+                      {bulkSettleAccounts.map((account, index) => (
+                        <div key={account.accountId} className="p-4 bg-zinc-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="text-sm font-bold text-white">{account.accountName}</div>
+                            <div className="text-xs text-red-400 font-semibold">
+                              Outstanding Debt: {formatCurrency(account.currentBalance, currency, exchangeRate)}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-bold">{currency}</span>
+                              <input
+                                type="number"
+                                required
+                                min="0"
+                                max={account.currentBalance}
+                                value={account.paymentAmount}
+                                onChange={(e) => {
+                                  const val = Math.min(account.currentBalance, Math.max(0, Number(e.target.value)));
+                                  setBulkSettleAccounts(prev => prev.map((a, idx) => idx === index ? { ...a, paymentAmount: val } : a));
+                                }}
+                                className="bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white w-40 font-mono text-right focus:outline-none focus:border-emerald-500"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBulkSettleAccounts(prev => prev.map((a, idx) => idx === index ? { ...a, paymentAmount: a.currentBalance } : a));
+                              }}
+                              className="text-[10px] uppercase font-bold text-emerald-500 hover:text-emerald-400 px-2 py-1 bg-emerald-500/10 rounded-lg border border-emerald-500/20"
+                            >
+                              Settle Full
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const remaining = bulkSettleAccounts.filter((_, idx) => idx !== index);
+                                setBulkSettleAccounts(remaining);
+                                setSelectedAccountIds(remaining.map(a => a.accountId));
+                                if (remaining.length === 0) {
+                                  setShowBulkSettleModal(false);
+                                }
+                              }}
+                              className="text-zinc-500 hover:text-red-500 p-1"
+                              title="Remove"
+                            >
+                              <XCircle size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Payment Details Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Payment Method</label>
+                      <select
+                        value={bulkPaymentMethod}
+                        onChange={(e) => setBulkPaymentMethod(e.target.value as any)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500/50 text-sm"
+                      >
+                        <option value="transfer">Bank Transfer</option>
+                        <option value="card">Card</option>
+                        <option value="cash">Cash</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="other">Other / Corporate Offset</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Reference / Settle Description</label>
+                      <input
+                        type="text"
+                        required
+                        value={bulkDescription}
+                        onChange={(e) => setBulkDescription(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500/50 text-sm"
+                        placeholder="e.g. Unified Invoice Clearing Q2"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Pricing Overview Summary Card */}
+                  <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="text-center sm:text-left space-y-1">
+                      <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Total Outstanding selected</div>
+                      <div className="text-lg font-bold text-zinc-400">
+                        {formatCurrency(bulkSettleAccounts.reduce((acc, a) => acc + a.currentBalance, 0), currency, exchangeRate)}
+                      </div>
+                    </div>
+                    <div className="h-px sm:h-8 w-full sm:w-px bg-zinc-800" />
+                    <div className="text-center sm:text-right space-y-1">
+                      <div className="text-xs text-emerald-400 font-bold uppercase tracking-widest">Total Settle Amount</div>
+                      <div className="text-2xl font-black text-emerald-400">
+                        {formatCurrency(bulkSettleAccounts.reduce((acc, a) => acc + a.paymentAmount, 0), currency, exchangeRate)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkSettleModal(false)}
+                    className="flex-1 px-4 py-2.5 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading || bulkSettleAccounts.reduce((acc, a) => acc + a.paymentAmount, 0) <= 0}
+                    className="flex-1 px-4 py-2.5 bg-emerald-500 disabled:opacity-50 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 flex items-center justify-center gap-2 text-sm"
+                  >
+                    {loading ? <RefreshCw size={18} className="animate-spin" /> : <CreditCard size={18} />}
+                    Confirm Settlement ({formatCurrency(bulkSettleAccounts.reduce((acc, a) => acc + a.paymentAmount, 0), currency, exchangeRate)})
+                  </button>
+                </div>
+              </form>
+            )}
           </motion.div>
         </div>
       )}

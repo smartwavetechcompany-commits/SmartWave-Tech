@@ -216,10 +216,34 @@ export const BillingService = {
     const expectedNightsCount = nightlyRate > 0 ? (totalStayCharge / nightlyRate) : originalNights;
     const extraNights = Math.max(0, expectedNightsCount - originalNights);
 
-    let totalCharges = (res.totalAmount || 0) + overstayCharge;
-    let totalPayments = (res.paidAmount || 0) + (res.totalDiscount || 0);
+    // Calculate exclusive tax on base stay
+    let baseExclusiveTax = 0;
+    const activeTaxes = (hotel?.taxes || []).filter((t: any) => {
+      const status = (t.status || '').toLowerCase().trim();
+      const taxCat = (t.category || '').toLowerCase().trim();
+      return status === 'active' && (taxCat === 'all' || taxCat === 'room' || taxCat === 'service');
+    });
 
-    let projectedRoomCharge = overstayCharge;
+    for (const tax of activeTaxes) {
+      if (!tax.isInclusive) {
+        baseExclusiveTax += baseRoomCharge * (tax.percentage / 100);
+      }
+    }
+
+    const baseStayWithTaxes = baseRoomCharge + baseExclusiveTax;
+
+    // Calculate exclusive tax on overstay charge
+    let overstayExclusiveTax = 0;
+    for (const tax of activeTaxes) {
+      if (!tax.isInclusive) {
+        overstayExclusiveTax += overstayCharge * (tax.percentage / 100);
+      }
+    }
+
+    let incidentalCharges = 0;
+    let totalCharges = 0;
+    let totalPayments = 0;
+    let projectedRoomCharge = 0;
     let unpostedPrepayment = 0;
 
     if (ledgerEntries !== undefined) {
@@ -234,34 +258,30 @@ export const BillingService = {
           const cat = e.category?.toLowerCase();
           if (cat === 'room') return true;
           if (e.chargeType === 'room_rate' || e.chargeType === 'overstay') return true;
-          if (cat === 'tax') {
-            const desc = e.description?.toLowerCase() || '';
-            return desc.includes('inclusive') && (desc.includes('room') || desc.includes('stay'));
-          }
           return false;
         })
         .reduce((acc, e) => acc + e.amount, 0);
 
-      // Unposted stay liability is total dynamic room cost minus what's already posted to ledger
       projectedRoomCharge = Math.max(0, totalStayCharge - postedRoomChargesSum);
+      const projectedRoomTax = Math.max(0, (projectedRoomCharge * overstayExclusiveTax) / (overstayCharge || 1));
       
-      // Unposted prepayment
       unpostedPrepayment = Math.max(0, (res.paidAmount || 0) - ledgerCreditsSum);
 
-      totalCharges = totalPostedDebits + projectedRoomCharge;
-      totalPayments = ledgerCreditsSum + unpostedPrepayment;
+      totalCharges = totalPostedDebits + projectedRoomCharge + projectedRoomTax;
+      totalPayments = ledgerCreditsSum + unpostedPrepayment + (res.totalDiscount || 0);
     } else {
-      // If ledgerBalance is available, we can deduce exactly how much room charge has already been posted
-      // Posted Room Charges + Posted Taxes = res.ledgerBalance + res.paidAmount - res.totalAmount + originalRoomStayTotal
+      // Deduce incidental charges from reservation totalAmount
+      incidentalCharges = Math.max(0, (res.totalAmount || 0) - baseStayWithTaxes);
+
+      // Total charges is the base stay + exclusive overstay + exclusive taxes + incidentals
+      totalCharges = baseStayWithTaxes + overstayCharge + overstayExclusiveTax + incidentalCharges;
+      totalPayments = (res.paidAmount || 0) + (res.totalDiscount || 0);
+
+      // Deduce projected/unposted room charge based on ledgerBalance if available
       if (res.ledgerBalance !== undefined) {
-        const originalRoomStayTotal = originalNights * nightlyRate;
-        const paidAmount = res.paidAmount || 0;
-        const totalAmount = res.totalAmount || 0;
-        const ledgerBalance = res.ledgerBalance || 0;
-        const postedRoomChargesSum = Math.max(0, ledgerBalance + paidAmount - totalAmount + originalRoomStayTotal);
+        const postedRoomChargesSum = Math.max(0, (res.ledgerBalance || 0) + (res.paidAmount || 0) - (res.totalAmount || 0) + baseStayWithTaxes);
         projectedRoomCharge = Math.max(0, totalStayCharge - postedRoomChargesSum);
       } else {
-        // Fallback estimate if ledgerBalance is not available
         let estimatedPostedCharges = 0;
         if (res.status === 'checked_out') {
           estimatedPostedCharges = totalStayCharge;
@@ -274,8 +294,8 @@ export const BillingService = {
 
     // Safety checks
     if (isNaN(projectedRoomCharge) || projectedRoomCharge < 0) projectedRoomCharge = 0;
-    if (isNaN(totalCharges)) totalCharges = 0;
-    if (isNaN(totalPayments)) totalPayments = 0;
+    if (isNaN(totalCharges) || totalCharges < 0) totalCharges = 0;
+    if (isNaN(totalPayments) || totalPayments < 0) totalPayments = 0;
 
     const outstandingBalance = totalCharges - totalPayments;
 
@@ -329,20 +349,9 @@ export function calculateBilling(
  * Backward compatibility wrapper for getReservationLiveBalance.
  */
 export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null): number {
-  if (res.ledgerBalance === undefined) {
-    const billing = BillingService.calculateOutstandingBalance(res, hotel);
-    return billing.outstandingBalance;
-  }
-  
   if (res.status === 'checked_out' || res.status === 'cancelled') {
-    return res.ledgerBalance;
+    return res.ledgerBalance !== undefined ? res.ledgerBalance : 0;
   }
-  
-  if (res.status === 'checked_in') {
-    const billing = BillingService.calculateOutstandingBalance(res, hotel);
-    return res.ledgerBalance + billing.projectedRoomCharge;
-  }
-  
   const billing = BillingService.calculateOutstandingBalance(res, hotel);
   return billing.outstandingBalance;
 }
