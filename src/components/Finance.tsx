@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, getDoc, deleteDoc, increment } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
@@ -46,7 +46,7 @@ import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, s
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -117,6 +117,53 @@ export function Finance() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const guestLiveBalances = useMemo(() => {
+    const balanceMap: Record<string, number> = {};
+    if (!guests.length) return balanceMap;
+
+    const resByGuestId: Record<string, Reservation[]> = {};
+    const resByEmail: Record<string, Reservation[]> = {};
+
+    reservations.forEach(r => {
+      if (r.status === 'checked_in' || r.status === 'checked_out') {
+        if (r.guestId) {
+          if (!resByGuestId[r.guestId]) resByGuestId[r.guestId] = [];
+          resByGuestId[r.guestId].push(r);
+        }
+        if (r.guestEmail) {
+          const emailKey = r.guestEmail.toLowerCase().trim();
+          if (!resByEmail[emailKey]) resByEmail[emailKey] = [];
+          resByEmail[emailKey].push(r);
+        }
+      }
+    });
+
+    guests.forEach(guest => {
+      const matchingResSet = new Set<Reservation>();
+
+      const resByIdList = resByGuestId[guest.id] || [];
+      resByIdList.forEach(r => matchingResSet.add(r));
+
+      if (guest.email) {
+        const emailKey = guest.email.toLowerCase().trim();
+        const resByEmailList = resByEmail[emailKey] || [];
+        resByEmailList.forEach(r => matchingResSet.add(r));
+      }
+
+      const liveOwed = Array.from(matchingResSet).reduce((sum, r) => {
+        return sum + getReservationLiveBalance(r, hotel);
+      }, 0);
+
+      balanceMap[guest.id] = matchingResSet.size > 0 ? liveOwed : (guest.ledgerBalance || 0);
+    });
+
+    return balanceMap;
+  }, [guests, reservations, hotel]);
+
+  const getGuestLiveBalance = useCallback((guest: Guest) => {
+    return guestLiveBalances[guest.id] ?? (guest.ledgerBalance || 0);
+  }, [guestLiveBalances]);
 
   const categories = {
     income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
@@ -790,13 +837,14 @@ export function Finance() {
     { name: 'Expense', value: totalExpense, color: '#ef4444' }
   ];
 
-  const filteredLedger = guests.filter(g => 
-    (g.ledgerBalance || 0) !== 0 && (
+  const filteredLedger = guests.filter(g => {
+    const bal = getGuestLiveBalance(g);
+    return Math.abs(bal) > 0.01 && (
       fuzzySearch(g.name || '', searchQuery) || 
       fuzzySearch(g.email || '', searchQuery) || 
       fuzzySearch(g.phone || '', searchQuery)
-    )
-  );
+    );
+  });
 
   const handleExport = () => {
     if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
@@ -1141,23 +1189,23 @@ export function Finance() {
                               <div className="text-xs text-zinc-400">{guest.email}</div>
                               <div className="text-[10px] text-zinc-500">{guest.phone}</div>
                             </td>
-                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500")}>
-                              {formatCurrency(guest.ledgerBalance || 0, currency, exchangeRate)}
+                             <td className={cn("px-6 py-4 text-right font-bold text-sm", getGuestLiveBalance(guest) > 0.01 ? "text-red-500" : "text-emerald-500")}>
+                              {formatCurrency(getGuestLiveBalance(guest), currency, exchangeRate)}
                             </td>
                             <td className="px-6 py-4 text-right space-x-3">
                               <button
                                 onClick={() => {
                                   setShowSettleModal(guest);
-                                  setSettleData({ ...settleData, splits: [{ amount: Math.abs(guest.ledgerBalance || 0), method: 'cash' }] });
+                                  setSettleData({ ...settleData, splits: [{ amount: Math.abs(getGuestLiveBalance(guest)), method: 'cash' }] });
                                 }}
                                 className={cn(
                                   "text-xs font-bold",
-                                  (guest.ledgerBalance || 0) < -0.01 
+                                  getGuestLiveBalance(guest) < -0.01 
                                     ? "text-red-400 hover:text-red-300" 
                                     : "text-emerald-500 hover:text-emerald-400"
                                 )}
                               >
-                                {(guest.ledgerBalance || 0) < -0.01 ? 'Refund' : 'Settle'}
+                                {getGuestLiveBalance(guest) < -0.01 ? 'Refund' : 'Settle'}
                               </button>
                               <button
                                 onClick={() => {

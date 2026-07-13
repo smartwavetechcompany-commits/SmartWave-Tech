@@ -13,47 +13,57 @@ export const canCheckout = (
   const settings = hotel.settings?.checkout;
   if (!settings) return { allowed: true }; // Default behavior
 
-  const liveBalance = getReservationLiveBalance(reservation, hotel);
-  const postedBalance = reservation.ledgerBalance || 0;
-  const balance = Math.max(liveBalance, postedBalance);
-  const isOwing = balance > 0.5;
+  const outstandingBalance = getReservationLiveBalance(reservation, hotel);
 
-  if (isOwing) {
-    if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
-      return { allowed: true };
-    }
-
-    if (settings.allowBalanceOutstanding) {
-      return { allowed: true };
-    }
-
-    if (!settings.allowPartialPaymentCheckout && reservation.paidAmount > 0 && reservation.paidAmount < (reservation.totalAmount || 0)) {
-      if (!hasPermission(profile, 'void_transaction')) {
-        return { allowed: false, message: 'Partial payment checkout is disabled by hotel configuration.' };
-      }
-    }
-
-    if (settings.requireFullPaymentBeforeCheckout) {
-      return { allowed: false, message: 'Full payment is required before checkout as per hotel policy.' };
-    }
-    
-    if (settings.preventOwingGuestCheckout) {
-      if (!hasPermission(profile, 'void_transaction')) {
-        return { allowed: false, message: 'Policy prevents checkout for guests with outstanding balances without admin approval.' };
-      }
-    }
-
-    if (settings.requireApprovalForDebtCheckout) {
-      if (!hasPermission(profile, 'void_transaction')) {
-        return { allowed: false, message: 'Manager approval is required to checkout a guest with debt.' };
-      }
-    }
-
-    // If Allow Checkout with Outstanding Balance is disabled, and no override matched, block checkout.
-    return { allowed: false, message: 'Policy restricts checkout with outstanding balances. Please settle guest ledger first.' };
+  // Scenario 1: Guest Has Fully Paid
+  if (outstandingBalance <= 0.01) {
+    return { allowed: true };
   }
 
-  return { allowed: true };
+  // Scenario 2: Guest Owes Money (Outstanding Balance > 0)
+  // Check the setting: "Allow Checkout with Outstanding Balance"
+  if (settings.allowBalanceOutstanding) {
+    return { allowed: true };
+  }
+
+  // Corporate postpaid override
+  if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
+    return { allowed: true };
+  }
+
+  // Admin / Manager override permissions checks
+  if (settings.preventOwingGuestCheckout) {
+    if (hasPermission(profile, 'void_transaction')) {
+      return { allowed: true };
+    }
+    return { 
+      allowed: false, 
+      message: `Policy prevents checkout for guests with outstanding balances without admin approval. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+    };
+  }
+
+  if (settings.requireApprovalForDebtCheckout) {
+    if (hasPermission(profile, 'void_transaction')) {
+      return { allowed: true };
+    }
+    return { 
+      allowed: false, 
+      message: `Manager approval is required to checkout a guest with debt. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+    };
+  }
+
+  if (settings.requireFullPaymentBeforeCheckout) {
+    return { 
+      allowed: false, 
+      message: `Full payment is required before checkout as per hotel policy. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+    };
+  }
+
+  // If Allow Checkout with Outstanding Balance is disabled, and no override matched, block checkout.
+  return { 
+    allowed: false, 
+    message: `Policy restricts checkout with outstanding balances. Please settle guest ledger first. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+  };
 };
 
 export const canCheckIn = (

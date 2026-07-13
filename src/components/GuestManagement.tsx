@@ -175,7 +175,7 @@ export function GuestManagement() {
         return sum + getReservationLiveBalance(r, hotel);
       }, 0);
 
-      balanceMap[guest.id] = Math.abs(liveOwed) > 0.01 ? liveOwed : (guest.ledgerBalance || 0);
+      balanceMap[guest.id] = matchingResSet.size > 0 ? liveOwed : (guest.ledgerBalance || 0);
     });
 
     return balanceMap;

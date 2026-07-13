@@ -1355,7 +1355,7 @@ export function FrontDesk() {
   };
 
   const runNightlyAudit = async () => {
-    if (!hotel?.id || !profile) return;
+    if (!hotel?.id || !profile || isAuditing) return;
     
     try {
       setIsAuditing(true);
@@ -1411,7 +1411,7 @@ export function FrontDesk() {
 
     } catch (err: any) {
       console.error("Audit error:", err.message || safeStringify(err));
-      toast.error("Failed to run nightly audit.");
+      toast.error(`Failed to run nightly audit: ${err.message || "Unknown error"}`);
     } finally {
       setIsAuditing(false);
       setShowNightAuditModal(false);
@@ -2381,9 +2381,9 @@ export function FrontDesk() {
         )}
 
         {reservations.filter(r => {
-          if (r.status !== 'checked_in' || !r.guestId) return false;
-          const guest = guests.find(g => g.id === r.guestId);
-          return guest && guest.ledgerBalance > 0;
+          if (r.status !== 'checked_in') return false;
+          const bal = getReservationLiveBalance(r, hotel);
+          return bal > 0.01;
         }).length > 0 && (
           <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-4">
             <div className="w-10 h-10 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500">
@@ -2393,9 +2393,9 @@ export function FrontDesk() {
               <div className="text-xs font-bold text-amber-500 uppercase tracking-wider">Outstanding Payments</div>
               <div className="text-lg font-bold text-zinc-50">
                 {reservations.filter(r => {
-                  if (r.status !== 'checked_in' || !r.guestId) return false;
-                  const guest = guests.find(g => g.id === r.guestId);
-                  return guest && guest.ledgerBalance > 0;
+                  if (r.status !== 'checked_in') return false;
+                  const bal = getReservationLiveBalance(r, hotel);
+                  return bal > 0.01;
                 }).length} Guests Owing
               </div>
             </div>
@@ -4053,7 +4053,7 @@ export function FrontDesk() {
                                   const policy = canCheckout(hotel, profile, res);
                                   return policy.allowed ? "Check Out (Preview Fees)" : policy.message;
                                 })()}
-                                disabled={loading || !canCheckout(hotel, profile, res).allowed}
+                                disabled={loading}
                               >
                                 <LogOut size={18} />
                               </button>
@@ -4772,22 +4772,38 @@ export function FrontDesk() {
                 <button
                   type="button"
                   onClick={() => setCheckoutPreviewRes(null)}
-                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl text-xs font-bold transition-all"
+                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl text-xs font-bold transition-all animate-in fade-in"
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const resToCheckout = checkoutPreviewRes;
-                    setCheckoutPreviewRes(null);
-                    await updateReservationStatus(resToCheckout, 'checked_out');
-                  }}
-                  className="px-5 py-2 bg-blue-500 hover:bg-blue-600 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
-                >
-                  <LogOut size={14} />
-                  Confirm & Check Out
-                </button>
+                {(() => {
+                  const policy = canCheckout(hotel, profile, checkoutPreviewRes);
+                  const isBlocked = !policy.allowed;
+                  
+                  return (
+                    <div className="flex flex-col items-end gap-1.5">
+                      {isBlocked && (
+                        <p className="text-[10px] text-red-400 font-bold text-right max-w-[250px] animate-pulse">
+                          {policy.message || 'Check-out restricted by hotel policy.'}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isBlocked}
+                        onClick={async () => {
+                          const resToCheckout = checkoutPreviewRes;
+                          setCheckoutPreviewRes(null);
+                          await updateReservationStatus(resToCheckout, 'checked_out');
+                        }}
+                        className="px-5 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed disabled:scale-100 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
+                        title={isBlocked ? (policy.message || 'Check-out restricted') : 'Finalize check-out'}
+                      >
+                        <LogOut size={14} />
+                        Confirm & Check Out
+                      </button>
+                    </div>
+                  );
+                })()}
               </footer>
             </div>
           </div>
