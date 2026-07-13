@@ -2985,38 +2985,22 @@ export function Rooms() {
                 <button
                   type="button"
                   onClick={() => setCheckoutPreviewRes(null)}
-                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl text-xs font-bold transition-all animate-in fade-in"
+                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl text-xs font-bold transition-all"
                 >
                   Cancel
                 </button>
-                {(() => {
-                  const policy = canCheckout(hotel, profile, checkoutPreviewRes);
-                  const isBlocked = !policy.allowed;
-                  
-                  return (
-                    <div className="flex flex-col items-end gap-1.5">
-                      {isBlocked && (
-                        <p className="text-[10px] text-red-400 font-bold text-right max-w-[250px] animate-pulse">
-                          {policy.message || 'Check-out restricted by hotel policy.'}
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isBlocked}
-                        onClick={async () => {
-                          const resToCheckout = checkoutPreviewRes;
-                          setCheckoutPreviewRes(null);
-                          await updateReservationStatus(resToCheckout, 'checked_out');
-                        }}
-                        className="px-5 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed disabled:scale-100 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
-                        title={isBlocked ? (policy.message || 'Check-out restricted') : 'Finalize check-out'}
-                      >
-                        <LogOut size={14} />
-                        Confirm & Check Out
-                      </button>
-                    </div>
-                  );
-                })()}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const resToCheckout = checkoutPreviewRes;
+                    setCheckoutPreviewRes(null);
+                    await updateReservationStatus(resToCheckout, 'checked_out');
+                  }}
+                  className="px-5 py-2 bg-blue-500 hover:bg-blue-600 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
+                >
+                  <LogOut size={14} />
+                  Confirm & Check Out
+                </button>
               </footer>
             </div>
           </div>
