@@ -1411,7 +1411,7 @@ export function FrontDesk() {
 
     } catch (err: any) {
       console.error("Audit error:", err.message || safeStringify(err));
-      toast.error("Failed to run nightly audit.");
+      toast.error(`Failed to run nightly audit: ${err.message || "Unknown error"}`);
     } finally {
       setIsAuditing(false);
       setShowNightAuditModal(false);
@@ -4053,7 +4053,7 @@ export function FrontDesk() {
                                   const policy = canCheckout(hotel, profile, res);
                                   return policy.allowed ? "Check Out (Preview Fees)" : policy.message;
                                 })()}
-                                disabled={loading || !canCheckout(hotel, profile, res).allowed}
+                                disabled={loading}
                               >
                                 <LogOut size={18} />
                               </button>
