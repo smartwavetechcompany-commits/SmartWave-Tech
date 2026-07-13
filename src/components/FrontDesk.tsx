@@ -23,6 +23,7 @@ import {
   XCircle,
   Clock,
   LogOut,
+  Lock,
   RefreshCw,
   Receipt,
   Building2,
@@ -55,7 +56,7 @@ import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
-import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService, calculateStayDuration } from '../utils/billingEngine';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1500,24 +1501,26 @@ export function FrontDesk() {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
-      // 1. Update reservation status immediately
-      await database.safeUpdate(resRef, { status }, {
-        hotelId: hotel.id,
-        module: 'Front Desk',
-        action: 'UPDATE_RESERVATION_STATUS',
-        details: `Reservation ${res.id} status changed to ${status}`
-      });
+      // 1. Update reservation status immediately if not checking out
+      if (status !== 'checked_out') {
+        await database.safeUpdate(resRef, { status }, {
+          hotelId: hotel.id,
+          module: 'Front Desk',
+          action: 'UPDATE_RESERVATION_STATUS',
+          details: `Reservation ${res.id} status changed to ${status}`
+        });
 
-      await logActivity(
-        hotel.id,
-        profile,
-        'UPDATE_RESERVATION_STATUS',
-        'Front Desk',
-        `Reservation status changed to ${status}`,
-        res.id,
-        { status: res.status },
-        { status }
-      );
+        await logActivity(
+          hotel.id,
+          profile,
+          'UPDATE_RESERVATION_STATUS',
+          'Front Desk',
+          `Reservation status changed to ${status}`,
+          res.id,
+          { status: res.status },
+          { status }
+        );
+      }
       
       // 2. Handle specific status transitions
       if (status === 'checked_in') {
@@ -1724,13 +1727,6 @@ export function FrontDesk() {
         if (blockCheckout) {
           toast.error(blockMessage);
           setLoading(false);
-          // Revert status to checked_in
-          await database.safeUpdate(resRef, { status: 'checked_in' }, { 
-            hotelId: hotel.id, 
-            module: 'Front Desk', 
-            action: 'REVERT_CHECKOUT', 
-            details: 'Reverting status to checked_in due to outstanding balance policy' 
-          });
           return;
         }
 
@@ -1740,20 +1736,14 @@ export function FrontDesk() {
             const confirmOut = window.confirm(`WARNING: Guest has an outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)}. Are you sure you want to proceed with checking them out?`);
             if (!confirmOut) {
               setLoading(false);
-              // Revert status to checked_in
-              await database.safeUpdate(resRef, { status: 'checked_in' }, { 
-                hotelId: hotel.id, 
-                module: 'Front Desk', 
-                action: 'REVERT_CHECKOUT', 
-                details: 'Reverting status to checked_in because user canceled unpaid checkout warning popup' 
-              });
               return;
             }
           }
         }
 
-        // 3. Update reservation total and checkout details
+        // 3. Update reservation total, status and checkout details in a single operation
         await database.safeUpdate(resRef, { 
+          status: 'checked_out',
           totalAmount: totalDebits,
           nights: nightsStayed,
           checkOut: format(now, 'yyyy-MM-dd'),
@@ -1765,6 +1755,17 @@ export function FrontDesk() {
           action: 'FINALIZE_CHECKOUT',
           details: `Finalized checkout for reservation ${res.id}`
         });
+
+        await logActivity(
+          hotel.id,
+          profile,
+          'UPDATE_RESERVATION_STATUS',
+          'Front Desk',
+          `Reservation status changed to checked_out`,
+          res.id,
+          { status: res.status },
+          { status: 'checked_out' }
+        );
 
         // 4. Mark room as dirty or clean based on sync settings
         const syncStatus = hotel.settings?.housekeeping?.autoSyncStatusAfterCheckout ?? true;
@@ -1784,7 +1785,7 @@ export function FrontDesk() {
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
+          const nights = calculateStayDuration(res.checkIn, res.checkOut).totalNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
             totalSpent: increment(totalDebits),
@@ -3851,21 +3852,11 @@ export function FrontDesk() {
               <Clock size={10} className="text-zinc-600" />
               <span className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter">
                 {(() => {
-                  const checkIn = parseISO(res.checkIn);
-                  const checkOut = parseISO(res.checkOut);
-                  const today = startOfDay(new Date());
-                  
-                  let nights = differenceInDays(checkOut, checkIn);
-                  
-                  if (res.status === 'checked_in') {
-                    const nightsSoFar = differenceInDays(today, checkIn);
-                    if (nightsSoFar > nights) {
-                      nights = nightsSoFar;
-                    }
-                  }
-                  
+                  const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
+                  const overstayNights = res.overstayNights || 0;
+                  const nights = totalNights + overstayNights;
                   const days = nights + 1;
-                  return `${days} ${days === 1 ? 'day' : 'days'}`;
+                  return `${days} ${days === 1 ? 'day' : 'days'} / ${nights} ${nights === 1 ? 'night' : 'nights'}`;
                 })()}
               </span>
             </div>
@@ -4045,18 +4036,26 @@ export function FrontDesk() {
                               >
                                 <QrCode size={18} />
                               </button>
-                              <button 
-                                type="button"
-                                onClick={() => setCheckoutPreviewRes(res)}
-                                className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                                title={(() => {
-                                  const policy = canCheckout(hotel, profile, res);
-                                  return policy.allowed ? "Check Out (Preview Fees)" : policy.message;
-                                })()}
-                                disabled={loading}
-                              >
-                                <LogOut size={18} />
-                              </button>
+                              {(() => {
+                                const policy = canCheckout(hotel, profile, res);
+                                const isBlocked = !policy.allowed;
+                                return (
+                                  <button 
+                                    type="button"
+                                    onClick={() => !isBlocked && setCheckoutPreviewRes(res)}
+                                    className={cn(
+                                      "p-2 rounded-lg transition-all active:scale-90 disabled:cursor-not-allowed",
+                                      isBlocked 
+                                        ? "text-red-400/50 hover:bg-red-500/5 opacity-50" 
+                                        : "text-blue-500 hover:bg-blue-500/10"
+                                    )}
+                                    title={isBlocked ? (policy.message || "Checkout Blocked") : "Check Out (Preview Fees)"}
+                                    disabled={loading || isBlocked}
+                                  >
+                                    {isBlocked ? <Lock size={18} /> : <LogOut size={18} />}
+                                  </button>
+                                );
+                              })()}
                             </>
                           )}
 

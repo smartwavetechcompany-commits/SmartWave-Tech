@@ -27,6 +27,7 @@ import {
   Info,
   LogOut,
   LogIn,
+  Lock,
   FileText,
   Tag,
   DollarSign,
@@ -39,7 +40,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
-import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService, calculateStayDuration } from '../utils/billingEngine';
 import { postToLedger, transferToCityLedger } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -686,7 +687,7 @@ export function Rooms() {
         // Update guest statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const nights = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
+          const nights = calculateStayDuration(res.checkIn, res.checkOut).totalNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
             totalSpent: increment(totalDebits),
@@ -2652,15 +2653,26 @@ export function Rooms() {
                   </button>
                 )}
 
-                {selectedReservation.status === 'checked_in' && (
-                  <button 
-                    onClick={() => setCheckoutPreviewRes(selectedReservation)}
-                    className="w-full flex items-center gap-3 bg-blue-500 hover:bg-blue-600 text-zinc-50 p-4 rounded-2xl font-bold transition-all active:scale-95"
-                  >
-                    <LogOut size={20} />
-                    Check-Out Guest
-                  </button>
-                )}
+                {selectedReservation.status === 'checked_in' && (() => {
+                  const policy = canCheckout(hotel, profile, selectedReservation);
+                  const isBlocked = !policy.allowed;
+                  return (
+                    <button 
+                      onClick={() => !isBlocked && setCheckoutPreviewRes(selectedReservation)}
+                      className={cn(
+                        "w-full flex items-center gap-3 p-4 rounded-2xl font-bold transition-all active:scale-95",
+                        isBlocked 
+                          ? "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-60" 
+                          : "bg-blue-500 hover:bg-blue-600 text-zinc-50"
+                      )}
+                      title={isBlocked ? (policy.message || "Checkout Blocked") : "Check-Out Guest"}
+                      disabled={isBlocked}
+                    >
+                      {isBlocked ? <Lock size={20} /> : <LogOut size={20} />}
+                      {isBlocked ? "Checkout Blocked" : "Check-Out Guest"}
+                    </button>
+                  );
+                })()}
 
                 <div className="grid grid-cols-2 gap-3">
                   <button 

@@ -35,7 +35,7 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime, calculateStayDuration } from '../utils/billingEngine';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -1238,19 +1238,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   </p>
                   <p className="text-sm font-black text-amber-500 italic tracking-widest bg-amber-500/5 px-2 py-1 rounded inline-block border border-amber-500/10">
                     {(() => {
-                      const checkIn = parseISO(currentReservation.checkIn);
-                      const checkOut = parseISO(currentReservation.checkOut);
-                      const today = startOfDay(new Date());
-                      
-                      let nights = differenceInDays(checkOut, checkIn);
-                      
-                      if (currentReservation.status === 'checked_in') {
-                        const nightsSoFar = differenceInDays(today, checkIn);
-                        if (nightsSoFar > nights) {
-                          nights = nightsSoFar;
-                        }
-                      }
-                      
+                      const { totalDays, totalNights } = calculateStayDuration(currentReservation.checkIn, currentReservation.checkOut);
+                      const overstayNights = currentReservation.overstayNights || 0;
+                      const nights = totalNights + overstayNights;
                       const days = nights + 1;
                       return `${days} ${days === 1 ? 'DAY' : 'DAYS'} (${nights} ${nights === 1 ? 'NIGHT' : 'NIGHTS'})`;
                     })()}

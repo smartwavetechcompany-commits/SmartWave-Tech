@@ -5,7 +5,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
-import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, calculateStayDuration } from '../utils/billingEngine';
 import { 
   Users, 
   Plus, 

@@ -22,23 +22,25 @@ export const canCheckout = (
 
   // Scenario 2: Guest Owes Money (Outstanding Balance > 0)
   // Check the setting: "Allow Checkout with Outstanding Balance"
-  if (settings.allowBalanceOutstanding) {
-    return { allowed: true };
+  if (!settings.allowBalanceOutstanding) {
+    // Corporate postpaid override
+    if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
+      return { allowed: true };
+    }
+    return { 
+      allowed: false, 
+      message: `Checkout blocked. Guest has an outstanding balance of ₦${Math.round(outstandingBalance).toLocaleString()}.` 
+    };
   }
 
-  // Corporate postpaid override
-  if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
-    return { allowed: true };
-  }
-
-  // Admin / Manager override permissions checks
+  // Admin / Manager override permissions checks (applicable when allowBalanceOutstanding is true but other restrictions are enabled)
   if (settings.preventOwingGuestCheckout) {
     if (hasPermission(profile, 'void_transaction')) {
       return { allowed: true };
     }
     return { 
       allowed: false, 
-      message: `Policy prevents checkout for guests with outstanding balances without admin approval. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+      message: `Policy prevents checkout for guests with outstanding balances without admin approval. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
     };
   }
 
@@ -48,22 +50,18 @@ export const canCheckout = (
     }
     return { 
       allowed: false, 
-      message: `Manager approval is required to checkout a guest with debt. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+      message: `Manager approval is required to checkout a guest with debt. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
     };
   }
 
   if (settings.requireFullPaymentBeforeCheckout) {
     return { 
       allowed: false, 
-      message: `Full payment is required before checkout as per hotel policy. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
+      message: `Full payment is required before checkout as per hotel policy. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
     };
   }
 
-  // If Allow Checkout with Outstanding Balance is disabled, and no override matched, block checkout.
-  return { 
-    allowed: false, 
-    message: `Policy restricts checkout with outstanding balances. Please settle guest ledger first. Outstanding balance: ₦${outstandingBalance.toLocaleString()}` 
-  };
+  return { allowed: true };
 };
 
 export const canCheckIn = (
