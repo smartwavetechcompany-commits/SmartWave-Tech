@@ -1411,7 +1411,7 @@ export function FrontDesk() {
 
     } catch (err: any) {
       console.error("Audit error:", err.message || safeStringify(err));
-      toast.error(`Failed to run nightly audit: ${err.message || "Unknown error"}`);
+      toast.error("Failed to run nightly audit.");
     } finally {
       setIsAuditing(false);
       setShowNightAuditModal(false);

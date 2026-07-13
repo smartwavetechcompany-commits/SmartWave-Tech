@@ -18,24 +18,15 @@ export const postToLedger = async (
   if (entry.chargePeriodStart && entry.chargePeriodEnd && entry.chargeType) {
     const q = query(
       collection(db, 'hotels', hotelId, 'ledger'),
-      where('reservationId', '==', reservationId)
+      where('reservationId', '==', reservationId),
+      where('chargePeriodStart', '==', entry.chargePeriodStart),
+      where('chargePeriodEnd', '==', entry.chargePeriodEnd),
+      where('chargeType', '==', entry.chargeType),
+      where('type', '==', 'debit')
     );
     const querySnap = await getDocs(q);
-    const entryStartDay = format(new Date(entry.chargePeriodStart), 'yyyy-MM-dd');
-    const entryEndDay = format(new Date(entry.chargePeriodEnd), 'yyyy-MM-dd');
-
-    const exists = querySnap.docs.some(doc => {
-      const e = doc.data() as LedgerEntry;
-      if (e.type !== 'debit' || e.chargeType !== entry.chargeType) return false;
-      if (!e.chargePeriodStart || !e.chargePeriodEnd) return false;
-
-      const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
-      const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
-      return eStartDay === entryStartDay && eEndDay === entryEndDay;
-    });
-
-    if (exists) {
-      const errMsg = `Duplicate charge detected and rejected: ${entry.chargeType} from ${entryStartDay} to ${entryEndDay}.`;
+    if (!querySnap.empty) {
+      const errMsg = `Duplicate charge detected and rejected: ${entry.chargeType} from ${entry.chargePeriodStart} to ${entry.chargePeriodEnd}.`;
       console.warn(errMsg);
       throw new Error(errMsg);
     }
@@ -54,15 +45,14 @@ export const postToLedger = async (
         // Query to see if there is any city ledger debit transfer entry
         const q = query(
           collection(db, 'hotels', hotelId, 'ledger'),
-          where('reservationId', '==', reservationId)
+          where('reservationId', '==', reservationId),
+          where('category', '==', 'city_ledger'),
+          where('type', '==', 'debit')
         );
         const querySnap = await getDocs(q);
-        const foundEntry = querySnap.docs.find(doc => {
-          const d = doc.data() as LedgerEntry;
-          return d.category === 'city_ledger' && d.type === 'debit' && d.corporateId;
-        });
+        const foundEntry = querySnap.docs.find(doc => doc.data().corporateId);
         if (foundEntry) {
-          finalCorporateId = (foundEntry.data() as LedgerEntry).corporateId;
+          finalCorporateId = foundEntry.data().corporateId;
         }
       }
     }
@@ -690,23 +680,14 @@ export const processAutomatedBillingForReservation = async (
       const startStr = Start.toISOString();
       const endStr = End.toISOString();
 
-      const entryStartDay = format(Start, 'yyyy-MM-dd');
-      const entryEndDay = format(End, 'yyyy-MM-dd');
-
       // Check if already posted
       const exists = ledgerEntries.some(e => {
-        if (e.type !== 'debit') return false;
-
-        if (e.chargeType === 'room_rate' && e.chargePeriodStart && e.chargePeriodEnd) {
-          const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
-          const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
-          if (eStartDay === entryStartDay && eEndDay === entryEndDay) {
-            return true;
-          }
+        // Match exact period if available
+        if (e.chargePeriodStart === startStr && e.chargePeriodEnd === endStr && e.chargeType === 'room_rate' && e.type === 'debit') {
+          return true;
         }
-
         // Fallback: if i === 1 and there is ANY room debit in the ledger, treat it as representing Night 1
-        if (i === 1 && e.category === 'room') {
+        if (i === 1 && e.category === 'room' && e.type === 'debit') {
           return true;
         }
         return false;
@@ -780,16 +761,13 @@ export const processAutomatedBillingForReservation = async (
         }
 
         if (targetAmount > 0) {
-          const entryStartDay = format(Start, 'yyyy-MM-dd');
-          const entryEndDay = format(End, 'yyyy-MM-dd');
-
           const postedAmount = ledgerEntries
-            .filter(e => {
-              if (e.type !== 'debit' || e.chargeType !== 'overstay' || !e.chargePeriodStart || !e.chargePeriodEnd) return false;
-              const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
-              const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
-              return eStartDay === entryStartDay && eEndDay === entryEndDay;
-            })
+            .filter(e => 
+              e.chargePeriodStart === startStr && 
+              e.chargePeriodEnd === endStr && 
+              e.chargeType === 'overstay' && 
+              e.type === 'debit'
+            )
             .reduce((sum, e) => sum + e.amount, 0);
 
           if (postedAmount < targetAmount - 0.01) {
