@@ -18,11 +18,10 @@ export const canCheckout = (
   
   // To prevent circular blockages (where a guest pays their overstay, putting their 
   // ledger in credit, but the checkout transition has not yet posted the matching overstay debit),
-  // a guest is only considered owing if BOTH their live calculated balance and their posted 
-  // ledger balance indicate outstanding debt. If their posted ledger is already settled 
-  // (<= 0.5), we allow checkout to proceed so that the checkout transition can post the 
-  // final stayed nights and verify the final balance.
-  const isOwing = liveBalance > 0.5 && postedBalance > 0.5;
+  // a guest is only considered owing if their posted ledger indicates outstanding debt,
+  // OR if their live calculated balance indicates debt and their total net balance (posted + live) 
+  // indicates they have not yet paid or settled it.
+  const isOwing = postedBalance > 0.5 || (liveBalance > 0.5 && (postedBalance + liveBalance) > 0.5);
 
   if (isOwing) {
     if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
