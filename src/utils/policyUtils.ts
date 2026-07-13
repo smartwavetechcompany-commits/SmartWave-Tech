@@ -1,6 +1,7 @@
 import { Hotel, UserProfile, Reservation, Room, LedgerEntry, Guest } from '../types';
 import { hasPermission } from './permissions';
 import { differenceInDays } from 'date-fns';
+import { getReservationLiveBalance } from './billingEngine';
 
 export const canCheckout = (
   hotel: Hotel | null,
@@ -12,8 +13,10 @@ export const canCheckout = (
   const settings = hotel.settings?.checkout;
   if (!settings) return { allowed: true }; // Default behavior
 
-  const balance = reservation.ledgerBalance || 0;
-  const isOwing = balance > 0.01;
+  const liveBalance = getReservationLiveBalance(reservation, hotel);
+  const postedBalance = reservation.ledgerBalance || 0;
+  const balance = Math.max(liveBalance, postedBalance);
+  const isOwing = balance > 0.5;
 
   if (isOwing) {
     if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
