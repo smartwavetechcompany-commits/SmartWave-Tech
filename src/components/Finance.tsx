@@ -47,6 +47,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateStayDuration } from '../utils/dateUtils';
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -105,7 +106,7 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'debtors' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -243,6 +244,7 @@ export function Finance() {
     { id: 'transactions', label: 'Transactions', icon: RefreshCw },
     { id: 'ledger', label: 'Guest Accounts', icon: Users },
     { id: 'city_ledger', label: 'City Ledger', icon: Building2 },
+    { id: 'debtors', label: 'Debtors List', icon: AlertCircle },
     { id: 'suppliers', label: 'Supplier Accounts', icon: Building2 },
     { id: 'accounts', label: 'Chart of Accounts', icon: Wallet },
     { id: 'expenses', label: 'Expense Records', icon: TrendingDown },
@@ -1430,6 +1432,214 @@ export function Finance() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'debtors' && (
+            <div className="space-y-6">
+              {(() => {
+                const debtors = reservations.filter(r => {
+                  const opStatus = r.operationalStatus || r.status;
+                  const bal = getReservationLiveBalance(r, hotel);
+                  const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
+                  return opStatus === 'checked_out' && finStatus !== 'SETTLED' && bal > 0.01;
+                }).filter(r => {
+                  if (!searchQuery) return true;
+                  return (
+                    fuzzySearch(r.guestName || '', searchQuery) ||
+                    fuzzySearch(r.roomNumber || '', searchQuery) ||
+                    fuzzySearch(r.guestEmail || '', searchQuery) ||
+                    fuzzySearch(r.id || '', searchQuery)
+                  );
+                });
+
+                const totalDebt = debtors.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel), 0);
+
+                return (
+                  <div className="space-y-6">
+                    {/* Header Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <AlertCircle size={20} className="text-red-400" />
+                          <span className="text-[10px] font-black uppercase text-red-500 bg-red-500/20 px-2 py-0.5 rounded">Debtor Folios</span>
+                        </div>
+                        <div className="text-3xl font-black text-red-400 font-mono">
+                          {formatCurrency(totalDebt, currency, exchangeRate)}
+                        </div>
+                        <div className="text-xs text-red-300/70 mt-1 font-bold">Total Checked-Out Outstanding Debt</div>
+                      </div>
+
+                      <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <Users size={20} className="text-amber-500" />
+                          <span className="text-[10px] font-black uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded">Count</span>
+                        </div>
+                        <div className="text-3xl font-black text-zinc-50 font-mono">
+                          {debtors.length}
+                        </div>
+                        <div className="text-xs text-zinc-400 mt-1 font-bold">Checked-Out Guests with Debt</div>
+                      </div>
+
+                      <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col justify-between">
+                        <div className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Payment Collection Workflow</div>
+                        <p className="text-xs text-zinc-500 leading-relaxed">
+                          Checking out a guest preserves full payment access until the balance reaches ₦0. Click &quot;Receive Payment&quot; on any debtor to collect funds directly from their folio.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Table View */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+                      <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <h3 className="font-bold text-zinc-50 text-lg flex items-center gap-2">
+                            <AlertCircle size={18} className="text-red-500" />
+                            Debtors List (Checked-Out Guest Balances)
+                          </h3>
+                          <p className="text-xs text-zinc-400">All checked-out guest folios with active financial debt requiring settlement</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                            <input
+                              type="text"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              placeholder="Search debtor or room..."
+                              className="pl-9 pr-4 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                          <button
+                            onClick={() => {
+                              exportToCSV(
+                                debtors.map(d => {
+                                  const bal = getReservationLiveBalance(d, hotel);
+                                  const { totalDays, totalNights } = calculateStayDuration(d.checkIn, d.checkOut);
+                                  return {
+                                    Guest: d.guestName,
+                                    Room: d.roomNumber,
+                                    'Check In': d.checkIn,
+                                    'Check Out': d.checkOut,
+                                    Duration: `${totalDays} Days / ${totalNights} Nights`,
+                                    OperationalStatus: 'CHECKED_OUT',
+                                    FinancialStatus: 'DEBTOR',
+                                    TotalAmount: d.totalAmount,
+                                    PaidAmount: d.paidAmount || 0,
+                                    OutstandingBalance: bal
+                                  };
+                                }),
+                                `debtors_report_${format(new Date(), 'yyyy-MM-dd')}`
+                              );
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                          >
+                            <Download size={14} /> Export
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="bg-zinc-950/50 border-b border-zinc-800">
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Guest & Contact</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Stay Duration</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Status</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Charges / Paid</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Outstanding Debt</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-800">
+                            {debtors.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-6 py-12 text-center text-zinc-500 italic">
+                                  No checked-out guests with outstanding balances found.
+                                </td>
+                              </tr>
+                            ) : (
+                              debtors.map((res) => {
+                                const bal = getReservationLiveBalance(res, hotel);
+                                const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
+                                const opStatus = res.operationalStatus || res.status;
+                                return (
+                                  <tr key={res.id} className="hover:bg-zinc-800/40 transition-colors">
+                                    <td className="px-6 py-4">
+                                      <div className="text-sm font-bold text-zinc-50">{res.guestName}</div>
+                                      <div className="text-[10px] text-zinc-400">{res.guestEmail || res.guestPhone || 'No contact info'}</div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <span className="px-2.5 py-1 bg-zinc-950 border border-zinc-800 rounded-lg text-xs font-mono font-bold text-zinc-200">
+                                        Room {res.roomNumber}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="text-xs font-medium text-zinc-300">
+                                        {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                                      </div>
+                                      <div className="text-[10px] font-black text-amber-500 mt-0.5">
+                                        {totalDays} Days / {totalNights} Nights
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="flex flex-col gap-1 items-start">
+                                        <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                          {opStatus.replace('_', ' ')}
+                                        </span>
+                                        <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-red-500/20 text-red-400 border border-red-500/30">
+                                          DEBTOR
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="text-xs text-zinc-300 font-mono">
+                                        {formatCurrency(res.totalAmount, currency, exchangeRate)}
+                                      </div>
+                                      <div className="text-[10px] text-emerald-400 font-mono">
+                                        Paid: {formatCurrency(res.paidAmount || 0, currency, exchangeRate)}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <span className="text-base font-black text-red-400 font-mono">
+                                        {formatCurrency(bal, currency, exchangeRate)}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedReservation(res);
+                                            setShowFolio(true);
+                                          }}
+                                          className="px-3 py-1.5 bg-emerald-500 text-black font-black text-[10px] uppercase tracking-wider rounded-lg hover:bg-emerald-400 transition-all flex items-center gap-1 active:scale-95 shadow-md shadow-emerald-500/10"
+                                        >
+                                          <DollarSign size={12} />
+                                          Receive Payment
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedReservation(res);
+                                            setShowFolio(true);
+                                          }}
+                                          className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-[10px] uppercase tracking-wider rounded-lg transition-all"
+                                        >
+                                          View Folio
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 

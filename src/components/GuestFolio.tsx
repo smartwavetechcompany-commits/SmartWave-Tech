@@ -29,6 +29,7 @@ import {
   PlusCircle,
   RefreshCw,
   AlertCircle,
+  CheckCircle2,
   Tag,
   X
 } from 'lucide-react';
@@ -1211,14 +1212,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Room</p>
                     <p className="text-lg font-bold text-zinc-50">{currentReservation.roomNumber}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase">Status</p>
-                    <span className={cn(
-                      "text-[10px] font-bold uppercase px-2 py-0.5 rounded",
-                      currentReservation.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
-                    )}>
-                      {currentReservation.status.replace('_', ' ')}
-                    </span>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">Operational:</span>
+                      <span className={cn(
+                        "text-[10px] font-bold uppercase px-2 py-0.5 rounded",
+                        (currentReservation.operationalStatus || currentReservation.status) === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
+                        (currentReservation.operationalStatus || currentReservation.status) === 'checked_out' ? "bg-zinc-800 text-zinc-300 border border-zinc-700" :
+                        "bg-blue-500/10 text-blue-500"
+                      )}>
+                        {(currentReservation.operationalStatus || currentReservation.status).replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase">Financial:</span>
+                      <span className={cn(
+                        "text-[10px] font-bold uppercase px-2 py-0.5 rounded",
+                        balance <= 0.01 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                        (currentReservation.operationalStatus || currentReservation.status) === 'checked_out' ? "bg-red-500/10 text-red-400 border border-red-500/30 font-black" :
+                        "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      )}>
+                        {balance <= 0.01 ? 'SETTLED' :
+                         (currentReservation.operationalStatus || currentReservation.status) === 'checked_out' ? 'DEBTOR' :
+                         (currentReservation.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING'}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -1391,14 +1409,56 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowSettlePayment(true)}
-                  className="w-full py-3 bg-emerald-500 text-black rounded-xl font-black text-sm uppercase tracking-widest hover:bg-emerald-400 transition-all shadow-xl shadow-emerald-500/10 flex items-center justify-center gap-2 active:scale-95"
-                >
-                  <DollarSign size={18} />
-                  Receive Payment / Pay Bill
-                </button>
+                {balance > 0.01 ? (
+                  <div className="space-y-3 pt-2">
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-red-400">
+                        <AlertCircle size={16} />
+                        <span className="text-xs font-bold uppercase">⚠ Outstanding Balance: {formatCurrency(balance, currency, exchangeRate)}</span>
+                      </div>
+                      <span className="text-[9px] font-black uppercase text-red-500 bg-red-500/20 px-2 py-0.5 rounded">
+                        {(currentReservation.operationalStatus || currentReservation.status) === 'checked_out' ? 'DEBTOR ACCOUNT' : 'UNPAID'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowSettlePayment(true)}
+                        className="py-2.5 px-3 bg-emerald-500 text-black rounded-xl font-black text-xs uppercase tracking-wider hover:bg-emerald-400 transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-lg shadow-emerald-500/10"
+                      >
+                        <DollarSign size={14} />
+                        Receive Payment
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowSettlePayment(true)}
+                        className="py-2.5 px-3 bg-zinc-800 border border-zinc-700 text-zinc-200 rounded-xl font-black text-xs uppercase tracking-wider hover:bg-zinc-700 transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                      >
+                        <CheckCircle2 size={14} className="text-emerald-500" />
+                        Settle Balance
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ledgerElem = document.getElementById('folio-ledger-table');
+                          if (ledgerElem) ledgerElem.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="py-2.5 px-3 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-xl font-bold text-xs uppercase tracking-wider hover:text-zinc-200 hover:border-zinc-700 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <History size={14} />
+                        View Ledger
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center gap-2 text-emerald-400">
+                    <CheckCircle2 size={18} />
+                    <span className="text-xs font-black uppercase tracking-widest">✅ Account Settled</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2116,7 +2176,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {/* Ledger Entries Table */}
-          <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
+          <div id="folio-ledger-table" className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/30">
               <div className="flex items-center gap-2">
                 <History size={16} className="text-zinc-500" />

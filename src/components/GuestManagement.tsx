@@ -227,14 +227,8 @@ export function GuestManagement() {
       let calculatedDays = 0;
       guestRes.forEach(r => {
         if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
-          try {
-            const billing = calculateBilling(r, hotel);
-            calculatedDays += (billing.nightsCount || 1) + 1;
-          } catch (e) {
-            const cin = parseISO(r.checkIn);
-            const cout = parseISO(r.checkOut);
-            calculatedDays += Math.max(1, differenceInDays(cout, cin)) + 1;
-          }
+          const { totalDays } = calculateStayDuration(r.checkIn, r.checkOut);
+          calculatedDays += totalDays;
         }
       });
 
@@ -1260,15 +1254,8 @@ export function GuestManagement() {
                                 {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
                                 <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded lowercase">
                                   {(() => {
-                                    let d = 1;
-                                    try {
-                                      const billing = calculateBilling(res, hotel);
-                                      d = (billing.nightsCount || 1) + 1;
-                                    } catch (e) {
-                                      const n = differenceInDays(parseISO(res.checkOut), parseISO(res.checkIn));
-                                      d = n + 1;
-                                    }
-                                    return `${d} ${d === 1 ? 'day' : 'days'}`;
+                                    const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
+                                    return `${totalDays} ${totalDays === 1 ? 'day' : 'days'} / ${totalNights} ${totalNights === 1 ? 'night' : 'nights'}`;
                                   })()}
                                 </span>
                               </div>

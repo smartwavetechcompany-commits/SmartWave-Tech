@@ -365,6 +365,8 @@ export interface Reservation {
   checkOutTime?: string; // e.g. "12:00"
   nights?: number;
   status: 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
+  operationalStatus?: 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show';
+  financialStatus?: 'unpaid' | 'partial' | 'paid' | 'OUTSTANDING' | 'PARTIALLY_PAID' | 'SETTLED' | 'DEBTOR';
   totalAmount: number;
   paidAmount: number;
   paymentStatus: 'unpaid' | 'partial' | 'paid';

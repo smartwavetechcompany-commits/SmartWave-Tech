@@ -49,6 +49,7 @@ import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateStayDuration } from '../utils/dateUtils';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
 
@@ -287,17 +288,21 @@ export function Reports() {
       case 'inhouse': {
         return reservations
           .filter(res => res.status === 'checked_in')
-          .map(res => ({
-            Room: res.roomNumber,
-            'Guest Name': res.guestName,
-            Arrival: res.checkIn,
-            Departure: res.checkOut,
-            Nights: res.nights || 0,
-            Balance: getReservationLiveBalance(res, hotel),
-            _id: res.id,
-            _collection: 'reservations',
-            _label: `In-House Reservation: ${res.guestName}`
-          }));
+          .map(res => {
+            const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
+            return {
+              Room: res.roomNumber,
+              'Guest Name': res.guestName,
+              Arrival: res.checkIn,
+              Departure: res.checkOut,
+              'Stay Duration': `${totalDays} Days / ${totalNights} Nights`,
+              Nights: totalNights,
+              Balance: getReservationLiveBalance(res, hotel),
+              _id: res.id,
+              _collection: 'reservations',
+              _label: `In-House Reservation: ${res.guestName}`
+            };
+          });
       }
       case 'reservations': {
         return reservations
@@ -305,18 +310,22 @@ export function Reports() {
             const date = new Date(res.createdAt || res.checkIn);
             return isWithinInterval(date, { start: startDate, end: endDate });
           })
-          .map(res => ({
-            'Res #': (res.id || '').slice(-6).toUpperCase(),
-            'Guest Name': res.guestName,
-            Room: res.roomNumber,
-            Arrival: res.checkIn,
-            Departure: res.checkOut,
-            Status: res.status.replace('_', ' ').toUpperCase(),
-            Total: res.totalAmount,
-            _id: res.id,
-            _collection: 'reservations',
-            _label: `Reservation ${(res.id || '').slice(-6).toUpperCase()}`
-          }));
+          .map(res => {
+            const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
+            return {
+              'Res #': (res.id || '').slice(-6).toUpperCase(),
+              'Guest Name': res.guestName,
+              Room: res.roomNumber,
+              Arrival: res.checkIn,
+              Departure: res.checkOut,
+              'Stay Duration': `${totalDays} Days / ${totalNights} Nights`,
+              Status: res.status.replace('_', ' ').toUpperCase(),
+              Total: res.totalAmount,
+              _id: res.id,
+              _collection: 'reservations',
+              _label: `Reservation ${(res.id || '').slice(-6).toUpperCase()}`
+            };
+          });
       }
       case 'daily_sales': {
         const data: any[] = [];
