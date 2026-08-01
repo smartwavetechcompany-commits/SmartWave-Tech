@@ -46,8 +46,8 @@ import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, s
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
-import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } from '../utils/billingEngine';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -123,48 +123,17 @@ export function Finance() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
-    const resByGuestId: Record<string, Reservation[]> = {};
-    const resByEmail: Record<string, Reservation[]> = {};
-
-    reservations.forEach(r => {
-      if (r.status === 'checked_in' || r.status === 'checked_out') {
-        if (r.guestId) {
-          if (!resByGuestId[r.guestId]) resByGuestId[r.guestId] = [];
-          resByGuestId[r.guestId].push(r);
-        }
-        if (r.guestEmail) {
-          const emailKey = r.guestEmail.toLowerCase().trim();
-          if (!resByEmail[emailKey]) resByEmail[emailKey] = [];
-          resByEmail[emailKey].push(r);
-        }
-      }
-    });
-
     guests.forEach(guest => {
-      const matchingResSet = new Set<Reservation>();
-
-      const resByIdList = resByGuestId[guest.id] || [];
-      resByIdList.forEach(r => matchingResSet.add(r));
-
-      if (guest.email) {
-        const emailKey = guest.email.toLowerCase().trim();
-        const resByEmailList = resByEmail[emailKey] || [];
-        resByEmailList.forEach(r => matchingResSet.add(r));
-      }
-
-      const liveOwed = Array.from(matchingResSet).reduce((sum, r) => {
-        return sum + getReservationLiveBalance(r, hotel);
-      }, 0);
-
-      balanceMap[guest.id] = matchingResSet.size > 0 ? liveOwed : (guest.ledgerBalance || 0);
+      const account = calculateGuestAccount(guest, reservations, hotel);
+      balanceMap[guest.id] = account.outstandingBalance;
     });
 
     return balanceMap;
   }, [guests, reservations, hotel]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
-    return guestLiveBalances[guest.id] ?? (guest.ledgerBalance || 0);
-  }, [guestLiveBalances]);
+    return guestLiveBalances[guest.id] ?? calculateGuestAccount(guest, reservations, hotel).outstandingBalance;
+  }, [guestLiveBalances, reservations, hotel]);
 
   const categories = {
     income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
@@ -309,7 +278,7 @@ export function Finance() {
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
     
-    const q = query(collection(db, 'hotels', hotel.id, 'guests'), where('ledgerBalance', '!=', 0));
+    const q = collection(db, 'hotels', hotel.id, 'guests');
     const unsub = onSnapshot(q, (snap) => {
       setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
     }, (error: any) => {
@@ -1298,7 +1267,7 @@ export function Finance() {
                       <p className="text-xs font-bold text-zinc-500 uppercase">Total Receivables</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (g.ledgerBalance > 0 ? g.ledgerBalance : 0), 0) +
+                          guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) > 0 ? getGuestLiveBalance(g) : 0), 0) +
                           corporateAccounts.reduce((acc, c) => acc + (c.currentBalance > 0 ? c.currentBalance : 0), 0),
                           currency, exchangeRate
                         )}
@@ -1316,7 +1285,7 @@ export function Finance() {
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {/* Simplified calculation for now */}
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (g.ledgerBalance > 100000 ? g.ledgerBalance : 0), 0),
+                          guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) > 100000 ? getGuestLiveBalance(g) : 0), 0),
                           currency, exchangeRate
                         )}
                       </h3>
@@ -1332,7 +1301,7 @@ export function Finance() {
                       <p className="text-xs font-bold text-zinc-500 uppercase">Credit Available</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (g.ledgerBalance < 0 ? Math.abs(g.ledgerBalance) : 0), 0) +
+                          guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) < 0 ? Math.abs(getGuestLiveBalance(g)) : 0), 0) +
                           corporateAccounts.reduce((acc, c) => acc + (c.currentBalance < 0 ? Math.abs(c.currentBalance) : 0), 0),
                           currency, exchangeRate
                         )}
@@ -1353,11 +1322,11 @@ export function Finance() {
                       }
                       exportToCSV(
                         [...guests, ...corporateAccounts]
-                          .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) > 0)
+                          .filter(a => ('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0)
                           .map(a => ({
                             Name: a.name,
-                            Type: 'ledgerBalance' in a ? 'Individual' : 'Corporate',
-                            Balance: 'ledgerBalance' in a ? a.ledgerBalance : a.currentBalance,
+                            Type: 'currentBalance' in a ? 'Corporate' : 'Individual',
+                            Balance: 'currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest),
                             CreditLimit: a.creditLimit || 0,
                             Terms: 'paymentTerms' in a ? a.paymentTerms : 'N/A'
                           })),
@@ -1383,14 +1352,14 @@ export function Finance() {
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
                       {[...guests, ...corporateAccounts]
-                        .filter(a => ('ledgerBalance' in a ? a.ledgerBalance : a.currentBalance) !== 0)
+                        .filter(a => Math.abs('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0.01)
                         .sort((a, b) => {
-                          const balA = 'ledgerBalance' in a ? (a.ledgerBalance || 0) : (a.currentBalance || 0);
-                          const balB = 'ledgerBalance' in b ? (b.ledgerBalance || 0) : (b.currentBalance || 0);
+                          const balA = 'currentBalance' in a ? (a.currentBalance || 0) : getGuestLiveBalance(a as Guest);
+                          const balB = 'currentBalance' in b ? (b.currentBalance || 0) : getGuestLiveBalance(b as Guest);
                           return balB - balA; // Sort larger debts (positive) first
                         })
                         .map((account) => {
-                          const balance = 'ledgerBalance' in account ? account.ledgerBalance : account.currentBalance;
+                          const balance = 'currentBalance' in account ? account.currentBalance : getGuestLiveBalance(account as Guest);
                           return (
                             <tr key={account.id} className="hover:bg-zinc-800/50 transition-colors">
                               <td className="px-6 py-4">
@@ -1515,13 +1484,12 @@ export function Finance() {
                               exportToCSV(
                                 debtors.map(d => {
                                   const bal = getReservationLiveBalance(d, hotel);
-                                  const { totalDays, totalNights } = calculateStayDuration(d.checkIn, d.checkOut);
                                   return {
                                     Guest: d.guestName,
                                     Room: d.roomNumber,
                                     'Check In': d.checkIn,
                                     'Check Out': d.checkOut,
-                                    Duration: `${totalDays} Days / ${totalNights} Nights`,
+                                    Duration: formatStayDuration(d.checkIn, d.checkOut),
                                     OperationalStatus: 'CHECKED_OUT',
                                     FinancialStatus: 'DEBTOR',
                                     TotalAmount: d.totalAmount,
@@ -1562,7 +1530,6 @@ export function Finance() {
                             ) : (
                               debtors.map((res) => {
                                 const bal = getReservationLiveBalance(res, hotel);
-                                const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
                                 const opStatus = res.operationalStatus || res.status;
                                 return (
                                   <tr key={res.id} className="hover:bg-zinc-800/40 transition-colors">
@@ -1579,9 +1546,7 @@ export function Finance() {
                                       <div className="text-xs font-medium text-zinc-300">
                                         {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
                                       </div>
-                                      <div className="text-[10px] font-black text-amber-500 mt-0.5">
-                                        {totalDays} Days / {totalNights} Nights
-                                      </div>
+                                      <StayDurationDisplay checkIn={res.checkIn} checkOut={res.checkOut} overstayNights={res.overstayNights || 0} className="text-[10px] font-black text-amber-500 mt-0.5" />
                                     </td>
                                     <td className="px-6 py-4">
                                       <div className="flex flex-col gap-1 items-start">

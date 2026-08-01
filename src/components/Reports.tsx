@@ -49,7 +49,7 @@ import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration } from '../utils/dateUtils';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
 
@@ -289,13 +289,12 @@ export function Reports() {
         return reservations
           .filter(res => res.status === 'checked_in')
           .map(res => {
-            const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
             return {
               Room: res.roomNumber,
               'Guest Name': res.guestName,
               Arrival: res.checkIn,
               Departure: res.checkOut,
-              'Stay Duration': `${totalDays} Days / ${totalNights} Nights`,
+              'Stay Duration': formatStayDuration(res.checkIn, res.checkOut),
               Balance: getReservationLiveBalance(res, hotel),
               _id: res.id,
               _collection: 'reservations',
@@ -310,14 +309,13 @@ export function Reports() {
             return isWithinInterval(date, { start: startDate, end: endDate });
           })
           .map(res => {
-            const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
             return {
               'Res #': (res.id || '').slice(-6).toUpperCase(),
               'Guest Name': res.guestName,
               Room: res.roomNumber,
               Arrival: res.checkIn,
               Departure: res.checkOut,
-              'Stay Duration': `${totalDays} Days / ${totalNights} Nights`,
+              'Stay Duration': formatStayDuration(res.checkIn, res.checkOut),
               Status: res.status.replace('_', ' ').toUpperCase(),
               Total: res.totalAmount,
               _id: res.id,

@@ -40,7 +40,8 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
-import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService, calculateStayDuration } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
+import { calculateStayDuration } from '../utils/dateUtils';
 import { postToLedger, transferToCityLedger } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';

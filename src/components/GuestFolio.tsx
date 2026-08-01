@@ -36,7 +36,7 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime, calculateGuestAccount } from '../utils/billingEngine';
 import { calculateStayDuration } from '../utils/dateUtils';
 
 interface GuestFolioProps {
@@ -1181,15 +1181,23 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <p className="text-lg font-bold text-zinc-50">{currentReservation.guestName}</p>
                 <p className="text-sm text-zinc-400">{currentReservation.guestEmail}</p>
                 <p className="text-sm text-zinc-400">{currentReservation.guestPhone}</p>
-                {guest && (
-                  <p className={cn(
-                    "text-xs font-bold mt-1",
-                    (guest.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
-                  )}>
-                    Guest Ledger Balance: {formatCurrency(Math.abs(guest.ledgerBalance || 0), currency, exchangeRate)}
-                    {(guest.ledgerBalance || 0) > 0 ? " (Debt)" : (guest.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
-                  </p>
-                )}
+                {(() => {
+                  const guestAccount = calculateGuestAccount(
+                    guest || { id: currentReservation.guestId, email: currentReservation.guestEmail },
+                    [currentReservation, ...otherReservations],
+                    hotel,
+                    ledgerEntries
+                  );
+                  return (
+                    <p className={cn(
+                      "text-xs font-bold mt-1",
+                      guestAccount.outstandingBalance > 0.01 ? "text-red-500" : "text-emerald-500"
+                    )}>
+                      Guest Ledger Balance: {formatCurrency(guestAccount.outstandingBalance, currency, exchangeRate)}
+                      {guestAccount.outstandingBalance > 0.01 ? " (Debt)" : " (Settled)"}
+                    </p>
+                  );
+                })()}
                 {currentReservation.corporateId && (
                   <div className="mt-4 pt-4 border-t border-zinc-800">
                     <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1">Corporate Account</p>

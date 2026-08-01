@@ -5,7 +5,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
-import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } from '../utils/billingEngine';
 import { calculateStayDuration } from '../utils/dateUtils';
 import { 
   Users, 
@@ -142,49 +142,17 @@ export function GuestManagement() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
-    // Group active reservations by guestId and email for efficient O(1) matching
-    const resByGuestId: Record<string, Reservation[]> = {};
-    const resByEmail: Record<string, Reservation[]> = {};
-
-    allReservations.forEach(r => {
-      if (r.status === 'checked_in' || r.status === 'checked_out') {
-        if (r.guestId) {
-          if (!resByGuestId[r.guestId]) resByGuestId[r.guestId] = [];
-          resByGuestId[r.guestId].push(r);
-        }
-        if (r.guestEmail) {
-          const emailKey = r.guestEmail.toLowerCase().trim();
-          if (!resByEmail[emailKey]) resByEmail[emailKey] = [];
-          resByEmail[emailKey].push(r);
-        }
-      }
-    });
-
     guests.forEach(guest => {
-      const matchingResSet = new Set<Reservation>();
-
-      const resByIdList = resByGuestId[guest.id] || [];
-      resByIdList.forEach(r => matchingResSet.add(r));
-
-      if (guest.email) {
-        const emailKey = guest.email.toLowerCase().trim();
-        const resByEmailList = resByEmail[emailKey] || [];
-        resByEmailList.forEach(r => matchingResSet.add(r));
-      }
-
-      const liveOwed = Array.from(matchingResSet).reduce((sum, r) => {
-        return sum + getReservationLiveBalance(r, hotel);
-      }, 0);
-
-      balanceMap[guest.id] = matchingResSet.size > 0 ? liveOwed : (guest.ledgerBalance || 0);
+      const account = calculateGuestAccount(guest, allReservations, hotel);
+      balanceMap[guest.id] = account.outstandingBalance;
     });
 
     return balanceMap;
   }, [guests, allReservations, hotel]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
-    return guestLiveBalances[guest.id] ?? (guest.ledgerBalance || 0);
-  }, [guestLiveBalances]);
+    return guestLiveBalances[guest.id] ?? calculateGuestAccount(guest, allReservations, hotel).outstandingBalance;
+  }, [guestLiveBalances, allReservations, hotel]);
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
   const guestStatsMap = useMemo(() => {
