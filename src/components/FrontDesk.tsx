@@ -3855,7 +3855,8 @@ export function FrontDesk() {
               <StayDurationDisplay 
                 checkIn={res.checkIn} 
                 checkOut={res.checkOut} 
-                overstayNights={res.overstayNights || 0}
+                overstayNights={res.overstayNights}
+                status={res.status}
                 className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter"
               />
             </div>
@@ -4683,7 +4684,8 @@ export function FrontDesk() {
                     <StayDurationDisplay 
                       checkIn={checkoutPreviewRes.checkIn} 
                       checkOut={checkoutPreviewRes.checkOut} 
-                      overstayNights={checkoutPreviewRes.overstayNights || 0}
+                      overstayNights={checkoutPreviewRes.overstayNights}
+                      status={checkoutPreviewRes.status}
                       mode="full"
                     />
                   </div>

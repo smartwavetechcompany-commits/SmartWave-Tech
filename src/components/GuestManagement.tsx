@@ -1225,7 +1225,8 @@ export function GuestManagement() {
                                 <StayDurationDisplay 
                                   checkIn={res.checkIn} 
                                   checkOut={res.checkOut} 
-                                  overstayNights={res.overstayNights || 0}
+                                  overstayNights={res.overstayNights}
+                                  status={res.status}
                                   className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded inline-block"
                                 />
                               </div>

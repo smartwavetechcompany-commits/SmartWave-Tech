@@ -1267,7 +1267,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <StayDurationDisplay 
                     checkIn={currentReservation.checkIn} 
                     checkOut={currentReservation.checkOut} 
-                    overstayNights={currentReservation.overstayNights || 0}
+                    overstayNights={currentReservation.overstayNights}
+                    status={currentReservation.status}
                     mode="full"
                   />
                 </div>

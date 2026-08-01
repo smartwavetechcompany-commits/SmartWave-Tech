@@ -1546,7 +1546,7 @@ export function Finance() {
                                       <div className="text-xs font-medium text-zinc-300">
                                         {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
                                       </div>
-                                      <StayDurationDisplay checkIn={res.checkIn} checkOut={res.checkOut} overstayNights={res.overstayNights || 0} className="text-[10px] font-black text-amber-500 mt-0.5" />
+                                      <StayDurationDisplay checkIn={res.checkIn} checkOut={res.checkOut} overstayNights={res.overstayNights} status={res.status} className="text-[10px] font-black text-amber-500 mt-0.5" />
                                     </td>
                                     <td className="px-6 py-4">
                                       <div className="flex flex-col gap-1 items-start">
