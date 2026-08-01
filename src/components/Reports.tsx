@@ -229,8 +229,8 @@ export function Reports() {
     const headers = (() => {
       switch (type) {
         case 'occupancy': return ['Date', 'Total Rooms', 'Occupied', 'Occupancy %'];
-        case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Nights', 'Balance'];
-        case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Status', 'Total'];
+        case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Stay Duration', 'Balance'];
+        case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Stay Duration', 'Status', 'Total'];
         case 'daily_sales': return ['Date', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
         case 'monthly_sales': return ['Month', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
         case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
@@ -296,7 +296,6 @@ export function Reports() {
               Arrival: res.checkIn,
               Departure: res.checkOut,
               'Stay Duration': `${totalDays} Days / ${totalNights} Nights`,
-              Nights: totalNights,
               Balance: getReservationLiveBalance(res, hotel),
               _id: res.id,
               _collection: 'reservations',

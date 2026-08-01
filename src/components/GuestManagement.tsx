@@ -1255,7 +1255,7 @@ export function GuestManagement() {
                                 <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded lowercase">
                                   {(() => {
                                     const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
-                                    return `${totalDays} ${totalDays === 1 ? 'day' : 'days'} / ${totalNights} ${totalNights === 1 ? 'night' : 'nights'}`;
+                                    return `${totalDays} Days / ${totalNights} Nights`;
                                   })()}
                                 </span>
                               </div>
