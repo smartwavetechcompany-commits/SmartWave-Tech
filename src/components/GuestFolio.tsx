@@ -1259,7 +1259,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       const { totalDays, totalNights } = calculateStayDuration(currentReservation.checkIn, currentReservation.checkOut);
                       const overstayNights = currentReservation.overstayNights || 0;
                       const nights = totalNights + overstayNights;
-                      const days = nights + 1;
+                      const days = Math.max(1, nights);
                       return `${days} ${days === 1 ? 'DAY' : 'DAYS'} (${nights} ${nights === 1 ? 'NIGHT' : 'NIGHTS'})`;
                     })()}
                   </p>

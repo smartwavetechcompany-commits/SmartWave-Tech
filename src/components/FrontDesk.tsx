@@ -3855,7 +3855,7 @@ export function FrontDesk() {
                   const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
                   const overstayNights = res.overstayNights || 0;
                   const nights = totalNights + overstayNights;
-                  const days = nights + 1;
+                  const days = Math.max(1, nights);
                   return `${days} ${days === 1 ? 'day' : 'days'} / ${nights} ${nights === 1 ? 'night' : 'nights'}`;
                 })()}
               </span>

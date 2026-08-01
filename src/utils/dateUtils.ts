@@ -24,7 +24,7 @@ export function calculateStayDuration(checkInDate: string | Date, checkoutDate: 
   const cin = startOfDay(parseDate(checkInDate));
   const cout = startOfDay(parseDate(checkoutDate));
   const totalNights = Math.max(0, differenceInDays(cout, cin));
-  const totalDays = totalNights + 1;
+  const totalDays = Math.max(1, totalNights);
 
   return {
     totalDays,
