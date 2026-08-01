@@ -24,7 +24,7 @@ export function calculateReservationAccount(
   ledgerEntries?: LedgerEntry[]
 ): GuestAccountSummary {
   const billing = BillingEngine.calculateReservation(res, hotel, ledgerEntries);
-  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0);
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status);
   const totalNights = duration.totalNights;
   const totalDays = duration.totalDays;
 

@@ -197,7 +197,7 @@ export function GuestManagement() {
       let calculatedDays = 0;
       guestRes.forEach(r => {
         if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
-          const { totalDays } = calculateStayDuration(r.checkIn, r.checkOut, r.overstayNights || 0);
+          const { totalDays } = calculateStayDuration(r.checkIn, r.checkOut, r.overstayNights, r.status);
           calculatedDays += totalDays;
         }
       });

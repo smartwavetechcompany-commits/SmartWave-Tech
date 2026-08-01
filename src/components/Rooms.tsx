@@ -688,7 +688,7 @@ export function Rooms() {
         // Update guest statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const nights = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0).totalNights;
+          const nights = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status).totalNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
             totalSpent: increment(totalDebits),

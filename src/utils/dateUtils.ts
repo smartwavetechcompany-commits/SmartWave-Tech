@@ -53,7 +53,7 @@ export function calculateStayDuration(
   }
 
   // Dynamic overstay calculation if not explicitly provided as a positive number
-  if (overstayNights === 0 && (status === 'checked_in' || status === undefined)) {
+  if (overstayNights === 0 && status === 'checked_in') {
     const now = startOfDay(currentDate || new Date());
     if (now > cout) {
       overstayNights = Math.max(0, differenceInDays(now, cout));

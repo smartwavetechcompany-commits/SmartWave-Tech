@@ -96,6 +96,22 @@ export function FrontDesk() {
     checkAndRunAudit();
   }, [hotel?.id, hotel?.lastAuditDate, profile?.uid]);
 
+  // Temporary Diagnostic Hook: Verify stay duration calculation parity (totalNights === totalDays - 1) in Reservation List
+  useEffect(() => {
+    if (reservations.length > 0) {
+      reservations.forEach(r => {
+        if (r.checkIn && r.checkOut) {
+          const duration = calculateStayDuration(r.checkIn, r.checkOut, r.overstayNights, r.status);
+          if (duration.totalNights !== duration.totalDays - 1) {
+            console.warn(
+              `[StayDuration Diagnostic Warning] Inconsistent duration calculation in Reservation List for Res #${r.id} (${r.guestName}): totalDays=${duration.totalDays}, totalNights=${duration.totalNights}. Expected totalNights = totalDays - 1.`
+            );
+          }
+        }
+      });
+    }
+  }, [reservations]);
+
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showTransferModal, setShowTransferModal] = useState<Reservation | null>(null);
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
