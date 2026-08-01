@@ -367,7 +367,7 @@ export const BillingService = {
       ? new Date(res.checkOutDateTime) 
       : parseLocalDateTime(res.checkOut, checkOutTime);
 
-    const originalNights = res.nights || calculateStayDuration(res.checkIn, res.checkOut).totalNights;
+    const originalNights = res.nights || calculateStayDuration(res.checkIn, res.checkOut).bookedNights;
 
     return {
       checkInDateTime,
@@ -468,158 +468,8 @@ export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null)
 import { calculateStayDuration } from './dateUtils';
 export { calculateStayDuration };
 
-export interface GuestAccountSummary {
-  totalCharges: number;
-  totalRoomCharges: number;
-  totalOverstayCharges: number;
-  totalServiceCharges: number;
-  totalPayments: number;
-  totalRefunds: number;
-  totalTransfers: number;
-  outstandingBalance: number;
-  totalDays: number;
-  totalNights: number;
-}
+export { calculateGuestAccount, calculateReservationAccount } from './financialUtils';
+export type { GuestAccountSummary } from './financialUtils';
 
-export function calculateReservationAccount(
-  res: Reservation,
-  hotel: Hotel | null,
-  ledgerEntries?: LedgerEntry[]
-): GuestAccountSummary {
-  const billing = BillingEngine.calculateReservation(res, hotel, ledgerEntries);
-  const duration = calculateStayDuration(res.checkIn, res.checkOut);
-  const overstayNights = res.overstayNights || 0;
-  const totalNights = duration.totalNights + overstayNights;
-  const totalDays = duration.totalDays + overstayNights;
-
-  const resLedger = ledgerEntries ? ledgerEntries.filter(e => e.reservationId === res.id) : undefined;
-  let totalRefunds = 0;
-  let totalTransfers = 0;
-  if (resLedger) {
-    totalRefunds = resLedger.filter(e => e.type === 'debit' && e.category === 'refund').reduce((a, e) => a + e.amount, 0);
-    totalTransfers = resLedger.filter(e => e.category === 'transfer').reduce((a, e) => a + e.amount, 0);
-  }
-
-  return {
-    totalCharges: billing.totalCharges,
-    totalRoomCharges: billing.roomCharge,
-    totalOverstayCharges: billing.overstayCharge,
-    totalServiceCharges: billing.extraServices + billing.taxAmount + billing.serviceChargeAmount,
-    totalPayments: billing.totalPayments,
-    totalRefunds,
-    totalTransfers,
-    outstandingBalance: billing.outstandingBalance,
-    totalDays,
-    totalNights
-  };
-}
-
-export function calculateGuestAccount(
-  guestOrId: Guest | string | { id?: string; email?: string; ledgerBalance?: number } | null | undefined,
-  reservations: Reservation[],
-  hotel: Hotel | null,
-  ledgerEntries?: LedgerEntry[]
-): GuestAccountSummary {
-  if (!guestOrId) {
-    return {
-      totalCharges: 0,
-      totalRoomCharges: 0,
-      totalOverstayCharges: 0,
-      totalServiceCharges: 0,
-      totalPayments: 0,
-      totalRefunds: 0,
-      totalTransfers: 0,
-      outstandingBalance: 0,
-      totalDays: 0,
-      totalNights: 0
-    };
-  }
-
-  const guestId = typeof guestOrId === 'string' ? guestOrId : guestOrId.id;
-  const guestEmail = typeof guestOrId === 'object' && guestOrId !== null ? guestOrId.email : undefined;
-
-  const matchingRes = reservations.filter(r => {
-    if (r.status === 'cancelled') return false;
-    if (guestId && r.guestId === guestId) return true;
-    if (guestEmail && r.guestEmail && r.guestEmail.toLowerCase().trim() === guestEmail.toLowerCase().trim()) return true;
-    return false;
-  });
-
-  if (matchingRes.length > 0) {
-    let totalCharges = 0;
-    let totalRoomCharges = 0;
-    let totalOverstayCharges = 0;
-    let totalServiceCharges = 0;
-    let totalPayments = 0;
-    let totalRefunds = 0;
-    let totalTransfers = 0;
-    let totalDays = 0;
-    let totalNights = 0;
-
-    matchingRes.forEach(res => {
-      const acc = calculateReservationAccount(res, hotel, ledgerEntries);
-      totalCharges += acc.totalCharges;
-      totalRoomCharges += acc.totalRoomCharges;
-      totalOverstayCharges += acc.totalOverstayCharges;
-      totalServiceCharges += acc.totalServiceCharges;
-      totalPayments += acc.totalPayments;
-      totalRefunds += acc.totalRefunds;
-      totalTransfers += acc.totalTransfers;
-      totalDays += acc.totalDays;
-      totalNights += acc.totalNights;
-    });
-
-    const outstandingBalance = Math.max(0, totalCharges - totalPayments);
-
-    return {
-      totalCharges: Number(totalCharges.toFixed(2)),
-      totalRoomCharges: Number(totalRoomCharges.toFixed(2)),
-      totalOverstayCharges: Number(totalOverstayCharges.toFixed(2)),
-      totalServiceCharges: Number(totalServiceCharges.toFixed(2)),
-      totalPayments: Number(totalPayments.toFixed(2)),
-      totalRefunds: Number(totalRefunds.toFixed(2)),
-      totalTransfers: Number(totalTransfers.toFixed(2)),
-      outstandingBalance: Number(outstandingBalance.toFixed(2)),
-      totalDays,
-      totalNights
-    };
-  }
-
-  // If no matching reservations found in list, check ledger entries if available
-  if (ledgerEntries && guestId) {
-    const guestEntries = ledgerEntries.filter(e => e.guestId === guestId);
-    if (guestEntries.length > 0) {
-      const debits = guestEntries.filter(e => e.type === 'debit').reduce((a, e) => a + e.amount, 0);
-      const credits = guestEntries.filter(e => e.type === 'credit').reduce((a, e) => a + e.amount, 0);
-      return {
-        totalCharges: debits,
-        totalRoomCharges: 0,
-        totalOverstayCharges: 0,
-        totalServiceCharges: 0,
-        totalPayments: credits,
-        totalRefunds: 0,
-        totalTransfers: 0,
-        outstandingBalance: Math.max(0, debits - credits),
-        totalDays: 0,
-        totalNights: 0
-      };
-    }
-  }
-
-  // Fallback if guest object has ledgerBalance property
-  const fallbackBal = typeof guestOrId === 'object' && guestOrId !== null ? Math.max(0, guestOrId.ledgerBalance || 0) : 0;
-  return {
-    totalCharges: fallbackBal,
-    totalRoomCharges: 0,
-    totalOverstayCharges: 0,
-    totalServiceCharges: 0,
-    totalPayments: 0,
-    totalRefunds: 0,
-    totalTransfers: 0,
-    outstandingBalance: fallbackBal,
-    totalDays: 0,
-    totalNights: 0
-  };
-}
 
 

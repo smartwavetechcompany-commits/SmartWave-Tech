@@ -36,8 +36,9 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling, parseLocalDateTime, calculateGuestAccount } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -1259,19 +1260,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   </div>
                 </div>
                 <div className="pt-2 mt-2 border-t border-zinc-800/50">
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-1 flex items-center gap-1.5">
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase mb-2 flex items-center gap-1.5">
                     <Clock size={10} />
-                    Current Duration
+                    Stay Duration Breakdown
                   </p>
-                  <p className="text-sm font-black text-amber-500 italic tracking-widest bg-amber-500/5 px-2 py-1 rounded inline-block border border-amber-500/10">
-                    {(() => {
-                      const { totalDays, totalNights } = calculateStayDuration(currentReservation.checkIn, currentReservation.checkOut);
-                      const overstayNights = currentReservation.overstayNights || 0;
-                      const nights = totalNights + overstayNights;
-                      const days = totalDays + overstayNights;
-                      return `${days} Days / ${nights} Nights`;
-                    })()}
-                  </p>
+                  <StayDurationDisplay 
+                    checkIn={currentReservation.checkIn} 
+                    checkOut={currentReservation.checkOut} 
+                    overstayNights={currentReservation.overstayNights || 0}
+                    mode="full"
+                  />
                 </div>
               </div>
             </div>

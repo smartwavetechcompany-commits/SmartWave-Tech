@@ -49,7 +49,8 @@ import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
 
@@ -294,7 +295,7 @@ export function Reports() {
               'Guest Name': res.guestName,
               Arrival: res.checkIn,
               Departure: res.checkOut,
-              'Stay Duration': formatStayDuration(res.checkIn, res.checkOut),
+              'Stay Duration': formatStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0),
               Balance: getReservationLiveBalance(res, hotel),
               _id: res.id,
               _collection: 'reservations',
@@ -315,7 +316,7 @@ export function Reports() {
               Room: res.roomNumber,
               Arrival: res.checkIn,
               Departure: res.checkOut,
-              'Stay Duration': formatStayDuration(res.checkIn, res.checkOut),
+              'Stay Duration': formatStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0),
               Status: res.status.replace('_', ' ').toUpperCase(),
               Total: res.totalAmount,
               _id: res.id,

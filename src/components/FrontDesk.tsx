@@ -57,7 +57,8 @@ import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOf
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -1786,7 +1787,7 @@ export function FrontDesk() {
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const nights = calculateStayDuration(res.checkIn, res.checkOut).totalNights;
+          const nights = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0).totalNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
             totalSpent: increment(totalDebits),
@@ -3851,15 +3852,12 @@ export function FrontDesk() {
             </div>
             <div className="mt-1.5 flex items-center gap-1">
               <Clock size={10} className="text-zinc-600" />
-              <span className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter">
-                {(() => {
-                  const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
-                  const overstayNights = res.overstayNights || 0;
-                  const nights = totalNights + overstayNights;
-                  const days = totalDays + overstayNights;
-                  return `${days} Days / ${nights} Nights`;
-                })()}
-              </span>
+              <StayDurationDisplay 
+                checkIn={res.checkIn} 
+                checkOut={res.checkOut} 
+                overstayNights={res.overstayNights || 0}
+                className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter"
+              />
             </div>
           </td>
                   <td className="px-6 py-4 text-sm">
@@ -4680,10 +4678,14 @@ export function FrontDesk() {
                     <p className="text-sm font-bold text-zinc-50 mt-1">{checkoutPreviewRes.guestName}</p>
                     <p className="text-xs text-zinc-400 mt-0.5">Room {checkoutPreviewRes.roomNumber} ({checkoutPreviewRes.roomId})</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Scheduled Checkout</p>
-                    <p className="text-sm font-bold text-zinc-200 mt-1">{checkoutPreviewRes.checkOut}</p>
-                    <p className="text-xs text-zinc-500 mt-0.5">{checkoutPreviewRes.checkOutTime || hotel?.defaultCheckOutTime || '12:00'}</p>
+                  <div className="text-right flex flex-col items-end">
+                    <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Stay Duration</p>
+                    <StayDurationDisplay 
+                      checkIn={checkoutPreviewRes.checkIn} 
+                      checkOut={checkoutPreviewRes.checkOut} 
+                      overstayNights={checkoutPreviewRes.overstayNights || 0}
+                      mode="full"
+                    />
                   </div>
                 </div>
 

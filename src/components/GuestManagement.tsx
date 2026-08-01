@@ -5,8 +5,9 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
-import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { 
   Users, 
   Plus, 
@@ -196,7 +197,7 @@ export function GuestManagement() {
       let calculatedDays = 0;
       guestRes.forEach(r => {
         if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
-          const { totalDays } = calculateStayDuration(r.checkIn, r.checkOut);
+          const { totalDays } = calculateStayDuration(r.checkIn, r.checkOut, r.overstayNights || 0);
           calculatedDays += totalDays;
         }
       });
@@ -1221,12 +1222,12 @@ export function GuestManagement() {
                               <div className="text-xs font-bold text-zinc-50 leading-tight">Room {res.roomNumber}</div>
                               <div className="text-[10px] text-zinc-500 flex items-center gap-1.5">
                                 {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
-                                <span className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded lowercase">
-                                  {(() => {
-                                    const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
-                                    return `${totalDays} Days / ${totalNights} Nights`;
-                                  })()}
-                                </span>
+                                <StayDurationDisplay 
+                                  checkIn={res.checkIn} 
+                                  checkOut={res.checkOut} 
+                                  overstayNights={res.overstayNights || 0}
+                                  className="text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-1 rounded inline-block"
+                                />
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <div className={cn(
