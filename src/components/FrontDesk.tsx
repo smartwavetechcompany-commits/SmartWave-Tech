@@ -56,7 +56,8 @@ import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
-import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService, calculateStayDuration } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
+import { calculateStayDuration } from '../utils/dateUtils';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -3855,7 +3856,7 @@ export function FrontDesk() {
                   const { totalDays, totalNights } = calculateStayDuration(res.checkIn, res.checkOut);
                   const overstayNights = res.overstayNights || 0;
                   const nights = totalNights + overstayNights;
-                  const days = Math.max(1, nights);
+                  const days = totalDays + overstayNights;
                   return `${days} Days / ${nights} Nights`;
                 })()}
               </span>

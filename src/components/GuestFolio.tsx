@@ -36,7 +36,8 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling, parseLocalDateTime, calculateStayDuration } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateStayDuration } from '../utils/dateUtils';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -1259,7 +1260,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       const { totalDays, totalNights } = calculateStayDuration(currentReservation.checkIn, currentReservation.checkOut);
                       const overstayNights = currentReservation.overstayNights || 0;
                       const nights = totalNights + overstayNights;
-                      const days = Math.max(1, nights);
+                      const days = totalDays + overstayNights;
                       return `${days} Days / ${nights} Nights`;
                     })()}
                   </p>
