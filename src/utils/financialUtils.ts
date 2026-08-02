@@ -75,27 +75,21 @@ export function calculateReservationAccount(
       }
     });
 
-    // Handle any unposted stay charges ONLY if room debits have not been posted at all yet (e.g. before night audit or check-in)
+    // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
     const roomDebitsPosted = resLedger.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
-    if (!roomDebitsPosted && res.status === 'checked_in') {
-      const billing = BillingEngine.calculateReservation(res, hotel, resLedger);
-      if (billing.roomCharge > 0) {
-        totalCharges += billing.roomCharge;
-        totalRoomCharges += billing.roomCharge;
-      }
-      if (billing.overstayCharge > 0) {
-        totalCharges += billing.overstayCharge;
-        totalOverstayCharges += billing.overstayCharge;
-      }
+    if (!roomDebitsPosted && res.status === 'checked_in' && totalCharges === 0) {
+      const baseRoom = res.totalAmount || (res.nightlyRate ? res.nightlyRate * (res.nights || 1) : 0);
+      totalCharges += baseRoom;
+      totalRoomCharges += baseRoom;
     }
   } else {
-    // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown
-    const billing = BillingEngine.calculateReservation(res, hotel);
-    totalCharges = billing.totalCharges;
-    totalRoomCharges = billing.roomCharge;
-    totalOverstayCharges = billing.overstayCharge;
-    totalServiceCharges = billing.extraServices + billing.taxAmount + billing.serviceChargeAmount;
-    totalPayments = billing.totalPayments;
+    // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown without unposted overstay projections
+    const baseRoom = res.totalAmount || (res.nightlyRate ? res.nightlyRate * (res.nights || 1) : 0);
+    totalCharges = baseRoom;
+    totalRoomCharges = baseRoom;
+    totalOverstayCharges = 0;
+    totalServiceCharges = 0;
+    totalPayments = res.paidAmount || 0;
   }
 
   // Round all values to 2 decimal places to prevent float precision drift

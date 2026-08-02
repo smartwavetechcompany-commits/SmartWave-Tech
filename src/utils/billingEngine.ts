@@ -1,5 +1,6 @@
 import { Reservation, Hotel, LedgerEntry, Tax, Guest } from '../types';
 import { startOfDay, parseISO, differenceInDays, format, addDays } from 'date-fns';
+import { calculateReservationAccount } from './financialUtils';
 
 /**
  * Safely parses a date string (YYYY-MM-DD) and optional time string (HH:MM)
@@ -447,22 +448,45 @@ export const BillingService = {
 };
 
 /**
- * Backward compatibility wrapper for calculateBilling.
+ * Single source of truth wrapper for calculateBilling.
+ * Derives accounting state from actual ledger entries or stored reservation ledger balance.
  */
 export function calculateBilling(
   res: Reservation,
   hotel: Hotel | null,
   ledgerEntries?: LedgerEntry[]
 ): BillingState {
-  return BillingEngine.calculateReservation(res, hotel, ledgerEntries);
+  const account = calculateReservationAccount(res, hotel, ledgerEntries);
+  const nightlyRate = res.nightlyRate || (account.totalNights > 0 ? account.totalRoomCharges / account.totalNights : 0);
+  return {
+    nightsCount: account.totalNights,
+    extraNights: 0,
+    nightlyRate,
+    originalNights: res.nights || 1,
+    overstayCharge: account.totalOverstayCharges,
+    totalCharges: account.totalCharges,
+    totalPayments: account.totalPayments,
+    outstandingBalance: account.outstandingBalance,
+    isOverstaying: res.status === 'checked_in' && account.totalOverstayCharges > 0,
+    projectedRoomCharge: 0,
+    unpostedPrepayment: 0,
+    unpostedIncidentals: 0
+  };
 }
 
 /**
- * Backward compatibility wrapper for getReservationLiveBalance.
+ * Single source of truth wrapper for getReservationLiveBalance.
+ * Strictly returns the authoritative ledger outstanding balance.
  */
-export function getReservationLiveBalance(res: Reservation, hotel: Hotel | null): number {
-  const billing = BillingEngine.calculateReservation(res, hotel);
-  return billing.outstandingBalance;
+export function getReservationLiveBalance(
+  res: Reservation,
+  hotel: Hotel | null,
+  ledgerEntries?: LedgerEntry[]
+): number {
+  if (res.ledgerBalance !== undefined && (!ledgerEntries || ledgerEntries.length === 0)) {
+    return Number(res.ledgerBalance.toFixed(2));
+  }
+  return calculateReservationAccount(res, hotel, ledgerEntries).outstandingBalance;
 }
 
 import { calculateStayDuration } from './dateUtils';
