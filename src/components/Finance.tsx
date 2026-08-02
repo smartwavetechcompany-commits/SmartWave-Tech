@@ -843,7 +843,7 @@ export function Finance() {
           Email: guest.email,
           Phone: guest.phone,
           Balance: guest.ledgerBalance || 0,
-          Status: (guest.ledgerBalance || 0) < 0 ? 'Debt' : (guest.ledgerBalance || 0) > 0 ? 'Credit' : 'Balanced'
+          Status: (guest.ledgerBalance || 0) > 0 ? 'Debt' : (guest.ledgerBalance || 0) < 0 ? 'Credit' : 'Balanced'
         };
       }
     });

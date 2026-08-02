@@ -5,6 +5,8 @@ import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService } from '../utils/billingEngine';
 
+import { validateLedgerTransaction } from './financialService';
+
 export const postToLedger = async (
   hotelId: string,
   guestId: string,
@@ -14,6 +16,13 @@ export const postToLedger = async (
   corporateId?: string,
   paymentMethod: 'cash' | 'card' | 'transfer' = 'cash'
 ) => {
+  // STRICT FINANCIAL INTEGRITY CHECK: Reject any attempt to post projections, forecasts, previews, or virtual entries to live ledger
+  const validation = validateLedgerTransaction(entry as any);
+  if (!validation.isValid) {
+    console.error('REJECTED LEDGER TRANSACTION:', validation.reason, entry);
+    throw new Error(validation.reason || 'Projections, forecasts, previews, and simulations cannot modify the live ledger.');
+  }
+
   // 0. Prevent duplicate room / overstay charges
   if (entry.chargePeriodStart && entry.chargePeriodEnd && entry.chargeType) {
     const q = query(
@@ -348,7 +357,27 @@ export const voidLedgerEntry = async (
 };
 
 // Deprecated in favor of voidLedgerEntry for production audit compliance
+export const purgeCorruptedLedgerEntries = async (
+  hotelId: string,
+  entryIds: string[]
+) => {
+  if (!hotelId || !entryIds || entryIds.length === 0) return;
+  for (const entryId of entryIds) {
+    try {
+      await database.safeDelete(doc(db, 'hotels', hotelId, 'ledger', entryId), {
+        hotelId,
+        module: 'Ledger',
+        action: 'PURGE_CORRUPTED_ENTRY',
+        details: `Purged corrupted or virtual projection ledger entry ${entryId}`
+      });
+    } catch (err) {
+      console.error(`Failed to purge ledger entry ${entryId}:`, err);
+    }
+  }
+};
+
 export const deleteLedgerEntry = async (
+
   hotelId: string,
   ledgerEntry: LedgerEntry & { firestoreId?: string }
 ) => {

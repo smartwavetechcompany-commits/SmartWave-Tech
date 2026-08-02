@@ -5,11 +5,12 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger, purgeCorruptedLedgerEntries } from '../services/ledgerService';
 import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
 import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
 import { DiscountApplication } from './DiscountApplication';
 import { ConfirmModal } from './ConfirmModal';
+import { LedgerDiagnosticModal } from './LedgerDiagnosticModal';
 import { 
   Receipt, 
   User, 
@@ -31,6 +32,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Tag,
+  ShieldAlert,
   X
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify } from '../utils';
@@ -89,6 +91,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showGuestHistory, setShowGuestHistory] = useState(false);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<LedgerEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showSettleOverpayment, setShowSettleOverpayment] = useState(false);
@@ -797,106 +800,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
-  const billingState = calculateBilling(currentReservation, hotel, processedDisplayedEntries);
-  const expectedNightsCount = billingState.nightsCount;
-  const originalNightsCount = billingState.originalNights;
-  const nightlyRateCalculated = billingState.nightlyRate;
-  const projectedRoomCharge = billingState.projectedRoomCharge;
+  const resAccount = calculateReservationAccount(currentReservation, hotel, processedDisplayedEntries);
+  const expectedNightsCount = resAccount.totalNights;
+  const originalNightsCount = currentReservation.nights || 0;
+  const nightlyRateCalculated = currentReservation.nightlyRate || (originalNightsCount > 0 ? currentReservation.totalAmount / originalNightsCount : 0);
+  
+  const totalDebits = resAccount.totalCharges;
+  const totalCredits = resAccount.totalPayments;
+  const balance = resAccount.outstandingBalance;
 
-  const totalDebits = processedDisplayedEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const ledgerCreditsSum = processedDisplayedEntries
-    .filter(e => {
-      if (e.type !== 'credit') return false;
-      // Exclude room rate discount/adjustment credits to prevent double counting
-      if (e.category === 'room') {
-        const desc = (e.description || '').toLowerCase();
-        if (desc.includes('discount') || desc.includes('adjust') || desc.includes('correction') || desc.includes('rate')) {
-          return false;
-        }
-      }
-      return true;
-    })
-    .reduce((acc, e) => acc + e.amount, 0);
-  const unpostedPrepayment = billingState.unpostedPrepayment;
-  const totalCredits = ledgerCreditsSum + unpostedPrepayment;
-  const balance = billingState.outstandingBalance;
-
-  // Combine real entries and a virtual projected room charge if room stay is unposted
+  // Real posted entries only in history items - NO VIRTUAL CREDITS OR PROJECTION REDUCTIONS
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
   
-  if (unpostedPrepayment > 0.01) {
-    const prepaymentTimestamp = (() => {
-      if (currentReservation.createdAt) {
-        try {
-          return new Date(currentReservation.createdAt).toISOString();
-        } catch (e) {}
-      }
-      if (currentReservation.checkIn) {
-        try {
-          const d = new Date(currentReservation.checkIn);
-          d.setHours(d.getHours() - 1);
-          return d.toISOString();
-        } catch (e) {}
-      }
-      return new Date().toISOString();
-    })();
-
-    allHistoryItems.push({
-      id: 'prepayment_deposit_virtual',
-      timestamp: prepaymentTimestamp,
-      description: 'Prepayment / Deposit Applied at Booking',
-      category: 'payment',
-      type: 'credit',
-      amount: unpostedPrepayment,
-      postedBy: 'system',
-      isVirtual: true
-    } as any);
-  }
-
-  if (projectedRoomCharge > 0.01) {
+  // Show unposted room charge liability ONLY if no room debits exist in ledger yet for a checked-in guest
+  const hasRoomDebitsPosted = processedDisplayedEntries.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
+  if (!hasRoomDebitsPosted && currentReservation.status === 'checked_in' && resAccount.totalRoomCharges > 0.01) {
     allHistoryItems.push({
       id: 'projected_room_stay_charge_virtual',
       timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
       description: 'Projected Room Stay (Unposted Stay Cost/Liability)',
       category: 'room',
       type: 'debit',
-      amount: projectedRoomCharge,
-      postedBy: 'system',
-      isVirtual: true
-    } as any);
-  } else if (projectedRoomCharge < -0.01) {
-    allHistoryItems.push({
-      id: 'projected_room_stay_charge_virtual_reduction',
-      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
-      description: 'Projected Room Rate Adjustment / Correction Credit',
-      category: 'room',
-      type: 'credit',
-      amount: Math.abs(projectedRoomCharge),
-      postedBy: 'system',
-      isVirtual: true
-    } as any);
-  }
-
-  const unpostedIncidentals = billingState.unpostedIncidentals || 0;
-  if (unpostedIncidentals > 0.01) {
-    allHistoryItems.push({
-      id: 'projected_incidental_adjustment_virtual',
-      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
-      description: 'Projected Incidental / Manual Adjustment Charge',
-      category: 'other',
-      type: 'debit',
-      amount: unpostedIncidentals,
-      postedBy: 'system',
-      isVirtual: true
-    } as any);
-  } else if (unpostedIncidentals < -0.01) {
-    allHistoryItems.push({
-      id: 'projected_incidental_adjustment_virtual_reduction',
-      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
-      description: 'Manual Adjustment / Correction Credit',
-      category: 'other',
-      type: 'credit',
-      amount: Math.abs(unpostedIncidentals),
+      amount: resAccount.totalRoomCharges,
       postedBy: 'system',
       isVirtual: true
     } as any);
@@ -1138,6 +1063,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <p className="text-xs sm:text-sm font-bold">Receipt</p>
               </div>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDiagnosticModal(true)}
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl sm:rounded-2xl text-amber-400 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <ShieldAlert size={16} className="sm:size-5" />
+              </div>
+              <div className="text-left">
+                <p className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider leading-tight">Audit</p>
+                <p className="text-xs sm:text-sm font-bold">Ledger</p>
+              </div>
+            </button>
+
           </div>
 
           {/* Financial Summary Breakdown */}
@@ -1155,7 +1095,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   else acc[cat].credit += entry.amount;
                   return acc;
                 }, {
-                  room: { debit: projectedRoomCharge, credit: 0 }
+                  room: { debit: hasRoomDebitsPosted ? 0 : resAccount.totalRoomCharges, credit: 0 }
                 })
               ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
                 <div key={cat} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
@@ -1400,7 +1340,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <div className="flex justify-between">
                       <span className="text-zinc-450">Total Net Invoice (Gross + Excl. Taxes)</span>
                       <span className="text-zinc-200 font-bold font-mono">
-                        {formatCurrency(totalDebits + projectedRoomCharge, currency, exchangeRate)}
+                        {formatCurrency(totalDebits, currency, exchangeRate)}
                       </span>
                     </div>
 
@@ -2616,6 +2556,23 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </motion.div>
         </div>
       )}
+
+      <LedgerDiagnosticModal
+        isOpen={showDiagnosticModal}
+        onClose={() => setShowDiagnosticModal(false)}
+        reservation={currentReservation}
+        guest={guest}
+        hotel={hotel}
+        ledgerEntries={ledgerEntries}
+        currency={currency}
+        exchangeRate={exchangeRate}
+        onPurgeInvalidEntries={async (entryIds) => {
+          if (hotel?.id) {
+            await purgeCorruptedLedgerEntries(hotel.id, entryIds);
+            toast.success(`Purged ${entryIds.length} invalid ledger entry(ies).`);
+          }
+        }}
+      />
 
       <ConfirmModal
         isOpen={!!confirmDelete}

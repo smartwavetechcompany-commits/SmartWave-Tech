@@ -3,15 +3,36 @@ import { hasPermission } from './permissions';
 import { differenceInDays } from 'date-fns';
 import { getReservationLiveBalance } from './billingEngine';
 
+import { validateGuestAccount } from '../services/financialService';
+
 export const canCheckout = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  reservation: Reservation
+  reservation: Reservation,
+  ledgerEntries?: LedgerEntry[]
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // HARD REQUIREMENT: Financial Consistency Audit Gate
+  if (reservation.guestId) {
+    const validation = validateGuestAccount(reservation.guestId, {
+      reservations: [reservation],
+      hotel,
+      ledgerEntries,
+      folioBalance: reservation.ledgerBalance
+    });
+
+    if (!validation.isValid) {
+      return {
+        allowed: false,
+        message: `Checkout blocked by Financial Validation Engine: ${validation.violations[0] || 'Guest account failed multi-point audit consistency check.'}`
+      };
+    }
+  }
+
   const settings = hotel.settings?.checkout;
   if (!settings) return { allowed: true }; // Default behavior
+
 
   const outstandingBalance = getReservationLiveBalance(reservation, hotel);
 

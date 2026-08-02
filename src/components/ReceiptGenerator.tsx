@@ -5,6 +5,7 @@ import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
 import { calculateBilling } from '../utils/billingEngine';
+import { calculateReservationAccount } from '../utils/financialUtils';
 
 export function processLedgerTaxes(
   entries: LedgerEntry[],
@@ -106,24 +107,14 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   // If room charges are already in ledger, don't add reservation.totalAmount again
   const hasRoomChargeInLedger = processedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
   
-  // Detailed billing and overstay analytics from central billing engine
-  const billingState = reservation 
-    ? calculateBilling(reservation, hotel, filteredEntries)
-    : null;
-
-  const projectedRoomCharge = billingState 
-    ? billingState.projectedRoomCharge
-    : 0;
-
-  // Find exclusive tax debits in the ledger (tax debits with description not containing "inclusive")
+  // Subtotal represents the gross charges of all stay/service items.
+  // We keep inclusive taxes as part of the subtotal (since they are built into the prices).
+  // Therefore, we only subtract exclusive tax debits from the ledger's total debits.
   const totalExclusiveTaxDebits = processedEntries
     .filter(e => e.category === 'tax' && e.type === 'debit' && !e.description.toLowerCase().includes('inclusive'))
     .reduce((acc, e) => acc + e.amount, 0);
 
-  // Subtotal represents the gross charges of all stay/service items.
-  // We keep inclusive taxes as part of the subtotal (since they are built into the prices).
-  // Therefore, we only subtract exclusive tax debits from the ledger's total debits.
-  const subtotal = (totalDebits - totalExclusiveTaxDebits) + projectedRoomCharge;
+  const subtotal = Math.max(0, totalDebits - totalExclusiveTaxDebits);
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -165,7 +156,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       const storedTax = reservation?.taxDetails?.find(t => t.name === tax.name);
       if (storedTax) {
         const baseTaxAmount = storedTax.amount;
-        const overstayCharge = billingState ? billingState.overstayCharge : 0;
+        const overstayCharge = reservation ? calculateReservationAccount(reservation, hotel, filteredEntries).totalOverstayCharges : 0;
         const overstayTaxAmount = tax.isInclusive
           ? overstayCharge - (overstayCharge / (1 + (tax.percentage / 100)))
           : overstayCharge * (tax.percentage / 100);
@@ -374,9 +365,10 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
                   // Generate unposted/projected room charges chronologically (including overstays)
                   if (reservation) {
+                    const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
                     const postedNightsCount = roomDebits.length;
-                    const totalNights = billingState ? billingState.nightsCount : 1;
-                    const nightlyRate = billingState ? billingState.nightlyRate : 0;
+                    const totalNights = resAccount.totalNights;
+                    const nightlyRate = reservation.nightlyRate || (reservation.nights ? reservation.totalAmount / reservation.nights : 0);
                     
                     if (totalNights > postedNightsCount && nightlyRate > 0) {
                       const unpostedNights = totalNights - postedNightsCount;
@@ -385,16 +377,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         const nightIndex = postedNightsCount + i;
                         const checkInDate = parseISO(reservation.checkIn);
                         const nightDate = addDays(checkInDate, nightIndex);
-                        const isOverstay = billingState ? (nightIndex >= billingState.originalNights) : false;
+                        const isOverstay = nightIndex >= (reservation.nights || 0);
                         
                         const title = isOverstay 
                           ? `Projected Overstay Room Charge (Night of ${format(nightDate, 'MMM dd, yyyy')})`
                           : `Projected Room Charge (Night of ${format(nightDate, 'MMM dd, yyyy')})`;
                         
-                        // Last night absorbs remainder to assure exact match
-                        const rateForThisNight = (i === unpostedNights - 1)
-                          ? projectedRoomCharge - (i * nightlyRate)
-                          : nightlyRate;
+                        const rateForThisNight = nightlyRate;
                         
                         if (rateForThisNight <= 0.01 && unpostedNights > 1 && i === unpostedNights - 1) {
                           continue;
