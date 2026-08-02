@@ -316,6 +316,10 @@ export const postToLedger = async (
     details: `Posted ${entries.length} entries to ${reservationId} Folio. Status: ${entry.type}, Amount: ${entry.amount}`
   });
 
+  if (reservationId) {
+    await recalculateReservationAccountFromLedger(hotelId, reservationId);
+  }
+
   return { id: postedIds[0], ...mainEntry };
 };
 
@@ -407,9 +411,9 @@ export const recalculateReservationAccountFromLedger = async (
     const resData = resSnap.data() as Reservation;
 
     let paymentStatus: Reservation['paymentStatus'] = 'unpaid';
-    if (ledgerBalance <= 0.01 && totalPaid > 0) {
+    if (ledgerBalance <= 0.01 && (totalPaid > 0 || totalCredits > 0 || totalDebits > 0)) {
       paymentStatus = 'paid';
-    } else if (totalPaid > 0) {
+    } else if (totalPaid > 0 || totalCredits > 0) {
       paymentStatus = 'partial';
     }
 
