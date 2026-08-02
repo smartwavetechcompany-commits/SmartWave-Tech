@@ -54,6 +54,31 @@ export function validateLedgerTransaction(entry: Partial<LedgerEntry>): { isVali
     };
   }
 
+  // Reject illegal refund credit entries (A refund is ALWAYS a debit)
+  const category = (entry.category || '').toString().toLowerCase();
+  const type = entry.type;
+  const description = (entry.description || '').toString().toLowerCase();
+
+  if (type === 'credit' && category === 'refund') {
+    return {
+      isValid: false,
+      reason: 'Transaction rejected: A refund cannot be a credit. Refunds are debits.'
+    };
+  }
+
+  // Reject automated or corrupted adjustment entries
+  if (
+    description.includes('room charge refund') || 
+    description.includes('early checkout adjustment') || 
+    description.includes('projected room rate adjustment') || 
+    description.includes('correction credit')
+  ) {
+    return {
+      isValid: false,
+      reason: 'Transaction rejected: Automated or projected adjustment entries are prohibited.'
+    };
+  }
+
   return { isValid: true };
 }
 
@@ -128,20 +153,25 @@ export function calculateGuestFinancialPosition(
     // Authoritative calculation PURELY from posted ledger entries
     validEntries.forEach(e => {
       if (e.type === 'debit') {
-        totalCharges += e.amount;
-        if (e.category === 'room' || e.chargeType === 'room_rate') {
-          totalRoomCharges += e.amount;
-        } else if (e.chargeType === 'overstay') {
-          totalOverstayCharges += e.amount;
-        } else if (e.category === 'refund') {
+        if (e.category === 'refund') {
           totalRefunds += e.amount;
         } else {
-          totalServiceCharges += e.amount;
+          totalCharges += e.amount;
+          if (e.category === 'room' || e.chargeType === 'room_rate') {
+            totalRoomCharges += e.amount;
+          } else if (e.chargeType === 'overstay') {
+            totalOverstayCharges += e.amount;
+          } else {
+            totalServiceCharges += e.amount;
+          }
         }
       } else if (e.type === 'credit') {
-        totalPayments += e.amount;
-        if (e.category === 'transfer') {
-          totalTransfers += e.amount;
+        const cat = (e.category || '').toLowerCase();
+        if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
+          totalPayments += e.amount;
+          if (cat === 'transfer') {
+            totalTransfers += e.amount;
+          }
         }
       }
     });
@@ -173,7 +203,8 @@ export function calculateGuestFinancialPosition(
   totalRefunds = Number(totalRefunds.toFixed(2));
   totalTransfers = Number(totalTransfers.toFixed(2));
 
-  const rawBalance = totalCharges - totalPayments;
+  const netPayments = Math.max(0, totalPayments - totalRefunds);
+  const rawBalance = totalCharges - netPayments;
   const outstandingBalance = Number(rawBalance.toFixed(2));
   const netAmountDue = Math.max(0, outstandingBalance);
   const creditBalance = Math.max(0, -outstandingBalance);

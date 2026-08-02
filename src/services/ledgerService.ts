@@ -357,14 +357,108 @@ export const voidLedgerEntry = async (
 };
 
 // Deprecated in favor of voidLedgerEntry for production audit compliance
+export const recalculateReservationAccountFromLedger = async (
+  hotelId: string,
+  reservationId: string
+) => {
+  if (!hotelId || !reservationId) return;
+  try {
+    const q = query(
+      collection(db, 'hotels', hotelId, 'ledger'),
+      where('reservationId', '==', reservationId)
+    );
+    const snap = await getDocs(q);
+    const validEntries = snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as LedgerEntry))
+      .filter(e => validateLedgerTransaction(e).isValid);
+
+    let totalDebits = 0;
+    let totalCredits = 0;
+    let totalPaid = 0;
+
+    validEntries.forEach(e => {
+      if (e.type === 'debit') {
+        if (e.category === 'refund') {
+          totalPaid -= e.amount;
+        } else {
+          totalDebits += e.amount;
+        }
+      } else if (e.type === 'credit') {
+        const cat = (e.category || '').toLowerCase();
+        if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
+          totalCredits += e.amount;
+          if (cat === 'payment') {
+            totalPaid += e.amount;
+          }
+        }
+      }
+    });
+
+    totalDebits = Number(totalDebits.toFixed(2));
+    totalCredits = Number(totalCredits.toFixed(2));
+    totalPaid = Math.max(0, Number(totalPaid.toFixed(2)));
+
+    const ledgerBalance = Number((totalDebits - totalCredits).toFixed(2));
+
+    const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+    const resSnap = await getDoc(resRef);
+    if (!resSnap.exists()) return;
+
+    const resData = resSnap.data() as Reservation;
+
+    let paymentStatus: Reservation['paymentStatus'] = 'unpaid';
+    if (ledgerBalance <= 0.01 && totalPaid > 0) {
+      paymentStatus = 'paid';
+    } else if (totalPaid > 0) {
+      paymentStatus = 'partial';
+    }
+
+    await database.safeUpdate(resRef, {
+      ledgerBalance,
+      paidAmount: totalPaid,
+      paymentStatus
+    }, {
+      hotelId,
+      module: 'Reservation',
+      action: 'RECALCULATE_FINANCIALS',
+      details: `Re-synchronized reservation ${reservationId} financial balance from valid ledger entries`
+    });
+
+    if (resData.guestId) {
+      const guestRef = doc(db, 'hotels', hotelId, 'guests', resData.guestId);
+      const guestSnap = await getDoc(guestRef);
+      if (guestSnap.exists()) {
+        await database.safeUpdate(guestRef, {
+          ledgerBalance
+        }, {
+          hotelId,
+          module: 'Guest',
+          action: 'RECALCULATE_GUEST_BALANCE',
+          details: `Re-synchronized guest ${resData.guestId} ledger balance`
+        });
+      }
+    }
+  } catch (err) {
+    console.error(`Failed to recalculate reservation account ${reservationId}:`, err);
+  }
+};
+
 export const purgeCorruptedLedgerEntries = async (
   hotelId: string,
   entryIds: string[]
 ) => {
   if (!hotelId || !entryIds || entryIds.length === 0) return;
+  const reservationIdsToSync = new Set<string>();
+
   for (const entryId of entryIds) {
     try {
-      await database.safeDelete(doc(db, 'hotels', hotelId, 'ledger', entryId), {
+      const docRef = doc(db, 'hotels', hotelId, 'ledger', entryId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data() as LedgerEntry;
+        if (data.reservationId) reservationIdsToSync.add(data.reservationId);
+      }
+      await database.safeDelete(docRef, {
         hotelId,
         module: 'Ledger',
         action: 'PURGE_CORRUPTED_ENTRY',
@@ -374,18 +468,20 @@ export const purgeCorruptedLedgerEntries = async (
       console.error(`Failed to purge ledger entry ${entryId}:`, err);
     }
   }
+
+  for (const resId of reservationIdsToSync) {
+    await recalculateReservationAccountFromLedger(hotelId, resId);
+  }
 };
 
 export const deleteLedgerEntry = async (
-
   hotelId: string,
   ledgerEntry: LedgerEntry & { firestoreId?: string }
 ) => {
   console.warn("deleteLedgerEntry is deprecated. Use voidLedgerEntry for production audit compliance.");
-  const { id, firestoreId, reservationId, guestId, corporateId, amount, type, category, description } = ledgerEntry;
+  const { id, firestoreId, reservationId } = ledgerEntry;
   const docId = firestoreId || id;
 
-  // For backward compatibility, we still allow it but strongly discourage
   if (docId) {
     await database.safeDelete(doc(db, 'hotels', hotelId, 'ledger', docId), {
       hotelId,
@@ -395,80 +491,8 @@ export const deleteLedgerEntry = async (
     });
   }
 
-  // 2. Synchronize Reservation
-  const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId!);
-  const resSnap = await getDoc(resRef);
-  if (resSnap.exists()) {
-    const resData = resSnap.data() as Reservation;
-    const resUpdates: any = {};
-    let totalAdj = 0;
-    let paidAdj = 0;
-    
-    if (type === 'credit' && (category === 'payment' || category === 'refund')) {
-      paidAdj = category === 'refund' ? amount : -amount;
-      resUpdates.paidAmount = increment(paidAdj);
-    }
-    
-    if (type === 'debit') {
-      const isRoomRelated = category === 'room' || description.toLowerCase().includes('room charge');
-      if (!isRoomRelated) {
-        totalAdj = -amount;
-        resUpdates.totalAmount = increment(totalAdj);
-      }
-    }
-
-    const balanceAdj = type === 'debit' ? -amount : amount;
-    resUpdates.ledgerBalance = increment(balanceAdj);
-
-    const projectedTotal = (resData.totalAmount || 0) + totalAdj;
-    const projectedPaid = (resData.paidAmount || 0) + paidAdj;
-    
-    let newPaymentStatus: Reservation['paymentStatus'] = 'unpaid';
-    if (projectedTotal > 0) {
-      if (projectedPaid >= projectedTotal - 0.01) {
-        newPaymentStatus = 'paid';
-      } else if (projectedPaid > 0) {
-        newPaymentStatus = 'partial';
-      }
-    } else if (projectedPaid > 0) {
-      newPaymentStatus = 'paid';
-    }
-    resUpdates.paymentStatus = newPaymentStatus;
-
-    await database.safeUpdate(resRef, resUpdates, {
-      hotelId,
-      module: 'Reservation',
-      action: 'SYNC_AFTER_DELETE',
-      details: `Synced reservation after deleting ledger entry`
-    });
-  }
-
-  // 4. Reverse the balance update
-  const reverseAmount = type === 'debit' ? -amount : amount;
-
-  if (corporateId) {
-    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
-    await database.safeUpdate(corpRef, {
-      currentBalance: increment(reverseAmount),
-      totalDebits: increment(type === 'debit' ? -amount : 0),
-      totalCredits: increment(type === 'credit' ? -amount : 0)
-    }, {
-      hotelId,
-      module: 'Corporate',
-      action: 'REVERSE_BALANCE',
-      details: `Reversed corporate balance by ${reverseAmount} due to deletion`
-    });
-  } else {
-    const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
-    await database.safeUpdate(guestRef, {
-      ledgerBalance: increment(reverseAmount),
-      totalSpent: increment(type === 'credit' && category === 'payment' ? -amount : 0)
-    }, {
-      hotelId,
-      module: 'Guest',
-      action: 'REVERSE_BALANCE',
-      details: `Reversed guest balance by ${reverseAmount} due to deletion`
-    });
+  if (reservationId) {
+    await recalculateReservationAccountFromLedger(hotelId, reservationId);
   }
 };
 

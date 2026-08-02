@@ -610,19 +610,6 @@ export function Rooms() {
           }
         }
 
-        const expectedTotalCharges = nightsStayed * rate;
-        if (finalTotalDebits > expectedTotalCharges + 0.01) {
-          const excessAmount = finalTotalDebits - expectedTotalCharges;
-          await postToLedger(hotel.id, res.guestId!, res.id, {
-            amount: excessAmount,
-            type: 'credit',
-            category: 'refund',
-            description: `Room Charge Refund: ${res.roomNumber} (Early Checkout adjustment)`,
-            referenceId: res.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId);
-        }
-
         // Fetch latest outstanding balance from reservation document
         const freshResSnap = await getDoc(resRef);
         const freshResData = freshResSnap.data() as Reservation;

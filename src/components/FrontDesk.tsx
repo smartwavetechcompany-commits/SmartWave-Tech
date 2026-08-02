@@ -1708,20 +1708,6 @@ export function FrontDesk() {
           }
         }
 
-        const expectedTotalCharges = nightsStayed * rate;
-        if (finalTotalDebits > expectedTotalCharges + 0.01) {
-          const excessAmount = finalTotalDebits - expectedTotalCharges;
-          await postToLedger(hotel.id, res.guestId!, res.id, {
-            amount: excessAmount,
-            type: 'credit',
-            category: 'refund',
-            description: `Room Charge Refund: ${res.roomNumber} (Early Checkout adjustment)`,
-            referenceId: res.id,
-            postedBy: profile.uid
-          }, profile.uid, res.corporateId);
-          finalTotalDebits -= excessAmount;
-        }
-
         // 2. Check if ledger is settled (for individual guests)
         const freshResSnap = await getDoc(resRef);
         const freshResData = freshResSnap.data() as Reservation;

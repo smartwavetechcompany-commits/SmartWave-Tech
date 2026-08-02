@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger, purgeCorruptedLedgerEntries } from '../services/ledgerService';
+import { validateLedgerTransaction } from '../services/financialService';
 import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
 import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
 import { DiscountApplication } from './DiscountApplication';
@@ -655,8 +656,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
       
+      // Auto-heal: Detect and purge any corrupted / virtual / invalid credit entries automatically
+      const invalidEntryIds = entries
+        .filter(e => !validateLedgerTransaction(e).isValid)
+        .map(e => e.firestoreId)
+        .filter(Boolean);
+
+      if (invalidEntryIds.length > 0 && hotel?.id) {
+        purgeCorruptedLedgerEntries(hotel.id, invalidEntryIds);
+      }
+
+      // Filter valid entries for display
+      const validEntries = entries.filter(e => validateLedgerTransaction(e).isValid);
+
       // Client-side sorting to avoid composite index requirements
-      const sortedEntries = [...entries].sort((a, b) => {
+      const sortedEntries = [...validEntries].sort((a, b) => {
         const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
         const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
         return timeB - timeA; // desc
@@ -811,21 +825,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   // Real posted entries only in history items - NO VIRTUAL CREDITS OR PROJECTION REDUCTIONS
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
-  
-  // Show unposted room charge liability ONLY if no room debits exist in ledger yet for a checked-in guest
-  const hasRoomDebitsPosted = processedDisplayedEntries.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
-  if (!hasRoomDebitsPosted && currentReservation.status === 'checked_in' && resAccount.totalRoomCharges > 0.01) {
-    allHistoryItems.push({
-      id: 'projected_room_stay_charge_virtual',
-      timestamp: currentReservation.checkIn || currentReservation.createdAt || new Date().toISOString(),
-      description: 'Projected Room Stay (Unposted Stay Cost/Liability)',
-      category: 'room',
-      type: 'debit',
-      amount: resAccount.totalRoomCharges,
-      postedBy: 'system',
-      isVirtual: true
-    } as any);
-  }
 
   // Sort chronologically (oldest first) to compute running balance correctly
   const chronologicalHistory = [...allHistoryItems].sort((a, b) => {
@@ -1095,7 +1094,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   else acc[cat].credit += entry.amount;
                   return acc;
                 }, {
-                  room: { debit: hasRoomDebitsPosted ? 0 : resAccount.totalRoomCharges, credit: 0 }
+                  room: { debit: 0, credit: 0 }
                 })
               ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
                 <div key={cat} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">

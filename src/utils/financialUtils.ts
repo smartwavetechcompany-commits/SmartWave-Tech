@@ -47,16 +47,17 @@ export function calculateReservationAccount(
     // 1. Authoritative computation directly from Posted Ledger Entries
     resLedger.forEach(e => {
       if (e.type === 'debit') {
-        totalCharges += e.amount;
-
-        if (e.category === 'room' || e.chargeType === 'room_rate') {
-          totalRoomCharges += e.amount;
-        } else if (e.chargeType === 'overstay') {
-          totalOverstayCharges += e.amount;
-        } else if (e.category === 'refund') {
+        if (e.category === 'refund') {
           totalRefunds += e.amount;
         } else {
-          totalServiceCharges += e.amount;
+          totalCharges += e.amount;
+          if (e.category === 'room' || e.chargeType === 'room_rate') {
+            totalRoomCharges += e.amount;
+          } else if (e.chargeType === 'overstay') {
+            totalOverstayCharges += e.amount;
+          } else {
+            totalServiceCharges += e.amount;
+          }
         }
       } else if (e.type === 'credit') {
         // ONLY real posted credits (payments, valid discounts, transfers)
@@ -101,8 +102,9 @@ export function calculateReservationAccount(
   totalRefunds = Number(totalRefunds.toFixed(2));
   totalTransfers = Number(totalTransfers.toFixed(2));
 
-  // Outstanding balance: Debits - Credits
-  const rawBalance = totalCharges - totalPayments;
+  // Outstanding balance: Total Charges - Net Payments (Payments Received minus Refunds)
+  const netPayments = Math.max(0, totalPayments - totalRefunds);
+  const rawBalance = totalCharges - netPayments;
   const outstandingBalance = Number(rawBalance.toFixed(2));
   const netAmountDue = Math.max(0, outstandingBalance);
   const creditBalance = Math.max(0, -outstandingBalance);
