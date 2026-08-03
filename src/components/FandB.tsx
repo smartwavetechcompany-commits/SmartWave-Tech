@@ -219,10 +219,18 @@ export function FandB() {
     e.preventDefault();
     if (!hotel?.id || !profile || isSaving) return;
 
+    // Check if room number is specified but not checked in
+    const isRoomOrder = newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in';
+    const res = isRoomOrder ? reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in') : undefined;
+
+    const hasRoomPayment = newOrder.payments.some(p => p.method === 'room');
+    if (isRoomOrder && hasRoomPayment && !res) {
+      toast.error(`No active checked-in guest found in Room ${newOrder.roomNumber} to charge.`);
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const res = reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in');
-      
       // Calculate Taxes
       const activeTaxes = (hotel?.taxes || []).filter(t => {
         const status = (t.status || '').toLowerCase().trim();
@@ -272,7 +280,7 @@ export function FandB() {
       if (newOrder.tableId) {
         const table = tables.find(t => t.id === newOrder.tableId);
         if (table) {
-          await database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', table.id), {
+          database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', table.id), {
             status: 'occupied',
             currentOrderId: orderRef.id,
             currentGuestName: orderData.guestName,
@@ -284,26 +292,22 @@ export function FandB() {
             module: 'F & B',
             action: 'UPDATE_TABLE_STATUS',
             details: `Table ${table.tableNumber} status set to occupied`
-          });
+          }).catch(() => {});
         }
       }
 
-      // Create notification for F & B staff
-      await createNotification(hotel.id, {
+      // Create background notification for F & B staff
+      createNotification(hotel.id, {
         title: 'New F & B Order',
-        message: `New order for Room ${newOrder.roomNumber}: ${newOrder.items}`,
+        message: `New order for Room ${newOrder.roomNumber || 'Walk-in'}: ${newOrder.items}`,
         type: 'info',
         userId: 'all'
-      });
+      }).catch(() => {});
 
       const guestId = newOrder.guestId || (res?.guestId);
 
-      // NEW LOGIC: If a room is selected, always post the charge to the room folio
-      // This ensures it appears on the guest's final receipt.
-      if (newOrder.roomNumber !== 'Walk-in' && res && guestId) {
-        console.log('Posting charge to room ledger for reservation:', res.id);
-        
-        // 1. Post the main charge (Debit)
+      // Post charge to room ledger if applicable
+      if (isRoomOrder && res && guestId) {
         await postToLedger(hotel.id, guestId, res.id, {
           amount: finalPrice,
           type: 'debit',
@@ -314,11 +318,10 @@ export function FandB() {
         }, profile.uid, res.corporateId);
       }
 
-      // 3. If any payments were made, post them to the ledger and finance
+      // Post payments to ledger/finance
       for (const pay of newOrder.payments) {
         if (pay.amount > 0) {
-          if (newOrder.roomNumber !== 'Walk-in' && res && guestId && pay.method !== 'room') {
-            console.log('Posting payment to room ledger for reservation:', res.id);
+          if (isRoomOrder && res && guestId && pay.method !== 'room') {
             await postToLedger(hotel.id, guestId, res.id, {
               amount: pay.amount,
               type: 'credit',
@@ -329,8 +332,7 @@ export function FandB() {
               paymentMethod: pay.method as any
             }, profile.uid, res.corporateId);
 
-             // Also record the payment in finance
-            await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+            database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
@@ -344,11 +346,9 @@ export function FandB() {
               module: 'Finance',
               action: 'F&B_INCOME_RECORD',
               details: `Recorded F&B income from Room ${newOrder.roomNumber}`
-            });
+            }).catch(() => {});
           } else if (pay.method !== 'room') {
-            // Walk-in or direct payment without room charge
-            console.log('Recording walk-in payment in finance...');
-            await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+            database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
@@ -362,13 +362,13 @@ export function FandB() {
               module: 'Finance',
               action: 'F&B_INCOME_RECORD',
               details: `Recorded walk-in F&B income`
-            });
+            }).catch(() => {});
           }
         }
       }
 
-      // Log action for UI visibility
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      // Log activity in background
+      database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile?.uid,
         userEmail: profile?.email,
@@ -382,7 +382,7 @@ export function FandB() {
         module: 'F & B',
         action: 'ACTIVITY_LOG_CREATE',
         details: 'F&B order creation activity'
-      });
+      }).catch(() => {});
 
       toast.success('F & B order created');
       setShowAddModal(false);
@@ -402,12 +402,7 @@ export function FandB() {
       });
     } catch (err: any) {
       console.error('Error in handleAddOrder:', err.message || safeStringify(err));
-      if (err.message === 'No active reservation or guest found for this room') {
-        toast.error(err.message);
-      } else {
-        handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/kitchen_orders`);
-        toast.error('Failed to create order');
-      }
+      toast.error(err.message || 'Failed to create order');
     } finally {
       setIsSaving(false);
     }
@@ -864,7 +859,7 @@ export function FandB() {
                         <div className="space-y-1 pt-2 border-t border-zinc-800/50">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">Subtotal</span>
-                            <span className="text-xs font-bold text-zinc-300">{order.price.toLocaleString()}</span>
+                            <span className="text-xs font-bold text-zinc-300">{formatCurrency(order.price, currency, exchangeRate)}</span>
                           </div>
                           
                           {order.taxDetails?.map((tax, idx) => (
@@ -876,19 +871,92 @@ export function FandB() {
                                 {tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}
                               </span>
                               <span className="text-[9px] font-bold text-zinc-500">
-                                {tax.isInclusive ? '' : '+'}{tax.amount.toLocaleString()}
+                                {tax.isInclusive ? '' : '+'}{formatCurrency(tax.amount, currency, exchangeRate)}
                               </span>
                             </div>
                           ))}
 
-                          <div className="flex items-center justify-between pt-1 mt-1 border-t border-zinc-800/30">
-                            <div className="text-sm font-black text-emerald-500">
-                              {(order.totalAmount || order.price).toLocaleString()}
-                            </div>
-                            <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider bg-zinc-800 px-2 py-0.5 rounded">
-                              {order.paymentMethod === 'room' ? 'Post to Room' : order.paymentMethod}
-                            </div>
-                          </div>
+                          {(() => {
+                            const orderTotal = order.totalAmount || order.price || 0;
+                            
+                            // Gather payments
+                            let paymentsList: { amount: number; method: string }[] = [];
+                            if (Array.isArray(order.payments) && order.payments.length > 0) {
+                              paymentsList = order.payments;
+                            } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
+                              paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
+                              if (order.paymentMethod === 'room' && order.paidAmount < orderTotal) {
+                                paymentsList.push({ amount: orderTotal - order.paidAmount, method: 'room' });
+                              }
+                            } else if (order.paymentMethod) {
+                              paymentsList = [{ amount: orderTotal, method: order.paymentMethod }];
+                            }
+
+                            const directPaid = paymentsList
+                              .filter(p => p.method !== 'room')
+                              .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                            const roomCharged = paymentsList
+                              .filter(p => p.method === 'room')
+                              .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                            const totalAccounted = directPaid + roomCharged;
+                            const balanceOwing = orderTotal - totalAccounted;
+                            const weOweGuest = directPaid - orderTotal;
+
+                            return (
+                              <div className="space-y-1.5 pt-2 mt-2 border-t border-zinc-800/30">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Grand Total</span>
+                                  <span className="text-sm font-black text-emerald-400">{formatCurrency(orderTotal, currency, exchangeRate)}</span>
+                                </div>
+
+                                <div className="flex items-center justify-between text-zinc-400">
+                                  <span className="text-[10px] font-semibold uppercase tracking-wider">Amount Paid</span>
+                                  <span className={cn("font-bold text-xs", directPaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
+                                    {formatCurrency(directPaid, currency, exchangeRate)}
+                                    {paymentsList.filter(p => p.method !== 'room').length > 0 && (
+                                      <span className="ml-1 text-[9px] text-zinc-500 font-normal">
+                                        ({paymentsList.filter(p => p.method !== 'room').map(p => p.method).join(', ')})
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+
+                                {roomCharged > 0 && (
+                                  <div className="flex items-center justify-between text-zinc-400">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider">Charged to Room</span>
+                                    <span className="font-bold text-xs text-blue-400">
+                                      {formatCurrency(roomCharged, currency, exchangeRate)}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {balanceOwing > 0 ? (
+                                  <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold">
+                                    <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
+                                      <AlertCircle size={12} /> Owing / Balance Due
+                                    </span>
+                                    <span className="text-xs">{formatCurrency(balanceOwing, currency, exchangeRate)}</span>
+                                  </div>
+                                ) : weOweGuest > 0 ? (
+                                  <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-bold">
+                                    <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
+                                      <CheckCircle2 size={12} /> We Owe Guest (Change)
+                                    </span>
+                                    <span className="text-xs">{formatCurrency(weOweGuest, currency, exchangeRate)}</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between p-1.5 mt-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
+                                    <span className="flex items-center gap-1">
+                                      <CheckCircle2 size={12} /> Settled
+                                    </span>
+                                    <span>{directPaid >= orderTotal ? 'Fully Paid' : 'Posted to Folio'}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                         {order.notes && (
                           <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
@@ -1089,20 +1157,51 @@ export function FandB() {
                       <span>GRAND TOTAL</span>
                       <span>{(printingOrder.totalAmount || printingOrder.price).toLocaleString()}</span>
                     </div>
-                    {printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0 && (
-                      <div className="mt-2 space-y-1 border-t border-black pt-2">
-                        <div className="flex justify-between text-xs font-bold">
-                          <span>PAID ({printingOrder.paymentMethod.toUpperCase()})</span>
-                          <span>{printingOrder.paidAmount.toLocaleString()}</span>
+                    {(() => {
+                      const pTotal = printingOrder.totalAmount || printingOrder.price || 0;
+                      let pPayments: { amount: number; method: string }[] = [];
+                      if (Array.isArray(printingOrder.payments) && printingOrder.payments.length > 0) {
+                        pPayments = printingOrder.payments;
+                      } else if (printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0) {
+                        pPayments = [{ amount: printingOrder.paidAmount, method: printingOrder.paymentMethod || 'cash' }];
+                      } else if (printingOrder.paymentMethod) {
+                        pPayments = [{ amount: pTotal, method: printingOrder.paymentMethod }];
+                      }
+
+                      const pDirectPaid = pPayments.filter(p => p.method !== 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+                      const pRoomCharged = pPayments.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+                      const pBalance = pTotal - (pDirectPaid + pRoomCharged);
+                      const pChange = pDirectPaid - pTotal;
+
+                      return (
+                        <div className="mt-2 space-y-1 border-t border-black pt-2 text-xs">
+                          {pDirectPaid > 0 && (
+                            <div className="flex justify-between font-bold">
+                              <span>AMOUNT PAID ({pPayments.filter(p => p.method !== 'room').map(p => p.method.toUpperCase()).join(', ') || 'DIRECT'})</span>
+                              <span>{formatCurrency(pDirectPaid, currency, exchangeRate)}</span>
+                            </div>
+                          )}
+                          {pRoomCharged > 0 && (
+                            <div className="flex justify-between font-bold">
+                              <span>CHARGED TO ROOM</span>
+                              <span>{formatCurrency(pRoomCharged, currency, exchangeRate)}</span>
+                            </div>
+                          )}
+                          {pBalance > 0 && (
+                            <div className="flex justify-between font-black text-red-700 pt-1 border-t border-black/20">
+                              <span>OWING / BALANCE DUE</span>
+                              <span>{formatCurrency(pBalance, currency, exchangeRate)}</span>
+                            </div>
+                          )}
+                          {pChange > 0 && (
+                            <div className="flex justify-between font-black text-emerald-800 pt-1 border-t border-black/20">
+                              <span>CHANGE DUE (WE OWE GUEST)</span>
+                              <span>{formatCurrency(pChange, currency, exchangeRate)}</span>
+                            </div>
+                          )}
                         </div>
-                        {(printingOrder.totalAmount || printingOrder.price) - printingOrder.paidAmount > 0 && (
-                          <div className="flex justify-between text-xs font-black">
-                            <span>BALANCE TO ROOM</span>
-                            <span>{((printingOrder.totalAmount || printingOrder.price) - printingOrder.paidAmount).toLocaleString()}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 ) : (
                   <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed">
@@ -1413,15 +1512,58 @@ export function FandB() {
                         ))}
                       </div>
 
-                      <div className="flex justify-between items-center pt-2 border-t border-zinc-900">
-                        <span className="text-[10px] text-zinc-500 uppercase font-bold">Total Collection</span>
-                        <span className={cn(
-                          "text-xs font-bold",
-                          newOrder.payments.reduce((acc, p) => acc + p.amount, 0) >= newOrder.price ? "text-emerald-500" : "text-yellow-500"
-                        )}>
-                          {newOrder.payments.reduce((acc, p) => acc + p.amount, 0).toLocaleString()} / {newOrder.price.toLocaleString()}
-                        </span>
-                      </div>
+                      {(() => {
+                        const activeTaxes = (hotel?.taxes || []).filter(t => {
+                          const status = (t.status || '').toLowerCase().trim();
+                          const category = (t.category || '').toLowerCase().trim();
+                          return status === 'active' && (category === 'restaurant' || category === 'f & b' || category === 'all');
+                        });
+                        const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
+                        const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (newOrder.price * (t.percentage / 100)), 0);
+                        
+                        let discountAmount = 0;
+                        if (newOrder.discount > 0) {
+                          if (newOrder.discountType === 'percentage') {
+                            discountAmount = ((newOrder.price + totalExclusiveTax) * newOrder.discount) / 100;
+                          } else {
+                            discountAmount = newOrder.discount;
+                          }
+                        }
+                        const grandTotal = newOrder.price + totalExclusiveTax - discountAmount;
+                        const totalCollected = newOrder.payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+                        const posOwing = grandTotal - totalCollected;
+                        const posChange = totalCollected - grandTotal;
+
+                        return (
+                          <div className="space-y-1.5 pt-2 border-t border-zinc-900">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] text-zinc-500 uppercase font-bold">Total Collection</span>
+                              <span className={cn(
+                                "text-xs font-bold",
+                                totalCollected >= grandTotal ? "text-emerald-500" : "text-amber-500"
+                              )}>
+                                {formatCurrency(totalCollected, currency, exchangeRate)} / {formatCurrency(grandTotal, currency, exchangeRate)}
+                              </span>
+                            </div>
+
+                            {posOwing > 0 ? (
+                              <div className="flex justify-between items-center p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold text-xs">
+                                <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
+                                  <AlertCircle size={12} /> Owing / Balance Due
+                                </span>
+                                <span>{formatCurrency(posOwing, currency, exchangeRate)}</span>
+                              </div>
+                            ) : posChange > 0 ? (
+                              <div className="flex justify-between items-center p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-bold text-xs">
+                                <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
+                                  <CheckCircle2 size={12} /> Change Due (We Owe)
+                                </span>
+                                <span>{formatCurrency(posChange, currency, exchangeRate)}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 

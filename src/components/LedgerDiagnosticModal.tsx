@@ -52,20 +52,75 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
 
   // Audit analysis for each entry
   const auditedEntries = useMemo(() => {
-    return filteredLedger.map(entry => {
-      const sourceModule = (entry as any).source || (entry as any).sourceModule || (entry as any).type_source || 'direct_post';
-      const isSystemGenerated = entry.postedBy === 'system' || (entry as any).isSystemGenerated === true;
+    return filteredLedger.map((entry, index) => {
+      const entryId = typeof entry.id === 'string' && entry.id
+        ? entry.id
+        : (entry as any).firestoreId || `entry-${index}-${Math.random().toString(36).substring(2, 7)}`;
+
+      const rawSource = (entry as any).source || (entry as any).sourceModule || (entry as any).type_source;
+      const sourceModule = typeof rawSource === 'string'
+        ? rawSource
+        : rawSource && typeof rawSource === 'object'
+          ? (rawSource.name || rawSource.module || 'direct_post')
+          : 'direct_post';
+
+      const rawPostedBy = entry.postedBy;
+      const postedByStr = typeof rawPostedBy === 'string'
+        ? rawPostedBy
+        : rawPostedBy && typeof rawPostedBy === 'object'
+          ? ((rawPostedBy as any).displayName || (rawPostedBy as any).email || (rawPostedBy as any).uid || 'system')
+          : 'system';
+
+      const isSystemGenerated = postedByStr === 'system' || (entry as any).isSystemGenerated === true;
       const validation = validateLedgerTransaction(entry);
       
-      const isSuspiciousAmount = Math.abs(entry.amount) > 1000000; // Flag sudden millions in credits/debits
+      const numAmount = Number(entry.amount) || 0;
+      const isSuspiciousAmount = Math.abs(numAmount) > 1000000; // Flag sudden millions in credits/debits
       const isProhibitedSource = !validation.isValid;
       const isVirtual = (entry as any).isVirtual === true;
 
       const isFlagged = isProhibitedSource || isVirtual || isSuspiciousAmount;
 
+      const descriptionStr = typeof entry.description === 'string' 
+        ? entry.description 
+        : entry.description && typeof entry.description === 'object' 
+          ? JSON.stringify(entry.description) 
+          : 'No description';
+
+      const categoryStr = typeof entry.category === 'string' 
+        ? entry.category 
+        : entry.category && typeof entry.category === 'object' 
+          ? String((entry.category as any).name || 'general') 
+          : 'general';
+
+      const chargeTypeStr = typeof entry.chargeType === 'string' 
+        ? entry.chargeType 
+        : entry.chargeType && typeof entry.chargeType === 'object' 
+          ? String((entry.chargeType as any).name || '') 
+          : '';
+
+      let dateDisplay = 'N/A';
+      if (entry.timestamp) {
+        if (typeof (entry.timestamp as any).toDate === 'function') {
+          dateDisplay = (entry.timestamp as any).toDate().toLocaleString();
+        } else if (typeof entry.timestamp === 'number' || typeof entry.timestamp === 'string') {
+          const d = new Date(entry.timestamp);
+          dateDisplay = isNaN(d.getTime()) ? String(entry.timestamp) : d.toLocaleString();
+        } else if (typeof entry.timestamp === 'object' && (entry.timestamp as any).seconds) {
+          dateDisplay = new Date((entry.timestamp as any).seconds * 1000).toLocaleString();
+        }
+      }
+
       return {
         ...entry,
+        id: entryId,
+        amount: numAmount,
         sourceModule,
+        postedByStr,
+        descriptionStr,
+        categoryStr,
+        chargeTypeStr,
+        dateDisplay,
         isSystemGenerated,
         validation,
         isSuspiciousAmount,
@@ -89,10 +144,10 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
         const term = searchTerm.toLowerCase();
         return (
           e.id.toLowerCase().includes(term) ||
-          (e.description || '').toLowerCase().includes(term) ||
-          e.category.toLowerCase().includes(term) ||
+          e.descriptionStr.toLowerCase().includes(term) ||
+          e.categoryStr.toLowerCase().includes(term) ||
           e.sourceModule.toLowerCase().includes(term) ||
-          (e.postedBy || '').toLowerCase().includes(term)
+          e.postedByStr.toLowerCase().includes(term)
         );
       }
       return true;
@@ -157,7 +212,7 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
                 )}
               </h3>
               <p className="text-xs text-zinc-400">
-                Auditing ledger origin for {reservation ? `Reservation #${reservation.id.slice(-6).toUpperCase()}` : guest ? `Guest: ${guest.name}` : 'Hotel Ledger'}
+                Auditing ledger origin for {reservation ? `Reservation #${String(reservation.id || '').slice(-6).toUpperCase()}` : guest ? `Guest: ${typeof guest.name === 'string' ? guest.name : (guest as any)?.guestName || 'Unknown'}` : 'Hotel Ledger'}
               </p>
             </div>
           </div>
@@ -216,7 +271,7 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
             </div>
             <ul className="list-disc list-inside space-y-0.5 text-[11px] text-red-300 font-mono">
               {validationResult.violations.map((v, i) => (
-                <li key={i}>{v}</li>
+                <li key={i}>{typeof v === 'string' ? v : JSON.stringify(v)}</li>
               ))}
             </ul>
           </div>
@@ -342,15 +397,15 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
                         />
                       </td>
                       <td className="p-3">
-                        <span className="text-zinc-200 font-bold block">{entry.id.slice(-8).toUpperCase()}</span>
+                        <span className="text-zinc-200 font-bold block">{String(entry.id).slice(-8).toUpperCase()}</span>
                         <span className="text-[10px] text-zinc-500 font-sans block">
-                          {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'N/A'}
+                          {entry.dateDisplay}
                         </span>
                       </td>
                       <td className="p-3 font-sans">
-                        <span className="text-zinc-200 font-medium block">{entry.description || 'No description'}</span>
+                        <span className="text-zinc-200 font-medium block">{entry.descriptionStr || 'No description'}</span>
                         <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">
-                          Category: {entry.category} {entry.chargeType ? `(${entry.chargeType})` : ''}
+                          Category: {entry.categoryStr} {entry.chargeTypeStr ? `(${entry.chargeTypeStr})` : ''}
                         </span>
                       </td>
                       <td className="p-3">
@@ -361,11 +416,11 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
                       <td className="p-3 font-sans">
                         {entry.isSystemGenerated ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                            System ({entry.postedBy || 'system'})
+                            System ({entry.postedByStr || 'system'})
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-800 text-zinc-400">
-                            Manual ({entry.postedBy || 'user'})
+                            Manual ({entry.postedByStr || 'user'})
                           </span>
                         )}
                       </td>
@@ -381,7 +436,7 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
                       </td>
                       <td className="p-3 text-center">
                         {entry.isFlagged ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30" title={entry.validation.reason || 'Flagged anomaly'}>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30" title={typeof entry.validation?.reason === 'string' ? entry.validation.reason : 'Flagged anomaly'}>
                             <AlertTriangle className="w-3 h-3" /> Flagged
                           </span>
                         ) : (

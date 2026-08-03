@@ -49,11 +49,19 @@ export const postToLedger = async (
     }
   }
 
-  // Resolve finalCorporateId if not specified for a payment
+  // Resolve finalCorporateId if not specified for a payment, and fetch hotel tax setup in parallel
   let finalCorporateId = corporateId;
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+  const hotelRef = doc(db, 'hotels', hotelId);
+
+  const shouldFetchHotel = entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment';
+  
+  const [resSnap, hotelSnap] = await Promise.all([
+    getDoc(resRef),
+    shouldFetchHotel ? getDoc(hotelRef) : Promise.resolve(null)
+  ]);
+
   if (!finalCorporateId && entry.category === 'payment' && entry.type === 'credit') {
-    const resSnap = await getDoc(resRef);
     if (resSnap.exists()) {
       const resData = resSnap.data() as Reservation;
       if (resData.corporateId) {
@@ -93,82 +101,74 @@ export const postToLedger = async (
   entries.push(mainEntry);
 
   // 2. Automatically post taxes if it's a debit charge (Room, Restaurant, etc.)
-  if (entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment') {
-    const hotelSnap = await getDoc(doc(db, 'hotels', hotelId));
-    if (hotelSnap.exists()) {
-      const hotelData = hotelSnap.data();
-      const activeTaxes = (hotelData.taxes || []).filter((t: any) => {
-        const status = (t.status || '').toLowerCase().trim();
-        const category = (t.category || '').toLowerCase().trim();
-        const entryCategory = (entry.category || '').toLowerCase().trim();
-        
-        if (status !== 'active') return false;
-        
-        // Match logic:
-        // 1. "all" always matches
-        // 2. Explicit category match
-        // 3. For room charges, any tax that isn't specific to F&B/Restaurant
-        // 4. For F&B/Restaurant, any tax that isn't specific to Room
-        if (category === 'all' || category === entryCategory) return true;
-        
-        if (entryCategory === 'room') {
-          return category !== 'f & b' && category !== 'restaurant' && category !== 'food';
-        }
-        
-        if (entryCategory === 'restaurant' || entryCategory === 'f & b' || entryCategory === 'food') {
-          return category !== 'room';
-        }
-
-        return false;
-      });
+  if (shouldFetchHotel && hotelSnap && hotelSnap.exists()) {
+    const hotelData = hotelSnap.data();
+    const activeTaxes = (hotelData.taxes || []).filter((t: any) => {
+      const status = (t.status || '').toLowerCase().trim();
+      const category = (t.category || '').toLowerCase().trim();
+      const entryCategory = (entry.category || '').toLowerCase().trim();
       
-      const baseAmount = entry.amount;
-      const initialDescription = entry.description;
-      let totalInclusiveTax = 0;
-      const inclusiveTaxEntries: Omit<LedgerEntry, 'id'>[] = [];
-
-      for (const tax of activeTaxes) {
-        const taxAmount = tax.isInclusive 
-          ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
-          : baseAmount * (tax.percentage / 100);
-        
-        if (tax.isInclusive) {
-          totalInclusiveTax += taxAmount;
-          const taxEntry: Omit<LedgerEntry, 'id'> = {
-            timestamp,
-            hotelId,
-            guestId,
-            reservationId,
-            corporateId: finalCorporateId,
-            type: 'debit',
-            amount: taxAmount,
-            description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
-            category: 'tax',
-            postedBy
-          };
-          inclusiveTaxEntries.push(taxEntry);
-        } else {
-          const taxEntry: Omit<LedgerEntry, 'id'> = {
-            timestamp,
-            hotelId,
-            guestId,
-            reservationId,
-            corporateId: finalCorporateId,
-            type: 'debit',
-            amount: taxAmount,
-            description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
-            category: 'tax',
-            postedBy
-          };
-          entries.push(taxEntry);
-        }
+      if (status !== 'active') return false;
+      
+      if (category === 'all' || category === entryCategory) return true;
+      
+      if (entryCategory === 'room') {
+        return category !== 'f & b' && category !== 'restaurant' && category !== 'food';
+      }
+      
+      if (entryCategory === 'restaurant' || entryCategory === 'f & b' || entryCategory === 'food') {
+        return category !== 'room';
       }
 
-      // Adjust the primary entry amount for inclusive taxes
-      entries[0].amount = baseAmount - totalInclusiveTax;
-      // Also add the inclusive tax entries to the main entries list
-      entries.push(...inclusiveTaxEntries);
+      return false;
+    });
+    
+    const baseAmount = entry.amount;
+    const initialDescription = entry.description;
+    let totalInclusiveTax = 0;
+    const inclusiveTaxEntries: Omit<LedgerEntry, 'id'>[] = [];
+
+    for (const tax of activeTaxes) {
+      const taxAmount = tax.isInclusive 
+        ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
+        : baseAmount * (tax.percentage / 100);
+      
+      if (tax.isInclusive) {
+        totalInclusiveTax += taxAmount;
+        const taxEntry: Omit<LedgerEntry, 'id'> = {
+          timestamp,
+          hotelId,
+          guestId,
+          reservationId,
+          corporateId: finalCorporateId,
+          type: 'debit',
+          amount: taxAmount,
+          description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
+          category: 'tax',
+          postedBy
+        };
+        inclusiveTaxEntries.push(taxEntry);
+      } else {
+        const taxEntry: Omit<LedgerEntry, 'id'> = {
+          timestamp,
+          hotelId,
+          guestId,
+          reservationId,
+          corporateId: finalCorporateId,
+          type: 'debit',
+          amount: taxAmount,
+          description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
+          category: 'tax',
+          postedBy
+        };
+        entries.push(taxEntry);
+      }
     }
+
+    // Adjust the primary entry amount for inclusive taxes
+    entries[0].amount = baseAmount - totalInclusiveTax;
+    // Also add the inclusive tax entries to the main entries list
+    entries.push(...inclusiveTaxEntries);
   }
 
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
@@ -206,25 +206,24 @@ export const postToLedger = async (
     const spentRefund = guestEntries.filter(e => e.type === 'debit' && e.category === 'refund').reduce((acc, e) => acc + e.amount, 0);
     const spentAdj = spentCredit - spentRefund;
 
-    batch.update(guestRef, {
+    batch.set(guestRef, {
       ledgerBalance: increment(guestBalanceAdj),
       totalSpent: increment(spentAdj),
       totalNights: increment(nightCountAdj)
-    });
+    }, { merge: true });
   }
 
   if (corporateId && corpBalanceAdj !== 0) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
-    batch.update(corpRef, {
+    batch.set(corpRef, {
       currentBalance: increment(corpBalanceAdj),
       totalDebits: increment(corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
       totalCredits: increment(corpEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
-    });
+    }, { merge: true });
   }
 
-  // 5. Update Reservation totals
-  const resSnap = await getDoc(resRef);
-  if (resSnap.exists()) {
+  // 5. Update Reservation totals using resSnap fetched at start
+  if (resSnap && resSnap.exists()) {
     const resData = resSnap.data() as Reservation;
     const resUpdates: any = {};
     
@@ -285,7 +284,7 @@ export const postToLedger = async (
     }
 
     resUpdates.paymentStatus = newPaymentStatus;
-    batch.update(resRef, resUpdates);
+    batch.set(resRef, resUpdates, { merge: true });
   }
 
 
@@ -317,7 +316,8 @@ export const postToLedger = async (
   });
 
   if (reservationId) {
-    await recalculateReservationAccountFromLedger(hotelId, reservationId);
+    // Non-blocking background verification audit
+    recalculateReservationAccountFromLedger(hotelId, reservationId).catch(() => {});
   }
 
   return { id: postedIds[0], ...mainEntry };

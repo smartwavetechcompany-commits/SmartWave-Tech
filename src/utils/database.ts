@@ -47,6 +47,7 @@ export async function createAuditLog(
   metadata?: any,
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) {
+  if (!hotelId) return;
   try {
     const user = auth.currentUser;
     const logData: any = {
@@ -63,20 +64,13 @@ export async function createAuditLog(
       metadata: metadata ? deepCloneSafe(metadata) : undefined
     };
 
-    // We use addDoc for append-only logging
     const isSystemLog = hotelId.toLowerCase() === 'system' || hotelId.toLowerCase() === 'global' || hotelId.toLowerCase() === 'none';
-    if (isSystemLog) {
-      await addDoc(collection(db, 'activityLogs'), logData);
-    } else {
-      await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), logData);
-    }
+    const colRef = isSystemLog ? collection(db, 'activityLogs') : collection(db, 'hotels', hotelId, 'activityLogs');
+    
+    // Non-blocking background log dispatch
+    addDoc(colRef, logData).catch(() => {});
   } catch (error) {
-    // Log failures to create audit logs as system errors
-    await errorService.handleError(error, { 
-      module: 'AuditLog', 
-      severity: ErrorSeverity.MEDIUM, 
-      silent: true 
-    });
+    // Silent catch so logging never breaks primary user workflow
   }
 }
 
@@ -100,14 +94,14 @@ export const database = {
       }, { merge: true });
       
       const cleanedData = deepCloneSafe(data);
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path,
         data: cleanedData,
         ...(options.metadata || {})
       }, options.userContext);
       return { success: true, id: docRef.id };
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
       }, options.userContext);
@@ -129,35 +123,21 @@ export const database = {
     options: { hotelId: string; module: string; action: string; details: string; metadata?: any; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
-      // Fetch old values for audit trail
-      const oldDoc = await getDoc(docRef);
-      const oldData = oldDoc.exists() ? oldDoc.data() : null;
-
       await updateDoc(docRef, {
         ...(data as any),
         updatedAt: serverTimestamp()
       });
+
       const cleanedNewData = deepCloneSafe(data);
-      const cleanedOldData = oldData ? deepCloneSafe(oldData) : null;
-      
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path,
         newData: cleanedNewData,
-        oldData: cleanedOldData,
-        ...(options.metadata || {}),
-        changes: oldData && !options.metadata?.changes ? Object.keys(data).reduce((acc: any, key) => {
-          const oldVal = oldData[key];
-          const newVal = (data as any)[key];
-          // Use safeStringify for comparison to handle circular structures
-          if (safeStringify(oldVal) !== safeStringify(newVal)) {
-            acc[key] = { from: deepCloneSafe(oldVal), to: deepCloneSafe(newVal) };
-          }
-          return acc;
-        }, {}) : (options.metadata?.changes || 'New document fields')
+        ...(options.metadata || {})
       }, options.userContext);
+
       return { success: true };
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
       }, options.userContext);
@@ -185,7 +165,7 @@ export const database = {
         updatedAt: serverTimestamp()
       });
       const cleanedData = deepCloneSafe(data);
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docId: docRef.id,
         colPath: colRef.path,
         data: cleanedData,
@@ -193,7 +173,7 @@ export const database = {
       }, options.userContext);
       return docRef;
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         colPath: colRef.path
       }, options.userContext);
@@ -216,10 +196,10 @@ export const database = {
   ) {
     try {
       await batch.commit();
-      await createAuditLog(hotelId, options.module, options.action, options.details, 'success', undefined, options.userContext);
+      createAuditLog(hotelId, options.module, options.action, options.details, 'success', undefined, options.userContext);
       return { success: true };
     } catch (error) {
-      await createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) }, options.userContext);
+      createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) }, options.userContext);
       
       await errorService.handleError(error, { 
         module: options.module, 
@@ -255,12 +235,12 @@ export const database = {
   ) {
     try {
       await deleteDoc(docRef);
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'success', {
         docPath: docRef.path
       }, options.userContext);
       return { success: true };
     } catch (error) {
-      await createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
+      createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
       }, options.userContext);
