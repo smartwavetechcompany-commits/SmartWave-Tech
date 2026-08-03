@@ -1640,20 +1640,7 @@ export function FrontDesk() {
           ]);
           
           if (guestSnap.exists() && freshResSnap.exists()) {
-            const guestData = guestSnap.data() as Guest;
-            const freshResData = freshResSnap.data() as Reservation;
-            
-            // AUTO DEDUCTION: If guest has credit balance (negative ledgerBalance), apply it
-            if (guestData.ledgerBalance < 0) {
-              const creditBalance = Math.abs(guestData.ledgerBalance);
-              const remainingBalance = freshResData.totalAmount - (freshResData.paidAmount || 0) - (freshResData.totalDiscount || 0);
-              const creditToApply = Math.min(creditBalance, Math.max(0, remainingBalance));
-              
-              if (creditToApply > 0) {
-                await settleLedger(hotel.id, res.guestId, res.id, creditToApply, 'cash', profile.uid, res.corporateId);
-                toast.info(`Applied ${formatCurrency(creditToApply, currency, exchangeRate)} from guest's credit balance.`);
-              }
-            }
+            // Guest & reservation checkin status updated
           }
         }
       } else if (status === 'checked_out') {
@@ -3885,16 +3872,20 @@ export function FrontDesk() {
                     <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
                         const bal = getReservationLiveBalance(res, hotel);
+                        const totalPaid = billing.totalPayments;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
-                        const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;
-                        const isPartial = bal > 0.01 && (res.paidAmount || 0) > 0;
+                        const isPartial = bal > 0.01 && totalPaid > 0;
+                        const isOutstanding = bal > 0.01 && totalPaid <= 0;
 
                         let label = 'Outstanding';
                         let badgeStyle = "bg-red-500/10 text-red-400 border-red-500/20";
-                        if (isSettled || isCredit) {
+                        if (isSettled) {
                           label = 'Settled';
                           badgeStyle = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                        } else if (isCredit) {
+                          label = 'Credit';
+                          badgeStyle = "bg-blue-500/10 text-blue-400 border-blue-500/20";
                         } else if (isPartial) {
                           label = 'Partial';
                           badgeStyle = "bg-amber-500/10 text-amber-400 border-amber-500/20";
@@ -3907,7 +3898,7 @@ export function FrontDesk() {
                                 {label}
                               </span>
                               <span className="text-[10px] text-zinc-500 font-medium">
-                                ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)} paid)
+                                ({formatCurrency(totalPaid, currency, exchangeRate)} paid)
                               </span>
                             </div>
                             <div className={cn(

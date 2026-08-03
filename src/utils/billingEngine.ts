@@ -36,7 +36,7 @@ export class BillingEngine {
    * 1. Calculates the Room Charge: roomRate * bookedNights
    */
   static calculateRoomCharges(res: Reservation): number {
-    const bookedNights = res.nights || 0;
+    const bookedNights = calculateStayDuration(res.checkIn, res.checkOut).bookedNights || res.nights || 0;
     const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
     return roomRate * bookedNights;
   }
@@ -48,7 +48,7 @@ export class BillingEngine {
     const allowOverstayCharges = options?.allowOverstayCharges ?? hotel?.autoChargeOverstays ?? true;
     if (!allowOverstayCharges) return 0;
 
-    const bookedNights = res.nights || 0;
+    const bookedNights = calculateStayDuration(res.checkIn, res.checkOut).bookedNights || res.nights || 0;
     const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
 
     // Retrieve manual overstay nights if set, otherwise calculate dynamically
@@ -368,7 +368,8 @@ export const BillingService = {
       ? new Date(res.checkOutDateTime) 
       : parseLocalDateTime(res.checkOut, checkOutTime);
 
-    const originalNights = res.nights || calculateStayDuration(res.checkIn, res.checkOut).bookedNights;
+    const duration = calculateStayDuration(res.checkIn, res.checkOut);
+    const originalNights = duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1);
 
     return {
       checkInDateTime,
@@ -458,11 +459,13 @@ export function calculateBilling(
 ): BillingState {
   const account = calculateReservationAccount(res, hotel, ledgerEntries);
   const nightlyRate = res.nightlyRate || (account.totalNights > 0 ? account.totalRoomCharges / account.totalNights : 0);
+  const duration = calculateStayDuration(res.checkIn, res.checkOut);
+  const originalNights = duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1);
   return {
     nightsCount: account.totalNights,
     extraNights: 0,
     nightlyRate,
-    originalNights: res.nights || 1,
+    originalNights,
     overstayCharge: account.totalOverstayCharges,
     totalCharges: account.totalCharges,
     totalPayments: account.totalPayments,
