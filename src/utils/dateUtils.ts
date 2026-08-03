@@ -1,5 +1,5 @@
 import React from 'react';
-import { startOfDay, parseISO, differenceInDays } from 'date-fns';
+import { startOfDay, parseISO, differenceInDays, format } from 'date-fns';
 
 export interface StayDuration {
   bookedDays: number;
@@ -9,6 +9,47 @@ export interface StayDuration {
   actualNights: number;
   totalDays: number;
   totalNights: number;
+}
+
+/**
+ * Universal safe parser for any Firestore timestamp, ISO string, number, or Date object.
+ */
+export function parseTimestampToDate(ts: any): Date {
+  if (!ts) return new Date(0);
+  if (ts instanceof Date) return ts;
+  if (typeof ts.toDate === 'function') {
+    try { return ts.toDate(); } catch { return new Date(0); }
+  }
+  if (typeof ts === 'object' && typeof ts.seconds === 'number') {
+    return new Date(ts.seconds * 1000);
+  }
+  if (typeof ts === 'number') {
+    return new Date(ts);
+  }
+  if (typeof ts === 'string') {
+    if (ts.includes('T')) {
+      try {
+        const parsed = parseISO(ts);
+        if (!isNaN(parsed.getTime())) return parsed;
+      } catch {}
+    }
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? new Date(0) : d;
+  }
+  return new Date(0);
+}
+
+/**
+ * Safely format any timestamp without throwing RangeError on invalid or Firestore objects.
+ */
+export function safeFormatDate(ts: any, formatPattern: string = 'MMM d, HH:mm'): string {
+  try {
+    const d = parseTimestampToDate(ts);
+    if (isNaN(d.getTime()) || d.getTime() === 0) return 'N/A';
+    return format(d, formatPattern);
+  } catch {
+    return 'N/A';
+  }
 }
 
 /**

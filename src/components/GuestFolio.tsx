@@ -40,8 +40,9 @@ import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
+import { useRequestManager } from '../contexts/RequestManagerContext';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -51,6 +52,7 @@ interface GuestFolioProps {
 
 export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioProps) {
   const { hotel, currency, exchangeRate, profile } = useAuth();
+  const { executeRequest, isPending } = useRequestManager();
   const [currentReservation, setCurrentReservation] = useState<Reservation>(reservation);
   const reservationRef = useRef<Reservation>(reservation);
 
@@ -286,37 +288,38 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const executeSettlePayment = async () => {
     if (!hotel?.id || !profile) return;
-    try {
-      setIsSaving(true);
-      for (const split of settleData.splits) {
-        if (split.amount > 0) {
-          await settleLedger(
-            hotel.id, 
-            currentReservation.guestId || 'unknown', 
-            currentReservation.id, 
-            split.amount, 
-            split.method, 
-            profile.uid, 
-            activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined,
-            (split as any).referenceCode,
-            (split as any).proofUrl
-          );
+    await executeRequest(
+      `settle-payment-${currentReservation.id}`,
+      async () => {
+        setIsSaving(true);
+        for (const split of settleData.splits) {
+          if (split.amount > 0) {
+            await settleLedger(
+              hotel.id, 
+              currentReservation.guestId || 'unknown', 
+              currentReservation.id, 
+              split.amount, 
+              split.method, 
+              profile.uid, 
+              activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined,
+              (split as any).referenceCode,
+              (split as any).proofUrl
+            );
+          }
         }
-      }
 
-      toast.success('Payment recorded successfully');
-      if (hotel.settings?.payments?.autoSendReceipts) {
-        toast.success(`E-Receipt automatically generated & emailed to ${currentReservation.guestEmail || 'guest on file'}`);
-      }
-      setShowSettlePayment(false);
-      setShowOverpaymentWarning(false);
-      setSettleData({ splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }], notes: '' });
-    } catch (err: any) {
-      console.error("Settle payment error:", err.message || safeStringify(err));
-      toast.error('Failed to record payment');
-    } finally {
+        toast.success('Payment recorded successfully');
+        if (hotel.settings?.payments?.autoSendReceipts) {
+          toast.success(`E-Receipt automatically generated & emailed to ${currentReservation.guestEmail || 'guest on file'}`);
+        }
+        setShowSettlePayment(false);
+        setShowOverpaymentWarning(false);
+        setSettleData({ splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }], notes: '' });
+      },
+      { loadingMessage: 'Processing payment ledger transaction...', showOverlay: true }
+    ).finally(() => {
       setIsSaving(false);
-    }
+    });
   };
 
   const handleSettlePayment = async (e: React.FormEvent) => {
@@ -602,38 +605,39 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const handleTransferBalance = async () => {
     if (!hotel?.id || !profile || !transferTargetId || balance === 0) return;
-    try {
-      setLoading(true);
-      if (transferType === 'guest') {
-        await transferLedgerBalance(
-          hotel.id,
-          currentReservation.guestId!,
-          currentReservation.id,
-          transferTargetId,
-          balance,
-          profile.uid,
-          activeFolio === 'company' ? currentReservation.corporateId : undefined
-        );
-      } else {
-        // Corporate transfer (City Ledger)
-        await transferToCityLedger(
-          hotel.id,
-          currentReservation.guestId!,
-          currentReservation.id,
-          balance,
-          profile.uid,
-          transferTargetId // This is the corporateId in this case
-        );
-      }
-      toast.success('Balance transferred successfully');
-      setShowTransferBalanceModal(false);
-      setTransferTargetId('');
-    } catch (err: any) {
-      console.error("Transfer error:", err.message || safeStringify(err));
-      toast.error('Failed to transfer balance');
-    } finally {
+    await executeRequest(
+      `transfer-balance-${currentReservation.id}`,
+      async () => {
+        setLoading(true);
+        if (transferType === 'guest') {
+          await transferLedgerBalance(
+            hotel.id,
+            currentReservation.guestId!,
+            currentReservation.id,
+            transferTargetId,
+            balance,
+            profile.uid,
+            activeFolio === 'company' ? currentReservation.corporateId : undefined
+          );
+        } else {
+          // Corporate transfer (City Ledger)
+          await transferToCityLedger(
+            hotel.id,
+            currentReservation.guestId!,
+            currentReservation.id,
+            balance,
+            profile.uid,
+            transferTargetId // This is the corporateId in this case
+          );
+        }
+        toast.success('Balance transferred successfully');
+        setShowTransferBalanceModal(false);
+        setTransferTargetId('');
+      },
+      { loadingMessage: 'Transferring ledger balance...', showOverlay: true }
+    ).finally(() => {
       setLoading(false);
-    }
+    });
   };
 
   useEffect(() => {
@@ -671,8 +675,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       // Client-side sorting to avoid composite index requirements
       const sortedEntries = [...validEntries].sort((a, b) => {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        const timeA = parseTimestampToDate(a.timestamp).getTime();
+        const timeB = parseTimestampToDate(b.timestamp).getTime();
         return timeB - timeA; // desc
       });
 
@@ -828,8 +832,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   // Sort chronologically (oldest first) to compute running balance correctly
   const chronologicalHistory = [...allHistoryItems].sort((a, b) => {
-    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    const timeA = parseTimestampToDate(a.timestamp).getTime();
+    const timeB = parseTimestampToDate(b.timestamp).getTime();
     return timeA - timeB; // asc
   });
 
@@ -856,8 +860,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   // Display newest history entries first (descending timestamp order)
   const sortedHistoryForDisplay = [...allHistoryItems].sort((a, b) => {
-    const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-    const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    const timeA = parseTimestampToDate(a.timestamp).getTime();
+    const timeB = parseTimestampToDate(b.timestamp).getTime();
     return timeB - timeA; // desc
   });
 
@@ -1088,7 +1092,10 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {Object.entries(
                 processedDisplayedEntries.reduce((acc: any, entry) => {
-                  const cat = entry.category || 'Other';
+                  const rawCat = entry.category;
+                  const cat = typeof rawCat === 'string' 
+                    ? rawCat 
+                    : (rawCat && typeof rawCat === 'object' ? String((rawCat as any).name || 'Other') : 'Other');
                   if (!acc[cat]) acc[cat] = { debit: 0, credit: 0 };
                   if (entry.type === 'debit') acc[cat].debit += entry.amount;
                   else acc[cat].credit += entry.amount;
@@ -1096,9 +1103,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 }, {
                   room: { debit: 0, credit: 0 }
                 })
-              ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([cat, totals]: [string, any]) => (
-                <div key={cat} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase mb-1.5 sm:mb-2">{cat.replace('_', ' ')}</p>
+              ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([catKey, totals]: [string, any]) => (
+                <div key={catKey} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
+                  <p className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase mb-1.5 sm:mb-2">{String(catKey).replace(/_/g, ' ')}</p>
                   <div className="space-y-1">
                     {totals.debit > 0 && (
                       <div className="flex justify-between text-[10px] sm:text-xs">
@@ -2216,12 +2223,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           )}
                         >
                           <td className="px-6 py-4 text-xs text-zinc-400">
-                            {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
+                            {safeFormatDate(entry.timestamp, 'MMM d, HH:mm')}
                           </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
-                              <div className="text-sm font-medium text-zinc-50">{entry.description}</div>
-                              {entry.category === 'refund' && (
+                              <div className="text-sm font-medium text-zinc-50">
+                                {typeof entry.description === 'string' 
+                                  ? entry.description 
+                                  : (entry.description && typeof entry.description === 'object' ? ((entry.description as any).name || (entry.description as any).text || JSON.stringify(entry.description)) : '')}
+                              </div>
+                              {String(entry.category).toLowerCase() === 'refund' && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
                                   ↩ Refund Issued
                                 </span>
@@ -2234,18 +2245,25 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[10px] text-zinc-500 font-mono">
-                                {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${(entry.id || '').slice(-8).toUpperCase()}`}
+                                {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${String(entry.id || (entry as any).firestoreId || '').slice(-8).toUpperCase()}`}
                               </span>
-                              {entry.postedBy && hotel?.settings?.payments?.trackPaymentStaff !== false && (
-                                <span className="text-[9px] text-zinc-500 font-medium">
-                                  • By: {entry.postedBy === 'system' ? 'System' : (entry.postedBy === profile?.uid ? 'You' : `Staff (${entry.postedBy.slice(-6).toUpperCase()})`)}
-                                </span>
-                              )}
+                              {(() => {
+                                const rawP = entry.postedBy;
+                                const pByStr = typeof rawP === 'string' 
+                                  ? rawP 
+                                  : (rawP && typeof rawP === 'object' ? String((rawP as any).displayName || (rawP as any).uid || 'system') : '');
+                                if (!pByStr || hotel?.settings?.payments?.trackPaymentStaff === false) return null;
+                                return (
+                                  <span className="text-[9px] text-zinc-500 font-medium">
+                                    • By: {pByStr === 'system' ? 'System' : (pByStr === profile?.uid ? 'You' : `Staff (${pByStr.slice(-6).toUpperCase()})`)}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </td>
                           <td className="px-6 py-4">
                             <span className="text-[10px] font-semi uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">
-                              {entry.category}
+                              {typeof entry.category === 'string' ? entry.category : (entry.category && typeof entry.category === 'object' ? String((entry.category as any).name || 'general') : 'general')}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right text-sm font-bold text-red-500">
@@ -2340,9 +2358,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const csvContent = [
                 headers.join(','),
                 ...processedDisplayedEntries.map(e => [
-                  format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
-                  `"${e.description}"`,
-                  e.category,
+                  safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
+                  `"${typeof e.description === 'string' ? e.description : JSON.stringify(e.description || '')}"`,
+                  typeof e.category === 'string' ? e.category : String((e.category as any)?.name || 'general'),
                   e.type === 'debit' ? e.amount : 0,
                   e.type === 'credit' ? e.amount : 0
                 ].join(','))

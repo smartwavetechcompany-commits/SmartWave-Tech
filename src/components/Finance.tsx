@@ -7,6 +7,7 @@ import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Accou
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
 import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
+import { useRequestManager } from '../contexts/RequestManagerContext';
 import { GuestFolio } from './GuestFolio';
 import { 
   DollarSign, 
@@ -51,6 +52,7 @@ import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { executeRequest, isPending } = useRequestManager();
   const [records, setRecords] = useState<FinanceRecord[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
@@ -390,26 +392,32 @@ export function Finance() {
       }
 
       // Process each split
-      for (const split of settleData.splits) {
-        if (split.amount > 0) {
-          if (settleType === 'payment') {
-            // Settle outstanding debt: Post a payment (credit)
-            await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
-          } else {
-            // Post a refund (debit)
-            const reason = settleData.notes || `Refund (${split.method.toUpperCase()})`;
-            if (currentBalance < 0) {
-              await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
-            } else {
-              await refundGuest(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, reason, profile.uid, isCorporate ? entityId : undefined);
+      await executeRequest(
+        `finance-settle-${entityId}`,
+        async () => {
+          for (const split of settleData.splits) {
+            if (split.amount > 0) {
+              if (settleType === 'payment') {
+                // Settle outstanding debt: Post a payment (credit)
+                await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
+              } else {
+                // Post a refund (debit)
+                const reason = settleData.notes || `Refund (${split.method.toUpperCase()})`;
+                if (currentBalance < 0) {
+                  await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
+                } else {
+                  await refundGuest(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, reason, profile.uid, isCorporate ? entityId : undefined);
+                }
+              }
             }
           }
-        }
-      }
 
-      toast.success('Balance settled successfully');
-      setShowSettleModal(null);
-      setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
+          toast.success('Balance settled successfully');
+          setShowSettleModal(null);
+          setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
+        },
+        { loadingMessage: 'Settling financial balance in ledger...', showOverlay: true }
+      );
     } catch (err: any) {
       console.error("Settle balance error:", err.message || safeStringify(err));
       toast.error('Failed to settle balance');

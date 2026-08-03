@@ -24,6 +24,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { format } from 'date-fns';
+import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { transferCorporateBalance } from '../services/ledgerService';
@@ -547,22 +548,26 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                         )}
                       >
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
+                          {safeFormatDate(entry.timestamp, 'MMM d, HH:mm')}
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            <div className="text-sm text-white font-medium">{entry.description}</div>
-                            {entry.category === 'refund' && (
+                            <div className="text-sm text-white font-medium">
+                              {typeof entry.description === 'string' 
+                                ? entry.description 
+                                : (entry.description && typeof entry.description === 'object' ? ((entry.description as any).name || (entry.description as any).text || JSON.stringify(entry.description)) : '')}
+                            </div>
+                            {String(entry.category).toLowerCase() === 'refund' && (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
                                 ↩ Refund Issued
                               </span>
                             )}
                           </div>
-                          <div className="text-[10px] text-zinc-500">Ref: {(entry.id || '').slice(-8).toUpperCase()}</div>
+                          <div className="text-[10px] text-zinc-500">Ref: {String(entry.id || '').slice(-8).toUpperCase()}</div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">
-                            {entry.category}
+                            {typeof entry.category === 'string' ? entry.category : (entry.category && typeof entry.category === 'object' ? String((entry.category as any).name || 'general') : 'general')}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right text-sm font-bold text-red-500">

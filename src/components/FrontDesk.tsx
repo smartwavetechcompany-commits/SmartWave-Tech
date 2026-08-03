@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, wr
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry } from '../types';
-import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal } from '../services/ledgerService';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -59,9 +59,11 @@ import { useSearchParams } from 'react-router-dom';
 import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
+import { useRequestManager } from '../contexts/RequestManagerContext';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { executeRequest, isPending } = useRequestManager();
   const [searchParams, setSearchParams] = useSearchParams();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -1071,76 +1073,36 @@ export function FrontDesk() {
 
     try {
       setLoading(true);
-      const batch = writeBatch(db);
       
-      // 1. Delete reservation
-      batch.delete(doc(db, 'hotels', hotel.id, 'reservations', res.id));
-      
-      // 2. If checked in and has valid roomId, mark room as clean
-      if (res.status === 'checked_in' && res.roomId && typeof res.roomId === 'string' && res.roomId.trim() !== '') {
-        batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId.trim()), { status: 'clean' });
-      }
+      await executeRequest(
+        `delete-reservation-${res.id}`,
+        async () => {
+          const { deletedEntriesCount } = await deleteReservationWithFinancialReversal(
+            hotel.id,
+            res,
+            { uid: profile.uid, email: profile.email || '', role: profile.role }
+          );
 
-      // 3. Purge linked ledger entries
-      try {
-        const ledgerSnap = await getDocs(query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        ));
-        ledgerSnap.docs.forEach((d) => {
-          batch.delete(d.ref);
-        });
-      } catch (lErr) {
-        console.warn("Could not query ledger entries during deletion:", lErr);
-      }
-      
-      await database.commitBatch(hotel.id, batch, {
-        module: 'Front Desk',
-        action: 'DELETE_RESERVATION',
-        details: `Deleted reservation ${res.id} for ${res.guestName} (Room ${res.roomNumber || 'N/A'})`,
-        userContext: { uid: profile.uid, email: profile.email, role: profile.role }
-      });
+          await logActivity(
+            hotel.id,
+            profile,
+            'DELETE_RESERVATION',
+            'Front Desk',
+            `Deleted reservation for ${res.guestName} (Room ${res.roomNumber || 'N/A'}) with financial reversal (${deletedEntriesCount} ledger entries purged)`,
+            res.id,
+            res,
+            null
+          );
 
-      if (res.guestId) {
-        try {
-          const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const guestSnap = await getDoc(guestRef);
-          if (guestSnap.exists()) {
-            const guestResSnap = await getDocs(query(
-              collection(db, 'hotels', hotel.id, 'reservations'),
-              where('guestId', '==', res.guestId)
-            ));
-            const activeRes = guestResSnap.docs.filter(d => d.id !== res.id).map(d => d.data() as Reservation);
-            const newGuestBalance = activeRes.reduce((acc, r) => acc + (r.ledgerBalance || 0), 0);
-            await database.safeUpdate(guestRef, { ledgerBalance: newGuestBalance }, {
-              hotelId: hotel.id,
-              module: 'Guest',
-              action: 'RECALCULATE_GUEST_BALANCE',
-              details: `Recalculated balance for guest ${res.guestId} after deleting reservation ${res.id}`
-            });
-          }
-        } catch (gErr) {
-          console.warn("Error recalculating guest ledger on deletion:", gErr);
-        }
-      }
+          // Reset modal and selection states
+          if (showFolioModal?.id === res.id) setShowFolioModal(null);
+          if (editingReservation?.id === res.id) setEditingReservation(null);
+          setSelectedReservations(prev => prev.filter(id => id !== res.id));
 
-      await logActivity(
-        hotel.id,
-        profile,
-        'DELETE_RESERVATION',
-        'Front Desk',
-        `Deleted reservation for ${res.guestName} (Room ${res.roomNumber || 'N/A'})`,
-        res.id,
-        res,
-        null
+          toast.success('Reservation and associated financial transactions deleted successfully');
+        },
+        { loadingMessage: `Deleting reservation & executing financial reversal...`, showOverlay: true }
       );
-
-      // Reset modal and selection states
-      if (showFolioModal?.id === res.id) setShowFolioModal(null);
-      if (editingReservation?.id === res.id) setEditingReservation(null);
-      setSelectedReservations(prev => prev.filter(id => id !== res.id));
-
-      toast.success('Reservation deleted successfully');
     } catch (err: any) {
       console.error("Delete reservation error:", err.message || safeStringify(err));
       toast.error('Failed to delete reservation: ' + (err.message || 'Unknown error'));

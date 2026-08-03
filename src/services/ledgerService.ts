@@ -5,7 +5,7 @@ import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService } from '../utils/billingEngine';
 
-import { validateLedgerTransaction } from './financialService';
+import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
 export const postToLedger = async (
   hotelId: string,
@@ -892,4 +892,151 @@ export const processAutomatedBillingForReservation = async (
   }
 
   return { chargedCount, totalAmount: totalAmountCharged };
+};
+
+/**
+ * REFACTORED RESERVATION DELETION WITH FINANCIAL REVERSAL & CLEANUP
+ * Atomically purges/reverses all ledger entries associated with a reservation,
+ * updates room status, deletes reservation document, recalculates guest & corporate balances,
+ * and creates audit logs to ensure zero orphan transactions.
+ */
+export const deleteReservationWithFinancialReversal = async (
+  hotelId: string,
+  reservation: Reservation,
+  userProfile?: { uid: string; email: string; role: string } | null
+): Promise<{ success: boolean; deletedEntriesCount: number }> => {
+  if (!hotelId || !reservation?.id) {
+    throw new Error('Invalid parameters: hotelId and reservation ID are required.');
+  }
+
+  const reservationId = reservation.id;
+  const batch = writeBatch(db);
+
+  // 1. Query all ledger entries associated with this reservation
+  const ledgerQuery = query(
+    collection(db, 'hotels', hotelId, 'ledger'),
+    where('reservationId', '==', reservationId)
+  );
+  const ledgerSnap = await getDocs(ledgerQuery);
+
+  let deletedEntriesCount = 0;
+  ledgerSnap.docs.forEach((ledgerDoc) => {
+    batch.delete(ledgerDoc.ref);
+    deletedEntriesCount++;
+  });
+
+  // 2. Delete the reservation document
+  const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+  batch.delete(resRef);
+
+  // 3. If checked in and assigned to a room, mark the room as clean/available
+  if (
+    reservation.status === 'checked_in' &&
+    reservation.roomId &&
+    typeof reservation.roomId === 'string' &&
+    reservation.roomId.trim() !== ''
+  ) {
+    const roomRef = doc(db, 'hotels', hotelId, 'rooms', reservation.roomId.trim());
+    batch.update(roomRef, { status: 'clean' });
+  }
+
+  // Commit batch atomically
+  await database.commitBatch(hotelId, batch, {
+    module: 'Front Desk',
+    action: 'DELETE_RESERVATION_WITH_FINANCIAL_REVERSAL',
+    details: `Deleted reservation ${reservationId} (${reservation.guestName || 'Guest'}) and purged ${deletedEntriesCount} associated ledger transaction(s)`,
+    userContext: userProfile ? { uid: userProfile.uid, email: userProfile.email, role: userProfile.role } : undefined
+  });
+
+  // 4. Recalculate Guest Profile Outstanding Balance
+  if (reservation.guestId) {
+    try {
+      const guestRef = doc(db, 'hotels', hotelId, 'guests', reservation.guestId);
+      const guestSnap = await getDoc(guestRef);
+      if (guestSnap.exists()) {
+        // Query remaining reservations for this guest
+        const remainingResSnap = await getDocs(
+          query(
+            collection(db, 'hotels', hotelId, 'reservations'),
+            where('guestId', '==', reservation.guestId)
+          )
+        );
+        const remainingReservations = remainingResSnap.docs
+          .filter(d => d.id !== reservationId)
+          .map(d => ({ id: d.id, ...d.data() } as Reservation));
+
+        // Query remaining ledger entries for this guest
+        const remainingLedgerSnap = await getDocs(
+          query(
+            collection(db, 'hotels', hotelId, 'ledger'),
+            where('guestId', '==', reservation.guestId)
+          )
+        );
+        const remainingLedger = remainingLedgerSnap.docs
+          .filter(d => d.data().reservationId !== reservationId)
+          .map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
+
+        // Calculate authoritative financial position
+        const position = calculateGuestFinancialPosition(
+          { id: reservation.guestId, email: reservation.guestEmail },
+          remainingReservations,
+          null,
+          remainingLedger
+        );
+
+        await database.safeUpdate(
+          guestRef,
+          { ledgerBalance: position.outstandingBalance },
+          {
+            hotelId,
+            module: 'Guest',
+            action: 'RECALCULATE_GUEST_BALANCE',
+            details: `Recalculated outstanding balance for guest ${reservation.guestId} after deleting reservation ${reservationId}`
+          }
+        );
+      }
+    } catch (gErr) {
+      console.warn("Could not recalculate guest balance after reservation deletion:", gErr);
+    }
+  }
+
+  // 5. Recalculate Corporate Account Balance if applicable
+  if (reservation.corporateId) {
+    try {
+      const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', reservation.corporateId);
+      const corpSnap = await getDoc(corpRef);
+      if (corpSnap.exists()) {
+        const corpLedgerSnap = await getDocs(
+          query(
+            collection(db, 'hotels', hotelId, 'ledger'),
+            where('corporateId', '==', reservation.corporateId)
+          )
+        );
+        const corpEntries = corpLedgerSnap.docs
+          .filter(d => d.data().reservationId !== reservationId)
+          .map(d => d.data() as LedgerEntry);
+
+        const newCorpBalance = corpEntries.reduce((acc, e) => {
+          if (e.type === 'debit') return acc + e.amount;
+          if (e.type === 'credit') return acc - e.amount;
+          return acc;
+        }, 0);
+
+        await database.safeUpdate(
+          corpRef,
+          { currentBalance: Number(newCorpBalance.toFixed(2)) },
+          {
+            hotelId,
+            module: 'Corporate',
+            action: 'RECALCULATE_CORPORATE_BALANCE',
+            details: `Recalculated corporate account ${reservation.corporateId} balance after deleting reservation ${reservationId}`
+          }
+        );
+      }
+    } catch (cErr) {
+      console.warn("Could not recalculate corporate balance after reservation deletion:", cErr);
+    }
+  }
+
+  return { success: true, deletedEntriesCount };
 };

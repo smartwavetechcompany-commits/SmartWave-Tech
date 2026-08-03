@@ -8,6 +8,7 @@ import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
+import { calculateGuestFinancialPosition } from '../services/financialService';
 import { 
   Users, 
   Plus, 
@@ -32,7 +33,9 @@ import {
   Receipt,
   Building2,
   TrendingUp,
-  ArrowDownRight
+  ArrowDownRight,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -144,15 +147,15 @@ export function GuestManagement() {
     if (!guests.length) return balanceMap;
 
     guests.forEach(guest => {
-      const account = calculateGuestAccount(guest, allReservations, hotel);
-      balanceMap[guest.id] = account.outstandingBalance;
+      const position = calculateGuestFinancialPosition(guest, allReservations, hotel);
+      balanceMap[guest.id] = position.outstandingBalance;
     });
 
     return balanceMap;
   }, [guests, allReservations, hotel]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
-    return guestLiveBalances[guest.id] ?? calculateGuestAccount(guest, allReservations, hotel).outstandingBalance;
+    return guestLiveBalances[guest.id] ?? calculateGuestFinancialPosition(guest, allReservations, hotel).outstandingBalance;
   }, [guestLiveBalances, allReservations, hotel]);
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
@@ -1007,6 +1010,30 @@ export function GuestManagement() {
                       )}
                     </div>
 
+                    {/* Prominent Debt / Credit Banner */}
+                    {getGuestLiveBalance(guest) > 0.01 && (
+                      <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-red-950/60 border border-red-500/40 flex items-center justify-between text-xs font-bold text-red-400 shadow-sm">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold text-red-400">
+                          <AlertTriangle size={12} className="shrink-0 text-red-400" />
+                          <span>Outstanding Debt</span>
+                        </div>
+                        <span className="text-xs font-extrabold text-red-300">
+                          {formatCurrency(getGuestLiveBalance(guest), currency, exchangeRate)}
+                        </span>
+                      </div>
+                    )}
+                    {getGuestLiveBalance(guest) < -0.01 && (
+                      <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between text-xs font-bold text-emerald-400 shadow-sm">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold text-emerald-400">
+                          <CheckCircle2 size={12} className="shrink-0 text-emerald-400" />
+                          <span>Credit Balance</span>
+                        </div>
+                        <span className="text-xs font-extrabold text-emerald-300">
+                          {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-2">
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
@@ -1020,20 +1047,27 @@ export function GuestManagement() {
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
                         <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
                       </div>
-                      <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
+                      <div className={cn(
+                        "p-2 rounded-lg border flex flex-col justify-center transition-all",
+                        getGuestLiveBalance(guest) > 0.01 
+                          ? "bg-red-950/30 border-red-500/40" 
+                          : getGuestLiveBalance(guest) < -0.01 
+                            ? "bg-emerald-950/30 border-emerald-500/30" 
+                            : "bg-zinc-950 border-zinc-800/50"
+                      )}>
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">
                           {getGuestLiveBalance(guest) > 0.01 
-                            ? "Owed" 
+                            ? "Outstanding Debt" 
                             : getGuestLiveBalance(guest) < -0.01 
-                              ? "Credit / Deposit" 
-                              : "Owed"}
+                              ? "Credit Balance" 
+                              : "Outstanding Balance"}
                         </div>
                         <div className={cn(
-                          "text-sm font-bold",
+                          "text-sm font-extrabold",
                           getGuestLiveBalance(guest) > 0.01 
-                            ? "text-red-500" 
+                            ? "text-red-400" 
                             : getGuestLiveBalance(guest) < -0.01 
-                              ? "text-emerald-500" 
+                              ? "text-emerald-400" 
                               : "text-zinc-500"
                         )}>
                           {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}

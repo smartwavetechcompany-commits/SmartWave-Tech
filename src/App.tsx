@@ -232,14 +232,18 @@ const queryClient = new QueryClient({
   },
 });
 
+import { RequestManagerProvider } from './contexts/RequestManagerContext';
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <GlobalErrorBoundary>
         <AuthProvider>
-          <Router>
-            <AppContent />
-          </Router>
+          <RequestManagerProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </RequestManagerProvider>
         </AuthProvider>
       </GlobalErrorBoundary>
     </QueryClientProvider>

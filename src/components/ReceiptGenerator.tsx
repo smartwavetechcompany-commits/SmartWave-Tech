@@ -6,6 +6,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
 import { calculateBilling } from '../utils/billingEngine';
 import { calculateReservationAccount } from '../utils/financialUtils';
+import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
+
+const getSafeStr = (val: any, fallback: string = ''): string => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') return String(val.name || val.text || val.description || fallback);
+  return String(val || fallback);
+};
 
 export function processLedgerTaxes(
   entries: LedgerEntry[],
@@ -16,24 +23,25 @@ export function processLedgerTaxes(
   const taxEntriesToMerge: { taxEntry: LedgerEntry; targetParentDesc: string }[] = [];
 
   const nonTaxEntries = entries
-    .filter(e => e.category !== 'tax' || e.type !== 'debit')
+    .filter(e => String(e.category) !== 'tax' || e.type !== 'debit')
     .map(e => ({ ...e }));
 
-  const taxDebits = entries.filter(e => e.category === 'tax' && e.type === 'debit');
+  const taxDebits = entries.filter(e => String(e.category) === 'tax' && e.type === 'debit');
   const sortedTaxes = [...(taxes || [])].sort((a, b) => b.name.length - a.name.length);
 
   for (const taxEntry of taxDebits) {
+    const taxDesc = getSafeStr(taxEntry.description).toLowerCase();
     const matchedTax = sortedTaxes.find(t => 
-      taxEntry.description.toLowerCase().includes(t.name.toLowerCase())
+      taxDesc.includes((t.name || '').toLowerCase())
     );
 
     const isVisible = matchedTax ? (matchedTax[showOnField] !== false) : true;
 
     if (!isVisible) {
       let parentDesc = '';
-      const forIndex = taxEntry.description.toLowerCase().lastIndexOf(' for ');
+      const forIndex = taxDesc.lastIndexOf(' for ');
       if (forIndex !== -1) {
-        parentDesc = taxEntry.description.slice(forIndex + 5).trim();
+        parentDesc = taxDesc.slice(forIndex + 5).trim();
       }
 
       taxEntriesToMerge.push({
@@ -50,12 +58,13 @@ export function processLedgerTaxes(
     
     const parent = nonTaxEntries.find(parentEntry => {
       if (parentEntry.type !== 'debit') return false;
-      const descMatches = parentEntry.description.toLowerCase() === targetParentDesc ||
-                          targetParentDesc.includes(parentEntry.description.toLowerCase()) ||
-                          parentEntry.description.toLowerCase().includes(targetParentDesc);
+      const pDesc = getSafeStr(parentEntry.description).toLowerCase();
+      const descMatches = pDesc === targetParentDesc ||
+                          targetParentDesc.includes(pDesc) ||
+                          pDesc.includes(targetParentDesc);
       
       const timeMatches = parentEntry.timestamp === taxEntry.timestamp || 
-                          Math.abs(new Date(parentEntry.timestamp).getTime() - new Date(taxEntry.timestamp).getTime()) < 5000;
+                          Math.abs(parseTimestampToDate(parentEntry.timestamp).getTime() - parseTimestampToDate(taxEntry.timestamp).getTime()) < 5000;
       return descMatches && timeMatches;
     });
 
@@ -98,20 +107,20 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
-  const totalPayments = credits.filter(e => e.category?.toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
+  const totalPayments = credits.filter(e => getSafeStr(e.category).toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
   const totalOtherCredits = totalCredits - totalPayments;
   
-  const totalTaxDebits = processedEntries.filter(e => e.category === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const totalTaxDebits = processedEntries.filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   let otherTaxAmount = 0;
   
   // If room charges are already in ledger, don't add reservation.totalAmount again
-  const hasRoomChargeInLedger = processedEntries.some(e => e.category?.toLowerCase() === 'room' && e.type === 'debit');
+  const hasRoomChargeInLedger = processedEntries.some(e => getSafeStr(e.category).toLowerCase() === 'room' && e.type === 'debit');
   
   // Subtotal represents the gross charges of all stay/service items.
   // We keep inclusive taxes as part of the subtotal (since they are built into the prices).
   // Therefore, we only subtract exclusive tax debits from the ledger's total debits.
   const totalExclusiveTaxDebits = processedEntries
-    .filter(e => e.category === 'tax' && e.type === 'debit' && !e.description.toLowerCase().includes('inclusive'))
+    .filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit' && !getSafeStr(e.description).toLowerCase().includes('inclusive'))
     .reduce((acc, e) => acc + e.amount, 0);
 
   const subtotal = Math.max(0, totalDebits - totalExclusiveTaxDebits);
@@ -328,11 +337,11 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         
         {type === 'restaurant' ? (
           <div className="space-y-3">
-            {ledgerEntries.filter(e => e.category === 'restaurant' && e.type === 'debit').map(e => (
+            {ledgerEntries.filter(e => getSafeStr(e.category) === 'restaurant' && e.type === 'debit').map(e => (
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="text-sm font-bold">{e.description}</p>
-                  <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
+                  <p className="text-sm font-bold">{getSafeStr(e.description)}</p>
+                  <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
                 </div>
                 <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>
@@ -421,7 +430,10 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               </div>
               <div className="pl-3 space-y-3">
                 {(() => {
-                  const incidentalDebits = debits.filter(e => e.category?.toLowerCase() !== 'room' && e.category?.toLowerCase() !== 'tax');
+                  const incidentalDebits = debits.filter(e => {
+                    const cat = getSafeStr(e.category).toLowerCase();
+                    return cat !== 'room' && cat !== 'tax';
+                  });
                   
                   if (incidentalDebits.length === 0) {
                     return <p className="text-xs text-zinc-400 italic pl-1">No additional services or incidental charges recorded.</p>;
@@ -432,9 +444,9 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                       {incidentalDebits.map((e, index) => (
                         <div key={e.id || `incidental-${index}`} className="flex justify-between items-start py-1">
                           <div className="flex-1">
-                            <p className="text-sm font-bold">{e.description}</p>
+                            <p className="text-sm font-bold">{getSafeStr(e.description)}</p>
                             <p className="text-[10px] text-zinc-500 font-medium">
-                              Category: {e.category?.toUpperCase() || 'OTHER'} • Posted {format(new Date(e.timestamp), 'MMM dd, HH:mm')}
+                              Category: {getSafeStr(e.category, 'OTHER').toUpperCase()} • Posted {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
                             </p>
                           </div>
                           <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -528,8 +540,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             {credits.map(e => (
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="text-sm font-bold text-emerald-600">{e.description}</p>
-                  <p className="text-[10px] text-zinc-400">{format(new Date(e.timestamp), 'MMM dd, HH:mm')}</p>
+                  <p className="text-sm font-bold text-emerald-600">{getSafeStr(e.description)}</p>
+                  <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
                 </div>
                 <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>
