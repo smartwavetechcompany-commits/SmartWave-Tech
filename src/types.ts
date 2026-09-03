@@ -460,6 +460,7 @@ export interface KitchenOrder {
   notes?: string;
   price: number;
   paidAmount?: number;
+  payments?: { amount: number; method: string; date?: string; reference?: string }[];
   paymentMethod: 'cash' | 'card' | 'transfer' | 'room';
   preparedAt?: string;
   readyAt?: string;

@@ -12,6 +12,7 @@ import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
 import { DiscountApplication } from './DiscountApplication';
 import { ConfirmModal } from './ConfirmModal';
 import { LedgerDiagnosticModal } from './LedgerDiagnosticModal';
+import { LedgerAuditErrorBoundary } from './LedgerAuditErrorBoundary';
 import { 
   Receipt, 
   User, 
@@ -2574,22 +2575,30 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         </div>
       )}
 
-      <LedgerDiagnosticModal
-        isOpen={showDiagnosticModal}
-        onClose={() => setShowDiagnosticModal(false)}
-        reservation={currentReservation}
-        guest={guest}
-        hotel={hotel}
-        ledgerEntries={ledgerEntries}
-        currency={currency}
-        exchangeRate={exchangeRate}
-        onPurgeInvalidEntries={async (entryIds) => {
-          if (hotel?.id) {
-            await purgeCorruptedLedgerEntries(hotel.id, entryIds);
-            toast.success(`Purged ${entryIds.length} invalid ledger entry(ies).`);
-          }
-        }}
-      />
+      {showDiagnosticModal && (
+        <LedgerAuditErrorBoundary
+          folioId={currentReservation?.id}
+          guestId={currentReservation?.guestId}
+          onClose={() => setShowDiagnosticModal(false)}
+        >
+          <LedgerDiagnosticModal
+            isOpen={showDiagnosticModal}
+            onClose={() => setShowDiagnosticModal(false)}
+            reservation={currentReservation}
+            guest={guest}
+            hotel={hotel}
+            ledgerEntries={ledgerEntries}
+            currency={currency}
+            exchangeRate={exchangeRate}
+            onPurgeInvalidEntries={async (entryIds) => {
+              if (hotel?.id) {
+                await purgeCorruptedLedgerEntries(hotel.id, entryIds);
+                toast.success(`Purged ${entryIds.length} invalid ledger entry(ies).`);
+              }
+            }}
+          />
+        </LedgerAuditErrorBoundary>
+      )}
 
       <ConfirmModal
         isOpen={!!confirmDelete}
