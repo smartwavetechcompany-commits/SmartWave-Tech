@@ -101,12 +101,67 @@
 }
 
 @media print {
-  body {
-    background: white !important;
-    color: black !important;
-  }
-  .print-hidden {
+  /* Hide all app navigation, sidebars, headers, action bars, toasts, and overlays */
+  aside,
+  nav,
+  header,
+  .sidebar,
+  .topbar,
+  .no-print,
+  .print-hidden,
+  [data-sonner-toaster],
+  .fixed,
+  button:not(.allow-print) {
     display: none !important;
+  }
+
+  /* Reset layout constraints so printed documents flow naturally across pages */
+  html,
+  body,
+  #root,
+  main,
+  div[class*="h-screen"],
+  div[class*="overflow-hidden"],
+  div[class*="overflow-y-auto"] {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  /* Clean high contrast printed text & borders */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    text-shadow: none !important;
+  }
+
+  .print-container {
+    display: block !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+
+  tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
   }
 }
 

@@ -242,14 +242,17 @@ export function DSSGuestReport() {
     doc.setTextColor(148, 163, 184);
     doc.text('Authorized Signature & Stamp: ___________________________        Generated: ' + format(new Date(), 'yyyy-MM-dd HH:mm'), 14, finalY + 16);
 
-    doc.save(`dss_guest_report_${period}_${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
+    doc.save(`${cleanHotel}_DSS_Guest_Report_${period}_${format(new Date(), 'yyyy-MM-dd')}.pdf`);
     toast.success('DSS Guest Report PDF exported successfully');
   };
 
   // Excel Export
   const handleExportExcel = () => {
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
     const data = filteredRecords.map(r => ({
       'Guest Name': r.guestName,
+      'Room Number': r.roomNumber || '-',
       'Arrival Date': r.arrivalDate,
       'Departure Date': r.departureDate,
       'Phone Number': r.phoneNumber,
@@ -260,7 +263,7 @@ export function DSSGuestReport() {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'DSS Guest List');
-    XLSX.writeFile(workbook, `dss_guest_report_${period}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    XLSX.writeFile(workbook, `${cleanHotel}_DSS_Guest_Report_${period}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
     toast.success('DSS Guest Report Excel exported successfully');
   };
 
@@ -269,10 +272,84 @@ export function DSSGuestReport() {
     window.print();
   };
 
+  const hotelDisplayName = hotel?.name || 'Hotel Property';
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* =========================================================================
+          PRINT-ONLY OFFICIAL STATUTORY GUEST REGISTER (Pure white, black text)
+          ========================================================================= */}
+      <div className="hidden print:block text-black p-4 bg-white">
+        <div className="flex items-start justify-between border-b-2 border-black pb-4 mb-4">
+          <div>
+            <h1 className="text-2xl font-black uppercase tracking-tight text-black">{hotelDisplayName}</h1>
+            {hotel?.branding?.address && <p className="text-xs text-zinc-700">{hotel.branding.address}</p>}
+            {hotel?.branding?.phone && <p className="text-xs text-zinc-700">Phone: {hotel.branding.phone} {hotel?.branding?.email ? `| Email: ${hotel.branding.email}` : ''}</p>}
+            <h2 className="text-sm font-bold uppercase tracking-wider mt-2 text-zinc-900 border-t border-zinc-300 pt-1">
+              DAILY SUMMARY STATEMENT (DSS) / STATUTORY GUEST REGISTER
+            </h2>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-bold text-black">OFFICIAL POLICE & IMMIGRATION REGISTER</p>
+            <p className="text-zinc-600 mt-1">Scope: {activeInterval.label}</p>
+            <p className="text-zinc-600">Printed: {format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
+            <p className="text-zinc-600">Total Registered Guests: {filteredRecords.length}</p>
+          </div>
+        </div>
+
+        {/* Printable Table */}
+        <table className="w-full text-left text-xs border border-black border-collapse">
+          <thead>
+            <tr className="bg-zinc-200 text-black font-bold uppercase text-[10px] border-b border-black">
+              <th className="p-2 border-r border-black">Guest Full Name</th>
+              <th className="p-2 border-r border-black">Room</th>
+              <th className="p-2 border-r border-black">Arrival Date</th>
+              <th className="p-2 border-r border-black">Departure Date</th>
+              <th className="p-2 border-r border-black">Phone Number</th>
+              <th className="p-2 border-r border-black">ID / Passport Number</th>
+              <th className="p-2 border-r border-black">Residential Address</th>
+              <th className="p-2">Guest Signature</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRecords.map((r) => (
+              <tr key={r.id} className="border-b border-zinc-300 break-inside-avoid">
+                <td className="p-2 border-r border-zinc-300 font-bold">{r.guestName}</td>
+                <td className="p-2 border-r border-zinc-300 font-mono font-bold">{r.roomNumber || '-'}</td>
+                <td className="p-2 border-r border-zinc-300">{r.arrivalDate}</td>
+                <td className="p-2 border-r border-zinc-300">{r.departureDate}</td>
+                <td className="p-2 border-r border-zinc-300">{r.phoneNumber}</td>
+                <td className="p-2 border-r border-zinc-300 font-mono">{r.idNumber}</td>
+                <td className="p-2 border-r border-zinc-300 text-[10px]">{r.address}</td>
+                <td className="p-2 text-zinc-400">___________________</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Official Signatures */}
+        <div className="mt-8 pt-4 border-t border-black flex justify-between text-xs text-zinc-800">
+          <div>
+            <p>Hotel General Manager: _______________________________</p>
+            <p className="text-[10px] text-zinc-500 mt-1">Verification & Compliance Officer</p>
+          </div>
+          <div>
+            <p>Law Enforcement / Immigration Inspecting Officer:</p>
+            <p className="mt-1">Signature: ______________________ Rank/Badge: ____________</p>
+          </div>
+          <div>
+            <p>Official Hotel Seal / Stamp:</p>
+            <div className="w-24 h-12 border border-dashed border-zinc-400 rounded mt-1"></div>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          SCREEN-ONLY INTERACTIVE UI (Hidden during print)
+          ========================================================================= */}
+      <div className="print:hidden space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-xl">
@@ -488,6 +565,7 @@ export function DSSGuestReport() {
             * Generated automatically from PMS database records without manual counting or copying.
           </span>
         </div>
+      </div>
       </div>
     </div>
   );

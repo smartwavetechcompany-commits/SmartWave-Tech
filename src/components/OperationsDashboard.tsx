@@ -377,7 +377,7 @@ export function OperationsDashboard() {
     let icsContent = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Tyyl Tech//PMS Occupancy//EN',
+      `PRODID:-//${hotel?.name || 'Hotel'}//PMS Occupancy//EN`,
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH'
     ];
@@ -554,8 +554,8 @@ export function OperationsDashboard() {
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8 print:p-0 print:m-0 print:space-y-0">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
           <p className="text-xs text-zinc-400">Manage today's guest movements and room status</p>
@@ -1101,7 +1101,7 @@ export function OperationsDashboard() {
             <p className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
               <span>Dynamic forecast trajectory modeled with localized day-of-week demand multipliers</span>
               <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/15 py-0.5 px-2 rounded-full font-bold">
-                Tyyl-Intellect ML v1.8
+                {hotel?.name ? `${hotel.name} ML Engine` : 'Intelligence Engine v1.8'}
               </span>
             </p>
           </div>

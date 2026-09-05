@@ -150,9 +150,18 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           <Menu size={20} />
         </button>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-zinc-400 min-w-fit cursor-pointer hover:text-zinc-50 transition-colors" onClick={() => navigate('/')}>
-            <Building2 size={16} />
-            <span className="text-xs sm:text-sm font-medium truncate max-w-[100px] sm:max-w-none">{hotel?.name || 'PMS'}</span>
+          <div className="flex items-center gap-2 text-zinc-400 min-w-fit cursor-pointer hover:text-zinc-50 transition-colors group" onClick={() => navigate('/')}>
+            {hotel?.branding?.logoUrl ? (
+              <img 
+                src={hotel.branding.logoUrl} 
+                alt={hotel?.name || 'Hotel Logo'} 
+                className="w-5 h-5 rounded-md object-contain bg-zinc-900 border border-zinc-800"
+                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+              />
+            ) : (
+              <Building2 size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" />
+            )}
+            <span className="text-xs sm:text-sm font-bold text-zinc-100 tracking-tight truncate max-w-[120px] sm:max-w-[240px]">{hotel?.name || 'Hotel PMS'}</span>
           </div>
 
           {hotel?.subscriptionExpiry && (

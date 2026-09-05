@@ -117,21 +117,56 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     return true;
   });
 
+  // Compute hotel brand initials (e.g. "Tide' Hotels & Resorts" -> "TH")
+  const hotelDisplayName = hotel?.name || (profile?.role === 'superAdmin' ? 'Super Admin' : 'Hotel PMS');
+  const hotelInitials = React.useMemo(() => {
+    if (!hotel?.name) return profile?.role === 'superAdmin' ? 'SA' : 'HP';
+    const clean = hotel.name.replace(/['"“”]/g, '').trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }, [hotel?.name, profile?.role]);
+
   return (
     <div className="w-60 bg-zinc-950 text-zinc-400 flex flex-col h-screen border-r border-zinc-800">
-      <div className="p-6 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-zinc-50 tracking-tighter flex items-center gap-2">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black font-black text-xs">
-            TT
+      <div className="p-4 sm:p-5 flex items-center justify-between border-b border-zinc-800/60">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          {hotel?.branding?.logoUrl ? (
+            <img 
+              src={hotel.branding.logoUrl} 
+              alt={hotelDisplayName} 
+              className="w-9 h-9 rounded-xl object-contain bg-zinc-900 border border-zinc-800 shrink-0 p-1"
+              onError={(e) => {
+                // If custom image fails to load, fallback to initials badge
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          ) : (
+            <div 
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-black font-black text-xs shrink-0 shadow-sm"
+              style={{ backgroundColor: hotel?.branding?.primaryColor || '#10b981' }}
+            >
+              {hotelInitials}
+            </div>
+          )}
+          <div className="flex flex-col min-w-0 flex-1">
+            <span 
+              className="text-sm font-bold text-zinc-50 tracking-tight truncate leading-tight" 
+              title={hotelDisplayName}
+            >
+              {hotelDisplayName}
+            </span>
+            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider truncate">
+              {hotel?.branding?.organizationName || (profile?.role === 'superAdmin' && !hotel?.id ? 'Management Portal' : 'Hotel PMS')}
+            </span>
           </div>
-          Tyyl Tech
-        </h1>
+        </div>
         {onClose && (
           <button 
             onClick={onClose}
-            className="lg:hidden p-1 text-zinc-500 hover:text-zinc-50"
+            className="lg:hidden p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg hover:bg-zinc-900 ml-1 shrink-0"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         )}
       </div>

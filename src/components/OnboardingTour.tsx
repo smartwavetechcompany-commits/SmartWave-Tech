@@ -26,43 +26,52 @@ interface Step {
   target?: string; // CSS selector for highlighting (optional for now)
 }
 
-const steps: Step[] = [
-  {
-    title: "Welcome to Tyyl Tech PMS",
-    description: "Your all-in-one solution for modern hotel management. Let's take a quick tour of the main features.",
-    icon: <Sparkles className="text-emerald-500" size={32} />
-  },
-  {
-    title: "The Dashboard",
-    description: "Get a bird's-eye view of your hotel's performance, occupancy rates, and daily operations at a glance.",
-    icon: <LayoutDashboard className="text-blue-500" size={32} />
-  },
-  {
-    title: "Front Desk",
-    description: "This is where the magic happens. Manage bookings, check-ins, check-outs, and guest folios with ease.",
-    icon: <CalendarDays className="text-purple-500" size={32} />
-  },
-  {
-    title: "Room Management",
-    description: "Configure your room types, set prices, and monitor housekeeping status in real-time.",
-    icon: <Bed className="text-amber-500" size={32} />
-  },
-  {
-    title: "System Settings",
-    description: "Customize your hotel branding, configure taxes, and manage your subscription settings.",
-    icon: <SettingsIcon className="text-zinc-500" size={32} />
-  },
-  {
-    title: "You're All Set!",
-    description: "You're ready to start managing your hotel like a pro. Need help? Click the Support link in the sidebar.",
-    icon: <CheckCircle2 className="text-emerald-500" size={32} />
-  }
-];
-
 export function OnboardingTour() {
-  const { profile } = useAuth();
+  const { profile, hotel } = useAuth();
   const [currentStep, setCurrentStep] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
+
+  const hotelDisplayName = hotel?.name || 'Hotel PMS';
+  const hotelInitials = React.useMemo(() => {
+    if (!hotel?.name) return 'HP';
+    const clean = hotel.name.replace(/['"“”]/g, '').trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }, [hotel?.name]);
+
+  const steps: Step[] = [
+    {
+      title: `Welcome to ${hotelDisplayName}`,
+      description: "Your all-in-one solution for modern hotel management. Let's take a quick tour of the main features.",
+      icon: <Sparkles className="text-emerald-500" size={32} />
+    },
+    {
+      title: "The Dashboard",
+      description: "Get a bird's-eye view of your hotel's performance, occupancy rates, and daily operations at a glance.",
+      icon: <LayoutDashboard className="text-blue-500" size={32} />
+    },
+    {
+      title: "Front Desk",
+      description: "This is where the magic happens. Manage bookings, check-ins, check-outs, and guest folios with ease.",
+      icon: <CalendarDays className="text-purple-500" size={32} />
+    },
+    {
+      title: "Room Management",
+      description: "Configure your room types, set prices, and monitor housekeeping status in real-time.",
+      icon: <Bed className="text-amber-500" size={32} />
+    },
+    {
+      title: "System Settings",
+      description: "Customize your hotel branding, configure taxes, and manage your subscription settings.",
+      icon: <SettingsIcon className="text-zinc-500" size={32} />
+    },
+    {
+      title: "You're All Set!",
+      description: "You're ready to start managing your hotel like a pro. Need help? Click the Support link in the sidebar.",
+      icon: <CheckCircle2 className="text-emerald-500" size={32} />
+    }
+  ];
 
   useEffect(() => {
     if (profile && !profile.hasCompletedOnboarding) {
@@ -119,10 +128,21 @@ export function OnboardingTour() {
           {/* Header */}
           <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-black font-black text-xs">
-                TT
-              </div>
-              <span className="text-sm font-bold text-white tracking-tight">Tyyl Tech Onboarding</span>
+              {hotel?.branding?.logoUrl ? (
+                <img 
+                  src={hotel.branding.logoUrl} 
+                  alt={hotelDisplayName} 
+                  className="w-8 h-8 rounded-lg object-contain bg-zinc-950 border border-zinc-800"
+                />
+              ) : (
+                <div 
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-black font-black text-xs"
+                  style={{ backgroundColor: hotel?.branding?.primaryColor || '#10b981' }}
+                >
+                  {hotelInitials}
+                </div>
+              )}
+              <span className="text-sm font-bold text-white tracking-tight">{hotelDisplayName} Onboarding</span>
             </div>
             <button 
               onClick={handleComplete}

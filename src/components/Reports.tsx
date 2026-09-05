@@ -21,7 +21,8 @@ import {
   Wallet,
   Receipt,
   Trash2,
-  Coffee
+  Coffee,
+  Printer
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
@@ -616,13 +617,20 @@ export function Reports() {
   const exportPDF = () => {
     const doc = new jsPDF();
     const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
+    const hotelName = hotel?.name || 'Hotel Property';
+    const cleanHotel = hotelName.replace(/[^a-zA-Z0-9]/g, '_');
     
     // Add header
-    doc.setFontSize(20);
-    doc.text(`${hotel?.name || 'Hotel'} - ${reportLabel}`, 14, 22);
+    doc.setFontSize(18);
+    doc.text(`${hotelName} - ${reportLabel}`, 14, 20);
     doc.setFontSize(10);
-    doc.text(`Period: ${dateRange.start} to ${dateRange.end}`, 14, 30);
-    doc.text(`Generated on: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`, 14, 35);
+    doc.text(`Period: ${dateRange.start} to ${dateRange.end}`, 14, 28);
+    doc.text(`Generated on: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`, 14, 34);
+
+    if (hotel?.branding?.address) {
+      doc.setFontSize(9);
+      doc.text(`${hotel.branding.address} ${hotel?.branding?.phone ? `| Tel: ${hotel.branding.phone}` : ''}`, 14, 40);
+    }
 
     // Add table
     const headers = getReportHeaders(activeReport);
@@ -636,14 +644,14 @@ export function Reports() {
     }));
 
     (doc as any).autoTable({
-      startY: 45,
+      startY: hotel?.branding?.address ? 46 : 40,
       head: [headers],
       body: tableData,
       theme: 'grid',
       headStyles: { fillColor: [16, 185, 129] }
     });
 
-    doc.save(`hotel_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.pdf`);
+    doc.save(`${cleanHotel}_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.pdf`);
     toast.success("PDF exported successfully");
   };
 
@@ -705,9 +713,10 @@ export function Reports() {
       return formattedRow;
     }));
 
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, reportLabel.slice(0, 31));
-    XLSX.writeFile(workbook, `hotel_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.xlsx`);
+    XLSX.writeFile(workbook, `${cleanHotel}_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.xlsx`);
     toast.success("Excel exported successfully");
   };
 
@@ -763,8 +772,28 @@ export function Reports() {
   });
 
   return (
-    <div className="p-8 space-y-8">
-      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+    <div className="p-8 space-y-8 print:p-2 print:space-y-4 print:bg-white print:text-black">
+      {/* Print-Only Official Report Header */}
+      <div className="hidden print:block text-black p-4 mb-4 border-b-2 border-black bg-white">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-black uppercase text-black">{hotel?.name || 'Hotel Property'}</h1>
+            {hotel?.branding?.address && <p className="text-xs text-zinc-700">{hotel.branding.address}</p>}
+            {hotel?.branding?.phone && <p className="text-xs text-zinc-700">Phone: {hotel.branding.phone}</p>}
+            <h2 className="text-base font-bold uppercase mt-2 text-zinc-900">
+              {reportTypes.find(r => r.id === activeReport)?.label || 'Performance Report'}
+            </h2>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-bold">OFFICIAL REPORT</p>
+            <p className="text-zinc-600">Period: {dateRange.start} – {dateRange.end}</p>
+            <p className="text-zinc-600">Printed: {format(new Date(), 'yyyy-MM-dd HH:mm')}</p>
+            <p className="text-zinc-600">Staff: {profile?.displayName || profile?.username || 'Authorized Staff'}</p>
+          </div>
+        </div>
+      </div>
+
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 print:hidden">
         <div>
           <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Reports & Analytics</h1>
           <p className="text-zinc-400">Monitor hotel performance and trends</p>
@@ -790,30 +819,40 @@ export function Reports() {
             />
           </div>
 
-          {(hotel?.settings?.reporting?.allowExports ?? true) && (
-            <div className="flex gap-2">
-              <button 
-                onClick={exportPDF}
-                className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-              >
-                <FileText size={18} className="text-red-500" />
-                PDF
-              </button>
-              <button 
-                onClick={exportExcel}
-                className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-              >
-                <FileSpreadsheet size={18} className="text-emerald-500" />
-                Excel
-              </button>
-            </div>
-          )}
+          <div className="flex gap-2">
+            <button 
+              onClick={() => window.print()}
+              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+              title="Print Report"
+            >
+              <Printer size={18} className="text-zinc-300" />
+              Print
+            </button>
+            {(hotel?.settings?.reporting?.allowExports ?? true) && (
+              <>
+                <button 
+                  onClick={exportPDF}
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+                >
+                  <FileText size={18} className="text-red-500" />
+                  PDF
+                </button>
+                <button 
+                  onClick={exportExcel}
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+                >
+                  <FileSpreadsheet size={18} className="text-emerald-500" />
+                  Excel
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
-      <div className="flex flex-col lg:flex-row gap-8">
+      <div className="flex flex-col lg:flex-row gap-8 print:block">
         {/* Sidebar Navigation */}
-        <div className="w-full lg:w-64 flex-shrink-0 space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar">
+        <div className="w-full lg:w-64 flex-shrink-0 space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto pr-2 custom-scrollbar print:hidden">
           {visibleReportTypes.map((item) => (
             <button
               key={item.id}

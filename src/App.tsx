@@ -42,9 +42,18 @@ import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal'
 import { AccountSuspendedModal } from './components/AccountSuspendedModal';
 
 function AppContent() {
-  const { user, loading, profile, isSubscriptionActive, isOffline, retryConnection } = useAuth();
+  const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const location = useLocation();
+
+  // Dynamic branding: Update document title to Hotel Name so browser tab and print headers reflect their hotel
+  React.useEffect(() => {
+    if (hotel?.name) {
+      document.title = `${hotel.name} | Property Management System`;
+    } else {
+      document.title = 'Hotel Property Management System';
+    }
+  }, [hotel?.name]);
 
   // Close sidebar on route change (mobile)
   React.useEffect(() => {
@@ -146,15 +155,17 @@ function AppContent() {
       </AnimatePresence>
 
       <div className={cn(
-        "fixed inset-y-0 left-0 z-[60] lg:static lg:block transition-transform duration-300 transform",
+        "fixed inset-y-0 left-0 z-[60] lg:static lg:block transition-transform duration-300 transform print:hidden",
         sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
       )}>
         <Sidebar onClose={() => setSidebarOpen(false)} />
       </div>
 
-      <main className="flex-1 flex flex-col overflow-hidden w-full">
-        <TopBar onMenuClick={() => setSidebarOpen(true)} />
-        <div className="flex-1 overflow-y-auto relative">
+      <main className="flex-1 flex flex-col overflow-hidden w-full print:overflow-visible print:h-auto print:block">
+        <div className="print:hidden">
+          <TopBar onMenuClick={() => setSidebarOpen(true)} />
+        </div>
+        <div className="flex-1 overflow-y-auto relative print:overflow-visible print:h-auto">
           <AnimatePresence mode="wait">
           <Routes location={location} key={location.pathname}>
             <Route path="/" element={<Dashboard />} />
