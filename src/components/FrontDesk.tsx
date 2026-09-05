@@ -164,6 +164,10 @@ export function FrontDesk() {
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer',
     payments: [{ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer' }],
     autoNightDeduction: true, // Mandatory toggle for automatic nightly charges
+    numberOfGuests: 1,
+    mealPlan: 'Bed & Breakfast',
+    breakfastEntitlement: 'Standard Breakfast Included',
+    isPrincipalRoom: false,
     additionalStays: [] as any[]
   });
 
@@ -944,6 +948,10 @@ export function FrontDesk() {
           ledgerBalance: 0,
           nightlyRate: pricePerNight,
           autoNightDeduction: newBooking.autoNightDeduction,
+          numberOfGuests: stay.numberOfGuests || newBooking.numberOfGuests || 1,
+          mealPlan: stay.mealPlan || newBooking.mealPlan || 'Bed & Breakfast',
+          breakfastEntitlement: stay.breakfastEntitlement || newBooking.breakfastEntitlement || 'Standard Breakfast Included',
+          isPrincipalRoom: newBooking.isPrincipalRoom || false,
           bookedBy: profile.uid,
           createdAt: new Date().toISOString(),
         };
@@ -1052,6 +1060,10 @@ export function FrontDesk() {
         paymentMethod: 'cash',
         payments: [{ amount: 0, method: 'cash' }],
         autoNightDeduction: true,
+        numberOfGuests: 1,
+        mealPlan: 'Bed & Breakfast',
+        breakfastEntitlement: 'Standard Breakfast Included',
+        isPrincipalRoom: false,
         additionalStays: [] as any[]
       });
     } catch (err: any) {
@@ -2272,6 +2284,10 @@ export function FrontDesk() {
                     paymentMethod: 'cash',
                     payments: [{ amount: 0, method: 'cash' }],
                     autoNightDeduction: true,
+                    numberOfGuests: 1,
+                    mealPlan: 'Bed & Breakfast',
+                    breakfastEntitlement: 'Standard Breakfast Included',
+                    isPrincipalRoom: false,
                     additionalStays: [] as any[],
                   });
                   setIsBooking(true);
@@ -2312,6 +2328,10 @@ export function FrontDesk() {
                     paymentMethod: 'cash',
                     payments: [{ amount: 0, method: 'cash' }],
                     autoNightDeduction: true,
+                    numberOfGuests: 1,
+                    mealPlan: 'Bed & Breakfast',
+                    breakfastEntitlement: 'Standard Breakfast Included',
+                    isPrincipalRoom: false,
                     additionalStays: [] as any[]
                   });
                   setIsBooking(true);
@@ -2959,6 +2979,54 @@ export function FrontDesk() {
                     </div>
                   );
                 })()}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-400 uppercase mb-1">Guests (Pax)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={newBooking.numberOfGuests || 1}
+                    onChange={(e) => setNewBooking({ ...newBooking, numberOfGuests: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-xs focus:border-emerald-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-400 uppercase mb-1">Meal Plan</label>
+                  <select
+                    value={newBooking.mealPlan}
+                    onChange={(e) => {
+                      const mp = e.target.value;
+                      let ent = 'Standard Breakfast Included';
+                      if (mp === 'Room Only') ent = 'Room Only (No Breakfast)';
+                      else if (mp === 'Full English Buffet') ent = 'Full English Buffet';
+                      else if (mp === 'Continental') ent = 'Continental Buffet';
+                      setNewBooking({ ...newBooking, mealPlan: mp, breakfastEntitlement: ent });
+                    }}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-xs focus:border-emerald-500 outline-none"
+                  >
+                    <option value="Bed & Breakfast">Bed & Breakfast</option>
+                    <option value="Full English Buffet">Full English Buffet</option>
+                    <option value="Continental">Continental Buffet</option>
+                    <option value="Half Board">Half Board (Breakfast + Dinner)</option>
+                    <option value="Full Board">Full Board (All Meals)</option>
+                    <option value="Room Only">Room Only (None)</option>
+                  </select>
+                </div>
+                <div className="flex flex-col justify-between">
+                  <label className="block text-xs font-semibold text-zinc-400 uppercase mb-1">Master Room?</label>
+                  <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={newBooking.isPrincipalRoom}
+                      onChange={(e) => setNewBooking({ ...newBooking, isPrincipalRoom: e.target.checked })}
+                      className="rounded bg-zinc-950 border-zinc-800 text-amber-500 focus:ring-0 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Set as Principal Room</span>
+                  </label>
+                </div>
               </div>
 
               <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl space-y-4">
@@ -3795,8 +3863,18 @@ export function FrontDesk() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="font-bold text-zinc-50 flex items-center gap-2 group/roomrelative text-sm">
-                      Room {res.roomNumber}
+                    <div className="font-bold text-zinc-50 flex items-center gap-2 group/roomrelative text-sm flex-wrap">
+                      <span>Room {res.roomNumber}</span>
+                      {res.isPrincipalRoom && (
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Master ({res.linkedRoomNumbers?.length || 0})
+                        </span>
+                      )}
+                      {res.principalReservationId && (
+                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                          Linked #{res.principalRoomNumber || 'M'}
+                        </span>
+                      )}
                       {(() => {
                         const room = rooms.find(r => r.id === res.roomId);
                         if (!room) return null;

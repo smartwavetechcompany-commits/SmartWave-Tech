@@ -24,8 +24,14 @@ import {
   AreaChart as ChartIcon,
   HelpCircle,
   Maximize2,
-  X
+  X,
+  Coffee,
+  FileText,
+  LayoutGrid
 } from 'lucide-react';
+import { BreakfastList } from './BreakfastList';
+import { DSSGuestReport } from './DSSGuestReport';
+import { RoomStatusDashboard } from './RoomStatusDashboard';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -45,6 +51,7 @@ export function OperationsDashboard() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [opView, setOpView] = useState<'flow' | 'room_status' | 'breakfast' | 'dss'>('flow');
   const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'checkouts' | 'inhouse'>('arrivals');
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(format(new Date(), 'yyyy-MM-dd'));
@@ -485,7 +492,54 @@ export function OperationsDashboard() {
           <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
           <p className="text-xs text-zinc-400">Manage today's guest movements and room status</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setOpView('flow')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                opView === 'flow' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
+              )}
+            >
+              <Calendar size={14} />
+              <span>Daily Movements</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpView('room_status')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                opView === 'room_status' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
+              )}
+            >
+              <LayoutGrid size={14} />
+              <span>Room Grid</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpView('breakfast')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                opView === 'breakfast' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
+              )}
+            >
+              <Coffee size={14} />
+              <span>Breakfast List</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpView('dss')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                opView === 'dss' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
+              )}
+            >
+              <FileText size={14} />
+              <span>DSS Report</span>
+            </button>
+          </div>
+
           {occupancyAlerts.length > 0 && (
             <button
               onClick={() => {
@@ -509,7 +563,27 @@ export function OperationsDashboard() {
         </div>
       </header>
 
-      {/* Operational Threshold Notification Alerts */}
+      {opView === 'room_status' && (
+        <div className="space-y-6">
+          <RoomStatusDashboard />
+        </div>
+      )}
+
+      {opView === 'breakfast' && (
+        <div className="space-y-6">
+          <BreakfastList />
+        </div>
+      )}
+
+      {opView === 'dss' && (
+        <div className="space-y-6">
+          <DSSGuestReport />
+        </div>
+      )}
+
+      {opView === 'flow' && (
+        <>
+          {/* Operational Threshold Notification Alerts */}
       {showAlerts && occupancyAlerts.length > 0 && (() => {
         const activeAlerts = occupancyAlerts.filter(alert => !dismissedAlerts.includes(`${alert.type}-${alert.date}`));
         const visibleAlerts = showAllAlerts ? activeAlerts : activeAlerts.slice(0, 3);
@@ -1232,6 +1306,8 @@ export function OperationsDashboard() {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

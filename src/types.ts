@@ -441,6 +441,16 @@ export interface Reservation {
   };
   createdAt: string;
   updatedAt?: string;
+  numberOfGuests?: number;
+  mealPlan?: string;
+  breakfastEntitlement?: string;
+  breakfastCount?: number;
+  isPrincipalRoom?: boolean;
+  principalReservationId?: string;
+  principalRoomNumber?: string;
+  linkedReservationIds?: string[];
+  linkedRoomNumbers?: string[];
+  groupBillingPreference?: 'consolidated' | 'separate';
 }
 
 export interface RoomBlocking {
@@ -814,6 +824,11 @@ export interface LedgerEntry {
   chargePeriodStart?: string; // Metadata for duplicate charge prevention
   chargePeriodEnd?: string; // Metadata for duplicate charge prevention
   chargeType?: 'room_rate' | 'overstay' | string; // Metadata for duplicate charge prevention
+  sourceRoomNumber?: string; // Room that originated this charge (e.g. Room 213, Room 214)
+  sourceReservationId?: string;
+  isLinkedRoomCharge?: boolean;
+  masterReservationId?: string;
+  postedByName?: string;
 }
 
 export interface CorporateAccount {

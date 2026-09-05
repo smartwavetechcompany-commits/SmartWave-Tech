@@ -20,7 +20,9 @@ import {
   Activity,
   Mail,
   XCircle,
-  X
+  X,
+  Coffee,
+  FileText
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useModuleAccess } from './PermissionGuard';
@@ -43,8 +45,10 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     { icon: Activity, label: 'Operations', path: '/operations', capability: 'access_front_desk', module: 'dashboard' },
     { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', capability: 'access_front_desk', module: 'frontDesk' },
     { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', capability: 'manage_rooms', module: 'rooms' },
+    { icon: Activity, label: 'Room Status', path: '/room-status', capability: 'manage_rooms', module: 'rooms' },
     { icon: ClipboardList, label: t('sidebar.housekeeping'), path: '/housekeeping', capability: 'manage_rooms', module: 'housekeeping' },
     { icon: ChefHat, label: 'F & B', path: '/f-and-b', capability: 'manage_kitchen', module: 'kitchen' },
+    { icon: Coffee, label: 'Breakfast List', path: '/breakfast-list', capability: null, module: 'kitchen' },
     { icon: Package, label: t('sidebar.inventory'), path: '/inventory', capability: 'manage_inventory', module: 'inventory' },
     { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', capability: 'manage_maintenance', module: 'maintenance' },
     { icon: CheckCircle, label: 'Tasks', path: '/tasks', capability: null, module: 'dashboard' },
@@ -52,6 +56,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     { icon: Building2, label: 'Corporate', path: '/corporate', capability: 'manage_corporate', module: 'corporate' },
     { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'view_financial_records', module: 'finance' },
     { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports' },
+    { icon: FileText, label: 'DSS Report', path: '/dss-report', capability: 'view_reports', module: 'reports' },
     { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff' },
     { icon: ShieldCheck, label: 'Admin Controls', path: '/admin-settings', capability: 'edit_hotel_settings', module: 'settings' },
     { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff' },

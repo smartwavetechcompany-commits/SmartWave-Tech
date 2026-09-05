@@ -20,8 +20,11 @@ import {
   CreditCard,
   Wallet,
   Receipt,
-  Trash2
+  Trash2,
+  Coffee
 } from 'lucide-react';
+import { BreakfastList } from './BreakfastList';
+import { DSSGuestReport } from './DSSGuestReport';
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
 import { ConfirmModal } from './ConfirmModal';
@@ -714,6 +717,8 @@ export function Reports() {
   
   const reportTypes = [
     { id: 'overview', label: 'Overview', icon: PieChart },
+    { id: 'breakfast_list', label: 'Automated Breakfast List', icon: Coffee },
+    { id: 'dss_guest_report', label: 'DSS / Guest Register', icon: FileText },
     { id: 'post_stay_surveys', label: 'Guest Feedback & Surveys', icon: Sparkles },
     { id: 'occupancy', label: 'Daily Occupancy', icon: Bed },
     { id: 'inhouse', label: 'In House Guests', icon: Users },
@@ -937,7 +942,19 @@ export function Reports() {
             <PostStaySurveys hotelId={hotel.id} currency={currency} exchangeRate={exchangeRate} />
           )}
 
-          {activeReport !== 'overview' && activeReport !== 'post_stay_surveys' && (
+          {activeReport === 'breakfast_list' && (
+            <div className="space-y-4">
+              <BreakfastList />
+            </div>
+          )}
+
+          {activeReport === 'dss_guest_report' && (
+            <div className="space-y-4">
+              <DSSGuestReport />
+            </div>
+          )}
+
+          {activeReport !== 'overview' && activeReport !== 'post_stay_surveys' && activeReport !== 'breakfast_list' && activeReport !== 'dss_guest_report' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

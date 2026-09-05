@@ -13,6 +13,7 @@ import { DiscountApplication } from './DiscountApplication';
 import { ConfirmModal } from './ConfirmModal';
 import { LedgerDiagnosticModal } from './LedgerDiagnosticModal';
 import { LedgerAuditErrorBoundary } from './LedgerAuditErrorBoundary';
+import { PrincipalRoomManager } from './PrincipalRoomManager';
 import { 
   Receipt, 
   User, 
@@ -95,6 +96,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showGuestHistory, setShowGuestHistory] = useState(false);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
   const [showReceipt, setShowReceipt] = useState(false);
+  const [showPrincipalManager, setShowPrincipalManager] = useState(false);
   const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<LedgerEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -908,6 +910,26 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button 
               type="button"
+              onClick={() => setShowPrincipalManager(true)}
+              className={cn(
+                "px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shadow-sm active:scale-95 border",
+                currentReservation.isPrincipalRoom || currentReservation.principalReservationId
+                  ? "bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
+                  : "bg-zinc-850 text-zinc-300 border-zinc-700 hover:bg-zinc-800"
+              )}
+              title="Manage Principal & Linked Rooms"
+            >
+              <Building2 size={14} className={currentReservation.isPrincipalRoom ? "text-amber-400" : "text-zinc-400"} />
+              <span>
+                {currentReservation.isPrincipalRoom 
+                  ? `Master (${currentReservation.linkedRoomNumbers?.length || 0})` 
+                  : currentReservation.principalReservationId 
+                  ? `Linked (M: ${currentReservation.principalRoomNumber})` 
+                  : 'Group / Master'}
+              </span>
+            </button>
+            <button 
+              type="button"
               onClick={() => setShowSettlePayment(true)}
               className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 bg-emerald-500 text-black rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/10 active:scale-95 border border-emerald-500/20"
             >
@@ -952,6 +974,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               />
             </div>
           </div>
+        )}
+
+        {showPrincipalManager && (
+          <PrincipalRoomManager
+            currentReservation={currentReservation}
+            onClose={() => setShowPrincipalManager(false)}
+          />
         )}
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8 custom-scrollbar">

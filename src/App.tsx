@@ -22,6 +22,9 @@ import { CorporateManagement } from './components/CorporateManagement';
 import { OperationsDashboard } from './components/OperationsDashboard';
 import { Finance } from './components/Finance';
 import { Reports } from './components/Reports';
+import { BreakfastList } from './components/BreakfastList';
+import { DSSGuestReport } from './components/DSSGuestReport';
+import { RoomStatusDashboard } from './components/RoomStatusDashboard';
 import { Notifications } from './components/Notifications';
 import { AuditLogs } from './components/AuditLogs';
 import { Tasks } from './components/Tasks';
@@ -158,6 +161,19 @@ function AppContent() {
             <Route path="/rooms" element={
               <PermissionGuard permission="manage_rooms" showError>
                 <Rooms />
+              </PermissionGuard>
+            } />
+            <Route path="/room-status" element={
+              <PermissionGuard permission="manage_rooms" showError>
+                <RoomStatusDashboard />
+              </PermissionGuard>
+            } />
+            <Route path="/breakfast-list" element={
+              <BreakfastList />
+            } />
+            <Route path="/dss-report" element={
+              <PermissionGuard permission="view_reports" showError>
+                <DSSGuestReport />
               </PermissionGuard>
             } />
             <Route path="/front-desk" element={
