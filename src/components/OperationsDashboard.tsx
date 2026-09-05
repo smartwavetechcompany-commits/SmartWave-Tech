@@ -27,11 +27,13 @@ import {
   X,
   Coffee,
   FileText,
-  LayoutGrid
+  LayoutGrid,
+  Receipt
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
 import { RoomStatusDashboard } from './RoomStatusDashboard';
+import { GuestFolio } from './GuestFolio';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -52,7 +54,8 @@ export function OperationsDashboard() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [opView, setOpView] = useState<'flow' | 'room_status' | 'breakfast' | 'dss'>('flow');
-  const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'checkouts' | 'inhouse'>('arrivals');
+  const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'due_checkouts' | 'checkouts' | 'inhouse'>('due_checkouts');
+  const [selectedFolioRes, setSelectedFolioRes] = useState<Reservation | null>(null);
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(format(new Date(), 'yyyy-MM-dd'));
   const [showAlerts, setShowAlerts] = useState<boolean>(() => {
@@ -459,16 +462,44 @@ export function OperationsDashboard() {
 
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  const arrivals = useMemo(() => reservations.filter(r => r.checkIn === today && r.status === 'pending'), [reservations, today]);
-  const checkins = useMemo(() => reservations.filter(r => r.checkIn === today && r.status === 'checked_in'), [reservations, today]);
-  const checkouts = useMemo(() => reservations.filter(r => (r.checkOut === today && (r.status === 'checked_in' || r.status === 'checked_out')) || (r.checkOut < today && r.status === 'checked_in')), [reservations, today]);
-  const inhouse = useMemo(() => reservations.filter(r => r.status === 'checked_in'), [reservations]);
+  // Arrivals: Pending or confirmed reservations scheduled to arrive today
+  const arrivals = useMemo(() => 
+    reservations.filter(r => r.checkIn === today && (r.status === 'pending' || r.status === 'confirmed')), 
+    [reservations, today]
+  );
+
+  // Check-ins: Guests who checked in today
+  const checkins = useMemo(() => 
+    reservations.filter(r => r.checkIn === today && r.status === 'checked_in'), 
+    [reservations, today]
+  );
+
+  // Due Check-outs: In-house guests scheduled to depart today or overdue, WHO HAVE NOT YET CHECKED OUT
+  // (status is still 'checked_in' and checkOut is today or in the past)
+  const dueCheckouts = useMemo(() => 
+    reservations.filter(r => r.status === 'checked_in' && r.checkOut <= today), 
+    [reservations, today]
+  );
+
+  // Completed Check-outs: Guests who HAVE actually checked out (status === 'checked_out')
+  // Under NO circumstances should an active checked-in guest appear here!
+  const checkouts = useMemo(() => 
+    reservations.filter(r => r.status === 'checked_out' && (r.checkOutDateTime?.startsWith(today) || r.checkOut === today)), 
+    [reservations, today]
+  );
+
+  // In-House: All active guests currently staying in the hotel
+  const inhouse = useMemo(() => 
+    reservations.filter(r => r.status === 'checked_in'), 
+    [reservations]
+  );
 
   const filteredData = () => {
     let data: Reservation[] = [];
     switch (activeTab) {
       case 'arrivals': data = arrivals; break;
       case 'checkins': data = checkins; break;
+      case 'due_checkouts': data = dueCheckouts; break;
       case 'checkouts': data = checkouts; break;
       case 'inhouse': data = inhouse; break;
     }
@@ -479,10 +510,47 @@ export function OperationsDashboard() {
   };
 
   const stats = [
-    { label: 'Arrivals', count: arrivals.length, icon: LogIn, color: 'text-blue-500', tab: 'arrivals' },
-    { label: 'Check-ins', count: checkins.length, icon: CheckCircle2, color: 'text-emerald-500', tab: 'checkins' },
-    { label: 'Check-outs', count: checkouts.length, icon: LogOut, color: 'text-amber-500', tab: 'checkouts' },
-    { label: 'In-house', count: inhouse.length, icon: BedDouble, color: 'text-indigo-500', tab: 'inhouse' },
+    { 
+      label: 'Arrivals', 
+      count: arrivals.length, 
+      icon: LogIn, 
+      color: 'text-blue-500', 
+      tab: 'arrivals' as const,
+      sublabel: 'Expected Today'
+    },
+    { 
+      label: 'Check-ins', 
+      count: checkins.length, 
+      icon: CheckCircle2, 
+      color: 'text-emerald-500', 
+      tab: 'checkins' as const,
+      sublabel: 'Checked In Today'
+    },
+    { 
+      label: 'Due Check-outs', 
+      count: dueCheckouts.length, 
+      icon: Clock, 
+      color: 'text-amber-500', 
+      tab: 'due_checkouts' as const,
+      sublabel: 'Pending Departure',
+      highlightBadge: dueCheckouts.length > 0 ? `${dueCheckouts.length} Pending` : undefined
+    },
+    { 
+      label: 'Check-outs', 
+      count: checkouts.length, 
+      icon: LogOut, 
+      color: 'text-zinc-400', 
+      tab: 'checkouts' as const,
+      sublabel: 'Departed Today'
+    },
+    { 
+      label: 'In-house', 
+      count: inhouse.length, 
+      icon: BedDouble, 
+      color: 'text-indigo-500', 
+      tab: 'inhouse' as const,
+      sublabel: 'Current Occupants'
+    },
   ];
 
   return (
@@ -697,27 +765,37 @@ export function OperationsDashboard() {
         );
       })()}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         {stats.map((stat) => (
           <button
             key={stat.tab}
             type="button"
-            onClick={() => setActiveTab(stat.tab as any)}
+            onClick={() => setActiveTab(stat.tab)}
             className={cn(
-               "bg-zinc-900 border p-3 sm:p-4 rounded-xl transition-all text-left group",
-               activeTab === stat.tab ? "border-emerald-500 ring-1 ring-emerald-500/20 shadow-lg shadow-emerald-500/5" : "border-zinc-800 hover:border-zinc-700"
+               "bg-zinc-900 border p-3 sm:p-4 rounded-xl transition-all text-left group relative",
+               activeTab === stat.tab 
+                 ? "border-emerald-500 ring-1 ring-emerald-500/20 shadow-lg shadow-emerald-500/5 bg-zinc-900/90" 
+                 : "border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850/50"
             )}
           >
             <div className="flex items-center justify-between mb-2">
               <div className={cn("p-1.5 rounded-lg bg-zinc-950", stat.color)}>
                 <stat.icon size={16} />
               </div>
-              {activeTab === stat.tab && (
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              )}
+              <div className="flex items-center gap-1.5">
+                {stat.highlightBadge && (
+                  <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                    {stat.highlightBadge}
+                  </span>
+                )}
+                {activeTab === stat.tab && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                )}
+              </div>
             </div>
             <div className="text-lg sm:text-2xl font-bold text-zinc-50 mb-0.5">{stat.count}</div>
-            <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{stat.label}</div>
+            <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">{stat.label}</div>
+            <div className="text-[8px] text-zinc-500 mt-0.5 font-medium truncate">{stat.sublabel}</div>
           </button>
         ))}
       </div>
@@ -1168,11 +1246,31 @@ export function OperationsDashboard() {
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-900/50">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-zinc-50 capitalize tracking-tight">{activeTab.replace('-', ' ')}</h2>
-            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] font-black rounded-full">
-              {filteredData().length}
-            </span>
+          <div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-zinc-50 tracking-tight">
+                {activeTab === 'arrivals' && 'Arrivals (Expected)'}
+                {activeTab === 'checkins' && 'Check-Ins (Today)'}
+                {activeTab === 'due_checkouts' && 'Due Check-Outs (Pending Departure)'}
+                {activeTab === 'checkouts' && 'Completed Check-Outs (Departed)'}
+                {activeTab === 'inhouse' && 'In-House Guests'}
+              </h2>
+              <span className={cn(
+                "px-2 py-0.5 text-[10px] font-black rounded-full",
+                activeTab === 'due_checkouts' && filteredData().length > 0
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  : "bg-zinc-800 text-zinc-400"
+              )}>
+                {filteredData().length}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              {activeTab === 'arrivals' && 'Guests scheduled to check in today who have not arrived yet'}
+              {activeTab === 'checkins' && 'Guests who have checked into the hotel today'}
+              {activeTab === 'due_checkouts' && 'In-house guests scheduled to depart today or overdue who have not yet checked out'}
+              {activeTab === 'checkouts' && 'Guests who have completed departure and checked out of the hotel'}
+              {activeTab === 'inhouse' && 'All guests currently occupying rooms'}
+            </p>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
@@ -1195,13 +1293,18 @@ export function OperationsDashboard() {
                 <th className="px-6 py-4 border-b border-zinc-800">Stay Period</th>
                 <th className="px-6 py-4 border-b border-zinc-800">Status</th>
                 <th className="px-6 py-4 border-b border-zinc-800">Balance</th>
+                <th className="px-6 py-4 border-b border-zinc-800 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {filteredData().length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">
-                    No {activeTab} found for today
+                  <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
+                    {activeTab === 'arrivals' && 'No arrivals expected for today'}
+                    {activeTab === 'checkins' && 'No check-ins recorded for today'}
+                    {activeTab === 'due_checkouts' && 'No guests are due for check-out at this time'}
+                    {activeTab === 'checkouts' && 'No completed check-outs for today'}
+                    {activeTab === 'inhouse' && 'No in-house guests currently'}
                   </td>
                 </tr>
               ) : (
@@ -1242,14 +1345,32 @@ export function OperationsDashboard() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className={cn(
-                        "inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                        res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                        res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
-                        res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
-                      )}>
-                        {res.status === 'checked_in' && <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />}
-                        {res.status.replace('_', ' ')}
+                      <div className="flex flex-col gap-1.5 items-start">
+                        <div className={cn(
+                          "inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
+                          res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
+                          res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
+                          res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
+                        )}>
+                          {res.status === 'checked_in' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                          {res.status.replace('_', ' ')}
+                        </div>
+                        {res.status === 'checked_in' && res.checkOut <= today && (
+                          <span className={cn(
+                            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border",
+                            res.checkOut < today
+                              ? "bg-red-500/15 text-red-400 border-red-500/30"
+                              : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                          )}>
+                            <Clock size={10} />
+                            {res.checkOut < today ? 'Overdue Departure' : 'Due Out Today'}
+                          </span>
+                        )}
+                        {res.status === 'checked_out' && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-zinc-800/80 text-zinc-400 border border-zinc-700/40">
+                            <CheckCircle2 size={10} className="text-emerald-400" /> Departed
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -1299,6 +1420,21 @@ export function OperationsDashboard() {
                         );
                       })()}
                     </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFolioRes(res)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95",
+                          res.status === 'checked_in' && res.checkOut <= today
+                            ? "bg-amber-500 hover:bg-amber-400 text-black font-extrabold"
+                            : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                        )}
+                      >
+                        <Receipt size={13} className={res.status === 'checked_in' && res.checkOut <= today ? 'text-black' : 'text-emerald-400'} />
+                        <span>{res.status === 'checked_in' && res.checkOut <= today ? 'Settle & Check Out' : 'Folio'}</span>
+                      </button>
+                    </td>
                   </motion.tr>
                 ))
               )}
@@ -1307,6 +1443,13 @@ export function OperationsDashboard() {
         </div>
       </div>
         </>
+      )}
+
+      {selectedFolioRes && (
+        <GuestFolio
+          reservation={selectedFolioRes}
+          onClose={() => setSelectedFolioRes(null)}
+        />
       )}
     </div>
   );

@@ -344,7 +344,7 @@ export function FrontDesk() {
         return res.checkIn === today && res.status === 'pending';
       }
       if (activeTab === 'departures') {
-        return res.checkOut === today && res.status === 'checked_in';
+        return res.checkOut <= today && res.status === 'checked_in';
       }
       if (activeTab === 'checked_in') {
         return res.status === 'checked_in';
@@ -3630,7 +3630,7 @@ export function FrontDesk() {
                         : "text-zinc-500 hover:text-zinc-300"
                     )}
                   >
-                    {tab === 'checked_in' ? 'In-House' : tab === 'checkin_history' ? 'Check-In History' : tab === 'checkout_history' ? 'Check-Out History' : tab}
+                    {tab === 'checked_in' ? 'In-House' : tab === 'departures' ? 'Due Check-Out' : tab === 'checkin_history' ? 'Check-In History' : tab === 'checkout_history' ? 'Check-Out History' : tab}
                   </button>
                 ))}
               </div>
