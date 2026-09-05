@@ -171,6 +171,20 @@ service cloud.firestore {
         }
       }
 
+      // Custom Roles & Permissions (RBAC)
+      match /customRoles/{roleId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId);
+        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+      }
+
+      // Active Sessions (Session Control Center)
+      match /sessions/{sessionId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId);
+        allow create, update: if isSuperAdmin() || isStaffOf(hotelId);
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+      }
+
       // Ledger entries are immutable and append-only audit logs.
       match /ledger/{entryId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId);

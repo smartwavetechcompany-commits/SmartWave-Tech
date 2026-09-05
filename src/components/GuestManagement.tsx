@@ -50,6 +50,8 @@ import { ConfirmModal } from './ConfirmModal';
 import { DigitalKeyModal } from './DigitalKeyModal';
 import { QrCode, Key as LucideKey } from 'lucide-react';
 import { transferToCityLedger } from '../services/ledgerService';
+import { Pagination } from './Pagination';
+import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -97,9 +99,23 @@ export function GuestManagement() {
   const [sortBy, setSortBy] = useState<'name' | 'ledgerBalance' | 'totalSpent' | 'totalStays'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [isLoading, setIsLoading] = useState(true);
-  const [visibleCount, setVisibleCount] = useState(24);
+  const [guestDateFilter, setGuestDateFilter] = useState<DateFilterValue>(() => ({ ...getDefaultDateFilter(), mode: 'all' }));
+  const [guestPage, setGuestPage] = useState(1);
+  const [guestPageSize, setGuestPageSize] = useState(24);
+
+  // History modal filters & pagination
+  const [resSearchQuery, setResSearchQuery] = useState('');
+  const [resDateFilter, setResDateFilter] = useState<DateFilterValue>(() => ({ ...getDefaultDateFilter(), mode: 'all' }));
+  const [resPage, setResPage] = useState(1);
+  const [resPageSize, setResPageSize] = useState(5);
+
+  const [histLedgerSearchQuery, setHistLedgerSearchQuery] = useState('');
+  const [histLedgerTypeFilter, setHistLedgerTypeFilter] = useState<'all' | 'credit' | 'debit'>('all');
+  const [histLedgerDateFilter, setHistLedgerDateFilter] = useState<DateFilterValue>(() => ({ ...getDefaultDateFilter(), mode: 'all' }));
+  const [histLedgerPage, setHistLedgerPage] = useState(1);
+  const [histLedgerPageSize, setHistLedgerPageSize] = useState(6);
+
   const [isSavingGuest, setIsSavingGuest] = useState(false);
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [reportFilter, setReportFilter] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd'),
@@ -222,28 +238,21 @@ export function GuestManagement() {
 
   // Reset pagination on filter changes
   useEffect(() => {
-    setVisibleCount(24);
-  }, [searchQuery, guestTypeFilter, balanceFilter, vipFilter, sortBy, sortOrder, dateRange]);
+    setGuestPage(1);
+  }, [searchQuery, guestTypeFilter, balanceFilter, vipFilter, sortBy, sortOrder, guestDateFilter]);
 
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-
+  // Reset history modal pagination and filters when viewing a different guest
   useEffect(() => {
-    const currentBottom = bottomRef.current;
-    if (!currentBottom) return;
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        setVisibleCount(prev => Math.min(prev + 24, guests.length));
-      }
-    }, {
-      rootMargin: '200px',
-    });
-
-    observer.observe(currentBottom);
-    return () => {
-      if (currentBottom) observer.unobserve(currentBottom);
-    };
-  }, [guests.length]);
+    if (viewingHistory) {
+      setResPage(1);
+      setResSearchQuery('');
+      setResDateFilter({ ...getDefaultDateFilter(), mode: 'all' });
+      setHistLedgerPage(1);
+      setHistLedgerSearchQuery('');
+      setHistLedgerTypeFilter('all');
+      setHistLedgerDateFilter({ ...getDefaultDateFilter(), mode: 'all' });
+    }
+  }, [viewingHistory]);
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -567,14 +576,8 @@ export function GuestManagement() {
       const matchesVip = vipFilter === 'all' || 
         (vipFilter === 'vip' ? (guest.tags || []).includes('VIP') : !(guest.tags || []).includes('VIP'));
 
-      // Date range filter
-      let matchesDate = true;
-      if (dateRange.start && dateRange.end) {
-        const guestDate = new Date(guest.createdAt || guest.lastStay || Date.now());
-        const start = startOfDay(new Date(dateRange.start));
-        const end = endOfDay(new Date(dateRange.end));
-        matchesDate = isWithinInterval(guestDate, { start, end });
-      }
+      // Date filter (matches day, month, year, custom range, or all time)
+      const matchesDate = matchesDateFilter(guest.createdAt || guest.lastStay || (guest as any).updatedAt, guestDateFilter);
 
       return matchesType && matchesBalance && matchesVip && matchesDate;
     }).sort((a, b) => {
@@ -593,11 +596,48 @@ export function GuestManagement() {
       }
       return sortOrder === 'desc' ? -result : result;
     });
-  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, dateRange, sortBy, sortOrder, guestStatsMap, guestLiveBalances]);
+  }, [guests, searchQuery, fuse, guestTypeFilter, balanceFilter, vipFilter, guestDateFilter, sortBy, sortOrder, guestStatsMap, guestLiveBalances]);
 
-  const visibleGuests = useMemo(() => {
-    return filteredGuests.slice(0, visibleCount);
-  }, [filteredGuests, visibleCount]);
+  const paginatedGuests = useMemo(() => {
+    const startIndex = (guestPage - 1) * guestPageSize;
+    return filteredGuests.slice(startIndex, startIndex + guestPageSize);
+  }, [filteredGuests, guestPage, guestPageSize]);
+
+  // Modal filtered reservations
+  const filteredGuestHistory = useMemo(() => {
+    return guestHistory.filter(res => {
+      const q = resSearchQuery.toLowerCase().trim();
+      const matchesSearch = !q || 
+        (res.roomNumber && String(res.roomNumber).toLowerCase().includes(q)) ||
+        (res.status && res.status.toLowerCase().includes(q)) ||
+        (res.paymentStatus && res.paymentStatus.toLowerCase().includes(q));
+      const matchesDate = matchesDateFilter(res.checkIn || res.createdAt, resDateFilter);
+      return matchesSearch && matchesDate;
+    }).sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
+  }, [guestHistory, resSearchQuery, resDateFilter]);
+
+  const paginatedGuestHistory = useMemo(() => {
+    const startIndex = (resPage - 1) * resPageSize;
+    return filteredGuestHistory.slice(startIndex, startIndex + resPageSize);
+  }, [filteredGuestHistory, resPage, resPageSize]);
+
+  // Modal filtered ledger
+  const filteredGuestLedger = useMemo(() => {
+    return guestLedger.filter(entry => {
+      const q = histLedgerSearchQuery.toLowerCase().trim();
+      const matchesSearch = !q ||
+        (entry.description && entry.description.toLowerCase().includes(q)) ||
+        (entry.category && entry.category.toLowerCase().includes(q));
+      const matchesType = histLedgerTypeFilter === 'all' || entry.type === histLedgerTypeFilter;
+      const matchesDate = matchesDateFilter(entry.timestamp, histLedgerDateFilter);
+      return matchesSearch && matchesType && matchesDate;
+    });
+  }, [guestLedger, histLedgerSearchQuery, histLedgerTypeFilter, histLedgerDateFilter]);
+
+  const paginatedGuestLedger = useMemo(() => {
+    const startIndex = (histLedgerPage - 1) * histLedgerPageSize;
+    return filteredGuestLedger.slice(startIndex, startIndex + histLedgerPageSize);
+  }, [filteredGuestLedger, histLedgerPage, histLedgerPageSize]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
@@ -770,82 +810,128 @@ export function GuestManagement() {
         })()}
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-3 mb-4 sm:mb-6">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
-          <input
-            type="text"
-            placeholder="Search by name, email, or phone..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={guestTypeFilter}
-            onChange={(e) => setGuestTypeFilter(e.target.value as any)}
-            className="bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none"
-          >
-            <option value="all">All Types</option>
-            <option value="individual">Individual</option>
-            <option value="corporate">Corporate</option>
-          </select>
-          <select
-            value={balanceFilter}
-            onChange={(e) => setBalanceFilter(e.target.value as any)}
-            className="bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none"
-          >
-            <option value="all">All Balances</option>
-            <option value="yes">Has Balance</option>
-            <option value="no">No Balance</option>
-          </select>
-          <select
-            value={vipFilter}
-            onChange={(e) => setVipFilter(e.target.value as any)}
-            className="bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-[11px] text-zinc-400 focus:outline-none"
-          >
-            <option value="all">All Status</option>
-            <option value="vip">VIP Only</option>
-            <option value="regular">Regular Only</option>
-          </select>
-          
-          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-2.5 py-1.5">
-            <span className="text-[9px] font-bold text-zinc-500 uppercase pr-1.5 border-r border-zinc-800">Sort</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent text-[11px] text-zinc-400 focus:outline-none cursor-pointer"
-            >
-              <option value="name">Name</option>
-              <option value="ledgerBalance">Balance</option>
-              <option value="totalSpent">Total Spent</option>
-              <option value="totalStays">Stays</option>
-            </select>
-            <button
-              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-              className="text-zinc-500 hover:text-emerald-500 transition-colors"
-            >
-              {sortOrder === 'asc' ? <TrendingUp size={12} /> : <ArrowDownRight size={12} />}
-            </button>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col gap-4 mb-4 sm:mb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
+            <input
+              type="text"
+              placeholder="Search guest by name, email, or phone..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setGuestPage(1);
+              }}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-8 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setGuestPage(1);
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1.5">
-            <Calendar size={12} className="text-zinc-500" />
-            <input 
-              type="date"
-              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[85px]"
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-            />
-            <span className="text-zinc-500 text-[9px]">-</span>
-            <input 
-              type="date"
-              className="bg-transparent text-[9px] text-zinc-50 focus:outline-none w-[85px]"
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={guestTypeFilter}
+              onChange={(e) => {
+                setGuestTypeFilter(e.target.value as any);
+                setGuestPage(1);
+              }}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-300 focus:outline-none cursor-pointer"
+            >
+              <option value="all" className="bg-zinc-900">All Types</option>
+              <option value="individual" className="bg-zinc-900">Individual</option>
+              <option value="corporate" className="bg-zinc-900">Corporate</option>
+            </select>
+            <select
+              value={balanceFilter}
+              onChange={(e) => {
+                setBalanceFilter(e.target.value as any);
+                setGuestPage(1);
+              }}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-300 focus:outline-none cursor-pointer"
+            >
+              <option value="all" className="bg-zinc-900">All Balances</option>
+              <option value="yes" className="bg-zinc-900">Has Balance</option>
+              <option value="no" className="bg-zinc-900">No Balance</option>
+            </select>
+            <select
+              value={vipFilter}
+              onChange={(e) => {
+                setVipFilter(e.target.value as any);
+                setGuestPage(1);
+              }}
+              className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-300 focus:outline-none cursor-pointer"
+            >
+              <option value="all" className="bg-zinc-900">All VIP Status</option>
+              <option value="vip" className="bg-zinc-900">VIP Only</option>
+              <option value="regular" className="bg-zinc-900">Regular Only</option>
+            </select>
+
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5">
+              <span className="text-[9px] font-bold text-zinc-500 uppercase pr-1.5 border-r border-zinc-800">Sort</span>
+              <select
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value as any);
+                  setGuestPage(1);
+                }}
+                className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
+              >
+                <option value="name" className="bg-zinc-900">Name</option>
+                <option value="ledgerBalance" className="bg-zinc-900">Balance</option>
+                <option value="totalSpent" className="bg-zinc-900">Total Spent</option>
+                <option value="totalStays" className="bg-zinc-900">Total Stays</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                className="text-zinc-400 hover:text-emerald-400 transition-colors ml-1"
+                title={sortOrder === 'asc' ? "Ascending order" : "Descending order"}
+              >
+                {sortOrder === 'asc' ? <TrendingUp size={13} /> : <ArrowDownRight size={13} />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-zinc-800/70">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Filter Date:</span>
+            <DateFilterControl
+              value={guestDateFilter}
+              onChange={(val) => {
+                setGuestDateFilter(val);
+                setGuestPage(1);
+              }}
             />
           </div>
+
+          {(searchQuery || guestTypeFilter !== 'all' || balanceFilter !== 'all' || vipFilter !== 'all' || guestDateFilter.mode !== 'all' || sortBy !== 'name' || sortOrder !== 'asc') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setGuestTypeFilter('all');
+                setBalanceFilter('all');
+                setVipFilter('all');
+                setSortBy('name');
+                setSortOrder('asc');
+                setGuestDateFilter({ ...getDefaultDateFilter(), mode: 'all' });
+                setGuestPage(1);
+              }}
+              className="text-xs text-zinc-400 hover:text-emerald-400 font-medium transition-colors"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -877,7 +963,7 @@ export function GuestManagement() {
               <p>No guest profiles found matching your criteria</p>
             </div>
           ) : (
-            visibleGuests.map((guest) => {
+            paginatedGuests.map((guest) => {
               const stats = guestStatsMap[guest.id] || { visitsCount: 0, calculatedDays: 0, totalSpentVal: 0 };
               const visitsCount = stats.visitsCount;
               const calculatedDays = stats.calculatedDays;
@@ -1100,12 +1186,20 @@ export function GuestManagement() {
               );
             })
           )}
-          {filteredGuests.length > visibleCount && (
-            <div ref={bottomRef} className="col-span-full h-8 flex items-center justify-center text-zinc-500 text-xs font-bold uppercase tracking-widest animate-pulse">
-              Loading more guests...
-            </div>
-          )}
         </AnimatePresence>
+      </div>
+
+      {/* Guest Cards Pagination */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden mt-4">
+        <Pagination
+          currentPage={guestPage}
+          totalItems={filteredGuests.length}
+          pageSize={guestPageSize}
+          onPageChange={setGuestPage}
+          onPageSizeChange={setGuestPageSize}
+          pageSizeOptions={[12, 24, 48, 96]}
+          itemLabel="guests"
+        />
       </div>
 
       {/* History Modal */}
@@ -1237,16 +1331,49 @@ export function GuestManagement() {
               </div>
 
               {historyTab === 'reservations' ? (
-                <>
-                  <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Recent Reservations</h3>
-                  {guestHistory.length === 0 ? (
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-800/70">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Reservations</h3>
+                      <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded-full font-bold">
+                        {filteredGuestHistory.length}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
+                        <input
+                          type="text"
+                          placeholder="Room or status..."
+                          value={resSearchQuery}
+                          onChange={(e) => {
+                            setResSearchQuery(e.target.value);
+                            setResPage(1);
+                          }}
+                          className="bg-zinc-950 border border-zinc-800 rounded-lg pl-7 pr-3 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-emerald-500/50 w-32 sm:w-36"
+                        />
+                      </div>
+
+                      <DateFilterControl
+                        compact
+                        value={resDateFilter}
+                        onChange={(val) => {
+                          setResDateFilter(val);
+                          setResPage(1);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {filteredGuestHistory.length === 0 ? (
                     <div className="text-center py-10 text-zinc-500 bg-zinc-950 rounded-xl border border-dashed border-zinc-800">
                       <Clock size={24} className="mx-auto mb-2 opacity-20" />
-                      <p className="text-xs">No reservation history found</p>
+                      <p className="text-xs">No reservations found matching filters</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {guestHistory.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map(res => (
+                      {paginatedGuestHistory.map(res => (
                         <div key={res.id} className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex items-center justify-between group hover:border-zinc-700 transition-all">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-zinc-900 rounded-lg flex items-center justify-center text-emerald-500 border border-zinc-800">
@@ -1307,18 +1434,83 @@ export function GuestManagement() {
                       ))}
                     </div>
                   )}
-                </>
+
+                  {filteredGuestHistory.length > 0 && (
+                    <Pagination
+                      compact
+                      currentPage={resPage}
+                      totalItems={filteredGuestHistory.length}
+                      pageSize={resPageSize}
+                      onPageChange={setResPage}
+                      onPageSizeChange={setResPageSize}
+                      pageSizeOptions={[5, 10, 20]}
+                      itemLabel="reservations"
+                    />
+                  )}
+                </div>
               ) : (
-                <>
-                  <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Transaction History</h3>
-                  {guestLedger.length === 0 ? (
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-800/70">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Transactions</h3>
+                      <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded-full font-bold">
+                        {filteredGuestLedger.length}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
+                        <input
+                          type="text"
+                          placeholder="Search description..."
+                          value={histLedgerSearchQuery}
+                          onChange={(e) => {
+                            setHistLedgerSearchQuery(e.target.value);
+                            setHistLedgerPage(1);
+                          }}
+                          className="bg-zinc-950 border border-zinc-800 rounded-lg pl-7 pr-3 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-emerald-500/50 w-32 sm:w-36"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 text-[10px]">
+                        {(['all', 'credit', 'debit'] as const).map(type => (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => {
+                              setHistLedgerTypeFilter(type);
+                              setHistLedgerPage(1);
+                            }}
+                            className={cn(
+                              "px-2 py-0.5 rounded capitalize font-medium transition-all",
+                              histLedgerTypeFilter === type ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-500 hover:text-zinc-300"
+                            )}
+                          >
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+
+                      <DateFilterControl
+                        compact
+                        value={histLedgerDateFilter}
+                        onChange={(val) => {
+                          setHistLedgerDateFilter(val);
+                          setHistLedgerPage(1);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {filteredGuestLedger.length === 0 ? (
                     <div className="text-center py-10 text-zinc-500 bg-zinc-950 rounded-xl border border-dashed border-zinc-800">
                       <CreditCard size={24} className="mx-auto mb-2 opacity-20" />
-                      <p className="text-xs">No transactions found</p>
+                      <p className="text-xs">No transactions found matching filters</p>
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {guestLedger.map(entry => (
+                      {paginatedGuestLedger.map(entry => (
                         <div key={entry.id} className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 flex items-center justify-between">
                           <div>
                             <div className="text-xs font-bold text-zinc-50 leading-tight">{entry.description}</div>
@@ -1339,7 +1531,20 @@ export function GuestManagement() {
                       ))}
                     </div>
                   )}
-                </>
+
+                  {filteredGuestLedger.length > 0 && (
+                    <Pagination
+                      compact
+                      currentPage={histLedgerPage}
+                      totalItems={filteredGuestLedger.length}
+                      pageSize={histLedgerPageSize}
+                      onPageChange={setHistLedgerPage}
+                      onPageSizeChange={setHistLedgerPageSize}
+                      pageSizeOptions={[6, 12, 24]}
+                      itemLabel="transactions"
+                    />
+                  )}
+                </div>
               )}
             </div>
             

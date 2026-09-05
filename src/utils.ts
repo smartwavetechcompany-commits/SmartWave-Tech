@@ -170,7 +170,9 @@ export function safeStringify(obj: any): string {
 }
 
 export function formatCurrency(amount: number, currency: 'NGN' | 'USD' = 'NGN', exchangeRate: number = 1500) {
-  const value = currency === 'USD' ? amount / exchangeRate : amount;
+  const safeAmount = typeof amount === 'number' && !isNaN(amount) && isFinite(amount) ? amount : 0;
+  const safeRate = typeof exchangeRate === 'number' && !isNaN(exchangeRate) && exchangeRate > 0 ? exchangeRate : 1500;
+  const value = currency === 'USD' ? safeAmount / safeRate : safeAmount;
   
   if (currency === 'NGN') {
     return '₦' + new Intl.NumberFormat('en-NG', {

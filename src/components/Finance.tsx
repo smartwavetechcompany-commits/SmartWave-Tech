@@ -49,6 +49,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { Pagination } from './Pagination';
+import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 
 export function Finance() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -63,8 +65,16 @@ export function Finance() {
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [methodFilter, setMethodFilter] = useState('all');
-  const [timeRange, setTimeRange] = useState<'today' | 'month' | 'all' | 'custom'>('month');
-  const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
+  const [transactionDateFilter, setTransactionDateFilter] = useState<DateFilterValue>(() => getDefaultDateFilter());
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [transactionPageSize, setTransactionPageSize] = useState(15);
+
+  // City Ledger / Guest Accounts state
+  const [ledgerSearchQuery, setLedgerSearchQuery] = useState('');
+  const [ledgerDateFilter, setLedgerDateFilter] = useState<DateFilterValue>(() => ({ ...getDefaultDateFilter(), mode: 'all' }));
+  const [ledgerBalanceType, setLedgerBalanceType] = useState<'all' | 'debt' | 'credit'>('all');
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerPageSize, setLedgerPageSize] = useState(10);
   const [newRecord, setNewRecord] = useState({
     description: '',
     amount: 0,
@@ -777,28 +787,28 @@ export function Finance() {
     }
   };
 
-  const filteredRecords = records.filter(r => {
-    const matchesSearch = fuzzySearch(r.description || '', searchQuery) || 
-                         fuzzySearch(r.category || '', searchQuery);
-    const matchesType = filterType === 'all' || r.type === filterType;
-    const matchesCategory = categoryFilter === 'all' || r.category === categoryFilter;
-    const matchesMethod = methodFilter === 'all' || r.paymentMethod === methodFilter;
-    
-    let matchesTime = true;
-    if (timeRange === 'today') matchesTime = isToday(new Date(r.timestamp));
-    if (timeRange === 'month') {
-      const start = startOfMonth(new Date());
-      const end = endOfMonth(new Date());
-      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
-    }
-    if (timeRange === 'custom' && customDateRange.start && customDateRange.end) {
-      const start = startOfDay(new Date(customDateRange.start));
-      const end = endOfDay(new Date(customDateRange.end));
-      matchesTime = isWithinInterval(new Date(r.timestamp), { start, end });
-    }
+  const filteredRecords = useMemo(() => {
+    return records.filter(r => {
+      const q = searchQuery.trim().toLowerCase();
+      const matchesSearch = !q || 
+        fuzzySearch(r.description || '', q) || 
+        fuzzySearch(r.category || '', q) ||
+        fuzzySearch(r.paymentMethod || '', q) ||
+        String(r.amount).includes(q) ||
+        (r.id && r.id.toLowerCase().includes(q));
+      const matchesType = filterType === 'all' || r.type === filterType;
+      const matchesCategory = categoryFilter === 'all' || r.category === categoryFilter;
+      const matchesMethod = methodFilter === 'all' || r.paymentMethod === methodFilter;
+      const matchesTime = matchesDateFilter(r.timestamp, transactionDateFilter);
 
-    return matchesSearch && matchesType && matchesCategory && matchesMethod && matchesTime;
-  });
+      return matchesSearch && matchesType && matchesCategory && matchesMethod && matchesTime;
+    });
+  }, [records, searchQuery, filterType, categoryFilter, methodFilter, transactionDateFilter]);
+
+  const paginatedRecords = useMemo(() => {
+    const start = (transactionPage - 1) * transactionPageSize;
+    return filteredRecords.slice(start, start + transactionPageSize);
+  }, [filteredRecords, transactionPage, transactionPageSize]);
 
   const totalIncome = filteredRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
   const totalExpense = filteredRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
@@ -816,14 +826,36 @@ export function Finance() {
     { name: 'Expense', value: totalExpense, color: '#ef4444' }
   ];
 
-  const filteredLedger = guests.filter(g => {
-    const bal = getGuestLiveBalance(g);
-    return Math.abs(bal) > 0.01 && (
-      fuzzySearch(g.name || '', searchQuery) || 
-      fuzzySearch(g.email || '', searchQuery) || 
-      fuzzySearch(g.phone || '', searchQuery)
-    );
-  });
+  const filteredLedger = useMemo(() => {
+    return guests.filter(g => {
+      const bal = getGuestLiveBalance(g);
+      const hasBalance = Math.abs(bal) > 0.01;
+      if (!hasBalance) return false;
+
+      if (ledgerBalanceType === 'debt' && bal <= 0.01) return false;
+      if (ledgerBalanceType === 'credit' && bal >= -0.01) return false;
+
+      const q = ledgerSearchQuery.trim().toLowerCase();
+      const matchesSearch = !q || 
+        fuzzySearch(g.name || '', q) || 
+        fuzzySearch(g.email || '', q) || 
+        fuzzySearch(g.phone || '', q);
+
+      if (!matchesSearch) return false;
+
+      const dateField = (g as any).createdAt || (g as any).created_at || (g as any).lastStay || (g as any).updatedAt;
+      if (ledgerDateFilter.mode !== 'all' && dateField) {
+        if (!matchesDateFilter(dateField, ledgerDateFilter)) return false;
+      }
+
+      return true;
+    });
+  }, [guests, getGuestLiveBalance, ledgerBalanceType, ledgerSearchQuery, ledgerDateFilter]);
+
+  const paginatedLedger = useMemo(() => {
+    const start = (ledgerPage - 1) * ledgerPageSize;
+    return filteredLedger.slice(start, start + ledgerPageSize);
+  }, [filteredLedger, ledgerPage, ledgerPageSize]);
 
   const handleExport = () => {
     if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
@@ -999,10 +1031,13 @@ export function Finance() {
                       {(['all', 'income', 'expense'] as const).map((type) => (
                         <button
                           key={type}
-                          onClick={() => setFilterType(type)}
+                          onClick={() => {
+                            setFilterType(type);
+                            setTransactionPage(1);
+                          }}
                           className={cn(
                             "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
-                            filterType === type ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-300"
+                            filterType === type ? "bg-zinc-800 text-zinc-50 font-bold" : "text-zinc-500 hover:text-zinc-300"
                           )}
                         >
                           {type}
@@ -1010,85 +1045,93 @@ export function Finance() {
                       ))}
                     </div>
                   </div>
-                  <div className="relative w-full md:w-64">
+                  <div className="relative w-full md:w-72">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
                     <input
                       type="text"
-                      placeholder="Search transactions..."
+                      placeholder="Search transactions, ref, amount..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setTransactionPage(1);
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-8 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setTransactionPage(1);
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
-                    <Filter size={14} className="text-zinc-500" />
-                    <select
-                      value={categoryFilter}
-                      onChange={(e) => setCategoryFilter(e.target.value)}
-                      className="bg-transparent text-xs text-zinc-400 focus:outline-none"
-                    >
-                      <option value="all">All Categories</option>
-                      {[...categories.income, ...categories.expense].map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/60">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <DateFilterControl
+                      value={transactionDateFilter}
+                      onChange={(val) => {
+                        setTransactionDateFilter(val);
+                        setTransactionPage(1);
+                      }}
+                    />
 
-                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
-                    <CreditCard size={14} className="text-zinc-500" />
-                    <select
-                      value={methodFilter}
-                      onChange={(e) => setMethodFilter(e.target.value)}
-                      className="bg-transparent text-xs text-zinc-400 focus:outline-none"
-                    >
-                      <option value="all">All Methods</option>
-                      <option value="cash">Cash</option>
-                      <option value="card">Card</option>
-                      <option value="transfer">Bank Transfer</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
-                    <Calendar size={14} className="text-zinc-500" />
-                    <select
-                      value={timeRange}
-                      onChange={(e) => setTimeRange(e.target.value as any)}
-                      className="bg-transparent text-xs text-zinc-400 focus:outline-none"
-                    >
-                      <option value="today">Today</option>
-                      <option value="month">This Month</option>
-                      <option value="all">All Time</option>
-                      <option value="custom">Custom Range</option>
-                    </select>
-                  </div>
-
-                  {timeRange === 'custom' && (
-                    <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
-                      <div className="relative flex items-center gap-1">
-                        <Calendar size={12} className="text-emerald-500" />
-                        <input 
-                          type="date"
-                          className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
-                          style={{ colorScheme: 'dark' }}
-                          value={customDateRange.start}
-                          onChange={(e) => setCustomDateRange({ ...customDateRange, start: e.target.value })}
-                        />
-                      </div>
-                      <span className="text-zinc-500 text-[10px]">-</span>
-                      <div className="relative flex items-center gap-1">
-                        <Calendar size={12} className="text-emerald-500" />
-                        <input 
-                          type="date"
-                          className="bg-transparent text-[10px] text-zinc-50 focus:outline-none appearance-none"
-                          style={{ colorScheme: 'dark' }}
-                          value={customDateRange.end}
-                          onChange={(e) => setCustomDateRange({ ...customDateRange, end: e.target.value })}
-                        />
-                      </div>
+                    <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5">
+                      <Filter size={14} className="text-zinc-500" />
+                      <select
+                        value={categoryFilter}
+                        onChange={(e) => {
+                          setCategoryFilter(e.target.value);
+                          setTransactionPage(1);
+                        }}
+                        className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
+                      >
+                        <option value="all" className="bg-zinc-900 text-zinc-200">All Categories</option>
+                        {[...categories.income, ...categories.expense].map(cat => (
+                          <option key={cat} value={cat} className="bg-zinc-900 text-zinc-200">{cat}</option>
+                        ))}
+                      </select>
                     </div>
+
+                    <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5">
+                      <CreditCard size={14} className="text-zinc-500" />
+                      <select
+                        value={methodFilter}
+                        onChange={(e) => {
+                          setMethodFilter(e.target.value);
+                          setTransactionPage(1);
+                        }}
+                        className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
+                      >
+                        <option value="all" className="bg-zinc-900 text-zinc-200">All Methods</option>
+                        <option value="cash" className="bg-zinc-900 text-zinc-200">Cash</option>
+                        <option value="card" className="bg-zinc-900 text-zinc-200">Card</option>
+                        <option value="transfer" className="bg-zinc-900 text-zinc-200">Bank Transfer</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {(searchQuery || filterType !== 'all' || categoryFilter !== 'all' || methodFilter !== 'all' || transactionDateFilter.mode !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery('');
+                        setFilterType('all');
+                        setCategoryFilter('all');
+                        setMethodFilter('all');
+                        setTransactionDateFilter(getDefaultDateFilter());
+                        setTransactionPage(1);
+                      }}
+                      className="text-xs text-zinc-400 hover:text-emerald-400 font-medium transition-colors"
+                    >
+                      Reset Filters
+                    </button>
                   )}
                 </div>
               </div>
@@ -1107,45 +1150,162 @@ export function Finance() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {filteredRecords.map((record) => (
-                      <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-zinc-50">{new Date(record.timestamp).toLocaleDateString()}</div>
-                          <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
+                    {filteredRecords.length === 0 ? (
+                      <tr>
+                        <td colSpan={(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') ? 6 : 5} className="px-6 py-12 text-center text-zinc-500 italic">
+                          No transactions found matching the selected filters.
                         </td>
-                        <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">{record.category}</span>
-                        </td>
-                        <td className="px-6 py-4 text-xs text-zinc-500 capitalize">{record.paymentMethod}</td>
-                        <td className={cn("px-6 py-4 text-right font-bold text-sm", record.type === 'income' ? "text-emerald-500" : "text-red-500")}>
-                          {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
-                        </td>
-                        {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
-                          <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={() => handleDeleteTransaction(record.id, record.description, record.amount)}
-                              className="p-2 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 rounded-lg transition-colors"
-                              title="Delete Transaction"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </td>
-                        )}
                       </tr>
-                    ))}
+                    ) : (
+                      paginatedRecords.map((record) => (
+                        <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-zinc-50">{new Date(record.timestamp).toLocaleDateString()}</div>
+                            <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
+                          <td className="px-6 py-4">
+                            <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">{record.category}</span>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-zinc-500 capitalize">{record.paymentMethod}</td>
+                          <td className={cn("px-6 py-4 text-right font-bold text-sm", record.type === 'income' ? "text-emerald-500" : "text-red-500")}>
+                            {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
+                          </td>
+                          {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                            <td className="px-6 py-4 text-right">
+                              <button
+                                onClick={() => handleDeleteTransaction(record.id, record.description, record.amount)}
+                                className="p-2 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 rounded-lg transition-colors"
+                                title="Delete Transaction"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
+
+              {/* Transactions Pagination */}
+              <Pagination
+                currentPage={transactionPage}
+                totalItems={filteredRecords.length}
+                pageSize={transactionPageSize}
+                onPageChange={setTransactionPage}
+                onPageSizeChange={setTransactionPageSize}
+                pageSizeOptions={[10, 15, 25, 50, 100]}
+                itemLabel="transactions"
+              />
             </div>
           )}
 
           {activeTab === 'ledger' && (
             <div className="space-y-6">
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                <div className="p-6 border-b border-zinc-800">
-                  <h3 className="font-bold text-zinc-50">Guest Accounts (City Ledger)</h3>
-                  <p className="text-xs text-zinc-500">Manage outstanding balances and credits for individual guests</p>
+                <div className="p-6 border-b border-zinc-800 flex flex-col gap-4">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-bold text-zinc-50">Guest Accounts (City Ledger)</h3>
+                      <p className="text-xs text-zinc-500">Manage outstanding balances and credits for individual guests</p>
+                    </div>
+                    <div className="relative w-full md:w-72">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                      <input
+                        type="text"
+                        placeholder="Search guest by name, phone, email..."
+                        value={ledgerSearchQuery}
+                        onChange={(e) => {
+                          setLedgerSearchQuery(e.target.value);
+                          setLedgerPage(1);
+                        }}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-8 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      />
+                      {ledgerSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLedgerSearchQuery('');
+                            setLedgerPage(1);
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/60">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLedgerBalanceType('all');
+                            setLedgerPage(1);
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg font-medium transition-all",
+                            ledgerBalanceType === 'all' ? "bg-zinc-800 text-zinc-100 font-bold" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          All Balances
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLedgerBalanceType('debt');
+                            setLedgerPage(1);
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg font-medium transition-all",
+                            ledgerBalanceType === 'debt' ? "bg-red-500/20 text-red-400 border border-red-500/30 font-bold" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          Debtors Only
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLedgerBalanceType('credit');
+                            setLedgerPage(1);
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg font-medium transition-all",
+                            ledgerBalanceType === 'credit' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          Credits Only
+                        </button>
+                      </div>
+
+                      <DateFilterControl
+                        value={ledgerDateFilter}
+                        onChange={(val) => {
+                          setLedgerDateFilter(val);
+                          setLedgerPage(1);
+                        }}
+                      />
+                    </div>
+
+                    {(ledgerSearchQuery || ledgerBalanceType !== 'all' || ledgerDateFilter.mode !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLedgerSearchQuery('');
+                          setLedgerBalanceType('all');
+                          setLedgerDateFilter({ ...getDefaultDateFilter(), mode: 'all' });
+                          setLedgerPage(1);
+                        }}
+                        className="text-xs text-zinc-400 hover:text-emerald-400 font-medium transition-colors"
+                      >
+                        Reset Filters
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
@@ -1159,9 +1319,9 @@ export function Finance() {
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
                       {filteredLedger.length === 0 ? (
-                        <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No guests with outstanding balances</td></tr>
+                        <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No guests with outstanding balances found</td></tr>
                       ) : (
-                        filteredLedger.map((guest) => (
+                        paginatedLedger.map((guest) => (
                           <tr key={guest.id} className="hover:bg-zinc-800/50 transition-colors">
                             <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{guest.name}</td>
                             <td className="px-6 py-4">
@@ -1208,6 +1368,17 @@ export function Finance() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* City Ledger Pagination */}
+                <Pagination
+                  currentPage={ledgerPage}
+                  totalItems={filteredLedger.length}
+                  pageSize={ledgerPageSize}
+                  onPageChange={setLedgerPage}
+                  onPageSizeChange={setLedgerPageSize}
+                  pageSizeOptions={[10, 20, 50]}
+                  itemLabel="guest accounts"
+                />
               </div>
 
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">

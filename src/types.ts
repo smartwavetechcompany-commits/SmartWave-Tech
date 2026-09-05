@@ -21,15 +21,37 @@ export interface CustomRole {
   permissions: string[];
   inheritsFrom?: StaffRole;
   hotelId: string;
+  isSystem?: boolean;
+  status?: 'active' | 'disabled' | 'archived';
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
+export interface ActiveSession {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName?: string;
+  userRole?: string;
+  hotelId: string;
+  device: string;
+  browser: string;
+  os: string;
+  ip?: string;
+  loginAt: string;
+  lastActivityAt: string;
+  status: 'active' | 'revoked';
 }
 
 export interface UserProfile {
   uid: string;
   email: string;
+  username?: string;
   role: UserRole;
   hotelId: string;
   createdAt: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'suspended';
   displayName?: string;
   permissions?: string[]; // Granular permissions
   staffRole?: StaffRole;
@@ -38,7 +60,26 @@ export interface UserProfile {
   subscriptionExpiry?: string;
   hasCompletedOnboarding?: boolean;
   department?: string; // Added for department-based tracking and navigation
+  employeeId?: string;
+  phoneNumber?: string;
   initialPassword?: string | null;
+  temporaryPassword?: string | null;
+  forcePasswordChange?: boolean;
+  passwordChangedAt?: string;
+  passwordChangedBy?: string;
+  passwordChangeDeviceInfo?: {
+    userAgent?: string;
+    platform?: string;
+    screen?: string;
+    browser?: string;
+  };
+  forceLogout?: boolean;
+  isLocked?: boolean;
+  lockedReason?: string;
+  lastLoginAt?: string;
+  lastLoginIp?: string;
+  lastLoginDevice?: string;
+  lastActivityAt?: string;
   updatedAt?: string;
 }
 

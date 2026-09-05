@@ -35,6 +35,8 @@ import { Toaster } from 'sonner';
 import { SubscriptionExpiredPage } from './components/SubscriptionExpiredPage';
 import { OnboardingTour } from './components/OnboardingTour';
 import { CommandPalette } from './components/CommandPalette';
+import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal';
+import { AccountSuspendedModal } from './components/AccountSuspendedModal';
 
 function AppContent() {
   const { user, loading, profile, isSubscriptionActive, isOffline, retryConnection } = useAuth();
@@ -70,6 +72,26 @@ function AppContent() {
       <>
         <Toaster position="top-right" theme="dark" richColors />
         <AuthPage />
+      </>
+    );
+  }
+
+  // If user is suspended, lock them out immediately
+  if (profile.status === 'suspended') {
+    return (
+      <>
+        <Toaster position="top-right" theme="dark" richColors />
+        <AccountSuspendedModal />
+      </>
+    );
+  }
+
+  // If user must change password on first login or after admin reset, lock into modal
+  if (profile.forcePasswordChange) {
+    return (
+      <>
+        <Toaster position="top-right" theme="dark" richColors />
+        <ForcePasswordChangeModal />
       </>
     );
   }

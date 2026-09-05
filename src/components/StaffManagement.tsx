@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, doc, setDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { db, auth, handleFirestoreError } from '../firebase';
+import { collection, query, where, doc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
-import { UserProfile, StaffRole, OperationType } from '../types';
+import { UserProfile, StaffRole, OperationType, CustomRole, UserRole } from '../types';
 import { hasPermission } from '../utils/permissions';
+import { RoleBuilderModal } from './RoleBuilderModal';
+import { SessionControlCenter } from './SessionControlCenter';
+import { AccountCreationSummaryModal, UserSummaryData } from './AccountCreationSummaryModal';
+import { AdminResetPasswordModal } from './AdminResetPasswordModal';
 import { 
   UserPlus, 
   Search, 
@@ -17,73 +20,130 @@ import {
   CheckCircle2,
   XCircle,
   Lock,
-  ChevronRight,
   RefreshCw,
-  Download
+  Download,
+  Users,
+  KeyRound,
+  ShieldAlert,
+  Laptop,
+  Plus,
+  Edit2,
+  ChevronLeft,
+  ChevronRight,
+  UserCheck,
+  UserX,
+  Phone,
+  Building,
+  Hash
 } from 'lucide-react';
 import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
-const AVAILABLE_ROLES = [
-  { id: 'view_reports', label: 'View Reports' },
-  { id: 'export_reports', label: 'Export Reports' },
-  { id: 'manage_staff', label: 'Manage Staff' },
-  { id: 'manage_rooms', label: 'Manage Rooms' },
-  { id: 'create_room_blocks', label: 'Block Rooms' },
-  { id: 'remove_room_blocks', label: 'Unblock Rooms' },
-  { id: 'edit_guest_profiles', label: 'Guest Profiles' },
-  { id: 'process_payments', label: 'Payments' },
-  { id: 'view_financial_records', label: 'Finance Records' },
-  { id: 'view_activity_logs', label: 'Activity Logs' },
-  { id: 'manage_roles', label: 'Roles/Permissions' },
-  { id: 'edit_hotel_settings', label: 'Hotel Settings' },
-  { id: 'nightly_audit', label: 'Nightly Audit' },
-  { id: 'access_front_desk', label: 'Front Desk Access' },
-  { id: 'manage_kitchen', label: 'Kitchen & F&B' },
-  { id: 'manage_inventory', label: 'Inventory Access' },
-  { id: 'manage_maintenance', label: 'Maintenance Access' },
-  { id: 'manage_corporate', label: 'Corporate Accounts' },
-];
-
-const BASE_ROLES = [
-  { id: 'hotelAdmin', label: 'Admin (Full Access)' },
-  { id: 'manager', label: 'Manager' },
+const BASE_ROLES: { id: StaffRole; label: string }[] = [
   { id: 'frontDesk', label: 'Front Desk' },
   { id: 'housekeeper', label: 'Housekeeper' },
   { id: 'maintenance', label: 'Maintenance' },
   { id: 'accountant', label: 'Accountant' },
+  { id: 'manager', label: 'Manager' },
+  { id: 'admin', label: 'Hotel Administrator' },
+];
+
+const AVAILABLE_PERMISSIONS = [
+  { id: 'access_front_desk', label: 'Front Desk Access' },
+  { id: 'manage_rooms', label: 'Manage Rooms & Status' },
+  { id: 'create_room_blocks', label: 'Block Rooms' },
+  { id: 'remove_room_blocks', label: 'Unblock Rooms' },
+  { id: 'edit_guest_profiles', label: 'Guest Management' },
+  { id: 'process_payments', label: 'Process Payments' },
+  { id: 'view_financial_records', label: 'Financial Records' },
+  { id: 'post_charges', label: 'Post Charges to Folio' },
+  { id: 'audit_ledger', label: 'Audit Ledger' },
+  { id: 'issue_refunds', label: 'Issue Refunds' },
+  { id: 'nightly_audit', label: 'Nightly Audit' },
+  { id: 'manage_kitchen', label: 'Kitchen & F&B' },
+  { id: 'manage_inventory', label: 'Inventory Access' },
+  { id: 'manage_maintenance', label: 'Maintenance Access' },
+  { id: 'manage_corporate', label: 'Corporate Accounts' },
+  { id: 'manage_staff', label: 'Staff Management' },
+  { id: 'manage_roles', label: 'Roles & Access Control' },
+  { id: 'view_reports', label: 'View Reports' },
+  { id: 'export_reports', label: 'Export Reports' },
+  { id: 'edit_hotel_settings', label: 'Hotel Settings' },
+  { id: 'view_activity_logs', label: 'Activity Logs' },
+];
+
+const DEPARTMENTS = [
+  'Front Office',
+  'Housekeeping',
+  'Food & Beverage',
+  'Maintenance / Engineering',
+  'Finance & Accounting',
+  'Sales & Marketing',
+  'Human Resources',
+  'Management',
+  'Security'
 ];
 
 export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) {
-  const { hotel: authHotel, profile } = useAuth();
+  const { hotel: authHotel, profile, customRoles } = useAuth();
   const hotelId = propHotelId || authHotel?.id;
+
+  const [activeTab, setActiveTab] = useState<'members' | 'roles' | 'sessions'>('members');
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [isAddingStaff, setIsAddingStaff] = useState(false);
+  const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
+  const [isCreatingRole, setIsCreatingRole] = useState(false);
   const [editingPermissions, setEditingPermissions] = useState<UserProfile | null>(null);
+  const [resettingUser, setResettingUser] = useState<UserProfile | null>(null);
+  const [summaryData, setSummaryData] = useState<UserSummaryData | null>(null);
+
+  // Pagination & Filtering state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended'>('all');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+
+  // New staff form state
   const [newStaff, setNewStaff] = useState({
+    fullName: '',
     email: '',
-    displayName: '',
-    password: '',
-    role: 'frontDesk' as any,
-    roles: [] as string[],
+    phone: '',
+    department: 'Front Office',
+    employeeId: '',
+    roleType: 'base' as 'base' | 'custom',
+    baseRole: 'frontDesk' as StaffRole,
+    customRoleId: '',
+    forcePasswordChange: true,
+    temporaryPassword: '',
+    overrides: [] as string[],
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [isResetting, setIsResetting] = useState<string | null>(null);
-  const [pendingRoleChange, setPendingRoleChange] = useState<{
-    member: UserProfile;
-    roleId: StaffRole;
-    roleLabel: string;
-    isAdding: boolean;
-  } | null>(null);
+  const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
+  const [showConfirmSuspend, setShowConfirmSuspend] = useState<{ member: UserProfile; willSuspend: boolean } | null>(null);
+
+  // Generate random strong password
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*';
+    let pwd = '';
+    for (let i = 0; i < 10; i++) {
+      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewStaff(prev => ({ ...prev, temporaryPassword: pwd }));
+  };
 
   useEffect(() => {
-    setHasPermissionError(false);
-  }, [profile?.uid, hotelId]);
+    if (isAddingStaff && !newStaff.temporaryPassword) {
+      generateRandomPassword();
+    }
+  }, [isAddingStaff]);
 
+  // Real-time Staff Listener
   useEffect(() => {
     if (!hotelId || !profile || hasPermissionError) return;
-    
+
     const q = query(collection(db, 'users'), where('hotelId', '==', hotelId));
     const unsub = onSnapshot(q, (snap) => {
       setStaff(snap.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
@@ -97,40 +157,63 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     return () => unsub();
   }, [hotelId, profile?.uid, hasPermissionError]);
 
-  const addStaff = async (e: React.FormEvent) => {
+  // Add staff submission
+  const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotelId) return;
 
-    // Check user permissions before submitting
-    if (!hasPermission(profile, 'manage_staff') && !hasPermission(profile, 'manage_roles')) {
-      toast.error("You do not have the required permissions to add staff members.");
+    if (!hasPermission(profile, 'manage_staff', customRoles) && !hasPermission(profile, 'manage_roles', customRoles)) {
+      toast.error("You do not have permission to add staff members.");
       return;
     }
 
-    const tempUid = `staff_${Math.random().toString(36).substr(2, 9)}`;
-    const staffProfile: any = {
+    if (!newStaff.temporaryPassword || newStaff.temporaryPassword.length < 6) {
+      toast.error('Temporary password must be at least 6 characters');
+      return;
+    }
+
+    const tempUid = `staff_${Math.random().toString(36).substring(2, 9)}`;
+    const assignedUserRole: UserRole = newStaff.roleType === 'base' && newStaff.baseRole === 'admin' ? 'hotelAdmin' : 'staff';
+    const roleLabel = newStaff.roleType === 'base'
+      ? (BASE_ROLES.find(r => r.id === newStaff.baseRole)?.label || newStaff.baseRole)
+      : (customRoles.find(r => r.id === newStaff.customRoleId)?.name || 'Custom Role');
+
+    const staffProfile: UserProfile = {
       uid: tempUid,
-      email: newStaff.email.toLowerCase(),
-      hotelId: hotelId,
-      role: newStaff.role,
-      createdAt: new Date().toISOString(),
-      roles: newStaff.roles,
-      permissions: newStaff.roles, // Keep for backward compatibility
+      email: newStaff.email.trim().toLowerCase(),
+      hotelId,
+      role: assignedUserRole,
+      staffRole: newStaff.roleType === 'base' ? newStaff.baseRole : undefined,
+      customRoleId: newStaff.roleType === 'custom' ? newStaff.customRoleId : undefined,
+      displayName: newStaff.fullName.trim(),
+      phoneNumber: newStaff.phone.trim() || undefined,
+      department: newStaff.department,
+      employeeId: newStaff.employeeId.trim() || undefined,
+      forcePasswordChange: newStaff.forcePasswordChange,
+      temporaryPassword: newStaff.temporaryPassword,
       status: 'active',
-      displayName: newStaff.displayName,
-      initialPassword: newStaff.password, // Store temporarily for first login
+      isLocked: false,
+      roles: newStaff.roleType === 'base' ? [newStaff.baseRole] : [],
+      permissions: newStaff.overrides,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     try {
       await database.safeSet(doc(db, 'users', tempUid), staffProfile, {
-        hotelId: hotelId,
-        module: 'Staff',
-        action: 'CREATE_STAFF',
-        details: `Created staff profile for ${newStaff.email} with roles: ${newStaff.roles.join(', ')}. Initial password: ${newStaff.password}`,
-        userContext: profile ? { uid: profile.uid, email: profile.email, role: profile.role } : undefined
+        hotelId,
+        module: 'Staff Security',
+        action: 'CREATE_STAFF_ACCOUNT',
+        details: `Created staff account for ${staffProfile.email} with role '${roleLabel}' and force password change: ${newStaff.forcePasswordChange}`,
+        metadata: {
+          uid: tempUid,
+          email: staffProfile.email,
+          role: roleLabel,
+          forcePasswordChange: newStaff.forcePasswordChange
+        }
       });
 
-      // Role compliance logging to GlobalAuditLog
+      // Role compliance audit log
       try {
         await database.safeAdd(collection(db, 'GlobalAuditLog'), {
           timestamp: new Date().toISOString(),
@@ -140,217 +223,175 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           targetUserId: tempUid,
           targetUserEmail: staffProfile.email,
           targetUserName: staffProfile.displayName,
-          assignedRoles: [staffProfile.role, ...staffProfile.roles],
-          hotelId: hotelId,
-          action: 'ROLE_ASSIGNMENT',
-          details: `Teammate status created with base access role '${staffProfile.role}' and override permissions: ${staffProfile.roles.join(', ')}`
+          assignedRoles: [staffProfile.role, ...(staffProfile.roles || [])],
+          hotelId,
+          action: 'STAFF_ACCOUNT_CREATED',
+          details: `Provisioned staff profile with role '${roleLabel}'. Password displayed exclusively in confirmation overlay.`
         }, {
-          hotelId: hotelId,
-          module: 'Staff',
-          action: 'CREATE_STAFF_GLOBAL_AUDIT',
-          details: 'Staff creation role compliance log'
+          hotelId,
+          module: 'Staff Security',
+          action: 'STAFF_ACCOUNT_CREATED_AUDIT',
+          details: 'Compliance audit log for staff creation'
         });
       } catch (logErr) {
-        console.error("Failed to write to GlobalAuditLog:", logErr);
+        console.warn("Global audit log notice:", logErr);
       }
 
+      // Close create form and show the one-time credentials summary overlay
       setIsAddingStaff(false);
-      setNewStaff({ email: '', displayName: '', password: '', role: 'frontDesk', roles: [] });
-      toast.success('Staff member added successfully. They can now login with the password you provided.');
+      setSummaryData({
+        uid: tempUid,
+        fullName: staffProfile.displayName || '',
+        username: staffProfile.email,
+        email: staffProfile.email,
+        phoneNumber: staffProfile.phoneNumber,
+        department: staffProfile.department,
+        hotelName: authHotel?.name || 'Hotel Property',
+        hotelId,
+        roleName: roleLabel,
+        roleId: staffProfile.customRoleId || staffProfile.staffRole || staffProfile.role,
+        employeeId: staffProfile.employeeId,
+        temporaryPassword: newStaff.temporaryPassword,
+        forcePasswordChange: newStaff.forcePasswordChange,
+        status: 'active',
+        createdAt: staffProfile.createdAt || new Date().toISOString(),
+        createdBy: profile?.email || 'Administrator'
+      });
+
+      // Reset form
+      setNewStaff({
+        fullName: '',
+        email: '',
+        phone: '',
+        department: 'Front Office',
+        employeeId: '',
+        roleType: 'base',
+        baseRole: 'frontDesk',
+        customRoleId: '',
+        forcePasswordChange: true,
+        temporaryPassword: '',
+        overrides: []
+      });
+
+      toast.success('Staff account created. Please review credentials slip.');
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
-      console.error("Add staff error:", err.message || safeStringify(err));
-      if (err.code === 'permission-denied' || (err.message && err.message.toLowerCase().includes('permission'))) {
-        toast.error('Insufficient Firestore permissions. You do not have the authorization required to create staff.');
-      } else {
-        toast.error('Failed to add staff member');
-      }
+      toast.error('Failed to create staff member: ' + err.message);
     }
   };
 
-  const removeStaff = async (staffUid: string, staffEmail: string) => {
+  // Suspend / Reactivate staff member with instant real-time sync
+  const handleToggleSuspend = async (member: UserProfile, willSuspend: boolean) => {
     if (!hotelId) return;
-    if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
-      toast.error('Only administrators can remove staff members');
-      return;
-    }
 
     try {
+      const userRef = doc(db, 'users', member.uid);
+      await database.safeUpdate(userRef, {
+        status: willSuspend ? 'suspended' : 'active',
+        isLocked: willSuspend,
+        forceLogout: willSuspend, // Triggers instant logout across all devices!
+        lockedReason: willSuspend ? `Suspended by ${profile?.email || 'Administrator'}` : null,
+        updatedAt: new Date().toISOString()
+      }, {
+        hotelId,
+        module: 'Account Status',
+        action: willSuspend ? 'USER_ACCOUNT_SUSPENDED' : 'USER_ACCOUNT_REACTIVATED',
+        details: `${willSuspend ? 'Suspended' : 'Reactivated'} account for ${member.email}`
+      });
+
+      toast.success(`Account for ${member.email} ${willSuspend ? 'suspended & logged out' : 'reactivated'}`);
+      setShowConfirmSuspend(null);
+    } catch (err: any) {
+      toast.error('Failed to update account status: ' + err.message);
+    }
+  };
+
+  // Remove staff
+  const removeStaff = async (staffUid: string, staffEmail: string) => {
+    if (!hotelId) return;
+    try {
       await database.safeDelete(doc(db, 'users', staffUid), {
-        hotelId: hotelId,
+        hotelId,
         module: 'Staff',
         action: 'DELETE_STAFF',
-        details: `Deleted staff member ${staffEmail}`,
-        userContext: profile ? { uid: profile.uid, email: profile.email, role: profile.role } : undefined
+        details: `Deleted staff member ${staffEmail}`
       });
       toast.success('Staff member removed');
       setShowConfirmRemove(null);
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.DELETE, `users/${staffUid}`);
-      console.error("Remove staff error:", err.message || safeStringify(err));
-      toast.error('Failed to remove staff member');
+      toast.error('Failed to remove staff member: ' + err.message);
     }
   };
 
-  const handleResetPassword = async (email: string, uid: string) => {
-    if (!email) return;
-    setIsResetting(uid);
-    try {
-      await sendPasswordResetEmail(auth, email);
-      
-      // Log the action for UI visibility
-      if (hotelId) {
-        await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
-          timestamp: new Date().toISOString(),
-          userId: profile?.uid,
-          userEmail: profile?.email,
-          userRole: profile?.role,
-          action: 'STAFF_PASSWORD_RESET_SENT',
-          resource: `Staff: ${email}`,
-          hotelId: hotelId,
-          module: 'Staff'
-        }, {
-          hotelId: hotelId,
-          module: 'Staff',
-          action: 'ACTIVITY_LOG_CREATE',
-          details: 'Staff password reset activity'
-        });
-      }
-      
-      toast.success(`Password reset email sent to ${email}`);
-    } catch (err: any) {
-      console.error("Reset password error:", err.message || safeStringify(err));
-      toast.error('Failed to send reset email: ' + err.message);
-    } finally {
-      setIsResetting(null);
-    }
-  };
-
-  const toggleRole = async (member: UserProfile, roleId: StaffRole) => {
+  // Delete custom role
+  const deleteCustomRole = async (roleId: string, roleName: string) => {
     if (!hotelId) return;
-    
-    // Check user permissions before submitting
-    if (!hasPermission(profile, 'manage_staff')) {
-      toast.error("You do not have the required 'manage_staff' permission to assign or modify roles.");
-      return;
-    }
-    
-    const currentRoles: StaffRole[] = (member.roles || member.permissions || []) as StaffRole[];
-    const newRoles = currentRoles.includes(roleId)
-      ? currentRoles.filter(r => r !== roleId)
-      : [...currentRoles, roleId];
-      
     try {
-      await database.safeUpdate(doc(db, 'users', member.uid), { 
-        roles: newRoles,
-        permissions: newRoles // Keep sync
-      }, {
-        hotelId: hotelId,
-        module: 'Staff',
-        action: 'UPDATE_STAFF_ROLES',
-        details: `Updated roles for ${member.email} to: ${newRoles.join(', ')}`
+      await database.safeDelete(doc(db, 'hotels', hotelId, 'customRoles', roleId), {
+        hotelId,
+        module: 'RBAC',
+        action: 'DELETE_CUSTOM_ROLE',
+        details: `Deleted custom role '${roleName}'`
       });
-      
-      // Update local state for immediate feedback
-      if (editingPermissions) {
-        setEditingPermissions({ ...editingPermissions, roles: newRoles, permissions: newRoles });
-      }
-
-      // Create an automated log entry in the 'GlobalAuditLog' collection for compliance
-      try {
-        await database.safeAdd(collection(db, 'GlobalAuditLog'), {
-          timestamp: new Date().toISOString(),
-          actorId: profile?.uid || 'unknown',
-          actorEmail: profile?.email || 'unknown',
-          actorRole: profile?.role || 'unknown',
-          targetUserId: member.uid,
-          targetUserEmail: member.email,
-          targetUserName: member.displayName || 'Unnamed Staff',
-          assignedRoles: newRoles,
-          hotelId: hotelId,
-          action: 'ROLE_ASSIGNMENT',
-          details: `Assigned roles/permissions updated for ${member.email} to: [${newRoles.join(', ')}]`
-        }, {
-          hotelId: hotelId,
-          module: 'Staff',
-          action: 'UPDATE_STAFF_ROLES_GLOBAL_AUDIT',
-          details: 'Staff role assignment compliance log'
-        });
-      } catch (logErr) {
-        console.error("Failed to write to GlobalAuditLog:", logErr);
-      }
-      
-      // Log the action for UI visibility (Audit Trail)
-      await database.safeAdd(collection(db, 'hotels', hotelId, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile?.uid,
-        userEmail: profile?.email,
-        userRole: profile?.role,
-        action: 'UPDATE_STAFF_ROLES',
-        resource: `Staff: ${member.email}, Roles: ${newRoles.join(', ')}`,
-        hotelId: hotelId,
-        module: 'Staff'
-      }, {
-        hotelId: hotelId,
-        module: 'Staff',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Staff roles update activity'
-      });
-      toast.success('Permissions updated');
+      toast.success(`Role '${roleName}' deleted`);
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${member.uid}`);
-      if (err.code === 'permission-denied' || (err.message && err.message.toLowerCase().includes('permission'))) {
-        toast.error('Insufficient Firestore permissions. You do not have the authorization required to update user roles.');
-      } else {
-        toast.error('Failed to update permissions');
-      }
+      toast.error('Failed to delete role: ' + err.message);
     }
   };
 
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
+  // Filtered and paginated staff
+  const filteredStaff = staff.filter(member => {
+    const search = searchTerm.toLowerCase();
+    const matchesSearch = 
+      (member.displayName?.toLowerCase() || '').includes(search) || 
+      (member.email?.toLowerCase() || '').includes(search) ||
+      (member.employeeId?.toLowerCase() || '').includes(search);
+    
+    const matchesStatus = statusFilter === 'all' || member.status === statusFilter;
+    const matchesDept = departmentFilter === 'all' || member.department === departmentFilter;
+    const matchesRole = roleFilter === 'all' || 
+      member.role === roleFilter || 
+      member.staffRole === roleFilter || 
+      member.customRoleId === roleFilter;
+
+    return matchesSearch && matchesStatus && matchesDept && matchesRole;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredStaff.length / pageSize));
+  const paginatedStaff = filteredStaff.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const handleExport = () => {
+    const dataToExport = filteredStaff.map(s => ({
+      Name: s.displayName || 'N/A',
+      Email: s.email,
+      Department: s.department || 'N/A',
+      Role: s.staffRole || s.role,
+      Status: s.status || 'active',
+      ForcePasswordChange: s.forcePasswordChange ? 'Yes' : 'No',
+      CreatedAt: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'
+    }));
+    exportToCSV(dataToExport, `staff_roster_${new Date().toISOString().split('T')[0]}.csv`);
+    toast.success('Staff list exported successfully');
+  };
 
   if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
     return (
       <div className="p-8 flex flex-col items-center justify-center h-[60vh] text-center">
         <Lock size={48} className="text-zinc-700 mb-4" />
         <h2 className="text-xl font-bold text-zinc-50 mb-2">Access Restricted</h2>
-        <p className="text-zinc-400">Only administrators can manage staff members.</p>
+        <p className="text-zinc-400">Only hotel administrators can manage staff and security settings.</p>
       </div>
     );
   }
 
-  const filteredStaff = staff.filter(member => {
-    const search = searchTerm.toLowerCase();
-    const matchesSearch = (member.displayName?.toLowerCase() || '').includes(search) || 
-                          (member.email?.toLowerCase() || '').includes(search);
-    
-    const status = member.status || 'active';
-    const matchesStatus = statusFilter === 'all' || status === statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
-
-  const handleExport = () => {
-    const dataToExport = filteredStaff.map(s => ({
-      Name: s.displayName || 'N/A',
-      Email: s.email,
-      Role: s.role,
-      Permissions: (s.roles || []).join(', '),
-      Status: s.status || 'active',
-      CreatedAt: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'
-    }));
-    exportToCSV(dataToExport, `staff_list_${new Date().toISOString().split('T')[0]}.csv`);
-    toast.success('Staff list exported successfully');
-  };
-
   return (
-    <div className="p-8 space-y-8 relative">
+    <div className="p-4 sm:p-8 space-y-6 max-w-7xl mx-auto">
+      
+      {/* Confirmation Modals */}
       <ConfirmModal
         isOpen={!!showConfirmRemove}
         title="Remove Staff Member"
-        message={`Are you sure you want to remove ${showConfirmRemove?.email}? This action cannot be undone.`}
+        message={`Are you sure you want to permanently remove ${showConfirmRemove?.email}? This action cannot be undone.`}
         onConfirm={() => showConfirmRemove && removeStaff(showConfirmRemove.uid, showConfirmRemove.email)}
         onCancel={() => setShowConfirmRemove(null)}
         type="danger"
@@ -358,134 +399,625 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       />
 
       <ConfirmModal
-        isOpen={!!pendingRoleChange}
-        title="Confirm Permission Override"
-        message={pendingRoleChange ? `Are you sure you want to ${pendingRoleChange.isAdding ? 'grant' : 'revoke'} the "${pendingRoleChange.roleLabel}" override permission for ${pendingRoleChange.member.displayName || pendingRoleChange.member.email}?` : ''}
-        onConfirm={async () => {
-          if (pendingRoleChange) {
-            const { member, roleId } = pendingRoleChange;
-            setPendingRoleChange(null);
-            await toggleRole(member, roleId);
-          }
-        }}
-        onCancel={() => setPendingRoleChange(null)}
-        type="warning"
-        confirmText={pendingRoleChange ? (pendingRoleChange.isAdding ? 'Confirm Grant' : 'Confirm Revoke') : 'Confirm'}
+        isOpen={!!showConfirmSuspend}
+        title={showConfirmSuspend?.willSuspend ? "Suspend Staff Account" : "Reactivate Staff Account"}
+        message={showConfirmSuspend?.willSuspend 
+          ? `Are you sure you want to suspend ${showConfirmSuspend.member.email}? Their active sessions will be terminated immediately and they will be locked out of the PMS.`
+          : `Reactivate access for ${showConfirmSuspend?.member.email}?`}
+        onConfirm={() => showConfirmSuspend && handleToggleSuspend(showConfirmSuspend.member, showConfirmSuspend.willSuspend)}
+        onCancel={() => setShowConfirmSuspend(null)}
+        type={showConfirmSuspend?.willSuspend ? "danger" : "warning"}
+        confirmText={showConfirmSuspend?.willSuspend ? "Suspend & Terminate Sessions" : "Reactivate Account"}
       />
 
+      {/* One-Time Account Creation Summary Modal */}
+      {summaryData && (
+        <AccountCreationSummaryModal
+          data={summaryData}
+          onClose={() => setSummaryData(null)}
+        />
+      )}
+
+      {/* Admin Password Reset Modal */}
+      {resettingUser && (
+        <AdminResetPasswordModal
+          user={resettingUser}
+          onClose={() => setResettingUser(null)}
+        />
+      )}
+
+      {/* Role Builder Modal */}
+      {(isCreatingRole || editingRole) && (
+        <RoleBuilderModal
+          role={editingRole}
+          onClose={() => {
+            setIsCreatingRole(false);
+            setEditingRole(null);
+          }}
+        />
+      )}
+
+      {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Staff Management</h1>
-          <p className="text-zinc-400">Manage your hotel's team and roles</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 tracking-tight flex items-center gap-3">
+            <Users className="text-emerald-400" />
+            Staff & Security Control
+          </h1>
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+            Enterprise user management, granular RBAC permissions, password policies, and live session control.
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 px-3.5 py-2 rounded-xl text-xs font-semibold border border-zinc-800 transition-colors"
           >
-            <Download size={18} />
+            <Download size={15} />
             Export CSV
           </button>
           <button 
             onClick={() => setIsAddingStaff(true)}
-            className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+            className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
           >
-            <UserPlus size={18} />
+            <UserPlus size={16} />
             Add Staff Member
           </button>
         </div>
       </header>
 
-      {isAddingStaff && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-zinc-50 mb-6">Add Staff Member</h3>
-            <form onSubmit={addStaff} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Full Name</label>
-                <input 
-                  required
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={newStaff.displayName}
-                  onChange={(e) => setNewStaff({ ...newStaff, displayName: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Email Address</label>
-                <input 
-                  required
-                  type="email" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={newStaff.email}
-                  onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Initial Password</label>
-                <input 
-                  required
-                  type="text" 
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={newStaff.password}
-                  onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
-                  placeholder="Set a password for them"
-                />
-                <p className="text-[10px] text-zinc-500 mt-1 italic">Tell the staff member this password so they can login.</p>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Base Access Role</label>
-                <select
-                  required
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                  value={newStaff.role}
-                  onChange={(e) => setNewStaff({ ...newStaff, role: e.target.value })}
+      {/* Navigation Tabs */}
+      <div className="flex border-b border-zinc-800 gap-2">
+        <button
+          onClick={() => setActiveTab('members')}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors",
+            activeTab === 'members'
+              ? "border-emerald-500 text-emerald-400"
+              : "border-transparent text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Users size={16} />
+          Staff Directory ({staff.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('roles')}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors",
+            activeTab === 'roles'
+              ? "border-emerald-500 text-emerald-400"
+              : "border-transparent text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Shield size={16} />
+          Custom Roles & Permissions ({customRoles.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('sessions')}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors",
+            activeTab === 'sessions'
+              ? "border-emerald-500 text-emerald-400"
+              : "border-transparent text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Laptop size={16} />
+          Session Control Center
+        </button>
+      </div>
+
+      {/* Tab 1: Staff Directory */}
+      {activeTab === 'members' && (
+        <div className="space-y-4">
+          {/* Filters Bar */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="text"
+                placeholder="Search staff by name, email, or ID..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full pl-9 pr-4 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Status Filter */}
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value as any);
+                  setCurrentPage(1);
+                }}
+                className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-300 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">All Statuses</option>
+                <option value="active">Active Only</option>
+                <option value="suspended">Suspended Only</option>
+              </select>
+
+              {/* Department Filter */}
+              <select
+                value={departmentFilter}
+                onChange={(e) => {
+                  setDepartmentFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-300 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="all">All Departments</option>
+                {DEPARTMENTS.map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Staff Table */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-950/70 border-b border-zinc-800 text-zinc-400 uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="py-3.5 px-4">Staff Member</th>
+                    <th className="py-3.5 px-4">Department</th>
+                    <th className="py-3.5 px-4">Role</th>
+                    <th className="py-3.5 px-4">Password Policy</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/60">
+                  {paginatedStaff.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-zinc-500">
+                        No staff members found matching the filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedStaff.map((member) => {
+                      const isSuspended = member.status === 'suspended';
+                      const roleName = member.customRoleId 
+                        ? (customRoles.find(r => r.id === member.customRoleId)?.name || 'Custom Role')
+                        : (BASE_ROLES.find(r => r.id === (member.staffRole || member.role))?.label || member.role);
+
+                      return (
+                        <tr key={member.uid} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
+                                isSuspended ? 'bg-red-500/10 text-red-400' : 'bg-zinc-800 text-zinc-200'
+                              }`}>
+                                {member.displayName?.charAt(0).toUpperCase() || 'S'}
+                              </div>
+                              <div>
+                                <span className="font-semibold text-zinc-200 block">
+                                  {member.displayName || 'Unnamed Staff'}
+                                </span>
+                                <span className="text-[11px] text-zinc-500 font-mono block">
+                                  {member.email}
+                                </span>
+                                {member.employeeId && (
+                                  <span className="text-[10px] text-zinc-600 block">
+                                    ID: {member.employeeId}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3.5 px-4 text-zinc-300">
+                            {member.department || 'General'}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-zinc-800 text-zinc-200 border border-zinc-700/50">
+                              <Shield size={12} className="text-emerald-400" />
+                              {roleName}
+                            </span>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            {member.forcePasswordChange ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400">
+                                <KeyRound size={12} />
+                                Change on Login
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-zinc-500">Standard</span>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            {isSuspended ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                                Suspended
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                Active
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Admin Password Reset */}
+                              <button
+                                onClick={() => setResettingUser(member)}
+                                className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 transition-colors"
+                                title="Admin Password Reset"
+                              >
+                                <KeyRound size={16} />
+                              </button>
+
+                              {/* Suspend / Reactivate */}
+                              {member.uid !== profile?.uid && member.role !== 'hotelAdmin' && (
+                                <button
+                                  onClick={() => setShowConfirmSuspend({ member, willSuspend: !isSuspended })}
+                                  className={`p-1.5 rounded-lg transition-colors ${
+                                    isSuspended 
+                                      ? 'text-emerald-400 hover:bg-emerald-500/10' 
+                                      : 'text-zinc-400 hover:text-red-400 hover:bg-red-500/10'
+                                  }`}
+                                  title={isSuspended ? "Reactivate Account" : "Suspend Account & Terminate Sessions"}
+                                >
+                                  {isSuspended ? <UserCheck size={16} /> : <UserX size={16} />}
+                                </button>
+                              )}
+
+                              {/* Manage Overrides */}
+                              <button
+                                onClick={() => setEditingPermissions(member)}
+                                className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
+                                title="Permissions Overrides"
+                              >
+                                <Lock size={16} />
+                              </button>
+
+                              {/* Remove */}
+                              {member.uid !== profile?.uid && member.role !== 'hotelAdmin' && (
+                                <button
+                                  onClick={() => setShowConfirmRemove({ uid: member.uid, email: member.email })}
+                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                                  title="Remove Staff"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="p-4 bg-zinc-950/60 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
+              <span>
+                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredStaff.length)} of {filteredStaff.length} members
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300"
                 >
-                  {BASE_ROLES.map(role => (
-                    <option key={role.id} value={role.id}>{role.label}</option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-zinc-500 mt-1 italic">Determines base permissions. Use "Additional Overrides" for fine-tuning.</p>
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="px-2 text-zinc-300 font-medium">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300"
+                >
+                  <ChevronRight size={16} />
+                </button>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Additional Overrides</label>
-                <div className="grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto p-2 bg-zinc-950 border border-zinc-800 rounded-lg">
-                  {AVAILABLE_ROLES.map(role => (
-                    <button
-                      key={role.id}
-                      type="button"
-                      onClick={() => {
-                        const roles = newStaff.roles.includes(role.id)
-                          ? newStaff.roles.filter(r => r !== role.id)
-                          : [...newStaff.roles, role.id];
-                        setNewStaff({ ...newStaff, roles });
-                      }}
-                      className={cn(
-                        "px-2 py-1.5 rounded text-[10px] font-bold uppercase transition-all",
-                        newStaff.roles.includes(role.id)
-                          ? "bg-emerald-500 text-black"
-                          : "bg-zinc-800 text-zinc-500 hover:text-zinc-50"
-                      )}
-                    >
-                      {role.label}
-                    </button>
-                  ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: Custom Roles & RBAC Matrix */}
+      {activeTab === 'roles' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-zinc-100">Granular Role-Based Access Control</h2>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Define reusable property roles with granular permissions that update live across all staff sessions.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsCreatingRole(true)}
+              className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-lg shadow-emerald-500/20"
+            >
+              <Plus size={16} />
+              Create Custom Role
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {customRoles.map((role) => (
+              <div 
+                key={role.id}
+                className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-zinc-700 transition-colors"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="font-bold text-zinc-100 text-sm flex items-center gap-2">
+                      <Shield size={16} className="text-emerald-400" />
+                      {role.name}
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      {role.description || 'No description provided.'}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[10px] text-zinc-500 mt-1 italic italic">Permissions added on top of the base role.</p>
+
+                <div className="p-3 bg-zinc-950/60 rounded-xl border border-zinc-800/80 text-xs space-y-1.5">
+                  <div className="flex justify-between text-zinc-400">
+                    <span>Base Template:</span>
+                    <span className="font-medium text-zinc-200">{role.inheritsFrom || 'Custom'}</span>
+                  </div>
+                  <div className="flex justify-between text-zinc-400">
+                    <span>Capabilities:</span>
+                    <span className="font-semibold text-emerald-400">{role.permissions?.length || 0} permissions</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                  {(role.permissions || []).slice(0, 5).map(p => (
+                    <span key={p} className="px-2 py-0.5 bg-zinc-950 text-zinc-400 rounded text-[10px] uppercase font-mono">
+                      {p}
+                    </span>
+                  ))}
+                  {(role.permissions || []).length > 5 && (
+                    <span className="px-2 py-0.5 bg-zinc-950 text-zinc-500 rounded text-[10px]">
+                      +{(role.permissions || []).length - 5} more
+                    </span>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-zinc-800 flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setEditingRole(role)}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium flex items-center gap-1 transition-colors"
+                  >
+                    <Edit2 size={13} />
+                    Edit Role
+                  </button>
+                  <button
+                    onClick={() => deleteCustomRole(role.id, role.name)}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Delete Role"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-4 mt-8">
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Active Sessions */}
+      {activeTab === 'sessions' && (
+        <SessionControlCenter />
+      )}
+
+      {/* Add Staff Modal */}
+      {isAddingStaff && (
+        <div className="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl my-6 shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-6 bg-gradient-to-r from-emerald-950/30 via-zinc-900 to-zinc-900 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-zinc-50">Provision Staff Member</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Configure profile, assign roles, and enforce security policies</p>
+              </div>
+              <button 
+                onClick={() => setIsAddingStaff(false)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddStaff} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Full Name *</label>
+                  <input 
+                    required
+                    type="text" 
+                    placeholder="Jane Doe"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.fullName}
+                    onChange={(e) => setNewStaff({ ...newStaff, fullName: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Email / Username *</label>
+                  <input 
+                    required
+                    type="email" 
+                    placeholder="staff@hotel.com"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.email}
+                    onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Phone Number</label>
+                  <input 
+                    type="tel" 
+                    placeholder="+1 234 567 8900"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.phone}
+                    onChange={(e) => setNewStaff({ ...newStaff, phone: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Employee ID</label>
+                  <input 
+                    type="text" 
+                    placeholder="EMP-104"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.employeeId}
+                    onChange={(e) => setNewStaff({ ...newStaff, employeeId: e.target.value })}
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">Department</label>
+                  <select
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.department}
+                    onChange={(e) => setNewStaff({ ...newStaff, department: e.target.value })}
+                  >
+                    {DEPARTMENTS.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Role Selection */}
+              <div className="p-4 bg-zinc-950/60 rounded-xl border border-zinc-800 space-y-3">
+                <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300">
+                  Role Assignment
+                </label>
+                
+                <div className="flex gap-4 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="roleType"
+                      checked={newStaff.roleType === 'base'}
+                      onChange={() => setNewStaff({ ...newStaff, roleType: 'base' })}
+                      className="text-emerald-500"
+                    />
+                    <span className="text-zinc-200">Standard System Role</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="roleType"
+                      checked={newStaff.roleType === 'custom'}
+                      onChange={() => setNewStaff({ ...newStaff, roleType: 'custom' })}
+                      className="text-emerald-500"
+                    />
+                    <span className="text-zinc-200">Custom Role ({customRoles.length})</span>
+                  </label>
+                </div>
+
+                {newStaff.roleType === 'base' ? (
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.baseRole}
+                    onChange={(e) => setNewStaff({ ...newStaff, baseRole: e.target.value as StaffRole })}
+                  >
+                    {BASE_ROLES.map(role => (
+                      <option key={role.id} value={role.id}>{role.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    required
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.customRoleId}
+                    onChange={(e) => setNewStaff({ ...newStaff, customRoleId: e.target.value })}
+                  >
+                    <option value="">-- Choose custom role --</option>
+                    {customRoles.map(role => (
+                      <option key={role.id} value={role.id}>{role.name} ({role.permissions?.length || 0} permissions)</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Password & Security Policy */}
+              <div className="p-4 bg-zinc-950/60 rounded-xl border border-zinc-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300">
+                    Temporary Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={generateRandomPassword}
+                    className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                  >
+                    <RefreshCw size={12} />
+                    Generate New
+                  </button>
+                </div>
+
+                <input 
+                  required
+                  type="text" 
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs font-mono text-amber-400 focus:border-emerald-500 outline-none"
+                  value={newStaff.temporaryPassword}
+                  onChange={(e) => setNewStaff({ ...newStaff, temporaryPassword: e.target.value })}
+                />
+
+                {/* Force Password Change Setting */}
+                <div className="pt-2 border-t border-zinc-800">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newStaff.forcePasswordChange}
+                      onChange={(e) => setNewStaff({ ...newStaff, forcePasswordChange: e.target.checked })}
+                      className="mt-0.5 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-zinc-200 block">
+                        Force Password Change on First Login
+                      </span>
+                      <span className="text-[11px] text-zinc-400 block">
+                        Staff member must choose their own private password upon signing in before accessing any hotel module.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Security Warning */}
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-start gap-2">
+                <ShieldAlert size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  No automated credentials email or SMS will be sent. Credentials will be presented in a one-time copy/print handover slip upon creation.
+                </span>
+              </div>
+
+              <div className="flex gap-3 pt-2">
                 <button 
                   type="button"
                   onClick={() => setIsAddingStaff(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-800 text-xs font-semibold text-zinc-400 hover:text-zinc-50 transition-all"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+                  className="flex-1 bg-emerald-500 text-zinc-950 text-xs font-bold py-2.5 rounded-xl hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
                 >
-                  Add Member
+                  Create Staff Account
                 </button>
               </div>
             </form>
@@ -493,227 +1025,59 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         </div>
       )}
 
-      {/* Summary Panel */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-        <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">Team Composition</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          {BASE_ROLES.map(role => {
-            const count = staff.filter(m => m.role === role.id).length;
-            const getRoleDisplayName = (id: string, qty: number) => {
-              switch (id) {
-                case 'hotelAdmin':
-                  return qty === 1 ? 'Admin' : 'Admins';
-                case 'manager':
-                  return qty === 1 ? 'Manager' : 'Managers';
-                case 'frontDesk':
-                  return qty === 1 ? 'Front Desk Agent' : 'Front Desk Agents';
-                case 'housekeeper':
-                  return qty === 1 ? 'Housekeeper' : 'Housekeepers';
-                case 'maintenance':
-                  return qty === 1 ? 'Maintenance Personnel' : 'Maintenance Staff';
-                case 'accountant':
-                  return qty === 1 ? 'Accountant' : 'Accountants';
-                default:
-                  return qty === 1 ? 'Staff' : 'Staff Members';
-              }
-            };
-            return (
-              <div 
-                key={role.id} 
-                className="bg-zinc-950 border border-zinc-900 p-4 rounded-xl flex flex-col items-center justify-center text-center hover:border-zinc-700 transition duration-200 cursor-default"
-              >
-                <div className="text-2xl font-bold text-zinc-50 font-mono mb-1">{count}</div>
-                <div className="text-xs text-zinc-400 capitalize font-medium">
-                  {getRoleDisplayName(role.id, count)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h3 className="font-bold text-zinc-50">Team Members</h3>
-            <p className="text-xs text-zinc-500 mt-0.5">Showing {filteredStaff.length} of {staff.length} staff members</p>
-          </div>
-          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-            {/* Status Dropdown Filter */}
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="bg-zinc-950 border border-zinc-850 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500 cursor-pointer w-full sm:w-auto font-medium"
-            >
-              <option value="all">All Statuses</option>
-              <option value="active">Active Only</option>
-              <option value="inactive">Inactive Only</option>
-            </select>
-
-            {/* Export To CSV Button */}
-            <button
-              type="button"
-              onClick={handleExport}
-              className="flex items-center justify-center gap-2 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-zinc-50 px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-95 w-full sm:w-auto cursor-pointer"
-              title="Export currently filtered list to CSV"
-            >
-              <Download size={14} />
-              <span>Export CSV</span>
-            </button>
-
-            {/* Search Input */}
-            <div className="relative w-full sm:w-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search staff..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full sm:w-auto bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
-                <th className="px-6 py-4">Member</th>
-                <th className="px-6 py-4">Role</th>
-                <th className="px-6 py-4">Permissions</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800">
-              {filteredStaff.map(member => (
-                <tr key={member.uid} className="hover:bg-zinc-800/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                        <UserIcon size={20} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-zinc-50">{member.displayName || 'Unnamed Staff'}</div>
-                        <div className="text-xs text-zinc-500 flex items-center gap-1">
-                          <Mail size={12} />
-                          {member.email}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 text-xs text-zinc-400">
-                      <Shield size={14} className="text-emerald-500" />
-                      <div className="flex flex-wrap gap-1">
-                        {member.role === 'hotelAdmin' ? (
-                          <span className="capitalize">Hotel Admin</span>
-                        ) : (
-                          (member.roles || member.permissions || ['Staff']).map(r => (
-                            <span key={r} className="capitalize">{r}</span>
-                          )).reduce((prev, curr) => [prev, ', ', curr] as any)
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-wrap gap-1">
-                      {(member.permissions || []).slice(0, 2).map(p => (
-                        <span key={p} className="px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded text-[10px] uppercase font-bold">
-                          {p}
-                        </span>
-                      ))}
-                      {(member.permissions || []).length > 2 && (
-                        <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[10px] font-bold">
-                          +{(member.permissions || []).length - 2}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                      member.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
-                    )}>
-                      {member.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      {member.role !== 'hotelAdmin' && (
-                        <button 
-                          onClick={() => handleResetPassword(member.email, member.uid)}
-                          disabled={isResetting === member.uid}
-                          className={cn(
-                            "p-2 transition-colors",
-                            isResetting === member.uid ? "text-zinc-700 animate-spin" : "text-zinc-500 hover:text-emerald-500"
-                          )}
-                          title="Send Password Reset Email"
-                        >
-                          <RefreshCw size={18} />
-                        </button>
-                      )}
-                      {member.role !== 'hotelAdmin' && (
-                        <button 
-                          onClick={() => setEditingPermissions(member)}
-                          disabled={member.uid === profile?.uid}
-                          className={cn(
-                            "p-2 transition-colors",
-                            member.uid === profile?.uid ? "text-zinc-700 cursor-not-allowed" : "text-zinc-500 hover:text-emerald-500"
-                          )}
-                          title={member.uid === profile?.uid ? "You cannot edit your own permissions" : "Manage Permissions"}
-                        >
-                          <Lock size={18} />
-                        </button>
-                      )}
-                      {member.role !== 'hotelAdmin' && member.uid !== profile?.uid && (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
-                        <button 
-                          onClick={() => setShowConfirmRemove({ uid: member.uid, email: member.email })}
-                          className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
-                          title="Remove Staff"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
+      {/* Permissions Overrides Modal */}
       {editingPermissions && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-zinc-50 mb-2">Manage Permissions</h3>
-            <p className="text-zinc-400 text-sm mb-6">Setting permissions for {editingPermissions.displayName || editingPermissions.email}</p>
+        <div className="fixed inset-0 bg-zinc-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+            <h3 className="text-lg font-bold text-zinc-50">Permission Overrides</h3>
+            <p className="text-zinc-400 text-xs mb-4">
+              Fine-tune specific capabilities for {editingPermissions.displayName || editingPermissions.email}
+            </p>
             
-            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-              {AVAILABLE_ROLES.map(role => {
-                const isGranted = (editingPermissions.roles || editingPermissions.permissions || []).includes(role.id);
+            <div className="space-y-1.5 flex-1 overflow-y-auto pr-1">
+              {AVAILABLE_PERMISSIONS.map(perm => {
+                const currentPerms = (editingPermissions.roles || editingPermissions.permissions || []) as string[];
+                const isGranted = currentPerms.includes(perm.id);
+
                 return (
                   <button
-                    key={role.id}
-                    onClick={() => {
-                      const isGranted = (editingPermissions.roles || editingPermissions.permissions || []).includes(role.id);
-                      setPendingRoleChange({
-                        member: editingPermissions,
-                        roleId: role.id as StaffRole,
-                        roleLabel: role.label,
-                        isAdding: !isGranted
-                      });
+                    key={perm.id}
+                    onClick={async () => {
+                      if (!hotelId) return;
+                      const next = isGranted 
+                        ? currentPerms.filter(p => p !== perm.id) 
+                        : [...currentPerms, perm.id];
+
+                      try {
+                        await database.safeUpdate(doc(db, 'users', editingPermissions.uid), {
+                          roles: next,
+                          permissions: next,
+                          updatedAt: new Date().toISOString()
+                        }, {
+                          hotelId,
+                          module: 'Staff Security',
+                          action: 'OVERRIDE_PERMISSIONS',
+                          details: `Updated permission overrides for ${editingPermissions.email}`
+                        });
+
+                        setEditingPermissions({
+                          ...editingPermissions,
+                          permissions: next
+                        });
+                        toast.success('Permission updated');
+                      } catch (err: any) {
+                        toast.error('Failed to update: ' + err.message);
+                      }
                     }}
                     className={cn(
-                      "w-full flex items-center justify-between p-3 rounded-xl border transition-all active:scale-[0.98]",
+                      "w-full flex items-center justify-between p-2.5 rounded-xl border text-xs transition-colors",
                       isGranted 
-                        ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-500" 
-                        : "bg-zinc-950 border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300" 
+                        : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     )}
                   >
-                    <span className="text-sm font-medium">{role.label}</span>
-                    {isGranted ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+                    <span>{perm.label}</span>
+                    {isGranted ? <CheckCircle2 size={16} className="text-emerald-400" /> : <XCircle size={16} className="text-zinc-600" />}
                   </button>
                 );
               })}
@@ -721,13 +1085,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
             <button 
               onClick={() => setEditingPermissions(null)}
-              className="w-full mt-8 bg-emerald-500 text-black font-bold py-3 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
+              className="w-full mt-4 bg-emerald-500 text-zinc-950 font-bold py-2 rounded-xl text-xs hover:bg-emerald-400 transition-colors"
             >
               Done
             </button>
           </div>
         </div>
       )}
+
     </div>
   );
 }

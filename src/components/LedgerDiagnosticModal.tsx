@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { LedgerEntry, Reservation, Guest, Hotel } from '../types';
 import { validateLedgerTransaction, validateGuestAccount } from '../services/financialService';
 import { 
@@ -14,6 +14,8 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { formatCurrency } from '../utils';
+import { Pagination } from './Pagination';
+import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 
 export interface LedgerDiagnosticModalProps {
   isOpen: boolean;
@@ -216,10 +218,18 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'flagged' | 'debit' | 'credit' | 'system'>('all');
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(() => ({ ...getDefaultDateFilter(), mode: 'all' }));
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc'); // Default chronological (earliest to latest)
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
   const [isPurging, setIsPurging] = useState(false);
   const [purgeSuccessMsg, setPurgeSuccessMsg] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Reset pagination on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType, sortOrder, dateFilter]);
 
   // 1. Filter entries to relevant reservation or guest
   const filteredLedger = useMemo(() => {
@@ -401,6 +411,11 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
       if (filterType === 'credit' && e.credit <= 0) return false;
       if (filterType === 'system' && !e.isSystemGenerated) return false;
 
+      // Date filtering (Day, Month, Year, Range, All)
+      if (dateFilter.mode !== 'all' && !matchesDateFilter(e.timestamp, dateFilter)) {
+        return false;
+      }
+
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
@@ -419,7 +434,13 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
     }
 
     return result;
-  }, [auditedEntries, filterType, searchTerm, sortOrder]);
+  }, [auditedEntries, filterType, dateFilter, searchTerm, sortOrder]);
+
+  // 3.5 Paginated display entries
+  const paginatedEntries = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return displayEntries.slice(startIndex, startIndex + pageSize);
+  }, [displayEntries, currentPage, pageSize]);
 
   // 4. Consistency audit summary
   const guestId = guest?.id || reservation?.guestId || '';
@@ -601,75 +622,92 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
         )}
 
         {/* Toolbar */}
-        <div className="p-4 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3 bg-zinc-900/60">
-          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
-                type="text"
-                placeholder="Search date, type, description, user, or ID..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50"
-              />
+        <div className="p-4 border-b border-zinc-800 flex flex-col gap-3 bg-zinc-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="Search date, type, description, user, or ID..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+
+              <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs">
+                <button
+                  onClick={() => setFilterType('all')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'all' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                >
+                  All ({auditedEntries.length})
+                </button>
+                <button
+                  onClick={() => setFilterType('flagged')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'flagged' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-zinc-400 hover:text-white'}`}
+                >
+                  Flagged ({flaggedCount})
+                </button>
+                <button
+                  onClick={() => setFilterType('debit')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'debit' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                >
+                  Debits
+                </button>
+                <button
+                  onClick={() => setFilterType('credit')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'credit' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                >
+                  Credits
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setFilterType('all')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'all' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors"
               >
-                All ({auditedEntries.length})
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                {sortOrder === 'asc' ? 'Oldest First' : 'Newest First'}
               </button>
-              <button
-                onClick={() => setFilterType('flagged')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'flagged' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-zinc-400 hover:text-white'}`}
-              >
-                Flagged ({flaggedCount})
-              </button>
-              <button
-                onClick={() => setFilterType('debit')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'debit' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
-              >
-                Debits
-              </button>
-              <button
-                onClick={() => setFilterType('credit')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'credit' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
-              >
-                Credits
-              </button>
+
+              {flaggedCount > 0 && (
+                <button
+                  onClick={selectAllFlagged}
+                  className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 rounded-xl text-xs font-medium transition-colors"
+                >
+                  Select Flagged ({flaggedCount})
+                </button>
+              )}
+
+              {onPurgeInvalidEntries && selectedEntries.size > 0 && (
+                <button
+                  onClick={handlePurgeSelected}
+                  disabled={isPurging}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Purge Selected ({selectedEntries.size})
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              {sortOrder === 'asc' ? 'Oldest First' : 'Newest First'}
-            </button>
+          {/* Date Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/60">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Filter Date:</span>
+              <DateFilterControl
+                value={dateFilter}
+                onChange={(val) => setDateFilter(val)}
+              />
+            </div>
 
-            {flaggedCount > 0 && (
-              <button
-                onClick={selectAllFlagged}
-                className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 rounded-xl text-xs font-medium transition-colors"
-              >
-                Select Flagged ({flaggedCount})
-              </button>
-            )}
-
-            {onPurgeInvalidEntries && selectedEntries.size > 0 && (
-              <button
-                onClick={handlePurgeSelected}
-                disabled={isPurging}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Purge Selected ({selectedEntries.size})
-              </button>
-            )}
+            <div className="text-xs text-zinc-500">
+              Showing <span className="text-zinc-200 font-mono font-semibold">{displayEntries.length}</span> matching of <span className="text-zinc-200 font-mono font-semibold">{auditedEntries.length}</span> total entries
+            </div>
           </div>
         </div>
 
@@ -692,9 +730,9 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
                   <th className="p-3 w-8">
                     <input
                       type="checkbox"
-                      checked={selectedEntries.size > 0 && selectedEntries.size === displayEntries.length}
+                      checked={selectedEntries.size > 0 && selectedEntries.size === paginatedEntries.length}
                       onChange={e => {
-                        if (e.target.checked) setSelectedEntries(new Set(displayEntries.map(d => d.id)));
+                        if (e.target.checked) setSelectedEntries(new Set(paginatedEntries.map(d => d.id)));
                         else setSelectedEntries(new Set());
                       }}
                       className="rounded bg-zinc-900 border-zinc-700 text-amber-500 focus:ring-amber-500/20"
@@ -711,7 +749,7 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60 font-mono">
-                {displayEntries.map(entry => {
+                {paginatedEntries.map(entry => {
                   const isSelected = selectedEntries.has(entry.id);
                   return (
                     <tr
@@ -795,6 +833,19 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
             </table>
           )}
         </div>
+
+        {/* Pagination Controls */}
+        {displayEntries.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={displayEntries.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[15, 25, 50, 100]}
+            itemLabel="audit transactions"
+          />
+        )}
 
         {/* Footer */}
         <div className="p-4 border-t border-zinc-800 bg-zinc-950 flex items-center justify-between text-xs text-zinc-400">

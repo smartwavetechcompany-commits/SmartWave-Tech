@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Permission, hasPermission } from '../utils/permissions';
@@ -13,7 +12,8 @@ interface PermissionGuardProps {
 
 /**
  * PRODUCTION-GRADE PERMISSION GUARD
- * Protects components or entire modules based on user capabilities.
+ * Protects components or entire modules based on database-driven capabilities.
+ * Synchronizes instantly across sessions when custom roles or permissions change.
  */
 export const PermissionGuard: React.FC<PermissionGuardProps> = ({ 
   permission, 
@@ -21,9 +21,9 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
   fallback = null,
   showError = false
 }) => {
-  const { profile } = useAuth();
+  const { profile, customRoles } = useAuth();
   
-  const hasAccess = hasPermission(profile, permission);
+  const hasAccess = hasPermission(profile, permission, customRoles);
 
   if (!hasAccess) {
     if (showError) {
@@ -46,19 +46,20 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
 };
 
 /**
- * Centralized hook to check a user's assigned modules based on their role and permissions overrides.
+ * Centralized hook to check a user's assigned modules based on database-driven roles and permissions.
  */
 export const useModuleAccess = () => {
-  const { profile } = useAuth();
+  const { profile, customRoles } = useAuth();
 
   const canAccessModule = (capability: Permission | null): boolean => {
     if (!capability) return true;
-    return hasPermission(profile, capability);
+    return hasPermission(profile, capability, customRoles);
   };
 
   return {
     canAccessModule,
-    hasPermission: (perm: Permission) => hasPermission(profile, perm),
-    profile
+    hasPermission: (perm: Permission) => hasPermission(profile, perm, customRoles),
+    profile,
+    customRoles
   };
 };

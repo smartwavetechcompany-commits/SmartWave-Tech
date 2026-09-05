@@ -7,7 +7,7 @@ import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType, HotelSettings } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { DEFAULT_SETTINGS } from '../constants';
-import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail } from 'lucide-react';
+import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert } from 'lucide-react';
 import { cn } from '../utils';
 
 export function AuthPage() {
@@ -530,7 +530,7 @@ export function AuthPage() {
           <h2 className="text-2xl font-bold text-white">Tyyl Tech PMS</h2>
           <p className="text-zinc-400 text-sm mt-2">
             {isResetting
-              ? 'Reset your password'
+              ? 'Security Policy Notice'
               : isRequesting 
                 ? 'Request a tracking code to start' 
                 : isLogin 
@@ -540,29 +540,25 @@ export function AuthPage() {
         </div>
 
         {isResetting ? (
-          <form onSubmit={handleResetPassword} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Email Address</label>
-              <input
-                required
-                type="email"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                placeholder="Enter your registered email"
-              />
+          <div className="space-y-5">
+            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                <ShieldAlert size={18} />
+                <span>Admin-Only Password Reset Policy</span>
+              </div>
+              <p className="text-xs text-amber-200/90 leading-relaxed">
+                Self-service password reset is disabled for security. Please contact your Hotel Administrator to reset your password.
+              </p>
             </div>
 
-            {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
-            {success && <p className="text-emerald-500 text-xs mt-2 font-medium">{success}</p>}
-
-            <button
-              disabled={loading || resetCooldown > 0}
-              type="submit"
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-bold py-3 rounded-lg transition-all active:scale-95 mt-6 disabled:opacity-50"
-            >
-              {loading ? 'Sending...' : resetCooldown > 0 ? `Resend in ${resetCooldown}s` : 'Send Reset Link'}
-            </button>
+            <div className="bg-zinc-950/60 p-4 rounded-xl border border-zinc-800 text-xs text-zinc-400 space-y-2">
+              <p>For PCI-DSS and hotel audit compliance:</p>
+              <ul className="list-disc list-inside space-y-1 text-zinc-300">
+                <li>Only authorized Hotel Administrators can issue temporary credentials</li>
+                <li>You will be required to choose a new password upon your next sign-in</li>
+                <li>Contact your supervisor, general manager, or IT team for assistance</li>
+              </ul>
+            </div>
 
             <button
               type="button"
@@ -571,12 +567,12 @@ export function AuthPage() {
                 setError('');
                 setSuccess('');
               }}
-              className="w-full flex items-center justify-center gap-2 text-zinc-500 text-sm hover:text-white transition-all mt-4"
+              className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold py-2.5 rounded-lg transition-all text-sm flex items-center justify-center gap-2"
             >
               <ArrowLeft size={16} />
-              Back to Login
+              Back to Sign In
             </button>
-          </form>
+          </div>
         ) : isRequesting ? (
           <form onSubmit={handleRequestCode} className="space-y-4">
             <div>
