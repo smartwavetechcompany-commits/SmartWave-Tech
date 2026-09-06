@@ -909,5 +909,58 @@ export interface FirestoreErrorInfo {
       email: string | null;
       photoUrl: string | null;
     }[];
-  }
+  };
+}
+
+export type DebtStatus = 'outstanding' | 'partially_paid' | 'paid' | 'written_off' | 'transferred';
+
+export interface OutstandingDebtAuditEntry {
+  id: string;
+  action: 'created' | 'payment' | 'transfer' | 'adjustment' | 'write_off';
+  date: string;
+  time: string;
+  user: string;
+  userId?: string;
+  userRole?: string;
+  amount: number;
+  previousBalance: number;
+  newBalance: number;
+  details?: string;
+  referenceId?: string;
+}
+
+export interface OutstandingDebt {
+  id: string; // reservationId
+  hotelId: string;
+  guestName: string;
+  guestId: string;
+  guestEmail?: string;
+  guestPhone?: string;
+  reservationId: string;
+  folioNumber: string;
+  roomNumber: string;
+  checkoutDate: string; // YYYY-MM-DD
+  checkoutTimestamp: string;
+  originalDebt: number;
+  outstandingAmount: number;
+  status: DebtStatus;
+  agingDays?: number;
+  notes?: string;
+  transferredTo?: {
+    type: 'corporate' | 'city_ledger' | 'house_account' | 'travel_agent' | 'master_folio';
+    targetId?: string;
+    targetName: string;
+    transferredAt: string;
+    transferredBy: string;
+  };
+  writtenOffBy?: {
+    userId: string;
+    userName: string;
+    reason: string;
+    approvedBy: string;
+    date: string;
+  };
+  auditHistory: OutstandingDebtAuditEntry[];
+  createdAt: string;
+  updatedAt: string;
 }

@@ -21,6 +21,7 @@ import { GuestManagement } from './components/GuestManagement';
 import { CorporateManagement } from './components/CorporateManagement';
 import { OperationsDashboard } from './components/OperationsDashboard';
 import { Finance } from './components/Finance';
+import { OutstandingGuestLedger } from './components/OutstandingGuestLedger';
 import { Reports } from './components/Reports';
 import { BreakfastList } from './components/BreakfastList';
 import { DSSGuestReport } from './components/DSSGuestReport';
@@ -45,6 +46,9 @@ function AppContent() {
   const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const location = useLocation();
+
+  const currency: 'NGN' | 'USD' = hotel?.defaultCurrency || 'NGN';
+  const exchangeRate: number = hotel?.exchangeRate || 1500;
 
   // Dynamic branding: Update document title to Hotel Name so browser tab and print headers reflect their hotel
   React.useEffect(() => {
@@ -230,6 +234,18 @@ function AppContent() {
             <Route path="/finance" element={
               <PermissionGuard permission="view_financial_records" showError>
                 <Finance />
+              </PermissionGuard>
+            } />
+            <Route path="/debt-ledger" element={
+              <PermissionGuard permission="view_debt_ledger" showError>
+                <div className="p-4 sm:p-8 h-full">
+                  <OutstandingGuestLedger 
+                    hotel={hotel} 
+                    profile={profile} 
+                    currency={currency} 
+                    exchangeRate={exchangeRate} 
+                  />
+                </div>
               </PermissionGuard>
             } />
             <Route path="/reports" element={

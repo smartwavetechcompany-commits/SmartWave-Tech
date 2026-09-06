@@ -4,6 +4,8 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
+import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
+import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType, RoomType, Reservation, UserProfile, RoomBlocking, RateConfiguration, InventoryConsumptionRule, InventoryItem, LedgerEntry } from '../types';
 import { 
@@ -88,6 +90,11 @@ export function Rooms() {
   };
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [returningGuestDebtModalData, setReturningGuestDebtModalData] = useState<{
+    debts: any[];
+    totalDebt: number;
+    reservation: Reservation;
+  } | null>(null);
   const [isManagingTypes, setIsManagingTypes] = useState(false);
   const [editingRoomType, setEditingRoomType] = useState<RoomType | null>(null);
   const [newRoomType, setNewRoomType] = useState({
@@ -550,9 +557,36 @@ export function Rooms() {
     toast.success('Rooms report exported successfully');
   };
 
-  const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
+  const updateReservationStatus = async (
+    res: Reservation, 
+    status: Reservation['status'],
+    skipDebtCheck: boolean = false
+  ) => {
     if (!hotel?.id || !profile) return;
     
+    // Check if returning guest has debt from previous stay before checking in
+    if (status === 'checked_in' && !skipDebtCheck) {
+      try {
+        const debtCheck = await checkReturningGuestDebt(
+          hotel.id,
+          res.guestId,
+          res.guestEmail,
+          res.guestPhone,
+          res.guestName
+        );
+        if (debtCheck.hasDebt) {
+          setReturningGuestDebtModalData({
+            debts: debtCheck.debts,
+            totalDebt: debtCheck.totalDebt,
+            reservation: res
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to check returning guest debt:", err);
+      }
+    }
+
     // Comprehensive Check-Out logic
     if (status === 'checked_out') {
       const policy = canCheckout(hotel, profile, res);
@@ -649,12 +683,14 @@ export function Rooms() {
           nights: nightsStayed,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
-          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid',
+          financialStatus: outstandingBalance > 0.01 ? ((res.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
+          ledgerBalance: outstandingBalance
         }, {
           hotelId: hotel.id,
           module: 'Rooms',
           action: 'FINALIZE_CHECKOUT',
-          details: `Finalized checkout for reservation ${res.id}`
+          details: `Finalized operational checkout for reservation ${res.id}. Outstanding balance: ${outstandingBalance}`
         });
 
         // Mark room as dirty
@@ -684,7 +720,8 @@ export function Rooms() {
               roomNumber: res.roomNumber,
               checkIn: res.checkIn,
               checkOut: format(now, 'yyyy-MM-dd'),
-              totalAmount: totalDebits
+              totalAmount: totalDebits,
+              outstandingBalance: outstandingBalance
             })
           }, {
             hotelId: hotel.id,
@@ -722,24 +759,18 @@ export function Rooms() {
           console.error("Failed to write to checkout_history:", err);
         }
 
-        // Calculate guest balance vs corporate balance
-        const freshLedgerQ = query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        );
-        const freshLedgerSnap = await getDocs(freshLedgerQ);
-        const freshEntries = freshLedgerSnap.docs.map(doc => doc.data() as LedgerEntry);
-        
-        const guestBalance = freshEntries
-          .filter(e => !e.corporateId)
-          .reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+        // CRITICAL FINANCIAL LOGIC: DECOUPLE CHECKOUT FROM BALANCE SETTLEMENT
+        // Operational checkout releases room inventory; balances are never automatically cleared.
+        if (outstandingBalance > 0.01) {
+          await recordOutstandingDebt(hotel.id, {
+            ...res,
+            totalAmount: totalDebits,
+            paidAmount: res.paidAmount || 0,
+            checkOut: format(now, 'yyyy-MM-dd'),
+            ledgerBalance: outstandingBalance
+          }, outstandingBalance, profile, 'Preserved at operational checkout');
 
-        if (res.corporateId && guestBalance > 0.01) {
-          await transferToCityLedger(hotel.id, res.guestId!, res.id, guestBalance, profile.uid, res.corporateId);
-          toast.success(`Individual guest balance of ${formatCurrency(guestBalance, currency, exchangeRate)} transferred to City Ledger.`, { id: toastId });
-        } else if (!res.corporateId && outstandingBalance > 0 && hotel.settings?.checkout?.autoMarkUnpaidAsDebt) {
-          await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
-          toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} marked as Debt (Transferred to City Ledger).`, { id: toastId });
+          toast.success(`Guest checked out successfully. Active outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} preserved in Outstanding Guest Ledger.`, { id: toastId });
         } else {
           toast.success(`Guest checked out successfully`, { id: toastId });
         }
@@ -3022,6 +3053,24 @@ export function Rooms() {
           </div>
         );
       })()}
+      {returningGuestDebtModalData && (
+        <ReturningGuestDebtModal
+          isOpen={true}
+          onClose={() => setReturningGuestDebtModalData(null)}
+          debts={returningGuestDebtModalData.debts}
+          totalDebt={returningGuestDebtModalData.totalDebt}
+          newReservation={returningGuestDebtModalData.reservation}
+          hotel={hotel}
+          profile={profile}
+          currency={currency}
+          exchangeRate={exchangeRate}
+          onProceedCheckIn={() => {
+            const targetRes = returningGuestDebtModalData.reservation;
+            setReturningGuestDebtModalData(null);
+            updateReservationStatus(targetRes, 'checked_in', true);
+          }}
+        />
+      )}
     </div>
   );
 }

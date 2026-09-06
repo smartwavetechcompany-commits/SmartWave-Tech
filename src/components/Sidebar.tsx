@@ -22,7 +22,8 @@ import {
   XCircle,
   X,
   Coffee,
-  FileText
+  FileText,
+  Receipt
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useModuleAccess } from './PermissionGuard';
@@ -55,6 +56,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     { icon: Users, label: t('sidebar.guests'), path: '/guests', capability: 'edit_guest_profiles', module: 'guests' },
     { icon: Building2, label: 'Corporate', path: '/corporate', capability: 'manage_corporate', module: 'corporate' },
     { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'view_financial_records', module: 'finance' },
+    { icon: Receipt, label: 'Debt Ledger (AR)', path: '/debt-ledger', capability: 'view_debt_ledger', module: 'finance' },
     { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports' },
     { icon: FileText, label: 'DSS Report', path: '/dss-report', capability: 'view_reports', module: 'reports' },
     { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff' },

@@ -9,6 +9,7 @@ import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { GuestFolio } from './GuestFolio';
+import { OutstandingGuestLedger } from './OutstandingGuestLedger';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -118,7 +119,7 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'debtors' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'debtors' | 'ar_debt_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -226,6 +227,7 @@ export function Finance() {
     { id: 'ledger', label: 'Guest Accounts', icon: Users },
     { id: 'city_ledger', label: 'City Ledger', icon: Building2 },
     { id: 'debtors', label: 'Debtors List', icon: AlertCircle },
+    { id: 'ar_debt_ledger', label: 'Guest AR Debt Ledger', icon: Receipt },
     { id: 'suppliers', label: 'Supplier Accounts', icon: Building2 },
     { id: 'accounts', label: 'Chart of Accounts', icon: Wallet },
     { id: 'expenses', label: 'Expense Records', icon: TrendingDown },
@@ -1784,6 +1786,17 @@ export function Finance() {
                   </div>
                 );
               })()}
+            </div>
+          )}
+
+          {activeTab === 'ar_debt_ledger' && (
+            <div className="bg-zinc-950 rounded-2xl">
+              <OutstandingGuestLedger
+                hotel={hotel}
+                profile={profile}
+                currency={currency}
+                exchangeRate={exchangeRate}
+              />
             </div>
           )}
 

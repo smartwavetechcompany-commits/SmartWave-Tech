@@ -85,11 +85,15 @@ export type Permission =
   | 'override_checkout'
   | 'extend_stay'
 
-  // --- CITY LEDGER ---
+  // --- CITY LEDGER & DEBT MANAGEMENT ---
   | 'view_city_ledger'
   | 'create_ledger_entries'
   | 'approve_ledger_transactions'
   | 'reverse_ledger_transactions'
+  | 'view_debt_ledger'
+  | 'transfer_debt'
+  | 'adjust_debt'
+  | 'write_off_debt'
 
   // --- HOUSE ACCOUNTS ---
   | 'view_house_accounts'
@@ -230,6 +234,10 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'reverse_transactions', label: 'Reverse Transactions', description: 'Reverse accidental or disputed entries' },
       { id: 'export_financial_data', label: 'Export Financial Data', description: 'Download transaction audits' },
       { id: 'view_city_ledger', label: 'View City Ledger', description: 'Corporate accounts and receivables' },
+      { id: 'view_debt_ledger', label: 'View Outstanding Debt Ledger', description: 'Access guest receivables and aging reports' },
+      { id: 'transfer_debt', label: 'Transfer Debt', description: 'Transfer debt to Corporate, City Ledger, or House accounts' },
+      { id: 'adjust_debt', label: 'Adjust Debt', description: 'Make approved balance adjustments and credit notes' },
+      { id: 'write_off_debt', label: 'Write-Off Debt', description: 'Authorize debt write-offs with mandatory reason' },
       { id: 'create_ledger_entries', label: 'Create Ledger Entries', description: 'Post manual ledger journals' },
       { id: 'approve_ledger_transactions', label: 'Approve Transactions', description: 'Authorize high-value adjustments' },
       { id: 'reverse_ledger_transactions', label: 'Reverse Ledger Transactions', description: 'Rollback erroneous postings' },
@@ -350,6 +358,7 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; description: 
       'view_dashboard', 'export_dashboard', 'view_reservations', 'view_guests',
       'view_ledger', 'post_charges', 'receive_payments', 'process_refunds',
       'reverse_transactions', 'export_financial_data', 'view_city_ledger',
+      'view_debt_ledger', 'transfer_debt', 'adjust_debt', 'write_off_debt',
       'create_ledger_entries', 'approve_ledger_transactions', 'reverse_ledger_transactions',
       'view_house_accounts', 'create_house_accounts', 'edit_house_accounts',
       'receive_payment', 'reverse_payment', 'approve_refund', 'void_transaction',

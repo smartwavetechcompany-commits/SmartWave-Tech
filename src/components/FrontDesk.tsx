@@ -4,6 +4,8 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal } from '../services/ledgerService';
+import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
+import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -74,6 +76,11 @@ export function FrontDesk() {
   const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
   const [isBooking, setIsBooking] = useState(false);
   const [checkoutPreviewRes, setCheckoutPreviewRes] = useState<Reservation | null>(null);
+  const [returningGuestDebtModalData, setReturningGuestDebtModalData] = useState<{
+    debts: any[];
+    totalDebt: number;
+    reservation: Reservation;
+  } | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
 
@@ -1481,9 +1488,36 @@ export function FrontDesk() {
     }
   };
 
-  const updateReservationStatus = async (res: Reservation, status: Reservation['status']) => {
+  const updateReservationStatus = async (
+    res: Reservation, 
+    status: Reservation['status'], 
+    skipDebtCheck: boolean = false
+  ) => {
     if (!hotel?.id || !profile) return;
     
+    // Check if returning guest has debt from previous stay before checking in
+    if (status === 'checked_in' && !skipDebtCheck) {
+      try {
+        const debtCheck = await checkReturningGuestDebt(
+          hotel.id,
+          res.guestId,
+          res.guestEmail,
+          res.guestPhone,
+          res.guestName
+        );
+        if (debtCheck.hasDebt) {
+          setReturningGuestDebtModalData({
+            debts: debtCheck.debts,
+            totalDebt: debtCheck.totalDebt,
+            reservation: res
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to check returning guest debt:", err);
+      }
+    }
+
     // Policy checks
     if (status === 'checked_in') {
       const room = rooms.find(r => r.id === res.roomId);
@@ -1749,12 +1783,14 @@ export function FrontDesk() {
           nights: nightsStayed,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
-          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
+          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid',
+          financialStatus: outstandingBalance > 0.01 ? ((res.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
+          ledgerBalance: outstandingBalance
         }, {
           hotelId: hotel.id,
           module: 'Front Desk',
           action: 'FINALIZE_CHECKOUT',
-          details: `Finalized checkout for reservation ${res.id}`
+          details: `Finalized operational checkout for reservation ${res.id}. Outstanding balance: ${outstandingBalance}`
         });
 
         await logActivity(
@@ -1762,10 +1798,10 @@ export function FrontDesk() {
           profile,
           'UPDATE_RESERVATION_STATUS',
           'Front Desk',
-          `Reservation status changed to checked_out`,
+          `Reservation status changed to checked_out (operational). Balance preserved: ${outstandingBalance}`,
           res.id,
           { status: res.status },
-          { status: 'checked_out' }
+          { status: 'checked_out', ledgerBalance: outstandingBalance }
         );
 
         // 4. Mark room as dirty or clean based on sync settings
@@ -1795,7 +1831,8 @@ export function FrontDesk() {
               roomNumber: res.roomNumber,
               checkIn: res.checkIn,
               checkOut: format(now, 'yyyy-MM-dd'),
-              totalAmount: totalDebits
+              totalAmount: totalDebits,
+              outstandingBalance: outstandingBalance
             })
           }, {
             hotelId: hotel.id,
@@ -1805,26 +1842,22 @@ export function FrontDesk() {
           });
         }
 
-        // 6. Calculate guest balance vs corporate balance from latest ledger entries to avoid double transfer/double-debiting
-        const freshLedgerQ = query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        );
-        const freshLedgerSnap = await getDocs(freshLedgerQ);
-        const freshEntries = freshLedgerSnap.docs.map(doc => doc.data() as LedgerEntry);
-        
-        const guestBalance = freshEntries
-          .filter(e => !e.corporateId)
-          .reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+        // 6. CRITICAL FINANCIAL LOGIC: DECOUPLE CHECKOUT FROM BALANCE SETTLEMENT
+        // Checking out a guest is an operational action (releasing room inventory).
+        // Paying a balance is a financial action.
+        // A guest checkout must NEVER automatically settle, clear, write off, or reduce any outstanding balance.
+        if (outstandingBalance > 0.01) {
+          await recordOutstandingDebt(hotel.id, {
+            ...res,
+            totalAmount: totalDebits,
+            paidAmount: res.paidAmount || 0,
+            checkOut: format(now, 'yyyy-MM-dd'),
+            ledgerBalance: outstandingBalance
+          }, outstandingBalance, profile, 'Preserved at operational checkout');
 
-        if (res.corporateId && guestBalance > 0.01) {
-          await transferToCityLedger(hotel.id, res.guestId!, res.id, guestBalance, profile.uid, res.corporateId);
-          toast.success(`Individual guest balance of ${formatCurrency(guestBalance, currency, exchangeRate)} transferred to City Ledger.`);
-        } else if (!res.corporateId && outstandingBalance > 0 && hotel.settings?.checkout?.autoMarkUnpaidAsDebt) {
-          // If autoMarkUnpaidAsDebt is enabled, we could transfer to city ledger or just log it as debt
-          // Let's use city ledger as it represents debt to the hotel
-          await transferToCityLedger(hotel.id, res.guestId!, res.id, outstandingBalance, profile.uid);
-          toast.success(`Balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} marked as Debt (Transferred to City Ledger).`);
+          toast.success(`Guest checked out successfully. Active outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} preserved in Outstanding Guest Ledger.`);
+        } else {
+          toast.success('Guest checked out successfully.');
         }
 
         if (outstandingBalance > 0.01 && hotel.settings?.checkout?.autoGenerateOutstandingInvoice) {
@@ -4882,6 +4915,24 @@ export function FrontDesk() {
           </div>
         );
       })()}
+      {returningGuestDebtModalData && (
+        <ReturningGuestDebtModal
+          isOpen={true}
+          onClose={() => setReturningGuestDebtModalData(null)}
+          debts={returningGuestDebtModalData.debts}
+          totalDebt={returningGuestDebtModalData.totalDebt}
+          newReservation={returningGuestDebtModalData.reservation}
+          hotel={hotel}
+          profile={profile}
+          currency={currency}
+          exchangeRate={exchangeRate}
+          onProceedCheckIn={() => {
+            const targetRes = returningGuestDebtModalData.reservation;
+            setReturningGuestDebtModalData(null);
+            updateReservationStatus(targetRes, 'checked_in', true);
+          }}
+        />
+      )}
     </div>
   );
 }
