@@ -1,5 +1,5 @@
 import { Room, Reservation, RoomBlocking, Hotel } from '../types';
-import { isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns';
+import { isWithinInterval, parseISO, startOfDay, endOfDay, addDays } from 'date-fns';
 
 export type DisplayRoomStatus = Room['status'] | 'occupied' | 'reserved' | 'blocked';
 
@@ -48,19 +48,45 @@ export const isRoomAvailable = (
   checkOut: string,
   reservations: Reservation[],
   roomBlockings: RoomBlocking[] = [],
-  hotel: Hotel | null = null
+  hotel: Hotel | null = null,
+  excludeReservationId?: string
 ): boolean => {
   const start = startOfDay(parseISO(checkIn));
   const end = startOfDay(parseISO(checkOut));
+  const today = startOfDay(new Date());
 
   // Check Reservations
   const hasConflict = reservations.some(r => {
     if (r.roomId !== roomId) return false;
+    if (excludeReservationId && r.id === excludeReservationId) return false;
     if (r.status === 'cancelled' || r.status === 'checked_out' || r.status === 'no_show') return false;
     
     const resStart = startOfDay(parseISO(r.checkIn));
     const resEnd = startOfDay(parseISO(r.checkOut));
 
+    // 1. If someone is CURRENTLY CHECKED IN to this room:
+    // That person is physically occupying the room right now.
+    // The room CANNOT be checked into or booked for today (same day) until they check out!
+    if (r.status === 'checked_in') {
+      // While checked in, the occupancy holds the room through today at minimum.
+      // Even if scheduled checkout was earlier today or in the past (overstay), until checkout happens,
+      // the room is physically occupied today.
+      const effectiveOccupancyEnd = resEnd <= today ? addDays(today, 1) : resEnd;
+
+      // Overlap with the active checked-in stay:
+      const overlapsActiveStay = start < effectiveOccupancyEnd && end > resStart;
+      if (overlapsActiveStay) return true;
+
+      // Same-day check-in block: If the requested booking/check-in starts today or spans today,
+      // and someone is already checked in, block it until they check out:
+      if (start.getTime() === today.getTime() || (start <= today && end > today)) {
+        return true;
+      }
+
+      return false;
+    }
+
+    // 2. For future / pending / confirmed reservations:
     // Overlap if: (StartA < EndB) and (EndA > StartB)
     return start < resEnd && end > resStart;
   });

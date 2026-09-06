@@ -90,9 +90,25 @@ export const canCheckIn = (
   profile: UserProfile | null,
   reservation: Reservation,
   room: Room | undefined,
-  guest?: Guest | null
+  guest?: Guest | null,
+  allReservations: Reservation[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+
+  // 1. HARD AVAILABILITY BLOCK: Prevent check-in if another guest is already checked into this room
+  if (allReservations && allReservations.length > 0) {
+    const activeCheckedInGuest = allReservations.find(r => 
+      r.roomId === reservation.roomId && 
+      r.status === 'checked_in' && 
+      r.id !== reservation.id
+    );
+    if (activeCheckedInGuest) {
+      return { 
+        allowed: false, 
+        message: `Cannot check in to Room ${room?.roomNumber || reservation.roomNumber}. It is currently occupied by in-house guest "${activeCheckedInGuest.guestName}". They must check out before a new guest can check in.` 
+      };
+    }
+  }
   
   const settings = hotel.settings?.checkIn;
   if (!settings) return { allowed: true };
@@ -106,7 +122,7 @@ export const canCheckIn = (
 
   if (room) {
     if (room.status === 'occupied') {
-      return { allowed: false, message: 'Cannot check-in. This room is currently occupied by another guest.' };
+      return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently occupied by another guest.` };
     }
 
     if (settings.preventCheckInDirty && (room.status === 'dirty' || room.status === 'cleaning')) {

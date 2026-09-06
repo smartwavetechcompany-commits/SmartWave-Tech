@@ -547,6 +547,7 @@ export function BreakfastList() {
       const data = filteredEntries.map(e => ({
         'Room Number': e.roomNumber,
         'Guest Name': e.guestName,
+        'Corporate / Account': e.isCorporate ? (e.corporateName || 'Corporate Guest') : 'Individual',
         'Guests (Pax)': e.numberOfGuests,
         'Room Type': e.roomType,
         'Breakfast Entitlement': e.breakfastEntitlement,
@@ -581,6 +582,7 @@ export function BreakfastList() {
         'Date': l.date,
         'Room Number': l.roomNumber,
         'Guest Name': l.guestName,
+        'Corporate / Account': l.isCorporate ? (l.corporateName || 'Corporate Guest') : 'Individual',
         'Pax': l.pax,
         'Room Type': l.roomType,
         'Meal Plan': l.mealPlan,
@@ -661,8 +663,14 @@ export function BreakfastList() {
             {viewMode === 'daily' ? (
               filteredEntries.map((e) => (
                 <tr key={e.id} className="border-b border-zinc-300 break-inside-avoid">
-                  <td className="p-2 border-r border-zinc-300 font-bold font-mono">{e.roomNumber}</td>
-                  <td className="p-2 border-r border-zinc-300 font-semibold">{e.guestName}</td>
+                  <td className="p-2 border-r border-zinc-300 font-bold font-mono">Room {e.roomNumber}</td>
+                  <td className="p-2 border-r border-zinc-300">
+                    <div className="font-semibold">{e.guestName}</div>
+                    <div className="text-[9px] text-zinc-600">
+                      {e.isCorporate ? `🏢 Corporate: ${e.corporateName || 'Corporate Guest'}` : 'Individual Guest'}
+                      {e.guestPhone ? ` • Tel: ${e.guestPhone}` : ''}
+                    </div>
+                  </td>
                   <td className="p-2 border-r border-zinc-300">{e.numberOfGuests}</td>
                   <td className="p-2 border-r border-zinc-300">{e.roomType}</td>
                   <td className="p-2 border-r border-zinc-300">{e.breakfastEntitlement}</td>
@@ -675,8 +683,13 @@ export function BreakfastList() {
               filteredHistoricalLogs.map((l, idx) => (
                 <tr key={idx} className="border-b border-zinc-300 break-inside-avoid">
                   <td className="p-2 border-r border-zinc-300 font-mono">{l.date}</td>
-                  <td className="p-2 border-r border-zinc-300 font-bold font-mono">{l.roomNumber}</td>
-                  <td className="p-2 border-r border-zinc-300 font-semibold">{l.guestName}</td>
+                  <td className="p-2 border-r border-zinc-300 font-bold font-mono">Room {l.roomNumber}</td>
+                  <td className="p-2 border-r border-zinc-300">
+                    <div className="font-semibold">{l.guestName}</div>
+                    <div className="text-[9px] text-zinc-600">
+                      {l.isCorporate ? `🏢 Corporate: ${l.corporateName || 'Corporate Guest'}` : 'Individual Guest'}
+                    </div>
+                  </td>
                   <td className="p-2 border-r border-zinc-300">{l.pax}</td>
                   <td className="p-2 border-r border-zinc-300">{l.roomType}</td>
                   <td className="p-2 border-r border-zinc-300">{l.entitlement}</td>
@@ -1120,10 +1133,27 @@ export function BreakfastList() {
                           </td>
 
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-zinc-100">{entry.guestName}</div>
-                            {entry.guestPhone && (
-                              <div className="text-[10px] text-zinc-500">{entry.guestPhone}</div>
-                            )}
+                            <div className="font-semibold text-zinc-100 flex items-center gap-2 flex-wrap">
+                              <span>{entry.guestName}</span>
+                              {entry.isCorporate ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30" title={`Corporate Guest: ${entry.corporateName || 'Corporate Account'}`}>
+                                  <Building2 size={10} />
+                                  {entry.corporateName || 'Corporate Guest'}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-zinc-800/80 text-zinc-400 border border-zinc-700/50">
+                                  Individual
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] font-mono font-bold text-zinc-400">
+                                Room {entry.roomNumber}
+                              </span>
+                              {entry.guestPhone && (
+                                <span className="text-[10px] text-zinc-500">• {entry.guestPhone}</span>
+                              )}
+                            </div>
                           </td>
 
                           <td className="py-3 px-4">
@@ -1299,7 +1329,18 @@ export function BreakfastList() {
                           <td className="py-2.5 px-4 font-mono text-zinc-400 text-[11px]">{log.date}</td>
                           <td className="py-2.5 px-4 font-bold text-zinc-100 font-mono">{log.roomNumber}</td>
                           <td className="py-2.5 px-4 font-semibold text-zinc-200">
-                            {log.guestName}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span>{log.guestName}</span>
+                              {log.isCorporate ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                  <Building2 size={9} />
+                                  {log.corporateName || 'Corporate'}
+                                </span>
+                              ) : (
+                                <span className="text-[9px] text-zinc-500">Individual</span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-zinc-400 font-mono">Room {log.roomNumber}</div>
                             {log.guestPhone && <span className="text-[10px] text-zinc-500 block">{log.guestPhone}</span>}
                           </td>
                           <td className="py-2.5 px-4">{log.pax} {log.pax === 1 ? 'Guest' : 'Guests'}</td>

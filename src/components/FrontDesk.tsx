@@ -777,8 +777,23 @@ export function FrontDesk() {
     for (const stay of allStays) {
       if (preventOverbooking && !isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel)) {
         const room = rooms.find(r => r.id === stay.roomId);
-        toast.error(`Room ${room?.roomNumber || stay.roomId} is not available for the selected dates.`);
+        const activeRes = reservations.find(r => r.roomId === stay.roomId && r.status === 'checked_in');
+        if (activeRes) {
+          toast.error(`Room ${room?.roomNumber || stay.roomId} is currently occupied by in-house guest "${activeRes.guestName}". Another guest cannot check in until they check out.`);
+        } else {
+          toast.error(`Room ${room?.roomNumber || stay.roomId} is not available for the selected dates.`);
+        }
         return;
+      }
+
+      // Hard check: if this stay is being checked in immediately (Walk-in), ensure room does not have another checked-in guest
+      if (stay.status === 'checked_in' || newBooking.status === 'checked_in') {
+        const activeRes = reservations.find(r => r.roomId === stay.roomId && r.status === 'checked_in');
+        if (activeRes) {
+          const room = rooms.find(r => r.id === stay.roomId);
+          toast.error(`Check-in Blocked: Room ${room?.roomNumber || stay.roomId} is currently occupied by "${activeRes.guestName}". The current guest must check out first.`);
+          return;
+        }
       }
     }
 
@@ -1145,6 +1160,18 @@ export function FrontDesk() {
       return;
     }
 
+    // Check if new dates conflict with another reservation or active stay in this room
+    if (!isRoomAvailable(editingReservation.roomId, editForm.checkIn, editForm.checkOut, reservations, roomBlockings, hotel, editingReservation.id)) {
+      const room = rooms.find(r => r.id === editingReservation.roomId);
+      const activeRes = reservations.find(r => r.roomId === editingReservation.roomId && r.status === 'checked_in' && r.id !== editingReservation.id);
+      if (activeRes) {
+        toast.error(`Room ${room?.roomNumber || editingReservation.roomNumber} is occupied by "${activeRes.guestName}". Cannot change dates to overlap with active stay.`);
+      } else {
+        toast.error(`The selected dates conflict with another reservation or maintenance block for Room ${room?.roomNumber || editingReservation.roomNumber}.`);
+      }
+      return;
+    }
+
     try {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', editingReservation.id);
@@ -1200,7 +1227,7 @@ export function FrontDesk() {
         if (res && (res.status === 'pending' || res.status === 'confirmed')) {
           const room = rooms.find(r => r.id === res.roomId);
           const guest = guests.find(g => g.id === res.guestId);
-          const policy = canCheckIn(hotel, profile, res, room, guest);
+          const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
           
           if (!policy.allowed) {
             skippedCount++;
@@ -1520,9 +1547,20 @@ export function FrontDesk() {
 
     // Policy checks
     if (status === 'checked_in') {
+      // Check if room currently has another active checked-in guest
+      const activeStay = reservations.find(r => 
+        r.roomId === res.roomId && 
+        r.status === 'checked_in' && 
+        r.id !== res.id
+      );
+      if (activeStay) {
+        toast.error(`Check-in Blocked: Room ${res.roomNumber} is currently occupied by in-house guest "${activeStay.guestName}". They must check out first before a new guest can check in.`);
+        return;
+      }
+
       const room = rooms.find(r => r.id === res.roomId);
       const guest = guests.find(g => g.id === res.guestId);
-      const policy = canCheckIn(hotel, profile, res, room, guest);
+      const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
       if (!policy.allowed) {
         toast.error(policy.message || 'Check-in denied by hotel policy');
         return;
@@ -3881,17 +3919,24 @@ export function FrontDesk() {
                             return null;
                           })()}
                         </div>
-                        {res.corporateId && (
-                          <div className="text-[10px] text-emerald-500 font-bold flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1">
-                              <Building2 size={10} />
-                              {corporateAccounts.find(a => a.id === res.corporateId)?.name || 'Corporate'}
+                        {(() => {
+                          const linkedGuest = guests.find(g => g.id === res.guestId);
+                          const corpId = res.corporateId || linkedGuest?.corporateId;
+                          const isCorp = Boolean(corpId || res.corporateReference || linkedGuest?.tags?.includes('Corporate'));
+                          if (!isCorp) return null;
+                          const corpName = corporateAccounts.find(a => a.id === corpId)?.name || res.corporateReference || 'Corporate Guest';
+                          return (
+                            <div className="text-[10px] text-blue-400 font-bold flex flex-col gap-0.5 mt-0.5">
+                              <div className="flex items-center gap-1">
+                                <Building2 size={10} />
+                                {corpName}
+                              </div>
+                              {res.corporateReference && (
+                                <div className="text-zinc-400 font-normal">Ref: {res.corporateReference}</div>
+                              )}
                             </div>
-                            {res.corporateReference && (
-                              <div className="text-zinc-400 font-normal">Ref: {res.corporateReference}</div>
-                            )}
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
                   </td>
@@ -4210,18 +4255,24 @@ export function FrontDesk() {
                                 className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
                                 title="Take Prepayment / Deposit"
                               >
-                                <DollarSign size={18} />
+                                 <DollarSign size={18} />
                               </button>
                                <button 
                                 onClick={() => updateReservationStatus(res, 'checked_in')}
                                 className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                                 title={(() => {
+                                  const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
+                                  if (activeStay) return `Room ${res.roomNumber} is currently occupied by "${activeStay.guestName}". They must check out first.`;
                                   const room = rooms.find(r => r.id === res.roomId);
                                   const guest = guests.find(g => g.id === res.guestId);
-                                  const policy = canCheckIn(hotel, profile, res, room, guest);
+                                  const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
                                   return policy.allowed ? "Check In" : policy.message;
                                 })()}
-                                disabled={loading || !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId)).allowed}
+                                disabled={loading || (() => {
+                                  const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
+                                  if (activeStay) return true;
+                                  return !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId), reservations).allowed;
+                                })()}
                               >
                                 <CheckCircle2 size={18} />
                               </button>
@@ -4419,7 +4470,7 @@ export function FrontDesk() {
                   <option value="">Select clean / ready room</option>
                   {rooms.filter(r => {
                     if (r.id === showTransferModal.roomId) return false;
-                    const policy = canCheckIn(hotel, profile, showTransferModal, r, null);
+                    const policy = canCheckIn(hotel, profile, showTransferModal, r, null, reservations);
                     return policy.allowed && r.status !== 'occupied';
                   }).map(room => (
                     <option key={room.id} value={room.id}>
