@@ -33,7 +33,7 @@ import { fuzzySearch } from '../utils/searchUtils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { postToLedger } from '../services/ledgerService';
+import { postToLedger, processAutomatedBillingForReservation } from '../services/ledgerService';
 import { parseLocalDateTime } from '../utils/billingEngine';
 import { useSettings } from '../hooks/useSettings';
 
@@ -259,45 +259,10 @@ export function CorporateManagement() {
 
       let chargedCount = 0;
       const now = new Date();
-      const todayStr = format(now, 'yyyy-MM-dd');
-      const overstayTime = hotel?.overstayChargeTime || hotel?.defaultCheckOutTime || '12:00';
       
       for (const res of activeReservations) {
-        // If it's checkout day, only charge if past overstay time
-        if (res.checkOut === todayStr) {
-          const checkOutDateTime = parseLocalDateTime(res.checkOut, overstayTime);
-          if (now <= checkOutDateTime) continue;
-        }
-
-        // 2. Check if already charged for today
-        const ledgerQ = query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        );
-        const ledgerSnap = await getDocs(ledgerQ);
-        
-        const descriptionToFind = `Daily Room Charge: ${res.roomNumber} (${todayFormatted})`;
-        const alreadyCharged = ledgerSnap.docs.some(doc => {
-          const data = doc.data();
-          return data.category === 'room' && 
-                 data.type === 'debit' && 
-                 data.description === descriptionToFind;
-        });
-        
-        if (!alreadyCharged) {
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
-          if (rate > 0 && res.guestId) {
-            await postToLedger(hotel.id, res.guestId, res.id, {
-              amount: rate,
-              type: 'debit',
-              category: 'room',
-              description: `Daily Room Charge: ${res.roomNumber} (${todayFormatted})`,
-              referenceId: res.id,
-              postedBy: profile.uid
-            }, profile.uid, res.corporateId);
-            chargedCount++;
-          }
-        }
+        const billingRes = await processAutomatedBillingForReservation(hotel, res, profile.uid, now);
+        chargedCount += billingRes.chargedCount;
       }
       
       if (chargedCount > 0) {

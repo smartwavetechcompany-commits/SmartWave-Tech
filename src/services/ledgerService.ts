@@ -4,6 +4,7 @@ import { LedgerEntry, Reservation, FinanceRecord, Hotel } from '../types';
 import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService } from '../utils/billingEngine';
+import { calculateStayDuration } from '../utils/dateUtils';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
@@ -23,28 +24,63 @@ export const postToLedger = async (
     throw new Error(validation.reason || 'Projections, forecasts, previews, and simulations cannot modify the live ledger.');
   }
 
-  // 0. Prevent duplicate room / overstay charges
-  if (entry.chargePeriodStart && entry.chargePeriodEnd && entry.chargeType) {
-    const q = query(
-      collection(db, 'hotels', hotelId, 'ledger'),
-      where('reservationId', '==', reservationId)
-    );
-    const querySnap = await getDocs(q);
-    const entryStartDay = format(new Date(entry.chargePeriodStart), 'yyyy-MM-dd');
-    const entryEndDay = format(new Date(entry.chargePeriodEnd), 'yyyy-MM-dd');
+  // 0. Prevent duplicate room / overstay charges with robust multi-field idempotency
+  const q = query(
+    collection(db, 'hotels', hotelId, 'ledger'),
+    where('reservationId', '==', reservationId)
+  );
+  const querySnap = await getDocs(q);
+
+  if (entry.type === 'debit' && (entry.category === 'room' || entry.chargeType === 'room_rate' || entry.chargeType === 'overstay')) {
+    const targetStartDay = entry.chargePeriodStart ? format(new Date(entry.chargePeriodStart), 'yyyy-MM-dd') : null;
+    const targetEndDay = entry.chargePeriodEnd ? format(new Date(entry.chargePeriodEnd), 'yyyy-MM-dd') : null;
 
     const exists = querySnap.docs.some(doc => {
       const e = doc.data() as LedgerEntry;
-      if (e.type !== 'debit' || e.chargeType !== entry.chargeType) return false;
-      if (!e.chargePeriodStart || !e.chargePeriodEnd) return false;
+      if (e.type !== 'debit') return false;
+      if (e.category !== 'room' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay') return false;
 
-      const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
-      const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
-      return eStartDay === entryStartDay && eEndDay === entryEndDay;
+      // Match by deterministic reference ID (e.g. resId_NIGHT_1 or resId_OVERSTAY_1)
+      if (entry.referenceId && e.referenceId && e.referenceId === entry.referenceId) {
+        return true;
+      }
+
+      // Match by exact charge period
+      if (targetStartDay && targetEndDay && e.chargePeriodStart && e.chargePeriodEnd) {
+        const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
+        const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
+        if (eStartDay === targetStartDay && eEndDay === targetEndDay) return true;
+      }
+
+      // Match by start day and charge type
+      if (targetStartDay && e.chargePeriodStart && e.chargeType === entry.chargeType) {
+        const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
+        if (eStartDay === targetStartDay) return true;
+      }
+
+      // Match by identical description
+      if (e.description && entry.description && e.description.trim() === entry.description.trim()) {
+        return true;
+      }
+
+      // Match by date substring within description (e.g. "Night of Sep 07, 2026")
+      if (entry.description && e.description) {
+        const dateMatchTarget = entry.description.match(/Night of\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/);
+        const dateMatchExisting = e.description.match(/Night of\s+([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/);
+        if (dateMatchTarget && dateMatchExisting && dateMatchTarget[1] === dateMatchExisting[1]) {
+          // If both represent the same night (base or overstay), skip
+          if ((entry.chargeType === 'overstay' || entry.description.includes('Overstay')) === 
+              (e.chargeType === 'overstay' || e.description.includes('Overstay'))) {
+            return true;
+          }
+        }
+      }
+
+      return false;
     });
 
     if (exists) {
-      console.warn(`Duplicate charge detected and skipped: ${entry.chargeType} from ${entryStartDay} to ${entryEndDay}.`);
+      console.warn(`Duplicate room charge skipped for reservation ${reservationId}: "${entry.description}"`);
       return;
     }
   }
@@ -129,6 +165,24 @@ export const postToLedger = async (
     const inclusiveTaxEntries: Omit<LedgerEntry, 'id'>[] = [];
 
     for (const tax of activeTaxes) {
+      const taxName = tax.name || 'Tax';
+      const taxDesc = `${taxName} (${tax.percentage}%)`;
+
+      // RULE 6: TAX IDEMPOTENCY - Never duplicate tax if already posted for this charge
+      const taxAlreadyPosted = querySnap.docs.some(doc => {
+        const d = doc.data() as LedgerEntry;
+        if (d.type !== 'debit' || d.category !== 'tax') return false;
+        if (d.description && d.description.includes(taxDesc) && d.description.includes(initialDescription)) {
+          return true;
+        }
+        return false;
+      });
+
+      if (taxAlreadyPosted) {
+        console.log(`[postToLedger] Skipping duplicate tax ${taxDesc} for: ${initialDescription}`);
+        continue;
+      }
+
       const taxAmount = tax.isInclusive 
         ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
         : baseAmount * (tax.percentage / 100);
@@ -702,6 +756,243 @@ export const transferCorporateBalance = async (
   });
 };
 
+export interface FolioReconciliationReport {
+  reservationId: string;
+  roomNumber: string;
+  guestId: string;
+  bookedNights: number;
+  overstayNights: number;
+  legitimateTotalNights: number;
+  purgedDuplicateEntriesCount: number;
+  purgedEntryIds: string[];
+  totalCharges: number;
+  totalPayments: number;
+  totalCredits: number;
+  expectedBalance: number;
+  previousStoredBalance: number;
+  isReconciled: boolean;
+  discrepancy: number;
+}
+
+/**
+ * PRODUCTION-GRADE FINANCIAL RECONCILIATION & PURGE ENGINE
+ * Strict enforcement of Rules 1, 2, 3, 4, 6, 8, 9:
+ * 1. Checks exact booked nights + overstay nights (additive, never multiplied)
+ * 2. Identifies any duplicate room entries for identical nights or exceeding legitimate stay duration
+ * 3. Identifies and purges attached tax debits for duplicate charges
+ * 4. Recalculates exact true balance: SUM(Charges) - SUM(Payments) - SUM(Credits)
+ * 5. Reconciles reservation.ledgerBalance, totalAmount, paidAmount, and guest.ledgerBalance
+ */
+export const reconcileAndRepairReservationFinancials = async (
+  hotelId: string,
+  reservationId: string,
+  existingEntries?: LedgerEntry[]
+): Promise<FolioReconciliationReport> => {
+  if (!hotelId || !reservationId) {
+    throw new Error('hotelId and reservationId are required for financial reconciliation');
+  }
+
+  const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+  const resSnap = await getDoc(resRef);
+  if (!resSnap.exists()) {
+    throw new Error(`Reservation ${reservationId} not found`);
+  }
+  const res = resSnap.data() as Reservation;
+
+  let ledgerEntries = existingEntries;
+  if (!ledgerEntries) {
+    const q = query(
+      collection(db, 'hotels', hotelId, 'ledger'),
+      where('reservationId', '==', reservationId)
+    );
+    const snap = await getDocs(q);
+    ledgerEntries = snap.docs.map(doc => ({ id: doc.id, firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId?: string }));
+  }
+
+  // Authoritative duration engine calculation (RULE 4)
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status);
+  const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
+  const overstayNights = Math.max(0, duration.overstayNights || 0);
+  const legitimateTotalNights = bookedNights + overstayNights;
+
+  // Identify all room debit charges (base room and overstay)
+  const roomDebits = ledgerEntries.filter(e => 
+    e.type === 'debit' && 
+    (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
+  );
+
+  const duplicateIds: string[] = [];
+
+  // Group room charges by date or night representation to keep at most 1 charge per distinct night
+  const chargesByNightKey: { [key: string]: (LedgerEntry & { firestoreId?: string })[] } = {};
+  
+  roomDebits.forEach(entry => {
+    let key = '';
+    if (entry.chargePeriodStart) {
+      key = format(new Date(entry.chargePeriodStart), 'yyyy-MM-dd');
+    } else if (entry.description) {
+      const match = entry.description.match(/(?:Night of|Nightly room charge -|Period \d+ past checkout).*?([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/i) ||
+                    entry.description.match(/(\d{4}-\d{2}-\d{2})/);
+      if (match) {
+        key = match[1];
+      } else {
+        key = entry.description.trim();
+      }
+    }
+    if (!key) key = entry.id;
+
+    if (!chargesByNightKey[key]) {
+      chargesByNightKey[key] = [];
+    }
+    chargesByNightKey[key].push(entry);
+  });
+
+  const retainedRoomCharges: (LedgerEntry & { firestoreId?: string })[] = [];
+
+  // For each night key, keep only the earliest valid entry; mark all other duplicates for purging
+  Object.entries(chargesByNightKey).forEach(([_, list]) => {
+    list.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+    retainedRoomCharges.push(list[0]);
+    for (let k = 1; k < list.length; k++) {
+      const dupId = list[k].firestoreId || list[k].id;
+      if (dupId && !duplicateIds.includes(dupId)) {
+        duplicateIds.push(dupId);
+      }
+    }
+  });
+
+  // If the number of retained room charges still exceeds legitimateTotalNights:
+  // e.g. guest booked 1 night + 1 overstay night = 2 nights, but 5 charges were posted!
+  if (retainedRoomCharges.length > legitimateTotalNights) {
+    retainedRoomCharges.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+    const excess = retainedRoomCharges.slice(legitimateTotalNights);
+    excess.forEach(entry => {
+      const excessId = entry.firestoreId || entry.id;
+      if (excessId && !duplicateIds.includes(excessId)) {
+        duplicateIds.push(excessId);
+      }
+    });
+  }
+
+  // Identify any attached tax entries for the purged duplicate charges
+  if (duplicateIds.length > 0) {
+    const dupEntries = ledgerEntries.filter(e => duplicateIds.includes((e as any).firestoreId || e.id));
+    dupEntries.forEach(dup => {
+      const dupDesc = dup.description;
+      if (dupDesc) {
+        const matchingTaxes = ledgerEntries!.filter(e => 
+          e.type === 'debit' && 
+          e.category === 'tax' && 
+          e.description && 
+          (e.description.includes(dupDesc) || (dup.id && e.description.includes(dup.id)))
+        );
+        matchingTaxes.forEach(t => {
+          const tId = (t as any).firestoreId || t.id;
+          if (tId && !duplicateIds.includes(tId)) {
+            duplicateIds.push(tId);
+          }
+        });
+      }
+    });
+
+    console.warn(`[FolioReconciliation] Purging ${duplicateIds.length} duplicate/excess charges for reservation ${reservationId}`, duplicateIds);
+    await purgeCorruptedLedgerEntries(hotelId, duplicateIds);
+  }
+
+  // Remaining clean ledger entries
+  const cleanEntries = ledgerEntries.filter(e => !duplicateIds.includes((e as any).firestoreId || e.id));
+
+  // Calculate authoritative balances according to RULE 2:
+  // Expected Balance = SUM(All Charges) - SUM(All Payments) - SUM(All Credits)
+  let totalCharges = 0;
+  let totalPayments = 0;
+  let totalCredits = 0;
+  let totalPaid = 0;
+
+  cleanEntries.forEach(e => {
+    if (e.type === 'debit') {
+      if (e.category === 'refund') {
+        totalPaid -= e.amount;
+      } else {
+        totalCharges += e.amount;
+      }
+    } else if (e.type === 'credit') {
+      const cat = (e.category || '').toLowerCase();
+      if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
+        totalCredits += e.amount;
+        if (cat === 'payment') {
+          totalPaid += e.amount;
+        }
+      }
+    }
+  });
+
+  totalCharges = Number(totalCharges.toFixed(2));
+  totalCredits = Number(totalCredits.toFixed(2));
+  totalPayments = Math.max(0, Number(totalPaid.toFixed(2)));
+  const expectedBalance = Number((totalCharges - totalCredits).toFixed(2));
+  const previousStoredBalance = res.ledgerBalance || 0;
+  const discrepancy = Number((previousStoredBalance - expectedBalance).toFixed(2));
+
+  // Update reservation document with authoritative reconciled numbers
+  await database.safeUpdate(resRef, {
+    ledgerBalance: expectedBalance,
+    totalAmount: totalCharges,
+    paidAmount: totalPayments,
+    paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 || totalCredits > 0 ? 'partial' : 'unpaid'),
+    financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
+  }, {
+    hotelId,
+    module: 'Reconciliation',
+    action: 'FOLIO_RECONCILIATION',
+    details: `Reconciled reservation ${reservationId}. Balance corrected from ${previousStoredBalance} to ${expectedBalance}. Purged ${duplicateIds.length} duplicate entries.`
+  });
+
+  // Update guest document
+  if (res.guestId) {
+    const guestRef = doc(db, 'hotels', hotelId, 'guests', res.guestId);
+    const guestSnap = await getDoc(guestRef);
+    if (guestSnap.exists()) {
+      await database.safeUpdate(guestRef, {
+        ledgerBalance: expectedBalance
+      }, {
+        hotelId,
+        module: 'Guest',
+        action: 'GUEST_BALANCE_RECONCILE',
+        details: `Reconciled guest ${res.guestId} ledger balance to ${expectedBalance}`
+      });
+    }
+  }
+
+  return {
+    reservationId,
+    roomNumber: res.roomNumber || '',
+    guestId: res.guestId || '',
+    bookedNights,
+    overstayNights,
+    legitimateTotalNights,
+    purgedDuplicateEntriesCount: duplicateIds.length,
+    purgedEntryIds: duplicateIds,
+    totalCharges,
+    totalPayments,
+    totalCredits,
+    expectedBalance,
+    previousStoredBalance,
+    isReconciled: true,
+    discrepancy
+  };
+};
+
+export const detectAndPurgeDuplicateOverstayCharges = async (
+  hotelId: string,
+  res: Reservation,
+  existingEntries?: LedgerEntry[]
+): Promise<string[]> => {
+  if (!hotelId || !res?.id) return [];
+  const recon = await reconcileAndRepairReservationFinancials(hotelId, res.id, existingEntries);
+  return recon.purgedEntryIds;
+};
+
 export const processAutomatedBillingForReservation = async (
   hotel: Hotel,
   res: Reservation,
@@ -720,27 +1011,49 @@ export const processAutomatedBillingForReservation = async (
     return { chargedCount: 0, totalAmount: 0 };
   }
 
-  // Fetch ledger entries for this reservation
+  // 1. Fetch current ledger entries for this reservation
   const ledgerQ = query(
     collection(db, 'hotels', hotel.id, 'ledger'),
     where('reservationId', '==', res.id)
   );
   const ledgerSnap = await getDocs(ledgerQ);
-  const ledgerEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+  let ledgerEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
+
+  // 2. Auto-Heal: Immediately detect and purge any duplicate or runaway overstay entries
+  const purgedIds = await detectAndPurgeDuplicateOverstayCharges(hotel.id, res, ledgerEntries);
+  if (purgedIds.length > 0) {
+    ledgerEntries = ledgerEntries.filter(e => !purgedIds.includes(e.id) && !purgedIds.includes(e.firestoreId));
+  }
+
+  // Authoritative stay duration calculation
+  const stayDuration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, currentTime);
+  const maxAllowedOverstayNights = Math.max(0, stayDuration.overstayNights);
+  const maxAllowedTotalNights = stayDuration.totalNights;
 
   let chargedCount = 0;
   let totalAmountCharged = 0;
   let lastChargeTime = res.lastChargeDateTime;
   let nextChargeTime = res.nextChargeDateTime;
 
-  // 1. Process Base Stay Nights
+  // Track room charges already on ledger
+  const postedRoomDebits = ledgerEntries.filter(e => 
+    e.type === 'debit' && 
+    (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
+  );
+
+  // If total posted room charges already reach or exceed allowed stay duration, STOP!
+  if (postedRoomDebits.length >= maxAllowedTotalNights) {
+    return { chargedCount: 0, totalAmount: 0 };
+  }
+
+  // 3. Process Base Stay Nights
   for (let i = 1; i <= originalNights; i++) {
     const Start = i === 1 
       ? checkInDateTime 
       : parseLocalDateTime(format(addDays(checkInDateTime, i - 1), 'yyyy-MM-dd'), checkOutTime);
     const End = parseLocalDateTime(format(addDays(checkInDateTime, i), 'yyyy-MM-dd'), checkOutTime);
 
-    // This night is chargeable if currentTime is past its start time, OR if it's the first night (since guest has checked in)
+    // This night is chargeable if currentTime is past its start time, OR if it's the first night
     const isNightChargeable = i === 1 || currentTime >= Start;
     if (isNightChargeable) {
       const startStr = Start.toISOString();
@@ -753,6 +1066,9 @@ export const processAutomatedBillingForReservation = async (
       const exists = ledgerEntries.some(e => {
         if (e.type !== 'debit') return false;
 
+        // Match by deterministic reference ID
+        if (e.referenceId === `${res.id}_NIGHT_${i}`) return true;
+
         if (e.chargeType === 'room_rate' && e.chargePeriodStart && e.chargePeriodEnd) {
           const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
           const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
@@ -761,20 +1077,27 @@ export const processAutomatedBillingForReservation = async (
           }
         }
 
+        // Check by matching date in description
+        if (e.description && (e.category === 'room' || e.chargeType === 'room_rate')) {
+          if (e.description.includes(format(Start, 'MMM dd, yyyy'))) {
+            return true;
+          }
+        }
+
         // Fallback: if i === 1 and there is ANY room debit in the ledger, treat it as representing Night 1
-        if (i === 1 && e.category === 'room') {
+        if (i === 1 && (e.category === 'room' || e.chargeType === 'room_rate')) {
           return true;
         }
         return false;
       });
 
-      if (!exists) {
+      if (!exists && (postedRoomDebits.length + chargedCount) < maxAllowedTotalNights) {
         await postToLedger(hotel.id, res.guestId, res.id, {
           amount: nightlyRate,
           type: 'debit',
           category: 'room',
           description: `Nightly Room Charge: ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')}) (Night ${i} of ${originalNights})`,
-          referenceId: res.id,
+          referenceId: `${res.id}_NIGHT_${i}`,
           postedBy: profileUid,
           chargePeriodStart: startStr,
           chargePeriodEnd: endStr,
@@ -789,20 +1112,24 @@ export const processAutomatedBillingForReservation = async (
     }
   }
 
-  // 2. Process Overstay Nights
+  // 4. Process Overstay Nights strictly capped by maxAllowedOverstayNights
   const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
   const minutesPastCheckout = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60);
-  if (currentTime > checkOutDateTime && minutesPastCheckout > gracePeriodMinutes && hotel.autoChargeOverstays !== false) {
+
+  if (currentTime > checkOutDateTime && minutesPastCheckout > gracePeriodMinutes && hotel.autoChargeOverstays !== false && maxAllowedOverstayNights > 0) {
     const policy = hotel?.overstayPolicy || 'grace';
     const graceHours = hotel?.overstayGraceHours ?? 2;
     const partialHours = hotel?.overstayPartialHours ?? 3;
     const partialPercentage = hotel?.overstayPartialPercentage ?? 50;
     const fullHours = hotel?.overstayFullHours ?? 6;
 
-    const hoursPast = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60);
-    const maxOverstayDays = Math.ceil(hoursPast / 24);
+    // STRICT BOUNDARY: Never iterate beyond actual allowed overstay nights!
+    for (let j = 1; j <= maxAllowedOverstayNights; j++) {
+      // If total posted room charges have reached maxAllowedTotalNights, stop!
+      if ((postedRoomDebits.length + chargedCount) >= maxAllowedTotalNights) {
+        break;
+      }
 
-    for (let j = 1; j <= maxOverstayDays; j++) {
       const Start = addDays(checkOutDateTime, j - 1);
       const End = addDays(checkOutDateTime, j);
 
@@ -839,24 +1166,31 @@ export const processAutomatedBillingForReservation = async (
           const entryStartDay = format(Start, 'yyyy-MM-dd');
           const entryEndDay = format(End, 'yyyy-MM-dd');
 
-          const postedAmount = ledgerEntries
-            .filter(e => {
-              if (e.type !== 'debit' || e.chargeType !== 'overstay' || !e.chargePeriodStart || !e.chargePeriodEnd) return false;
-              const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
-              const eEndDay = format(new Date(e.chargePeriodEnd), 'yyyy-MM-dd');
-              return eStartDay === entryStartDay && eEndDay === entryEndDay;
-            })
-            .reduce((sum, e) => sum + e.amount, 0);
+          // Check if already posted by referenceId, charge period, description, or start day
+          const alreadyPosted = ledgerEntries.some(e => {
+            if (e.type !== 'debit') return false;
+            // Match by deterministic reference ID
+            if (e.referenceId === `${res.id}_OVERSTAY_${j}`) return true;
 
-          if (postedAmount < targetAmount - 0.01) {
-            const dueAmount = targetAmount - postedAmount;
-            
+            if (e.chargeType !== 'overstay' && !e.description?.toLowerCase().includes('overstay')) return false;
+
+            if (e.chargePeriodStart) {
+              const eStartDay = format(new Date(e.chargePeriodStart), 'yyyy-MM-dd');
+              if (eStartDay === entryStartDay) return true;
+            }
+            if (e.description && (e.description.includes(format(Start, 'MMM dd, yyyy')) || e.description.includes(`Period ${j}`))) {
+              return true;
+            }
+            return false;
+          });
+
+          if (!alreadyPosted) {
             await postToLedger(hotel.id, res.guestId, res.id, {
-              amount: dueAmount,
+              amount: targetAmount,
               type: 'debit',
               category: 'room',
-              description: `Overstay Room Charge: ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')}) (Period ${j} past checkout)${postedAmount > 0 ? ' [Upgrade to Full]' : ''}`,
-              referenceId: res.id,
+              description: `Overstay Room Charge: ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')}) (Period ${j} past checkout)`,
+              referenceId: `${res.id}_OVERSTAY_${j}`,
               postedBy: profileUid,
               chargePeriodStart: startStr,
               chargePeriodEnd: endStr,
@@ -864,7 +1198,7 @@ export const processAutomatedBillingForReservation = async (
             } as any, profileUid, res.corporateId);
 
             chargedCount++;
-            totalAmountCharged += dueAmount;
+            totalAmountCharged += targetAmount;
             lastChargeTime = currentTime.toISOString();
             nextChargeTime = BillingService.calculateNextChargeDateTime(res, hotel, originalNights + j).toISOString();
           }
@@ -873,7 +1207,7 @@ export const processAutomatedBillingForReservation = async (
     }
   }
 
-  // 3. Update the Reservation fields in the database
+  // 5. Update the Reservation fields in the database
   const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
   const updates: any = {};
   
@@ -890,6 +1224,9 @@ export const processAutomatedBillingForReservation = async (
       details: 'Automated billing fields and timestamps updated'
     });
   }
+
+  // Ensure balances are completely synchronized to ledger transaction sum
+  await recalculateReservationAccountFromLedger(hotel.id, res.id);
 
   return { chargedCount, totalAmount: totalAmountCharged };
 };

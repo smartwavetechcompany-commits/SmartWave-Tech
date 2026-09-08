@@ -44,7 +44,7 @@ import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration } from '../utils/dateUtils';
-import { postToLedger, transferToCityLedger } from '../services/ledgerService';
+import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
@@ -587,6 +587,20 @@ export function Rooms() {
       }
     }
 
+    // Policy checks
+    if (status === 'checked_in') {
+      // Check if room currently has another active checked-in guest
+      const activeStay = reservations.find(r => 
+        r.roomId === res.roomId && 
+        r.status === 'checked_in' && 
+        r.id !== res.id
+      );
+      if (activeStay) {
+        toast.error(`Check-in Blocked: Room ${res.roomNumber} is currently occupied by in-house guest "${activeStay.guestName}". They must check out first before a new guest can check in.`);
+        return;
+      }
+    }
+
     // Comprehensive Check-Out logic
     if (status === 'checked_out') {
       const policy = canCheckout(hotel, profile, res);
@@ -601,54 +615,15 @@ export function Rooms() {
         const now = new Date();
         const billingState = calculateBilling(res, hotel);
         const nightsStayed = billingState.nightsCount;
-        const checkInDate = startOfDay(new Date(res.checkIn));
-        
-        // Ensure all room charges are posted
-        const ledgerQ = query(
-          collection(db, 'hotels', hotel.id, 'ledger'),
-          where('reservationId', '==', res.id)
-        );
-        const ledgerSnap = await getDocs(ledgerQ);
-        const roomChargeEntries = ledgerSnap.docs.filter(doc => {
-          const data = doc.data();
-          return data.category === 'room' && data.type === 'debit';
-        });
-        
-        let finalTotalDebits = roomChargeEntries.reduce((acc, doc) => acc + doc.data().amount, 0);
-        const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+        // 1. Authoritative financial reconciliation & stay billing before checkout
+        await reconcileAndRepairReservationFinancials(hotel.id, res.id);
+        await processAutomatedBillingForReservation(hotel, res, profile.uid, now);
 
-        for (let i = 0; i < nightsStayed; i++) {
-          const chargeDate = addDays(startOfDay(checkInDate), i);
-          const dateStr = format(chargeDate, 'MMM dd, yyyy');
-
-          const alreadyCharged = roomChargeEntries.some(doc => {
-            const data = doc.data();
-            if (data.description?.includes(dateStr)) return true;
-            if (data.chargePeriodStart) {
-              const pStart = startOfDay(new Date(data.chargePeriodStart));
-              if (format(pStart, 'yyyy-MM-dd') === format(chargeDate, 'yyyy-MM-dd')) return true;
-            }
-            return false;
-          });
-
-          if (!alreadyCharged) {
-            await postToLedger(hotel.id, res.guestId!, res.id, {
-              amount: rate,
-              type: 'debit',
-              category: 'room',
-              description: `Final Room Charge: ${res.roomNumber} (Night of ${dateStr})`,
-              referenceId: res.id,
-              postedBy: profile.uid
-            }, profile.uid, res.corporateId);
-            finalTotalDebits += rate;
-          }
-        }
-
-        // Fetch latest outstanding balance from reservation document
+        // 2. Fetch authoritative reconciled balance from reservation document
         const freshResSnap = await getDoc(resRef);
         const freshResData = freshResSnap.data() as Reservation;
         const outstandingBalance = freshResData.ledgerBalance || 0;
-        const totalDebits = billingState.totalCharges;
+        const totalDebits = freshResData.totalAmount || 0;
 
         let blockCheckout = false;
         let blockMessage = '';
@@ -676,15 +651,13 @@ export function Rooms() {
           }
         }
 
-        // Update reservation
+        // 3. Update reservation - preserving exact debt in ledger and reservation (RULE 7)
         await database.safeUpdate(resRef, { 
           status: 'checked_out',
-          totalAmount: totalDebits,
-          nights: nightsStayed,
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
-          paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid',
-          financialStatus: outstandingBalance > 0.01 ? ((res.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
+          paymentStatus: freshResData.paymentStatus || (outstandingBalance <= 0.01 ? 'paid' : (freshResData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'),
+          financialStatus: outstandingBalance > 0.01 ? ((freshResData.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
           ledgerBalance: outstandingBalance
         }, {
           hotelId: hotel.id,

@@ -5,7 +5,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger, purgeCorruptedLedgerEntries } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { validateLedgerTransaction } from '../services/financialService';
 import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
 import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
@@ -232,60 +232,43 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     
     try {
       setIsAuditing(true);
-      const checkInDateTime = parseLocalDateTime(currentReservation.checkIn, currentReservation.checkInTime || '14:00');
-      const now = new Date();
-      const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-      let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+      // RULE 1, 4, 9: First auto-reconcile and purge any runaway duplicates
+      await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id, ledgerEntries);
 
-      // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
-      if (hotel.autoChargeOverstays !== false) {
-        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = parseLocalDateTime(currentReservation.checkOut, overstayTime);
-        if (isAfter(now, checkOutDateTime)) {
-          // Calculate how many days past checkout they are
-          const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
-          const expectedTotalNights = (currentReservation.nights || 1) + daysPastCheckout;
-          targetCharges = Math.max(targetCharges, expectedTotalNights);
-        }
-      }
+      // Now charge only missing eligible nights using authoritative engine
+      const res = await processAutomatedBillingForReservation(hotel, currentReservation, profile.uid, new Date());
       
-      let nightsPosted = 0;
-      for (let i = 0; i < targetCharges; i++) {
-        const chargeDate = addDays(startOfDay(checkInDateTime), i);
-        const dateStr = format(chargeDate, 'MMM dd, yyyy');
-        
-        const alreadyCharged = ledgerEntries.some(e => 
-          e.category === 'room' && 
-          e.type === 'debit' && 
-          e.description?.includes(dateStr)
-        );
-        
-        if (!alreadyCharged) {
-          const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
-          const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
-          
-          await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
-            amount: rate,
-            type: 'debit',
-            category: 'room',
-            description: `${isOverstay ? 'Overstay' : 'Manual Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${dateStr})`,
-            referenceId: currentReservation.id,
-            postedBy: profile.uid
-          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
-          nightsPosted++;
-        }
-      }
-      
-      if (nightsPosted > 0) {
-        toast.success(`Posted ${nightsPosted} nightly charge(s)`);
+      if (res.chargedCount > 0) {
+        toast.success(`Posted ${res.chargedCount} nightly charge(s) totaling ${formatCurrency(res.totalAmount, currency, exchangeRate)}`);
       } else {
-        toast.info('All nights are already charged up to date.');
+        toast.info('All nights are already accurately charged up to date.');
       }
     } catch (err: any) {
       console.error("Manual audit error:", err.message || safeStringify(err));
-      toast.error('Failed to post nightly charge');
+      toast.error('Failed to process nightly charge audit');
     } finally {
       setIsAuditing(false);
+    }
+  };
+
+  const [isReconciling, setIsReconciling] = useState(false);
+  const handleReconcileBalances = async () => {
+    if (!hotel?.id || !currentReservation.id) return;
+    try {
+      setIsReconciling(true);
+      const result = await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id, ledgerEntries);
+      if (result.purgedDuplicateEntriesCount > 0) {
+        toast.success(`Reconciled folio! Purged ${result.purgedDuplicateEntriesCount} duplicate/corrupted charge(s). Restored authoritative balance: ${formatCurrency(result.expectedBalance, currency, exchangeRate)}`);
+      } else if (result.discrepancy !== 0) {
+        toast.success(`Reconciled folio balance! Fixed discrepancy of ${formatCurrency(result.discrepancy, currency, exchangeRate)}. Current balance: ${formatCurrency(result.expectedBalance, currency, exchangeRate)}`);
+      } else {
+        toast.info(`Folio balance is 100% verified and reconciled: ${formatCurrency(result.expectedBalance, currency, exchangeRate)}`);
+      }
+    } catch (err: any) {
+      console.error("Reconciliation error:", err);
+      toast.error('Failed to reconcile folio balances');
+    } finally {
+      setIsReconciling(false);
     }
   };
 
@@ -673,6 +656,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         purgeCorruptedLedgerEntries(hotel.id, invalidEntryIds);
       }
 
+      // Auto-heal: Detect and purge any duplicate or runaway overstay entries automatically
+      if (hotel?.id && currentReservation.status === 'checked_in') {
+        detectAndPurgeDuplicateOverstayCharges(hotel.id, currentReservation, entries);
+      }
+
       // Filter valid entries for display
       const validEntries = entries.filter(e => validateLedgerTransaction(e).isValid);
 
@@ -721,51 +709,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
     
     try {
-      const checkInDateTime = parseLocalDateTime(currentReservation.checkIn, currentReservation.checkInTime || '14:00');
-      const now = new Date();
-      const hoursStayed = (now.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
-      let targetCharges = Math.max(1, Math.ceil(hoursStayed / 24));
+      // RULE 1, 4, 9: First ensure full reconciliation and purge any duplicate or excess overstays
+      await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id, ledgerEntries);
 
-      // Overstay logic: If past overstayChargeTime on checkout date, add an extra charge
-      if (hotel.autoChargeOverstays !== false) {
-        const overstayTime = hotel.overstayChargeTime || hotel.defaultCheckOutTime || '12:00';
-        const checkOutDateTime = parseLocalDateTime(currentReservation.checkOut, overstayTime);
-        if (isAfter(now, checkOutDateTime)) {
-          const daysPastCheckout = Math.max(1, Math.ceil((now.getTime() - checkOutDateTime.getTime()) / (1000 * 60 * 60 * 24)));
-          const expectedTotalNights = (currentReservation.nights || 1) + daysPastCheckout;
-          targetCharges = Math.max(targetCharges, expectedTotalNights);
-        }
-      }
-      
-      let nightsPosted = 0;
-      for (let i = 0; i < targetCharges; i++) {
-        const chargeDate = addDays(startOfDay(checkInDateTime), i);
-        const dateStr = format(chargeDate, 'MMM dd, yyyy');
-        
-        const alreadyCharged = ledgerEntries.some(e => 
-          e.category === 'room' && 
-          e.type === 'debit' && 
-          e.description?.includes(dateStr)
-        );
-        
-        if (!alreadyCharged) {
-          const isOverstay = isAfter(chargeDate, startOfDay(new Date(currentReservation.checkOut)));
-          const rate = currentReservation.nightlyRate || (currentReservation.totalAmount / (currentReservation.nights || 1)) || 0;
-          
-          await postToLedger(hotel.id, currentReservation.guestId!, currentReservation.id, {
-            amount: rate,
-            type: 'debit',
-            category: 'room',
-            description: `${isOverstay ? 'Overstay' : 'Automated Nightly'} Charge: Room ${currentReservation.roomNumber} (Night of ${dateStr})`,
-            referenceId: currentReservation.id,
-            postedBy: profile.uid
-          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
-          nightsPosted++;
-        }
-      }
-      
-      if (nightsPosted > 0) {
-        toast.info(`Accrued ${nightsPosted} night stays automatically.`);
+      // Now process automated stay billing with strict duration limits
+      const res = await processAutomatedBillingForReservation(hotel, currentReservation, profile.uid, new Date());
+      if (res.chargedCount > 0) {
+        toast.info(`Accrued ${res.chargedCount} night stay(s) automatically.`);
       }
     } catch (err: any) {
       console.error("Auto sync nightly charges error:", err);
@@ -903,8 +853,29 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <Receipt size={18} />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-zinc-50 truncate max-w-[120px] sm:max-w-none tracking-tight">Guest Folio</h2>
-              <p className="text-[9px] sm:text-xs text-zinc-500 font-mono">Res #{(currentReservation.id || '').slice(-6).toUpperCase()}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-lg font-bold text-zinc-50 tracking-tight">Guest Folio</h2>
+                <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-100 text-xs font-bold border border-zinc-700 flex items-center gap-1.5 shadow-sm">
+                  <span className="text-zinc-400 font-medium">Room</span>
+                  <span className="text-emerald-400 font-extrabold text-sm">{currentReservation.roomNumber}</span>
+                </span>
+                {currentReservation.corporateId ? (
+                  <span className="px-2.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 text-xs font-bold border border-blue-500/30 flex items-center gap-1.5 shadow-sm">
+                    <Building2 size={13} className="text-blue-400" />
+                    <span>Corporate Guest{corporateAccountsList.find(c => c.id === currentReservation.corporateId)?.name ? `: ${corporateAccountsList.find(c => c.id === currentReservation.corporateId)?.name}` : ''}</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-md bg-zinc-800/80 text-zinc-400 text-xs font-medium border border-zinc-700/50 flex items-center gap-1.5">
+                    <User size={13} className="text-zinc-500" />
+                    <span>Individual Guest</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-400">
+                <span className="font-semibold text-zinc-200">{currentReservation.guestName}</span>
+                <span className="text-zinc-600">•</span>
+                <span className="font-mono text-zinc-500 text-[11px]">Res #{(currentReservation.id || '').slice(-6).toUpperCase()}</span>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2">
@@ -2184,6 +2155,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Transaction History</h3>
               </div>
               <div className="flex items-center gap-3">
+                <button 
+                  onClick={handleReconcileBalances}
+                  disabled={isReconciling}
+                  title="Audit and synchronize ledger transactions to match authoritative reservation balance"
+                  className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-300 text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-zinc-700 transition-colors disabled:opacity-50 border border-zinc-700"
+                >
+                  <RefreshCw size={12} className={isReconciling ? "animate-spin" : ""} />
+                  {isReconciling ? 'Reconciling...' : 'Reconcile Balance'}
+                </button>
                 <button 
                   onClick={() => setShowSettlePayment(true)}
                   className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-emerald-400 transition-colors"

@@ -1,9 +1,8 @@
 import { db } from '../firebase';
-import { collection, getDocs, query, where, doc, setDoc, addDoc, writeBatch, increment } from 'firebase/firestore';
-import { Reservation, Room, Guest, OperationType } from '../types';
-import { postToLedger } from './ledgerService';
+import { collection, doc, getDoc } from 'firebase/firestore';
+import { Reservation, Room, Guest, Hotel } from '../types';
+import { processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from './ledgerService';
 import { database } from '../utils/database';
-import { format, addDays, differenceInDays, parseISO, isBefore, startOfDay } from 'date-fns';
 
 export const syncDailyCharges = async (
   hotelId: string,
@@ -13,63 +12,28 @@ export const syncDailyCharges = async (
   rooms: Room[],
   guests: Guest[]
 ) => {
-  const today = startOfDay(new Date());
-  const todayStr = format(today, 'yyyy-MM-dd');
+  const hotelSnap = await getDoc(doc(db, 'hotels', hotelId));
+  if (!hotelSnap.exists()) {
+    return { chargedCount: 0, totalAmount: 0 };
+  }
+  const hotel = { id: hotelSnap.id, ...hotelSnap.data() } as Hotel;
+
   let chargedCount = 0;
   let totalAmount = 0;
-
-  const batch = writeBatch(db);
 
   for (const res of reservations) {
     if (res.status !== 'checked_in') continue;
 
-    const room = rooms.find(r => r.id === res.roomId);
-    if (!room) continue;
+    try {
+      // RULE 1 & 9: Auto-reconcile and purge any duplicates first
+      await reconcileAndRepairReservationFinancials(hotelId, res.id);
 
-    // Calculate how many nights they've stayed so far
-    const checkInDate = startOfDay(parseISO(res.checkIn));
-    const nightsStayedSoFar = Math.max(0, differenceInDays(today, checkInDate));
-
-    // We should have 'nightsStayedSoFar' charges in the ledger
-    // But wait, the first night is usually charged at check-in.
-    // Let's check the ledger for this reservation
-    const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-    const q = query(ledgerRef, where('reservationId', '==', res.id));
-    const ledgerSnap = await getDocs(q);
-    
-    // Client-side filter to avoid index requirement
-    const roomCharges = ledgerSnap.docs.filter(doc => doc.data().category === 'room');
-    const existingChargesCount = roomCharges.length;
-
-    // If they've stayed 3 nights, they should have 3 charges.
-    // If they overstay, nightsStayedSoFar will be > (checkOut - checkIn).
-    
-    const chargesNeeded = nightsStayedSoFar + 1; // +1 because we charge for the current night too? 
-    // Actually, usually hotels charge at the end of the day or at check-in.
-    // Let's say: at any point, they should have been charged for all nights up to (and including) tonight.
-    
-    if (existingChargesCount < chargesNeeded) {
-      const nightsToCharge = chargesNeeded - existingChargesCount;
-      
-      for (let i = 0; i < nightsToCharge; i++) {
-        const chargeDate = addDays(checkInDate, existingChargesCount + i);
-        const chargeDateStr = format(chargeDate, 'MMM dd, yyyy');
-        
-        // Calculate nightly rate
-        let nightlyRate = res.nightlyRate || room.price;
-        
-        await postToLedger(hotelId, res.guestId || 'unknown', res.id, {
-          amount: nightlyRate,
-          type: 'debit',
-          category: 'room',
-          description: `Nightly room charge - ${chargeDateStr} (Room ${res.roomNumber})`,
-          referenceId: res.id,
-          postedBy: profileId
-        }, profileId, res.corporateId);
-
-        chargedCount++;
-        totalAmount += nightlyRate;
-      }
+      // Process automated nightly billing
+      const resResult = await processAutomatedBillingForReservation(hotel, res, profileId, new Date());
+      chargedCount += resResult.chargedCount;
+      totalAmount += resResult.totalAmount;
+    } catch (err) {
+      console.error(`Error during finance sync for reservation ${res.id}:`, err);
     }
   }
 
