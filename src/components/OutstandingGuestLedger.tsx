@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount } from '../types';
+import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount, Guest } from '../types';
 import { formatCurrency } from '../utils';
 import { 
   getOutstandingDebts, 
@@ -57,6 +57,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all_active' | '0-30' | '31-60' | '61-90' | '90+' | 'paid' | 'transferred' | 'written_off' | 'all'>('all_active');
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   
   // Modals
   const [activePaymentDebt, setActivePaymentDebt] = useState<OutstandingDebt | null>(null);
@@ -91,6 +92,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
   const canTransfer = profile?.role === 'superAdmin' || profile?.role === 'hotelAdmin' || hasPermission(profile, 'transfer_debt');
 
   const hotelDisplayName = hotel?.branding?.name || hotel?.name || 'Grand Hotel PMS';
+  const primaryColor = hotel?.branding?.primaryColor || '#10b981';
 
   const loadDebts = async () => {
     if (!hotel?.id) return;
@@ -99,17 +101,43 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       const data = await getOutstandingDebts(hotel.id);
       setDebts(data);
 
-      // Also load corporate accounts for transfer dropdown
+      // Load corporate accounts for identification & transfer dropdown
       const corpRef = collection(db, 'hotels', hotel.id, 'corporate_accounts');
       const corpSnap = await getDocs(corpRef);
       const corps = corpSnap.docs.map(d => ({ id: d.id, ...d.data() } as CorporateAccount));
       setCorporateAccounts(corps);
+
+      // Load guests to determine corporate guest profile linkage
+      const guestsRef = collection(db, 'hotels', hotel.id, 'guests');
+      const guestsSnap = await getDocs(guestsRef);
+      const guestList = guestsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
+      setGuests(guestList);
     } catch (err: any) {
       console.error("Failed to load outstanding debts:", err);
       toast.error("Failed to load debts: " + err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper to detect if debtor is associated with a corporate account
+  const getCorporateInfo = (debt: OutstandingDebt) => {
+    const linkedGuest = guests.find(g => g.id === debt.guestId);
+    const corpId = debt.corporateId || linkedGuest?.corporateId;
+    const isCorp = Boolean(
+      corpId || 
+      debt.corporateName || 
+      debt.transferredTo?.type === 'corporate' || 
+      linkedGuest?.tags?.includes('Corporate') ||
+      corporateAccounts.some(c => c.name.toLowerCase() === debt.guestName?.toLowerCase())
+    );
+    const corpName = 
+      debt.corporateName || 
+      corporateAccounts.find(c => c.id === corpId)?.name || 
+      debt.transferredTo?.targetName || 
+      (linkedGuest?.tags?.includes('Corporate') ? 'Corporate Account' : null);
+
+    return { isCorp, corpName };
   };
 
   useEffect(() => {
@@ -195,11 +223,13 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
     const headers = [
       "Folio Number",
       "Guest Name",
+      "Guest Type",
+      "Corporate Account",
       "Room Number",
       "Checkout Date",
       "Aging Days",
-      "Original Debt (NGN)",
-      "Outstanding Amount (NGN)",
+      `Original Debt (${currency})`,
+      `Outstanding Amount (${currency})`,
       "Status",
       "Phone",
       "Email",
@@ -207,20 +237,25 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       "Notes"
     ];
 
-    const rows = filteredDebts.map(d => [
-      `"${d.folioNumber || ''}"`,
-      `"${d.guestName || ''}"`,
-      `"${d.roomNumber || ''}"`,
-      `"${d.checkoutDate || ''}"`,
-      d.agingDays || 0,
-      d.originalDebt || 0,
-      d.outstandingAmount || 0,
-      `"${d.status}"`,
-      `"${d.guestPhone || ''}"`,
-      `"${d.guestEmail || ''}"`,
-      `"${d.transferredTo?.targetName || ''}"`,
-      `"${(d.notes || '').replace(/"/g, '""')}"`
-    ]);
+    const rows = filteredDebts.map(d => {
+      const { isCorp, corpName } = getCorporateInfo(d);
+      return [
+        `"${d.folioNumber || ''}"`,
+        `"${d.guestName || ''}"`,
+        `"${isCorp ? 'Corporate' : 'Individual'}"`,
+        `"${corpName || ''}"`,
+        `"Room ${d.roomNumber || 'N/A'}"`,
+        `"${d.checkoutDate || ''}"`,
+        d.agingDays || 0,
+        d.originalDebt || 0,
+        d.outstandingAmount || 0,
+        `"${d.status}"`,
+        `"${d.guestPhone || ''}"`,
+        `"${d.guestEmail || ''}"`,
+        `"${d.transferredTo?.targetName || ''}"`,
+        `"${(d.notes || '').replace(/"/g, '""')}"`
+      ];
+    });
 
     const csvContent = "data:text/csv;charset=utf-8," + 
       [`# ${hotelDisplayName} - Outstanding Guest Ledger (AR) - Generated ${format(new Date(), 'yyyy-MM-dd HH:mm')}`,
@@ -420,7 +455,14 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       <div className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-zinc-800/80 border border-zinc-700/60 rounded-xl text-emerald-400">
+            <div 
+              className="p-2.5 rounded-xl border transition-colors"
+              style={{
+                backgroundColor: `${primaryColor}15`,
+                borderColor: `${primaryColor}35`,
+                color: primaryColor
+              }}
+            >
               <Building className="w-6 h-6" />
             </div>
             <div>
@@ -428,7 +470,14 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                 <h1 className="text-2xl font-bold text-zinc-50 tracking-tight">
                   {hotelDisplayName}
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span 
+                  className="px-2.5 py-0.5 rounded-full text-xs font-bold border transition-colors"
+                  style={{
+                    backgroundColor: `${primaryColor}15`,
+                    borderColor: `${primaryColor}35`,
+                    color: primaryColor
+                  }}
+                >
                   Accounts Receivable
                 </span>
               </div>
@@ -459,7 +508,8 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
 
           <button
             onClick={handlePrint}
-            className="px-3.5 py-2 text-[10px] font-black uppercase tracking-widest text-black bg-emerald-500 hover:bg-emerald-400 rounded-xl transition-colors flex items-center space-x-1.5 cursor-pointer active:scale-95"
+            style={{ backgroundColor: primaryColor }}
+            className="px-3.5 py-2 text-[10px] font-black uppercase tracking-widest text-black hover:opacity-90 rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer active:scale-95 shadow-sm"
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Print Ledger</span>
@@ -560,19 +610,23 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
               { id: 'transferred', label: 'Transferred' },
               { id: 'written_off', label: 'Written Off' },
               { id: 'all', label: 'All History' }
-            ].map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setSelectedFilter(f.id as any)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                  selectedFilter === f.id
-                    ? 'bg-zinc-800 text-zinc-50 font-bold shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+            ].map((f) => {
+              const isActive = selectedFilter === f.id;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setSelectedFilter(f.id as any)}
+                  style={isActive ? { backgroundColor: primaryColor } : undefined}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                    isActive
+                      ? 'text-black font-bold shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -581,7 +635,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden">
         {loading ? (
           <div className="py-20 text-center">
-            <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin mx-auto mb-3" />
+            <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3" style={{ color: primaryColor }} />
             <p className="text-zinc-400 text-sm font-medium">Loading Outstanding Guest Ledger...</p>
           </div>
         ) : filteredDebts.length === 0 ? (
@@ -599,8 +653,8 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-zinc-950/80 border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[11px]">
-                  <th className="py-3.5 px-4">Guest Details</th>
-                  <th className="py-3.5 px-4">Folio & Room</th>
+                  <th className="py-3.5 px-4">Guest & Corporate Status</th>
+                  <th className="py-3.5 px-4">Folio & Room Number</th>
                   <th className="py-3.5 px-4">Checkout Date</th>
                   <th className="py-3.5 px-4">Aging Days</th>
                   <th className="py-3.5 px-4 text-right">Original Debt</th>
@@ -615,6 +669,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                   const isOverdue90 = aging > 90;
                   const isOverdue60 = aging > 60 && aging <= 90;
                   const isOverdue30 = aging > 30 && aging <= 60;
+                  const { isCorp, corpName } = getCorporateInfo(debt);
 
                   return (
                     <tr 
@@ -626,17 +681,30 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                       {/* Guest Info */}
                       <td className="py-3.5 px-4">
                         <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-zinc-300 text-xs">
+                          <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-zinc-300 text-xs shrink-0">
                             {debt.guestName ? debt.guestName.charAt(0).toUpperCase() : 'G'}
                           </div>
                           <div>
-                            <div className="font-bold text-zinc-100 text-sm">
-                              {debt.guestName}
+                            <div className="font-bold text-zinc-100 text-sm flex items-center gap-2 flex-wrap">
+                              <span>{debt.guestName}</span>
+                              {isCorp ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30" title={`Corporate Guest: ${corpName || 'Corporate Account'}`}>
+                                  <Building className="w-3 h-3" />
+                                  <span>{corpName || 'Corporate Guest'}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-zinc-800/80 text-zinc-400 border border-zinc-700/50">
+                                  Individual
+                                </span>
+                              )}
                             </div>
-                            <div className="text-[11px] text-zinc-400 flex items-center space-x-2">
-                              {debt.guestPhone && <span>{debt.guestPhone}</span>}
+                            <div className="text-[11px] text-zinc-400 flex items-center space-x-2 mt-1">
+                              <span className="font-mono font-bold text-zinc-200 bg-zinc-800/90 px-1.5 py-0.5 rounded border border-zinc-700/80">
+                                Room {debt.roomNumber || 'N/A'}
+                              </span>
+                              {debt.guestPhone && <span>• {debt.guestPhone}</span>}
                               {debt.guestEmail && (
-                                <span className="truncate max-w-[140px] text-zinc-500">{debt.guestEmail}</span>
+                                <span className="truncate max-w-[140px] text-zinc-500">• {debt.guestEmail}</span>
                               )}
                             </div>
                           </div>
@@ -645,11 +713,14 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
 
                       {/* Folio & Room */}
                       <td className="py-3.5 px-4">
-                        <span className="font-bold text-zinc-200 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded text-xs">
+                        <span className="font-bold text-zinc-200 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded text-xs font-mono">
                           {debt.folioNumber || `FOL-${debt.id.slice(-6).toUpperCase()}`}
                         </span>
-                        <div className="text-[11px] text-zinc-400 mt-0.5">
-                          Room {debt.roomNumber || 'N/A'}
+                        <div className="text-xs font-bold text-zinc-300 mt-1 flex items-center gap-1.5">
+                          <span className="text-zinc-500 font-normal">Assigned:</span>
+                          <span className="font-mono bg-zinc-800/60 px-1.5 py-0.5 rounded border border-zinc-700/50 text-zinc-200">
+                            Room {debt.roomNumber || 'N/A'}
+                          </span>
                         </div>
                       </td>
 

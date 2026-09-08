@@ -786,10 +786,11 @@ export function FrontDesk() {
         return;
       }
 
-      // Hard check: if this stay is being checked in immediately (Walk-in), ensure room does not have another checked-in guest
-      if (stay.status === 'checked_in' || newBooking.status === 'checked_in') {
-        const activeRes = reservations.find(r => r.roomId === stay.roomId && r.status === 'checked_in');
-        if (activeRes) {
+      // Hard check: if this stay is for today and room currently has an active in-house guest
+      const activeRes = reservations.find(r => r.roomId === stay.roomId && r.status === 'checked_in');
+      if (activeRes) {
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        if (stay.checkIn <= todayStr && stay.checkOut >= todayStr) {
           const room = rooms.find(r => r.id === stay.roomId);
           toast.error(`Check-in Blocked: Room ${room?.roomNumber || stay.roomId} is currently occupied by "${activeRes.guestName}". The current guest must check out first.`);
           return;

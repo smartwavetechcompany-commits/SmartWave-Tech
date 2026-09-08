@@ -61,6 +61,8 @@ interface BreakfastEntry {
   servedAt?: string;
   isMasterRoom?: boolean;
   linkedRooms?: string[];
+  isCorporate?: boolean;
+  corporateName?: string;
 }
 
 interface HistoricalDaySummary {
@@ -84,6 +86,8 @@ interface HistoricalGuestLog {
   isServed: boolean;
   status: string;
   guestPhone?: string;
+  isCorporate?: boolean;
+  corporateName?: string;
 }
 
 export function BreakfastList() {

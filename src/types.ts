@@ -946,6 +946,8 @@ export interface OutstandingDebt {
   status: DebtStatus;
   agingDays?: number;
   notes?: string;
+  corporateId?: string;
+  corporateName?: string;
   transferredTo?: {
     type: 'corporate' | 'city_ledger' | 'house_account' | 'travel_agent' | 'master_folio';
     targetId?: string;
