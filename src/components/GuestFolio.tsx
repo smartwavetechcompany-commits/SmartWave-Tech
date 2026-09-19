@@ -41,7 +41,7 @@ import {
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling, parseLocalDateTime } from '../utils/billingEngine';
+import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
@@ -771,14 +771,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
+  const folioBreakdown = BillingEngine.calculateFolioBreakdown(currentReservation, hotel, processedDisplayedEntries);
   const resAccount = calculateReservationAccount(currentReservation, hotel, processedDisplayedEntries);
-  const expectedNightsCount = resAccount.totalNights;
-  const originalNightsCount = currentReservation.nights || 0;
-  const nightlyRateCalculated = currentReservation.nightlyRate || (originalNightsCount > 0 ? currentReservation.totalAmount / originalNightsCount : 0);
+  const expectedNightsCount = folioBreakdown.stayDuration.totalNights;
+  const originalNightsCount = folioBreakdown.stayDuration.bookedNights;
+  const nightlyRateCalculated = folioBreakdown.nightlyRate;
   
-  const totalDebits = resAccount.totalCharges;
-  const totalCredits = resAccount.totalPayments;
-  const balance = resAccount.outstandingBalance;
+  const totalDebits = folioBreakdown.tier3.totalCharges;
+  const totalCredits = folioBreakdown.tier3.totalPayments;
+  const balance = folioBreakdown.tier3.outstandingBalance;
 
   // Real posted entries only in history items - NO VIRTUAL CREDITS OR PROJECTION REDUCTIONS
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
@@ -1259,19 +1260,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="flex justify-between text-xs">
                     <span className="text-zinc-500">Base Room Stay Gross</span>
                     <span className="text-zinc-300 font-medium font-mono">
-                      {formatCurrency(
-                        currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0), 
-                        currency, 
-                        exchangeRate
-                      )}
+                      {formatCurrency(folioBreakdown.tier1.baseRoomGross, currency, exchangeRate)}
                     </span>
                   </div>
                   
                   {/* Ancillary services list if any */}
-                  {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').length > 0 && (
+                  {folioBreakdown.tier1.ancillaryCharges.length > 0 && (
                     <div className="pt-2 border-t border-zinc-900 space-y-1">
                       <span className="text-[9px] font-bold text-zinc-600 uppercase">Ancillary Gross Charges</span>
-                      {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').map((e, idx) => (
+                      {folioBreakdown.tier1.ancillaryCharges.map((e, idx) => (
                         <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2">
                           <span className="truncate max-w-[200px]">{e.description}</span>
                           <span className="font-mono">{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -1284,29 +1281,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="flex justify-between text-xs pt-2 mt-2 border-t border-zinc-800 font-bold">
                     <span className="text-zinc-400">Total Gross Rate</span>
                     <span className="text-zinc-100 font-mono">
-                      {(() => {
-                        const baseAmt = currentReservation.totalAmount - (currentReservation.taxDetails?.reduce((acc, t) => acc + t.amount, 0) || 0);
-                        const otherGross = processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0);
-                        return formatCurrency(baseAmt + otherGross, currency, exchangeRate);
-                      })()}
+                      {formatCurrency(folioBreakdown.tier1.totalGrossRate, currency, exchangeRate)}
                     </span>
                   </div>
                 </div>
 
-                {/* TIER 2: TAX INCLUSIVE BREAKDOWN */}
+                {/* TIER 2: TAX BREAKDOWN */}
                 <div className="bg-zinc-900/30 p-4 rounded-xl border border-zinc-805 space-y-2">
                   <div className="flex justify-between items-center pb-1 border-b border-zinc-800/50">
-                    <span className="text-[10px] font-black tracking-wider text-zinc-400 uppercase">Tier 2: Tax Inclusive Breakdown</span>
+                    <span className="text-[10px] font-black tracking-wider text-zinc-400 uppercase">Tier 2: Tax Breakdown</span>
                     <span className="text-[8px] font-bold text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded tracking-widest uppercase">Breakdown</span>
                   </div>
 
-                  {/* Render hotel taxes detail */}
-                  {currentReservation.taxDetails && currentReservation.taxDetails.length > 0 ? (
+                  {/* Render active taxes calculated once */}
+                  {folioBreakdown.tier2.taxes.length > 0 ? (
                     <div className="space-y-1.5">
-                      {currentReservation.taxDetails.filter(t => {
-                        const match = (hotel.taxes || []).find(ht => ht.name.toLowerCase() === t.name.toLowerCase());
-                        return match ? match.showOnFolio !== false : true;
-                      }).map((tax, idx) => (
+                      {folioBreakdown.tier2.taxes.map((tax, idx) => (
                         <div key={idx} className="flex justify-between text-xs">
                           <span className="text-zinc-500 flex items-center gap-1">
                             {tax.name} ({tax.percentage}%)
@@ -1317,22 +1307,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <span className="text-zinc-300 font-mono">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
                         </div>
                       ))}
+                      <div className="pt-2 border-t border-zinc-900 flex justify-between text-xs font-bold">
+                        <span className="text-zinc-400">Total Taxes</span>
+                        <span className="text-zinc-200 font-mono">{formatCurrency(folioBreakdown.tier2.totalTaxAmount, currency, exchangeRate)}</span>
+                      </div>
                     </div>
                   ) : (
                     <p className="text-[10px] text-zinc-600 italic">No tax rules applied to this folio reservation</p>
-                  )}
-
-                  {/* Ledger specific taxes if any */}
-                  {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').length > 0 && (
-                    <div className="pt-2 border-t border-zinc-900 space-y-1">
-                      <span className="text-[9px] font-bold text-zinc-600 uppercase font-mono">Ledger Adjusted Taxes</span>
-                      {processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').map((e, idx) => (
-                        <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2 font-mono">
-                          <span className="truncate max-w-[200px]">{e.description}</span>
-                          <span>{formatCurrency(e.amount, currency, exchangeRate)}</span>
-                        </div>
-                      ))}
-                    </div>
                   )}
                 </div>
 

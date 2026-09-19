@@ -52,6 +52,68 @@ export function safeFormatDate(ts: any, formatPattern: string = 'MMM d, HH:mm'):
   }
 }
 
+export interface StayDurationOptions {
+  checkInTime?: string;
+  checkOutTime?: string;
+  gracePeriodMinutes?: number;
+  currentTime?: Date;
+  hotel?: any;
+  res?: any;
+}
+
+/**
+ * Calculates exact overstay nights using hotel-configured checkout time, grace period, and actual stay duration.
+ * A chargeable night must only be added when the guest exceeds the configured checkout time plus grace period.
+ */
+export function getOverstayNightsFromSettings(
+  checkOutDate: string | Date,
+  checkOutTime: string = '12:00',
+  gracePeriodMinutes: number = 0,
+  now: Date = new Date()
+): number {
+  const parseDateStr = (d: string | Date): string => {
+    if (!d) return format(new Date(), 'yyyy-MM-dd');
+    if (d instanceof Date) return format(d, 'yyyy-MM-dd');
+    if (typeof d === 'string') {
+      if (d.includes('T')) return d.split('T')[0];
+      return d;
+    }
+    return format(new Date(), 'yyyy-MM-dd');
+  };
+
+  const coutDateStr = parseDateStr(checkOutDate);
+  const parts = coutDateStr.split('-').map(Number);
+  if (parts.length < 3 || isNaN(parts[0])) return 0;
+
+  let overstayNights = 0;
+  // Day-by-day evaluation starting from scheduled checkout day (k = 0)
+  while (true) {
+    const baseTargetDate = new Date(parts[0], parts[1] - 1, parts[2] + overstayNights);
+    const [chHours, chMins] = (checkOutTime || '12:00').split(':').map(Number);
+    const scheduledDeadline = new Date(
+      baseTargetDate.getFullYear(),
+      baseTargetDate.getMonth(),
+      baseTargetDate.getDate(),
+      chHours || 0,
+      chMins || 0,
+      0,
+      0
+    );
+    // Add grace period
+    const graceThreshold = new Date(scheduledDeadline.getTime() + (gracePeriodMinutes || 0) * 60 * 1000);
+
+    // Chargeable night is added ONLY when the guest exceeds checkout time + grace period
+    if (now > graceThreshold) {
+      overstayNights++;
+      if (overstayNights > 3650) break; // safety boundary
+    } else {
+      break;
+    }
+  }
+
+  return overstayNights;
+}
+
 /**
  * Single Authoritative Duration Engine for PMS
  */
@@ -60,7 +122,8 @@ export function calculateStayDuration(
   checkoutDate: string | Date,
   overstayNightsInput?: number | string | Date,
   status?: string,
-  currentDate?: Date
+  currentDateOrOptions?: Date | StayDurationOptions,
+  legacyOptions?: StayDurationOptions
 ): StayDuration {
   const parseDate = (d: string | Date): Date => {
     if (!d) return new Date();
@@ -80,25 +143,43 @@ export function calculateStayDuration(
 
   const cin = startOfDay(parseDate(checkInDate));
   const cout = startOfDay(parseDate(checkoutDate));
-  const bookedNights = Math.max(0, differenceInDays(cout, cin));
+  const bookedNights = Math.max(1, differenceInDays(cout, cin));
   const bookedDays = bookedNights + 1;
 
-  let overstayNights = 0;
-  if (typeof overstayNightsInput === 'number' && overstayNightsInput > 0) {
-    overstayNights = overstayNightsInput;
-  } else if (overstayNightsInput instanceof Date || (typeof overstayNightsInput === 'string' && overstayNightsInput.includes('-'))) {
-    const curr = startOfDay(parseDate(overstayNightsInput as string | Date));
-    if (curr > cout) {
-      overstayNights = Math.max(0, differenceInDays(curr, cout));
-    }
+  // Extract options if provided
+  let options: StayDurationOptions = {};
+  let now = new Date();
+  if (currentDateOrOptions instanceof Date) {
+    now = currentDateOrOptions;
+    if (legacyOptions) options = legacyOptions;
+  } else if (currentDateOrOptions && typeof currentDateOrOptions === 'object') {
+    options = currentDateOrOptions;
+    if (options.currentTime) now = options.currentTime;
   }
 
-  // Dynamic overstay calculation if not explicitly provided as a positive number
-  if (overstayNights === 0 && status === 'checked_in') {
-    const now = startOfDay(currentDate || new Date());
-    if (now > cout) {
-      overstayNights = Math.max(0, differenceInDays(now, cout));
+  const checkOutTime = options.checkOutTime || options.res?.checkOutTime || options.hotel?.defaultCheckOutTime || options.hotel?.settings?.checkout?.defaultTime || '12:00';
+  const gracePeriodMinutes = options.gracePeriodMinutes ?? (
+    options.hotel?.settings?.checkout?.gracePeriod !== undefined && options.hotel?.settings?.checkout?.gracePeriod !== null
+      ? Number(options.hotel.settings.checkout.gracePeriod)
+      : (options.hotel?.overstayGraceHours !== undefined && options.hotel?.overstayGraceHours !== null
+          ? Number(options.hotel.overstayGraceHours) * 60
+          : 0)
+  );
+
+  let overstayNights = 0;
+  if (status === 'checked_in') {
+    // For checked-in guests, calculate actual overstay nights based on checkout time + grace period
+    const calculatedOverstay = getOverstayNightsFromSettings(checkoutDate, checkOutTime, gracePeriodMinutes, now);
+    const manualOverstay = typeof overstayNightsInput === 'number' ? overstayNightsInput : 0;
+    overstayNights = Math.max(manualOverstay, calculatedOverstay);
+  } else if (status === 'checked_out') {
+    if (typeof overstayNightsInput === 'number' && overstayNightsInput >= 0) {
+      overstayNights = overstayNightsInput;
+    } else {
+      overstayNights = getOverstayNightsFromSettings(checkoutDate, checkOutTime, gracePeriodMinutes, now);
     }
+  } else if (typeof overstayNightsInput === 'number' && overstayNightsInput > 0) {
+    overstayNights = overstayNightsInput;
   }
 
   const actualNights = bookedNights + overstayNights;

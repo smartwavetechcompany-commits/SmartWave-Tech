@@ -28,7 +28,7 @@ export function calculateReservationAccount(
   hotel: Hotel | null,
   ledgerEntries?: LedgerEntry[]
 ): GuestAccountSummary {
-  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status);
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res });
   const totalNights = duration.totalNights;
   const totalDays = duration.totalDays;
 
@@ -79,13 +79,15 @@ export function calculateReservationAccount(
     // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
     const roomDebitsPosted = resLedger.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
     if (!roomDebitsPosted && res.status === 'checked_in' && totalCharges === 0) {
-      const baseRoom = res.totalAmount || (res.nightlyRate ? res.nightlyRate * (res.nights || 1) : 0);
+      const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+      const baseRoom = nightly * duration.totalNights;
       totalCharges += baseRoom;
       totalRoomCharges += baseRoom;
     }
   } else {
     // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown without unposted overstay projections
-    const baseRoom = res.totalAmount || (res.nightlyRate ? res.nightlyRate * (res.nights || 1) : 0);
+    const nightly = BillingEngine.getNightlyRate(res, hotel);
+    const baseRoom = nightly * duration.totalNights;
     totalCharges = baseRoom;
     totalRoomCharges = baseRoom;
     totalOverstayCharges = 0;

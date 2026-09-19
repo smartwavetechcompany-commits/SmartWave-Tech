@@ -3,7 +3,7 @@ import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, w
 import { LedgerEntry, Reservation, FinanceRecord, Hotel } from '../types';
 import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
-import { parseLocalDateTime, BillingService } from '../utils/billingEngine';
+import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
 import { calculateStayDuration } from '../utils/dateUtils';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
@@ -474,6 +474,7 @@ export const recalculateReservationAccountFromLedger = async (
     await database.safeUpdate(resRef, {
       ledgerBalance,
       paidAmount: totalPaid,
+      totalAmount: totalDebits > 0 ? totalDebits : (resData.totalAmount || 0),
       paymentStatus
     }, {
       hotelId,
@@ -793,11 +794,15 @@ export const reconcileAndRepairReservationFinancials = async (
   }
 
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-  const resSnap = await getDoc(resRef);
+  const [resSnap, hotelSnap] = await Promise.all([
+    getDoc(resRef),
+    getDoc(doc(db, 'hotels', hotelId))
+  ]);
   if (!resSnap.exists()) {
     throw new Error(`Reservation ${reservationId} not found`);
   }
   const res = resSnap.data() as Reservation;
+  const hotel = hotelSnap.exists() ? (hotelSnap.data() as Hotel) : null;
 
   let ledgerEntries = existingEntries;
   if (!ledgerEntries) {
@@ -809,11 +814,12 @@ export const reconcileAndRepairReservationFinancials = async (
     ledgerEntries = snap.docs.map(doc => ({ id: doc.id, firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId?: string }));
   }
 
-  // Authoritative duration engine calculation (RULE 4)
-  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status);
+  // Authoritative duration and rate calculations from single engine
+  const duration = BillingEngine.calculateStay(res, hotel);
   const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
   const overstayNights = Math.max(0, duration.overstayNights || 0);
-  const legitimateTotalNights = bookedNights + overstayNights;
+  const legitimateTotalNights = duration.totalNights;
+  const nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
 
   // Identify all room debit charges (base room and overstay)
   const roomDebits = ledgerEntries.filter(e => 
@@ -939,6 +945,9 @@ export const reconcileAndRepairReservationFinancials = async (
     ledgerBalance: expectedBalance,
     totalAmount: totalCharges,
     paidAmount: totalPayments,
+    nightlyRate,
+    nights: bookedNights,
+    overstayNights,
     paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 || totalCredits > 0 ? 'partial' : 'unpaid'),
     financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
   }, {
@@ -1005,7 +1014,7 @@ export const processAutomatedBillingForReservation = async (
 
   const { checkInDateTime, checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
   const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
-  const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
+  let nightlyRate = BillingEngine.getNightlyRate(res, hotel);
 
   if (nightlyRate <= 0) {
     return { chargedCount: 0, totalAmount: 0 };
@@ -1025,10 +1034,11 @@ export const processAutomatedBillingForReservation = async (
     ledgerEntries = ledgerEntries.filter(e => !purgedIds.includes(e.id) && !purgedIds.includes(e.firestoreId));
   }
 
-  // Authoritative stay duration calculation
-  const stayDuration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, currentTime);
+  // Authoritative stay duration calculation from single engine
+  const stayDuration = BillingEngine.calculateStay(res, hotel, currentTime);
   const maxAllowedOverstayNights = Math.max(0, stayDuration.overstayNights);
   const maxAllowedTotalNights = stayDuration.totalNights;
+  nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
 
   let chargedCount = 0;
   let totalAmountCharged = 0;
@@ -1225,8 +1235,8 @@ export const processAutomatedBillingForReservation = async (
     });
   }
 
-  // Ensure balances are completely synchronized to ledger transaction sum
-  await recalculateReservationAccountFromLedger(hotel.id, res.id);
+  // Ensure balances and taxes are completely reconciled and synchronized to single financial engine
+  await reconcileAndRepairReservationFinancials(hotel.id, res.id);
 
   return { chargedCount, totalAmount: totalAmountCharged };
 };
