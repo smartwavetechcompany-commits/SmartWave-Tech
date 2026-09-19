@@ -41,11 +41,19 @@ import { OnboardingTour } from './components/OnboardingTour';
 import { CommandPalette } from './components/CommandPalette';
 import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal';
 import { AccountSuspendedModal } from './components/AccountSuspendedModal';
+import { ResetPasswordPage } from './components/ResetPasswordPage';
 
 function AppContent() {
   const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  const [resetCompletedInfo, setResetCompletedInfo] = React.useState<{ email?: string; message?: string } | null>(null);
   const location = useLocation();
+
+  const searchParams = new URLSearchParams(location.search);
+  const resetTokenParam = searchParams.get('resetToken') || searchParams.get('token');
+  const oobCodeParam = searchParams.get('oobCode');
+  const modeParam = searchParams.get('mode');
+  const isResetFlow = !!resetTokenParam || (modeParam === 'resetPassword' && !!oobCodeParam) || location.pathname === '/reset-password';
 
   const currency: 'NGN' | 'USD' = hotel?.defaultCurrency || 'NGN';
   const exchangeRate: number = hotel?.exchangeRate || 1500;
@@ -72,12 +80,34 @@ function AppContent() {
     );
   }
 
+  // Intercept password reset token link for unauthenticated user or explicit reset URL
+  if (isResetFlow && (!user || resetTokenParam)) {
+    return (
+      <>
+        <Toaster position="top-right" theme="dark" richColors />
+        <ResetPasswordPage
+          tokenParam={resetTokenParam || oobCodeParam || ''}
+          emailParam={searchParams.get('email') || ''}
+          onNavigateToLogin={(prefilledEmail, msg) => {
+            setResetCompletedInfo({ email: prefilledEmail, message: msg });
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, document.title, '/');
+            }
+          }}
+        />
+      </>
+    );
+  }
+
   // If no user is logged in, show AuthPage
   if (!user) {
     return (
       <>
         <Toaster position="top-right" theme="dark" richColors />
-        <AuthPage />
+        <AuthPage 
+          initialEmail={resetCompletedInfo?.email}
+          initialSuccessMessage={resetCompletedInfo?.message}
+        />
       </>
     );
   }

@@ -290,6 +290,320 @@ async function startServer() {
     }
   });
 
+  // API Route: Send Password Reset Email & Generate Token (Server-side)
+  app.post("/api/auth/send-password-reset-email", async (req, res) => {
+    const { 
+      hotelId, 
+      hotelName = "Hotel Property", 
+      targetUid, 
+      targetEmail, 
+      targetName, 
+      resetToken, 
+      resetUrl, 
+      expiresAt, 
+      durationMinutes = 60, 
+      adminEmail, 
+      adminName, 
+      note 
+    } = req.body;
+
+    if (!hotelId || !targetEmail || !resetToken || !resetUrl) {
+      return res.status(400).json({ error: "Missing required fields for password reset email." });
+    }
+
+    try {
+      let emailDispatched = false;
+      const formattedExpiry = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const durationHours = durationMinutes >= 60 ? `${Math.round(durationMinutes / 60)} hour(s)` : `${durationMinutes} minutes`;
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Staff Password Reset Request</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f4f4f5;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #09090b; padding: 40px 20px;">
+            <tr>
+              <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+                  <!-- Header -->
+                  <tr>
+                    <td style="padding: 32px 32px 24px; background: linear-gradient(135deg, #18181b 0%, #27272a 100%); border-bottom: 1px solid #27272a;">
+                      <table width="100%">
+                        <tr>
+                          <td>
+                            <div style="display: inline-block; padding: 8px 14px; background-color: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; color: #10b981; font-weight: bold; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;">
+                              Secure Staff Access
+                            </div>
+                            <h1 style="margin: 16px 0 4px; font-size: 22px; font-weight: 700; color: #ffffff;">
+                              Password Reset Request
+                            </h1>
+                            <p style="margin: 0; font-size: 14px; color: #a1a1aa;">
+                              ${hotelName} Property Management System
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  
+                  <!-- Body -->
+                  <tr>
+                    <td style="padding: 32px;">
+                      <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #e4e4e7;">
+                        Hello <strong>${targetName || targetEmail}</strong>,
+                      </p>
+                      <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
+                        Your Hotel Administrator <strong>${adminName || adminEmail}</strong> has initiated a secure password reset for your staff account (<code>${targetEmail}</code>).
+                      </p>
+
+                      ${note ? `
+                        <div style="background-color: #27272a; border-left: 3px solid #f59e0b; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px;">
+                          <span style="font-size: 12px; font-weight: 600; color: #fbbf24; text-transform: uppercase;">Admin Note:</span>
+                          <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${note}"</p>
+                        </div>
+                      ` : ''}
+
+                      <!-- Action Button -->
+                      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
+                        <tr>
+                          <td align="center">
+                            <a href="${resetUrl}" style="display: inline-block; padding: 14px 32px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                              Create New Password
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+
+                      <!-- Security & Expiration Warning -->
+                      <div style="background-color: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 16px; margin: 24px 0 16px;">
+                        <table width="100%">
+                          <tr>
+                            <td width="24" valign="top" style="color: #f59e0b; font-size: 16px; padding-right: 10px;">⏳</td>
+                            <td>
+                              <p style="margin: 0; font-size: 13px; font-weight: 600; color: #fbbf24;">
+                                Time-Limited Single-Use Link
+                              </p>
+                              <p style="margin: 4px 0 0; font-size: 12px; color: #fde68a; line-height: 1.5;">
+                                This link is valid for <strong>${durationHours}</strong> (until <strong>${formattedExpiry}</strong>) and will automatically deactivate once used.
+                              </p>
+                            </td>
+                          </tr>
+                        </table>
+                      </div>
+
+                      <p style="margin: 24px 0 8px; font-size: 12px; color: #71717a;">
+                        If the button above does not open, copy and paste this link into your browser:
+                      </p>
+                      <p style="margin: 0 0 24px; font-size: 12px; color: #10b981; word-break: break-all; background-color: #18181b; border: 1px solid #27272a; padding: 10px; border-radius: 6px;">
+                        ${resetUrl}
+                      </p>
+                      
+                      <hr style="border: none; border-top: 1px solid #27272a; margin: 24px 0;">
+                      
+                      <p style="margin: 0; font-size: 12px; color: #71717a; line-height: 1.5;">
+                        <strong>Security Advisory:</strong> If you did not request or expect this password reset, please contact your Hotel Management immediately. Do not share this link with anyone.
+                      </p>
+                    </td>
+                  </tr>
+
+                  <!-- Footer -->
+                  <tr>
+                    <td style="padding: 20px 32px; background-color: #121215; border-top: 1px solid #27272a; text-align: center;">
+                      <p style="margin: 0; font-size: 11px; color: #71717a;">
+                        © ${new Date().getFullYear()} ${hotelName} • Property Management System (PMS)
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+      `;
+
+      // 1. Check if SMTP configuration exists in environment
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+        try {
+          const nodemailer = await import('nodemailer');
+          const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: Number(process.env.SMTP_PORT) || 587,
+            secure: process.env.SMTP_SECURE === 'true',
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS,
+            }
+          });
+
+          await transporter.sendMail({
+            from: `"${hotelName} Security" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+            to: targetEmail,
+            subject: `[ACTION REQUIRED] Password Reset for ${targetEmail} - ${hotelName}`,
+            html: htmlContent
+          });
+          emailDispatched = true;
+          console.log(`[EMAIL DISPATCHED] Password reset email sent via SMTP to ${targetEmail}`);
+        } catch (smtpErr) {
+          console.error("[SMTP ERROR] Failed to send via configured SMTP:", smtpErr);
+        }
+      }
+
+      // 2. Also call Firebase Identity Toolkit sendOobCode if apiKey is available
+      try {
+        const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+        if (fs.existsSync(configPath)) {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          if (config.apiKey) {
+            await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${config.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                requestType: 'PASSWORD_RESET',
+                email: targetEmail,
+                continueUrl: resetUrl
+              })
+            });
+            emailDispatched = true;
+            console.log(`[FIREBASE OOB] Identity Toolkit reset triggered for ${targetEmail}`);
+          }
+        }
+      } catch (fbOobErr) {
+        console.warn("[FIREBASE OOB WARNING]", fbOobErr);
+      }
+
+      // 3. Record in Firestore outbox / notification log for live PMS visibility
+      if (db) {
+        try {
+          const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+          await addDoc(collection(db, 'hotels', hotelId, 'emailNotifications'), {
+            type: 'PASSWORD_RESET',
+            recipient: targetEmail,
+            recipientName: targetName || targetEmail,
+            subject: `Password Reset for ${targetEmail}`,
+            tokenId: resetToken,
+            resetUrl,
+            expiresAt,
+            sentBy: adminEmail,
+            status: emailDispatched ? 'sent' : 'queued',
+            timestamp: serverTimestamp()
+          });
+        } catch (dbErr) {
+          console.warn("Could not record email notification in Firestore:", dbErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        emailSent: emailDispatched,
+        resetUrl,
+        expiresAt,
+        message: `Password reset link generated and email notification processed for ${targetEmail}.`
+      });
+    } catch (err: any) {
+      console.error("Password reset email dispatch error:", err);
+      return res.status(500).json({ error: err.message || "Failed to dispatch password reset email." });
+    }
+  });
+
+  // API Route: Validate Password Reset Token (Server-side)
+  app.post("/api/auth/validate-reset-token", async (req, res) => {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ valid: false, error: "Token is required." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ valid: false, error: "Database unavailable." });
+    }
+
+    try {
+      const { doc, getDoc } = await import('firebase/firestore');
+      const tokenSnap = await getDoc(doc(db, 'passwordResetTokens', token));
+
+      if (!tokenSnap.exists()) {
+        return res.json({ valid: false, error: "Password reset link not found.", errorCode: "NOT_FOUND" });
+      }
+
+      const data = tokenSnap.data();
+      if (data.status === 'revoked') {
+        return res.json({ valid: false, error: "This reset link was revoked by the Hotel Administrator.", errorCode: "REVOKED" });
+      }
+      if (data.isUsed || data.status === 'used') {
+        return res.json({ valid: false, error: "This reset link has already been used and is no longer valid.", errorCode: "USED" });
+      }
+
+      const expiry = new Date(data.expiresAt).getTime();
+      if (isNaN(expiry) || Date.now() > expiry) {
+        return res.json({ valid: false, error: "This password reset link has expired.", errorCode: "EXPIRED" });
+      }
+
+      return res.json({
+        valid: true,
+        targetEmail: data.targetEmail,
+        targetName: data.targetName,
+        hotelId: data.hotelId,
+        hotelName: data.hotelName,
+        expiresAt: data.expiresAt
+      });
+    } catch (err: any) {
+      console.error("Token validation error:", err);
+      return res.status(500).json({ valid: false, error: err.message });
+    }
+  });
+
+  // API Route: Complete Password Reset and Sync User (Server-side)
+  app.post("/api/auth/complete-password-reset", async (req, res) => {
+    const { tokenId, hotelId, targetEmail, targetUid } = req.body;
+    if (!tokenId) {
+      return res.status(400).json({ error: "Missing token ID." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable." });
+    }
+
+    try {
+      const { doc, updateDoc, serverTimestamp } = await import('firebase/firestore');
+      const now = new Date().toISOString();
+
+      // Mark token as used in root collection
+      try {
+        await updateDoc(doc(db, 'passwordResetTokens', tokenId), {
+          isUsed: true,
+          status: 'used',
+          usedAt: now,
+          updatedAt: now
+        });
+      } catch (e) {
+        console.warn("Failed to mark root token as used:", e);
+      }
+
+      // Mark token in hotel subcollection if hotelId is known
+      if (hotelId) {
+        try {
+          await updateDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId), {
+            isUsed: true,
+            status: 'used',
+            usedAt: now,
+            updatedAt: now
+          });
+        } catch (e) {
+          console.warn("Failed to mark hotel token as used:", e);
+        }
+      }
+
+      return res.json({ success: true, message: "Token marked as used and logged." });
+    } catch (err: any) {
+      console.error("Error in complete-password-reset endpoint:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // API routes FIRST
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });

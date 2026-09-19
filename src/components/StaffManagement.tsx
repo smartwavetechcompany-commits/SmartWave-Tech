@@ -140,6 +140,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     }
   }, [isAddingStaff]);
 
+  // Role-based permission check for staff password reset
+  const canResetPasswords = profile && (
+    profile.role === 'hotelAdmin' || 
+    profile.role === 'superAdmin' || 
+    hasPermission(profile, 'reset_passwords', customRoles) || 
+    hasPermission(profile, 'manage_staff', customRoles)
+  );
+
   // Real-time Staff Listener
   useEffect(() => {
     if (!hotelId || !profile || hasPermissionError) return;
@@ -648,14 +656,16 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* Admin Password Reset */}
-                              <button
-                                onClick={() => setResettingUser(member)}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 transition-colors"
-                                title="Admin Password Reset"
-                              >
-                                <KeyRound size={16} />
-                              </button>
+                              {/* Admin Password Reset (Secure Email & Token System) */}
+                              {canResetPasswords && (
+                                <button
+                                  onClick={() => setResettingUser(member)}
+                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                                  title="Reset Staff Password (Send Secure Token Email)"
+                                >
+                                  <KeyRound size={16} />
+                                </button>
+                              )}
 
                               {/* Suspend / Reactivate */}
                               {member.uid !== profile?.uid && member.role !== 'hotelAdmin' && (
@@ -1091,6 +1101,15 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
             </button>
           </div>
         </div>
+      )}
+
+      {/* Admin Password Reset Modal (Email Token & Live Sync) */}
+      {resettingUser && (
+        <AdminResetPasswordModal
+          user={resettingUser}
+          onClose={() => setResettingUser(null)}
+          onSuccess={() => setResettingUser(null)}
+        />
       )}
 
     </div>

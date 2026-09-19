@@ -81,6 +81,31 @@ export interface UserProfile {
   lastLoginDevice?: string;
   lastActivityAt?: string;
   updatedAt?: string;
+  lastPasswordResetRequestedAt?: string;
+  lastPasswordResetRequestedBy?: string;
+}
+
+export interface PasswordResetToken {
+  id: string;
+  token: string;
+  targetUid: string;
+  targetEmail: string;
+  targetName?: string;
+  hotelId: string;
+  hotelName?: string;
+  createdByUid: string;
+  createdByEmail: string;
+  createdByName?: string;
+  createdAt: string;
+  expiresAt: string;
+  durationMinutes: number;
+  isUsed: boolean;
+  usedAt?: string | null;
+  status: 'active' | 'used' | 'expired' | 'revoked';
+  note?: string;
+  revokedAt?: string | null;
+  revokedBy?: string | null;
+  resetUrl?: string;
 }
 
 export interface HotelBranding {

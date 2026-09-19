@@ -10,7 +10,12 @@ import { DEFAULT_SETTINGS } from '../constants';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert } from 'lucide-react';
 import { cn } from '../utils';
 
-export function AuthPage() {
+interface AuthPageProps {
+  initialEmail?: string;
+  initialSuccessMessage?: string;
+}
+
+export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps = {}) {
   const [isLogin, setIsLogin] = useState(true);
   const [isRequesting, setIsRequesting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -19,7 +24,7 @@ export function AuthPage() {
   const [resetCooldown, setResetCooldown] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [success, setSuccess] = useState(initialSuccessMessage || '');
   const [settings, setSettings] = useState({
     paymentInstructions: '',
     supportEmail: '',
@@ -29,6 +34,15 @@ export function AuthPage() {
   });
 
   const { user, profile } = useAuth();
+
+  useEffect(() => {
+    if (initialEmail) {
+      setFormData(prev => ({ ...prev, email: initialEmail }));
+    }
+    if (initialSuccessMessage) {
+      showNotification(initialSuccessMessage, 'success');
+    }
+  }, [initialEmail, initialSuccessMessage]);
 
   useEffect(() => {
     // If user is logged in but has no profile, force registration mode

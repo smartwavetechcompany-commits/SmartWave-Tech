@@ -441,7 +441,8 @@ export const BASE_ROLE_PERMISSIONS: Record<string, Permission[]> = {
  * Maps permissions to legacy aliases to ensure zero regressions across existing screens
  */
 const ALIAS_MAP: Record<string, Permission[]> = {
-  manage_staff: ['manage_staff', 'manage_users_admin', 'view_users', 'create_users', 'edit_users', 'assign_roles'],
+  reset_passwords: ['reset_passwords', 'manage_staff', 'manage_users_admin'],
+  manage_staff: ['manage_staff', 'manage_users_admin', 'view_users', 'create_users', 'edit_users', 'assign_roles', 'reset_passwords'],
   manage_roles: ['manage_roles', 'manage_roles_admin', 'assign_roles', 'manage_permissions_admin'],
   manage_rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms'],
   access_front_desk: ['access_front_desk', 'view_reservations', 'create_reservations', 'check_in_guests'],
