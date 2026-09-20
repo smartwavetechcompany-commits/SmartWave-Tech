@@ -29,6 +29,15 @@ export interface GenerateTokenOptions {
   note?: string;
 }
 
+export interface GenerateActivationTokenOptions {
+  hotelId: string;
+  hotelName?: string;
+  targetUser: UserProfile;
+  adminProfile: UserProfile;
+  durationMinutes?: number; // e.g. 1440 for 24 hours
+  note?: string;
+}
+
 export interface TokenValidationResult {
   valid: boolean;
   tokenData?: PasswordResetToken;
@@ -39,7 +48,7 @@ export interface TokenValidationResult {
 /**
  * Generates a cryptographically strong, unguessable token string
  */
-function createSecureTokenString(): string {
+function createSecureTokenString(prefix: 'prt' | 'act' = 'prt'): string {
   const timestamp = Date.now().toString(36);
   const randomPart1 = Math.random().toString(36).substring(2, 12);
   const randomPart2 = Math.random().toString(36).substring(2, 12);
@@ -51,7 +60,177 @@ function createSecureTokenString(): string {
   } else {
     cryptoHex = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
   }
-  return `prt_${timestamp}_${randomPart1}${randomPart2}_${cryptoHex.substring(0, 16)}`;
+  return `${prefix}_${timestamp}_${randomPart1}${randomPart2}_${cryptoHex.substring(0, 16)}`;
+}
+
+/**
+ * Generates a secure, one-time account activation token and dispatches activation email
+ */
+export async function generateAccountActivationToken(options: GenerateActivationTokenOptions): Promise<{
+  token: PasswordResetToken;
+  activationUrl: string;
+  emailSent: boolean;
+}> {
+  const { hotelId, hotelName, targetUser, adminProfile, durationMinutes = 1440, note } = options;
+
+  if (!hotelId || !targetUser?.uid || !targetUser?.email) {
+    throw new Error('Missing required user or hotel information to generate activation token.');
+  }
+
+  const tokenId = createSecureTokenString('act');
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+  
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const activationUrl = `${origin}/?token=${tokenId}&mode=activate&email=${encodeURIComponent(targetUser.email.toLowerCase())}`;
+
+  const tokenRecord: PasswordResetToken = {
+    id: tokenId,
+    token: tokenId,
+    type: 'activation',
+    targetUid: targetUser.uid,
+    targetEmail: targetUser.email.toLowerCase(),
+    targetName: targetUser.displayName || targetUser.email,
+    hotelId,
+    hotelName: hotelName || 'Hotel Property',
+    createdByUid: adminProfile.uid || 'system',
+    createdByEmail: adminProfile.email || 'admin',
+    createdByName: adminProfile.displayName || adminProfile.email,
+    createdAt,
+    expiresAt,
+    durationMinutes,
+    isUsed: false,
+    usedAt: null,
+    status: 'active',
+    note: note?.trim() || '',
+    resetUrl: activationUrl
+  };
+
+  // 1. Save token in root collection for lookup by unauthenticated staff member
+  const rootTokenRef = doc(db, 'passwordResetTokens', tokenId);
+  await setDoc(rootTokenRef, tokenRecord);
+
+  // 2. Save token in hotel subcollection
+  const hotelTokenRef = doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId);
+  await setDoc(hotelTokenRef, tokenRecord);
+
+  // 3. Update staff user profile with status: 'pending_activation' and activation metadata
+  try {
+    const userDocRef = doc(db, 'users', targetUser.uid);
+    await updateDoc(userDocRef, {
+      status: 'pending_activation',
+      activationTokenId: tokenId,
+      activationLinkExpiresAt: expiresAt,
+      activationEmailSentAt: createdAt,
+      activationEmailSentBy: adminProfile.email,
+      initialPassword: null,
+      temporaryPassword: null,
+      updatedAt: createdAt
+    });
+  } catch (userUpdateErr) {
+    console.warn('Could not update user profile with activation metadata:', userUpdateErr);
+  }
+
+  // 4. Log in Hotel Audit Trail: ACTIVATION_EMAIL_SENT
+  const durationHoursText = durationMinutes >= 60 ? `${Math.round(durationMinutes / 60)} hours` : `${durationMinutes} minutes`;
+  await logActivity(
+    hotelId,
+    adminProfile,
+    'ACTIVATION_EMAIL_SENT',
+    'StaffManagement',
+    `Secure account activation email sent to ${targetUser.email} by Hotel Admin ${adminProfile.email}. Link valid for ${durationHoursText} (expires at ${new Date(expiresAt).toLocaleString()}).`,
+    targetUser.uid,
+    null,
+    { tokenId, targetEmail: targetUser.email, expiresAt, durationMinutes }
+  );
+
+  // 5. Send Activation Email via server endpoint
+  let emailSent = false;
+  try {
+    const resp = await fetch('/api/auth/send-account-activation-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hotelId,
+        hotelName,
+        targetUid: targetUser.uid,
+        targetEmail: targetUser.email.toLowerCase(),
+        targetName: targetUser.displayName || targetUser.email,
+        activationToken: tokenId,
+        activationUrl,
+        expiresAt,
+        durationMinutes,
+        adminEmail: adminProfile.email,
+        adminName: adminProfile.displayName || adminProfile.email,
+        note
+      })
+    });
+    if (resp.ok) {
+      emailSent = true;
+    }
+  } catch (emailErr) {
+    console.warn('Server activation email dispatch notice:', emailErr);
+  }
+
+  return {
+    token: tokenRecord,
+    activationUrl,
+    emailSent
+  };
+}
+
+/**
+ * Resends an activation email with a freshly generated activation link
+ */
+export async function resendAccountActivationEmail(
+  hotelId: string,
+  hotelName: string,
+  targetUser: UserProfile,
+  adminProfile: UserProfile,
+  durationMinutes = 1440
+): Promise<{
+  token: PasswordResetToken;
+  activationUrl: string;
+  emailSent: boolean;
+}> {
+  // Revoke any previous active tokens for this user
+  try {
+    const colRef = collection(db, 'hotels', hotelId, 'passwordResetTokens');
+    const q = query(colRef, where('targetEmail', '==', targetUser.email.toLowerCase()), where('status', '==', 'active'));
+    const snap = await getDocs(q);
+    const now = new Date().toISOString();
+    snap.forEach(async (d) => {
+      try {
+        await updateDoc(doc(db, 'passwordResetTokens', d.id), { status: 'revoked', revokedAt: now, revokedBy: adminProfile.email });
+        await updateDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', d.id), { status: 'revoked', revokedAt: now, revokedBy: adminProfile.email });
+      } catch (e) {}
+    });
+  } catch (revErr) {
+    console.warn('Could not revoke old tokens before resend:', revErr);
+  }
+
+  // Generate new token and dispatch email
+  const result = await generateAccountActivationToken({
+    hotelId,
+    hotelName,
+    targetUser,
+    adminProfile,
+    durationMinutes
+  });
+
+  // Log in Hotel Audit Trail: ACTIVATION_EMAIL_RESENT
+  await logActivity(
+    hotelId,
+    adminProfile,
+    'ACTIVATION_EMAIL_RESENT',
+    'StaffManagement',
+    `Hotel Admin ${adminProfile.email} resent secure account activation email to ${targetUser.email}. New link valid for ${durationMinutes / 60} hours.`,
+    targetUser.uid,
+    null,
+    { tokenId: result.token.id, targetEmail: targetUser.email, expiresAt: result.token.expiresAt }
+  );
+
+  return result;
 }
 
 /**
@@ -68,7 +247,7 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
     throw new Error('Missing required user or hotel information to generate password reset token.');
   }
 
-  const tokenId = createSecureTokenString();
+  const tokenId = createSecureTokenString('prt');
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
   
@@ -78,6 +257,7 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
   const tokenRecord: PasswordResetToken = {
     id: tokenId,
     token: tokenId,
+    type: 'password_reset',
     targetUid: targetUser.uid,
     targetEmail: targetUser.email.toLowerCase(),
     targetName: targetUser.displayName || targetUser.email,
@@ -104,10 +284,11 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
   const hotelTokenRef = doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId);
   await setDoc(hotelTokenRef, tokenRecord);
 
-  // 3. Update staff user profile with reset request timestamp
+  // 3. Update staff user profile: status becomes 'password_reset_pending'
   try {
     const userDocRef = doc(db, 'users', targetUser.uid);
     await updateDoc(userDocRef, {
+      status: 'password_reset_pending',
       lastPasswordResetRequestedAt: createdAt,
       lastPasswordResetRequestedBy: adminProfile.email,
       updatedAt: createdAt
@@ -116,13 +297,14 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
     console.warn('Could not update user metadata with reset request:', userUpdateErr);
   }
 
-  // 4. Log in Hotel Audit Trail and Activity Logs
+  // 4. Log in Hotel Audit Trail: PASSWORD_RESET_REQUESTED
+  const durationHours = durationMinutes >= 60 ? `${Math.round(durationMinutes / 60)} hour(s)` : `${durationMinutes} minutes`;
   await logActivity(
     hotelId,
     adminProfile,
-    'STAFF_PASSWORD_RESET_GENERATED',
+    'PASSWORD_RESET_REQUESTED',
     'StaffManagement',
-    `Hotel Admin ${adminProfile.email} generated a secure ${durationMinutes}-minute password reset token for staff ${targetUser.email}. Expires at ${new Date(expiresAt).toLocaleTimeString()}.`,
+    `Hotel Admin ${adminProfile.email} requested password reset for staff ${targetUser.email}. Reset email sent. Token valid for ${durationHours} (expires at ${new Date(expiresAt).toLocaleTimeString()}).`,
     targetUser.uid,
     null,
     { tokenId, targetEmail: targetUser.email, expiresAt, durationMinutes }
@@ -165,7 +347,6 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
     await sendPasswordResetEmail(auth, targetUser.email, actionCodeSettings);
     emailSent = true;
   } catch (fbEmailErr: any) {
-    // If auth/user-not-found, it means the staff user exists in Firestore but hasn't created a Firebase Auth record yet
     console.log('Firebase Auth sendPasswordResetEmail status:', fbEmailErr?.code || fbEmailErr?.message);
   }
 
@@ -308,14 +489,16 @@ export async function completePasswordResetWithToken(
     }
   }
 
+  const isActivation = tokenData.type === 'activation';
+
   const profileUpdate = {
     ...existingData,
-    temporaryPassword: newPassword,
+    temporaryPassword: null,
     initialPassword: null,
     forcePasswordChange: false,
     passwordChangedAt: now,
     passwordChangedBy: tokenData.targetEmail,
-    status: existingData.status === 'suspended' ? 'suspended' : 'active',
+    status: (existingData.status === 'disabled' || existingData.status === 'suspended') ? 'disabled' : 'active',
     updatedAt: now
   };
 
@@ -362,8 +545,13 @@ export async function completePasswordResetWithToken(
     console.warn('Server complete notification warning:', srvErr);
   }
 
-  // 6. Log completion in Audit Trail
+  // 6. Log completion in Audit Trail with exact action name
   if (tokenData.hotelId) {
+    const auditAction = isActivation ? 'ACTIVATION_COMPLETED' : 'PASSWORD_RESET_COMPLETED';
+    const auditDetails = isActivation
+      ? `Staff member ${tokenData.targetEmail} completed account activation and successfully established their initial password.`
+      : `Staff member ${tokenData.targetEmail} completed password reset using secure one-time token and updated their password.`;
+
     await logActivity(
       tokenData.hotelId,
       {
@@ -372,18 +560,20 @@ export async function completePasswordResetWithToken(
         displayName: tokenData.targetName || tokenData.targetEmail,
         role: existingData?.role || 'staff'
       },
-      'STAFF_PASSWORD_RESET_COMPLETED',
+      auditAction,
       'Auth',
-      `Staff member ${tokenData.targetEmail} successfully created a new password using time-limited security token.`,
+      auditDetails,
       targetUid,
       null,
-      { tokenId, completedAt: now }
+      { tokenId, completedAt: now, type: tokenData.type || 'password_reset' }
     );
   }
 
   return {
     success: true,
-    message: 'Your password has been successfully updated. You can now log in normally.'
+    message: isActivation
+      ? 'Your staff account has been successfully activated! You can now log into the PMS.'
+      : 'Your password has been successfully updated. You can now log into the PMS.'
   };
 }
 

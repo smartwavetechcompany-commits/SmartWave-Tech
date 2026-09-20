@@ -14,6 +14,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { LedgerDiagnosticModal } from './LedgerDiagnosticModal';
 import { LedgerAuditErrorBoundary } from './LedgerAuditErrorBoundary';
 import { PrincipalRoomManager } from './PrincipalRoomManager';
+import { GuestActivityTimeline } from './GuestActivityTimeline';
 import { 
   Receipt, 
   User, 
@@ -84,6 +85,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   }, [currentReservation]);
 
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [folioTab, setFolioTab] = useState<'ledger' | 'timeline'>('ledger');
   const [guest, setGuest] = useState<Guest | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
@@ -189,7 +191,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           description: `Room Rate Discount Adjust (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Rate adjustment'}`,
           referenceId: currentReservation.id,
           postedBy: profile.uid
-        }, profile.uid);
+        }, profile.uid, undefined, 'cash', {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        });
 
         toast.success(`Discount applied! Room nightly rate adjusted from ${formatCurrency(currentRate, currency, exchangeRate)} to ${formatCurrency(newRate, currency, exchangeRate)}`);
       } else {
@@ -212,7 +219,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           description: `Folio Service Discount (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Service Adjustment'}`,
           referenceId: currentReservation.id,
           postedBy: profile.uid
-        }, profile.uid);
+        }, profile.uid, undefined, 'cash', {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        });
 
         toast.success('Discount credit applied to guest folio successfully');
       }
@@ -289,7 +301,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               profile.uid, 
               activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined,
               (split as any).referenceCode,
-              (split as any).proofUrl
+              (split as any).proofUrl,
+              {
+                uid: profile?.uid,
+                email: profile?.email,
+                role: profile?.role || 'staff',
+                displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+              }
             );
           }
         }
@@ -385,7 +403,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     try {
       setIsSaving(true);
       const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
-      await settleOverpayment(hotel.id, currentReservation.guestId || 'unknown', currentReservation.id, totalAmount, settleData.splits[0]?.method || 'cash', profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+      await settleOverpayment(
+        hotel.id, 
+        currentReservation.guestId || 'unknown', 
+        currentReservation.id, 
+        totalAmount, 
+        settleData.splits[0]?.method || 'cash', 
+        profile.uid, 
+        activeFolio === 'company' ? currentReservation.corporateId : undefined,
+        {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        }
+      );
       toast.success('Overpayment settled successfully');
       setShowSettleOverpayment(false);
     } catch (err: any) {
@@ -499,7 +531,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             quantity: item.quantity,
             price: item.price,
             idempotencyKey
-          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined);
+          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined, 'cash', {
+            uid: profile?.uid,
+            email: profile?.email,
+            role: profile?.role || 'staff',
+            displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+          });
         }
         
         toast.success(`${finalItems.length === 1 ? 'Entry' : 'All entries in the batch'} posted successfully (Local fallback)`);
@@ -603,7 +640,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             transferTargetId,
             balance,
             profile.uid,
-            activeFolio === 'company' ? currentReservation.corporateId : undefined
+            activeFolio === 'company' ? currentReservation.corporateId : undefined,
+            {
+              uid: profile?.uid,
+              email: profile?.email,
+              role: profile?.role || 'staff',
+              displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+            }
           );
         } else {
           // Corporate transfer (City Ledger)
@@ -613,7 +656,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             currentReservation.id,
             balance,
             profile.uid,
-            transferTargetId // This is the corporateId in this case
+            transferTargetId, // This is the corporateId in this case
+            {
+              uid: profile?.uid,
+              email: profile?.email,
+              role: profile?.role || 'staff',
+              displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+            }
           );
         }
         toast.success('Balance transferred successfully');
@@ -830,7 +879,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     try {
       setIsDeleting(true);
-      await voidLedgerEntry(hotel.id, confirmDelete as any, profile.uid);
+      await voidLedgerEntry(hotel.id, confirmDelete as any, profile.uid, {
+        uid: profile?.uid,
+        email: profile?.email,
+        role: profile?.role || 'staff',
+        displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+      });
       
       toast.success('Transaction voided and reversed');
       setConfirmDelete(null);
@@ -956,32 +1010,73 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         )}
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8 custom-scrollbar">
-          {/* Folio Tabs for Corporate Stays */}
-          {currentReservation.corporateId && (
-            <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-fit mx-auto shadow-sm">
+          {/* Folio View Switcher: Folio Ledger & Billing vs Guest Activity Timeline */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-zinc-950 p-2 rounded-2xl border border-zinc-800">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setActiveFolio('guest')}
+                type="button"
+                onClick={() => setFolioTab('ledger')}
                 className={cn(
-                  "px-4 sm:px-6 py-1.5 sm:py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                  activeFolio === 'guest' ? "bg-emerald-500 text-black shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                  "flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2",
+                  folioTab === 'ledger'
+                    ? "bg-zinc-100 text-black shadow-md"
+                    : "bg-zinc-900/90 text-zinc-400 hover:text-zinc-200 border border-zinc-800"
                 )}
               >
-                Folio 2 (Guest)
+                <Receipt size={15} />
+                <span>Folio Ledger & Billing</span>
               </button>
               <button
-                onClick={() => setActiveFolio('company')}
+                type="button"
+                onClick={() => setFolioTab('timeline')}
                 className={cn(
-                  "px-4 sm:px-6 py-1.5 sm:py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                  activeFolio === 'company' ? "bg-blue-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                  "flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2",
+                  folioTab === 'timeline'
+                    ? "bg-emerald-500 text-black shadow-md"
+                    : "bg-zinc-900/90 text-zinc-400 hover:text-zinc-200 border border-zinc-800"
                 )}
               >
-                Folio 1 (Company)
+                <History size={15} />
+                <span>Guest Activity Timeline</span>
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  Live
+                </span>
               </button>
             </div>
-          )}
 
+            {/* Folio Tabs for Corporate Stays */}
+            {currentReservation.corporateId && (
+              <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 self-center sm:self-auto">
+                <button
+                  onClick={() => setActiveFolio('guest')}
+                  className={cn(
+                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                    activeFolio === 'guest' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  Folio 2 (Guest)
+                </button>
+                <button
+                  onClick={() => setActiveFolio('company')}
+                  className={cn(
+                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                    activeFolio === 'company' ? "bg-blue-500 text-white shadow-sm" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  Folio 1 (Company)
+                </button>
+              </div>
+            )}
+          </div>
+
+          {folioTab === 'timeline' ? (
+            <div className="space-y-6">
+              <GuestActivityTimeline reservation={currentReservation} />
+            </div>
+          ) : (
+            <>
           {/* Quick Actions Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 sm:gap-4">
             <button
               type="button"
               onClick={() => setShowSettlePayment(true)}
@@ -1043,6 +1138,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
             <button
               type="button"
+              onClick={() => setFolioTab('timeline')}
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl sm:rounded-2xl text-emerald-400 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Clock size={16} className="sm:size-5" />
+              </div>
+              <div className="text-left">
+                <p className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-wider leading-tight">Activity</p>
+                <p className="text-xs sm:text-sm font-bold">Timeline</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowGuestHistory(true)}
               className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl sm:rounded-2xl text-purple-500 hover:bg-purple-500 hover:text-white transition-all group active:scale-95"
             >
@@ -1082,7 +1191,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <p className="text-xs sm:text-sm font-bold">Ledger</p>
               </div>
             </button>
-
           </div>
 
           {/* Financial Summary Breakdown */}
@@ -2338,6 +2446,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               </table>
             </div>
           </div>
+
+          {/* Complete Guest Activity Timeline (In-line beneath Transaction Ledger) */}
+          <GuestActivityTimeline reservation={currentReservation} />
+          </>
+          )}
         </div>
 
         {/* Footer Actions */}

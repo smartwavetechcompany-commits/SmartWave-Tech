@@ -11,7 +11,8 @@ import {
   User, 
   ArrowLeft,
   Lock,
-  Sparkles
+  Sparkles,
+  UserCheck
 } from 'lucide-react';
 import { 
   validatePasswordResetToken, 
@@ -43,6 +44,8 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
   // Live countdown timer state
   const [timeLeft, setTimeLeft] = useState<{ minutes: number; seconds: number } | null>(null);
 
+  const isActivation = tokenData?.type === 'activation';
+
   // Read URL params if not passed in props
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -52,7 +55,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
       performValidation(activeToken);
     } else {
       setIsValidating(false);
-      setValidationError('No reset token was provided. Please use the secure link sent to your registered email address or contact your Hotel Administrator.');
+      setValidationError('No security token was provided. Please use the activation or password reset link sent to your email, or contact your Hotel Administrator.');
     }
   }, [tokenParam]);
 
@@ -65,10 +68,10 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
       if (result.valid && result.tokenData) {
         setTokenData(result.tokenData);
       } else {
-        setValidationError(result.error || 'The reset link is invalid, expired, or has already been used.');
+        setValidationError(result.error || 'The link is invalid, expired, or has already been used.');
       }
     } catch (err: any) {
-      setValidationError(err.message || 'Unable to validate the password reset token.');
+      setValidationError(err.message || 'Unable to validate the security link.');
     } finally {
       setIsValidating(false);
     }
@@ -82,7 +85,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
       const diff = new Date(tokenData.expiresAt).getTime() - Date.now();
       if (diff <= 0) {
         setTimeLeft(null);
-        setValidationError(`This password reset link expired at ${new Date(tokenData.expiresAt).toLocaleTimeString()}. Please request a new link from your Hotel Administrator.`);
+        setValidationError(`This link expired at ${new Date(tokenData.expiresAt).toLocaleTimeString()}. Please request a new link from your Hotel Administrator.`);
         return;
       }
       const minutes = Math.floor(diff / 60000);
@@ -124,7 +127,6 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
     setSubmitError(null);
 
     try {
-      // Check for oobCode in query params if Firebase Auth action link
       const params = new URLSearchParams(window.location.search);
       const oobCode = params.get('oobCode') || undefined;
 
@@ -139,7 +141,6 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
 
   // Clean URL when returning to login
   const handleBackToLogin = (withSuccessMsg = false) => {
-    // Clear resetToken from URL query params
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.delete('resetToken');
@@ -151,7 +152,9 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
     }
     const targetEmail = tokenData?.targetEmail || emailParam;
     const msg = withSuccessMsg 
-      ? 'Password successfully updated! You can now log in with your new credentials.' 
+      ? (isActivation 
+          ? 'Account successfully activated! You can now log into the PMS.' 
+          : 'Password successfully updated! You can now log into the PMS.')
       : undefined;
     onNavigateToLogin(targetEmail, msg);
   };
@@ -162,13 +165,15 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
         {/* Brand Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 text-emerald-400 mb-4 shadow-xl">
-            <KeyRound size={28} />
+            {isActivation ? <UserCheck size={28} /> : <KeyRound size={28} />}
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white">
-            Staff Password Reset
+            {isActivation ? 'Staff Account Activation' : 'Staff Password Reset'}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Enterprise Hotel Property Management System
+            {isActivation 
+              ? 'Create your password to activate your Hotel PMS account' 
+              : 'Enterprise Hotel Property Management System'}
           </p>
         </div>
 
@@ -179,7 +184,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
             <div className="py-12 text-center space-y-4">
               <div className="w-10 h-10 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
               <p className="text-sm text-zinc-400 font-medium">
-                Verifying secure reset token with hotel security service...
+                Verifying secure security token with hotel directory...
               </p>
             </div>
           )}
@@ -190,7 +195,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-3">
                 <div className="flex items-center gap-2.5 text-red-400 font-bold text-sm">
                   <AlertTriangle size={18} className="shrink-0" />
-                  <span>Invalid or Expired Reset Link</span>
+                  <span>Invalid or Expired Link</span>
                 </div>
                 <p className="text-xs text-red-200/90 leading-relaxed">
                   {validationError}
@@ -200,9 +205,9 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               <div className="p-4 bg-zinc-950/60 border border-zinc-800/80 rounded-xl space-y-2 text-xs text-zinc-400">
                 <p className="font-semibold text-zinc-300">Why did this happen?</p>
                 <ul className="list-disc list-inside space-y-1 text-zinc-400">
-                  <li>Password reset links expire after a designated time limit (typically 1 hour) for hotel security.</li>
-                  <li>Each reset link is single-use and deactivates immediately after password creation.</li>
-                  <li>Your Hotel Administrator may have re-issued or revoked the link.</li>
+                  <li>Activation links are valid for 24 hours; password reset links are valid for the configured period.</li>
+                  <li>Each security link is single-use and deactivates immediately after password creation.</li>
+                  <li>Your Hotel Administrator can resend an activation email or issue a new reset link.</li>
                 </ul>
               </div>
 
@@ -227,10 +232,12 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               
               <div className="space-y-2">
                 <h2 className="text-xl font-bold text-white">
-                  Password Successfully Set!
+                  {isActivation ? 'Account Activated Successfully!' : 'Password Successfully Set!'}
                 </h2>
                 <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mx-auto">
-                  Your new staff password has been encrypted and applied across the Hotel PMS. You can now log into your account.
+                  {isActivation 
+                    ? 'Your staff account is now active and verified. You can now log into the PMS using your registered email and new password.' 
+                    : 'Your new staff password has been encrypted and applied across the Hotel PMS. You can now log into your account.'}
                 </p>
               </div>
 
@@ -244,7 +251,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                   <span className="font-semibold text-zinc-200">{tokenData?.hotelName}</span>
                 </div>
                 <div className="flex justify-between text-zinc-400">
-                  <span>Status:</span>
+                  <span>Account Status:</span>
                   <span className="text-emerald-400 font-semibold">Active & Verified</span>
                 </div>
               </div>
@@ -259,7 +266,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
             </div>
           )}
 
-          {/* Active Reset Form */}
+          {/* Active Reset / Activation Form */}
           {!isValidating && !validationError && !submitSuccess && tokenData && (
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Account Context Badge */}
@@ -293,6 +300,13 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                 )}
               </div>
 
+              {isActivation && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300/90 leading-relaxed">
+                  <span className="font-bold text-emerald-400 block mb-0.5">Welcome to the Team!</span>
+                  Default passwords are not provided for security compliance. Please establish your personal password below to activate your account.
+                </div>
+              )}
+
               {submitError && (
                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-medium">
                   {submitError}
@@ -302,7 +316,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               {/* New Password Field */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-zinc-300">
-                  New Staff Password
+                  {isActivation ? 'Create Your Password' : 'New Staff Password'}
                 </label>
                 <div className="relative">
                   <input
@@ -348,7 +362,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               {/* Confirm Password Field */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-zinc-300">
-                  Confirm New Password
+                  Confirm Password
                 </label>
                 <div className="relative">
                   <input
@@ -387,12 +401,12 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                 {isSubmitting ? (
                   <>
                     <div className="w-4 h-4 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
-                    <span>Updating Password...</span>
+                    <span>{isActivation ? 'Activating Account...' : 'Updating Password...'}</span>
                   </>
                 ) : (
                   <>
                     <Lock size={16} />
-                    <span>Set New Password & Activate</span>
+                    <span>{isActivation ? 'Activate Account & Set Password' : 'Set New Password & Continue'}</span>
                   </>
                 )}
               </button>
@@ -404,7 +418,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                   className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors inline-flex items-center gap-1.5"
                 >
                   <ArrowLeft size={13} />
-                  <span>Return to Sign In without changing</span>
+                  <span>Return to Sign In</span>
                 </button>
               </div>
             </form>

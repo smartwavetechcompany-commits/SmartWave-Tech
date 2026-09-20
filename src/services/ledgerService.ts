@@ -15,7 +15,8 @@ export const postToLedger = async (
   entry: Omit<LedgerEntry, 'id' | 'timestamp' | 'hotelId' | 'guestId' | 'reservationId'>,
   postedBy: string,
   corporateId?: string,
-  paymentMethod: 'cash' | 'card' | 'transfer' = 'cash'
+  paymentMethod: 'cash' | 'card' | 'transfer' = 'cash',
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   // STRICT FINANCIAL INTEGRITY CHECK: Reject any attempt to post projections, forecasts, previews, or virtual entries to live ledger
   const validation = validateLedgerTransaction(entry as any);
@@ -362,11 +363,58 @@ export const postToLedger = async (
     });
   });
 
-  // 7. Commit batch and Log once
+  // 7. Commit batch and Log once with high-fidelity action naming and metadata
+  let actionName = 'LEDGER_ENTRY_POSTED';
+  const primaryCat = (entry.category || '').toLowerCase();
+  const descLower = (entry.description || '').toLowerCase();
+
+  if (descLower.startsWith('reversal:') || descLower.includes('reversal')) {
+    actionName = 'TRANSACTION_VOIDED';
+  } else if (primaryCat === 'payment') {
+    actionName = entry.type === 'credit' ? 'PAYMENT_RECEIVED' : 'REFUND_PROCESSED';
+  } else if (primaryCat === 'refund') {
+    actionName = 'REFUND_PROCESSED';
+  } else if (primaryCat === 'discount') {
+    actionName = 'DISCOUNT_APPLIED';
+  } else if (primaryCat === 'transfer') {
+    actionName = 'BALANCE_TRANSFERRED';
+  } else if (primaryCat === 'city_ledger') {
+    actionName = 'DEBT_TRANSFERRED';
+  } else if (entry.chargeType === 'overstay' || descLower.includes('overstay')) {
+    actionName = 'OVERSTAY_CHARGE_POSTED';
+  } else if (primaryCat === 'room' || entry.chargeType === 'room_rate') {
+    actionName = 'ROOM_CHARGE_POSTED';
+  } else if (primaryCat === 'restaurant' || primaryCat === 'f & b') {
+    actionName = 'RESTAURANT_ORDER';
+  } else if (primaryCat === 'laundry') {
+    actionName = 'LAUNDRY_POSTED';
+  } else if (primaryCat === 'service') {
+    actionName = 'SERVICE_POSTED';
+  } else if (entry.type === 'debit') {
+    actionName = 'CHARGE_POSTED';
+  } else {
+    actionName = 'CREDIT_ADJUSTMENT';
+  }
+
+  const logDetails = entry.description || `${actionName}: Amount ${entry.amount}`;
+
   await database.commitBatch(hotelId, batch, {
-    module: 'Ledger',
-    action: 'POST_LEDGER_BATCH',
-    details: `Posted ${entries.length} entries to ${reservationId} Folio. Status: ${entry.type}, Amount: ${entry.amount}`
+    module: 'Folio Ledger',
+    action: actionName,
+    details: logDetails,
+    metadata: {
+      reservationId,
+      guestId,
+      targetId: reservationId,
+      amount: entry.amount,
+      type: entry.type,
+      category: entry.category,
+      paymentMethod,
+      referenceCode: (entry as any).referenceCode,
+      description: entry.description,
+      entriesCount: entries.length
+    },
+    userContext: userContext || { uid: postedBy, role: 'staff' }
   });
 
   if (reservationId) {
@@ -385,7 +433,8 @@ export const postToLedger = async (
 export const voidLedgerEntry = async (
   hotelId: string,
   ledgerEntry: LedgerEntry & { firestoreId?: string },
-  voidedBy: string
+  voidedBy: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   const { firestoreId, id, reservationId, guestId, corporateId, amount, type, category, description } = ledgerEntry;
   
@@ -410,7 +459,9 @@ export const voidLedgerEntry = async (
     reservationId!,
     reversalEntry,
     voidedBy,
-    corporateId
+    corporateId,
+    'cash',
+    userContext
   );
 };
 
@@ -565,7 +616,8 @@ export const settleLedger = async (
   postedBy: string,
   corporateId?: string,
   referenceCode?: string,
-  proofUrl?: string
+  proofUrl?: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
@@ -576,7 +628,7 @@ export const settleLedger = async (
     postedBy,
     referenceCode,
     proofUrl
-  } as any, postedBy, corporateId, paymentMethod);
+  } as any, postedBy, corporateId, paymentMethod, userContext);
 };
 
 export const transferLedgerBalance = async (
@@ -586,7 +638,8 @@ export const transferLedgerBalance = async (
   toReservationId: string,
   amount: number,
   postedBy: string,
-  corporateId?: string
+  corporateId?: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   await postToLedger(hotelId, guestId, fromReservationId, {
     amount,
@@ -595,7 +648,7 @@ export const transferLedgerBalance = async (
     description: `Balance Transfer to Res #${(toReservationId || '').slice(-6).toUpperCase()}`,
     referenceId: toReservationId,
     postedBy
-  }, postedBy, corporateId);
+  }, postedBy, corporateId, 'cash', userContext);
 
   await postToLedger(hotelId, guestId, toReservationId, {
     amount,
@@ -604,7 +657,7 @@ export const transferLedgerBalance = async (
     description: `Balance Transfer from Res #${(fromReservationId || '').slice(-6).toUpperCase()}`,
     referenceId: fromReservationId,
     postedBy
-  }, postedBy, corporateId);
+  }, postedBy, corporateId, 'cash', userContext);
 };
 
 export const refundGuest = async (
@@ -614,7 +667,8 @@ export const refundGuest = async (
   amount: number,
   reason: string,
   postedBy: string,
-  corporateId?: string
+  corporateId?: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
@@ -623,7 +677,7 @@ export const refundGuest = async (
     description: `Refund: ${reason}`,
     referenceId: reservationId,
     postedBy
-  }, postedBy, corporateId);
+  }, postedBy, corporateId, 'cash', userContext);
 };
 
 export const settleOverpayment = async (
@@ -633,7 +687,8 @@ export const settleOverpayment = async (
   amount: number,
   method: 'cash' | 'card' | 'transfer',
   postedBy: string,
-  corporateId?: string
+  corporateId?: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
@@ -642,7 +697,7 @@ export const settleOverpayment = async (
     description: `Overpayment Settlement (${method})`,
     referenceId: reservationId,
     postedBy
-  }, postedBy, corporateId, method);
+  }, postedBy, corporateId, method, userContext);
 };
 
 export const transferToCityLedger = async (
@@ -651,7 +706,8 @@ export const transferToCityLedger = async (
   reservationId: string,
   amount: number,
   postedBy: string,
-  corporateId?: string
+  corporateId?: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   // 1. Credit the reservation (Guest/Folio side) - removes debt from reservation's guest folio
   await postToLedger(hotelId, guestId, reservationId, {
@@ -661,7 +717,7 @@ export const transferToCityLedger = async (
     description: 'Transfer to City Ledger (Folio Credit)',
     referenceId: reservationId,
     postedBy
-  }, postedBy); // NO corporateId here for the guest credit
+  }, postedBy, undefined, 'cash', userContext); // NO corporateId here for the guest credit
 
   // 2. Debit the corporate (Company side) - adds debt to corporate account
   if (corporateId) {
@@ -672,7 +728,7 @@ export const transferToCityLedger = async (
       description: 'Transfer from Guest Folio (Folio Debit)',
       referenceId: reservationId,
       postedBy
-    }, postedBy, corporateId);
+    }, postedBy, corporateId, 'cash', userContext);
 
     // Link the reservation to the corporate account as well
     const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);

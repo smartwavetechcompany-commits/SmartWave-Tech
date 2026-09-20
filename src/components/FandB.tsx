@@ -315,7 +315,12 @@ export function FandB() {
           description: `F & B Order (Room ${newOrder.roomNumber || 'Service'}): ${newOrder.items}${discountAmount > 0 ? ` (Discounted)` : ''}`,
           referenceId: orderRef.id,
           postedBy: profile.uid
-        }, profile.uid, res.corporateId);
+        }, profile.uid, res.corporateId, 'cash', {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        });
       }
 
       // Post payments to ledger/finance
@@ -330,7 +335,12 @@ export function FandB() {
               referenceId: orderRef.id,
               postedBy: profile.uid,
               paymentMethod: pay.method as any
-            }, profile.uid, res.corporateId);
+            }, profile.uid, res.corporateId, pay.method as any, {
+              uid: profile?.uid,
+              email: profile?.email,
+              role: profile?.role || 'staff',
+              displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+            });
 
             database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',

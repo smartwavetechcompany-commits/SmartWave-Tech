@@ -51,7 +51,7 @@ export interface UserProfile {
   role: UserRole;
   hotelId: string;
   createdAt: string;
-  status: 'active' | 'inactive' | 'suspended';
+  status: 'pending_activation' | 'active' | 'password_reset_pending' | 'disabled' | 'suspended' | 'inactive';
   displayName?: string;
   permissions?: string[]; // Granular permissions
   staffRole?: StaffRole;
@@ -83,11 +83,16 @@ export interface UserProfile {
   updatedAt?: string;
   lastPasswordResetRequestedAt?: string;
   lastPasswordResetRequestedBy?: string;
+  activationTokenId?: string;
+  activationLinkExpiresAt?: string;
+  activationEmailSentAt?: string;
+  activationEmailSentBy?: string;
 }
 
 export interface PasswordResetToken {
   id: string;
   token: string;
+  type?: 'activation' | 'password_reset';
   targetUid: string;
   targetEmail: string;
   targetName?: string;
@@ -367,14 +372,22 @@ export interface AuditLog {
   userEmail: string;
   userName?: string;
   userRole?: string;
+  actor?: string;
   hotelId: string;
   timestamp: string;
   details: string;
   module?: string;
   oldValue?: any;
   newValue?: any;
+  before?: any;
+  after?: any;
   metadata?: any;
   targetId?: string;
+  reservationId?: string;
+  guestId?: string;
+  roomNumber?: string;
+  guestName?: string;
+  status?: 'success' | 'failure';
 }
 
 export interface RoomType {

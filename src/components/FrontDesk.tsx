@@ -810,6 +810,9 @@ export function FrontDesk() {
         discountAmount?: number;
         discountType?: 'fixed' | 'percentage';
         discountReason?: string;
+        nights: number;
+        checkIn: string;
+        checkOut: string;
       }[] = [];
       
       for (const stay of allStays) {
@@ -1000,7 +1003,10 @@ export function FrontDesk() {
           corporateId: newBooking.corporateId,
           discountAmount: createdStays.length === 0 ? newBooking.discountAmount : 0,
           discountType: createdStays.length === 0 ? newBooking.discountType : undefined,
-          discountReason: createdStays.length === 0 ? newBooking.discountReason : undefined
+          discountReason: createdStays.length === 0 ? newBooking.discountReason : undefined,
+          nights,
+          checkIn: stay.checkIn,
+          checkOut: stay.checkOut
         });
       }
 
@@ -1011,17 +1017,34 @@ export function FrontDesk() {
         userContext: { uid: profile.uid, email: profile.email, role: profile.role }
       });
 
-      // logActivity
-      await logActivity(
-        hotel.id,
-        profile,
-        'CREATE_BOOKING',
-        'Front Desk',
-        `Created batch of ${allStays.length} bookings for ${newBooking.guestName}`,
-        undefined,
-        null,
-        allStays
-      );
+      // logActivity for each created stay
+      for (const stay of createdStays) {
+        await logActivity(
+          hotel.id,
+          profile,
+          'RESERVATION_CREATED',
+          'Front Desk',
+          `Reservation created for ${newBooking.guestName} in Room ${stay.roomNumber} (${stay.nights || 1} nights, ${stay.checkIn} to ${stay.checkOut})`,
+          stay.resId,
+          null,
+          {
+            reservationId: stay.resId,
+            guestId: stay.guestId,
+            roomNumber: stay.roomNumber,
+            guestName: newBooking.guestName,
+            nights: stay.nights,
+            checkIn: stay.checkIn,
+            checkOut: stay.checkOut,
+            totalAmount: stay.totalAmount
+          },
+          {
+            reservationId: stay.resId,
+            guestId: stay.guestId,
+            roomNumber: stay.roomNumber,
+            guestName: newBooking.guestName
+          }
+        );
+      }
       
       // Post discounts and initial payments to ledger if any
       for (const stay of createdStays) {
@@ -1341,12 +1364,13 @@ export function FrontDesk() {
       await logActivity(
         hotel.id,
         profile,
-        'RESERVATION_POSTPONED',
+        'STAY_EXTENDED',
         'Front Desk',
-        `Reservation ${res.id} postponed to ${newCheckOutDate}`,
+        `Stay extended for ${res.guestName} by ${extraNights} night(s) to ${newCheckOutDate}${baseExtraAmount > 0 ? ` (Additional room charge: ${formatCurrency(baseExtraAmount, currency, exchangeRate)})` : ''}`,
         res.id,
         { checkOut: res.checkOut, totalAmount: res.totalAmount },
-        { checkOut: newCheckOutDate, totalAmount: newTotalAmount }
+        { checkOut: newCheckOutDate, totalAmount: newTotalAmount, extraNights, baseExtraAmount },
+        { reservationId: res.id, guestId: res.guestId, roomNumber: res.roomNumber, guestName: res.guestName }
       );
 
       toast.success('Stay postponed successfully');
@@ -1611,15 +1635,25 @@ export function FrontDesk() {
           details: `Reservation ${res.id} status changed to ${status}`
         });
 
+        const actionTag = status === 'checked_in' ? 'CHECK_IN' : status === 'cancelled' ? 'RESERVATION_CANCELLED' : status === 'no_show' ? 'NO_SHOW_RECORDED' : 'STATUS_CHANGED';
+        const actionDesc = status === 'checked_in'
+          ? `Guest ${res.guestName} checked in to Room ${res.roomNumber} (Scheduled stay: ${res.checkIn} to ${res.checkOut})`
+          : status === 'cancelled'
+          ? `Reservation cancelled for ${res.guestName} (Room ${res.roomNumber})`
+          : status === 'no_show'
+          ? `Guest marked as No-Show: ${res.guestName} (Room ${res.roomNumber})`
+          : `Reservation status changed from ${res.status} to ${status}`;
+
         await logActivity(
           hotel.id,
           profile,
-          'UPDATE_RESERVATION_STATUS',
+          actionTag,
           'Front Desk',
-          `Reservation status changed to ${status}`,
+          actionDesc,
           res.id,
           { status: res.status },
-          { status }
+          { status, roomNumber: res.roomNumber, checkIn: res.checkIn, checkOut: res.checkOut },
+          { reservationId: res.id, guestId: res.guestId, roomNumber: res.roomNumber, guestName: res.guestName }
         );
       }
       
@@ -1787,12 +1821,13 @@ export function FrontDesk() {
         await logActivity(
           hotel.id,
           profile,
-          'UPDATE_RESERVATION_STATUS',
+          'CHECK_OUT',
           'Front Desk',
-          `Reservation status changed to checked_out (operational). Balance preserved: ${outstandingBalance}`,
+          `Guest ${res.guestName} checked out of Room ${res.roomNumber}.${outstandingBalance > 0.01 ? ` Outstanding debt preserved: ${formatCurrency(outstandingBalance, currency, exchangeRate)}.` : ' Account balance zero/settled.'}`,
           res.id,
-          { status: res.status },
-          { status: 'checked_out', ledgerBalance: outstandingBalance }
+          { status: res.status, ledgerBalance: res.ledgerBalance },
+          { status: 'checked_out', ledgerBalance: outstandingBalance, checkOutTime: format(now, 'HH:mm') },
+          { reservationId: res.id, guestId: res.guestId, roomNumber: res.roomNumber, guestName: res.guestName }
         );
 
         // 4. Mark room as dirty or clean based on sync settings
@@ -2075,7 +2110,24 @@ export function FrontDesk() {
         description: `Room Transfer: From ${res.roomNumber} to ${newRoom.roomNumber}${priceDifference !== 0 ? ` (Price Adj: ${formatCurrency(priceDifference, currency, exchangeRate)})` : ''}`,
         referenceId: res.id,
         postedBy: profile.uid
-      }, profile.uid, res.corporateId);
+      }, profile.uid, res.corporateId, 'cash', {
+        uid: profile?.uid,
+        email: profile?.email,
+        role: profile?.role || 'staff',
+        displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+      });
+
+      await logActivity(
+        hotel.id,
+        profile,
+        'ROOM_CHANGED',
+        'Front Desk',
+        `Guest ${res.guestName} moved from Room ${res.roomNumber} (${oldRoomType?.name || 'Standard'}) to Room ${newRoom.roomNumber} (${newRoomType?.name || 'Standard'})${priceDifference !== 0 ? ` (Rate adjustment: ${formatCurrency(priceDifference, currency, exchangeRate)})` : ''}`,
+        res.id,
+        { roomId: res.roomId, roomNumber: res.roomNumber },
+        { roomId: newRoomId, roomNumber: newRoom.roomNumber, priceDifference },
+        { reservationId: res.id, guestId: res.guestId, roomNumber: newRoom.roomNumber, guestName: res.guestName }
+      );
 
       // 5. Log action is handled by safeUpdate/postToLedger internals
       toast.success(`Transferred to Room ${newRoom.roomNumber}`);

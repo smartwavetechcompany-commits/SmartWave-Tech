@@ -3,6 +3,7 @@ import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, RoomType, OperationType } from '../types';
+import { logActivity } from '../utils/activityLogger';
 import { 
   Coffee, 
   Search, 
@@ -44,6 +45,7 @@ import { toast } from 'sonner';
 
 interface BreakfastEntry {
   id: string;
+  guestId?: string;
   guestName: string;
   guestPhone?: string;
   guestEmail?: string;
@@ -235,6 +237,7 @@ export function BreakfastList() {
 
         return {
           id: res.id,
+          guestId: res.guestId,
           guestName: res.guestName || 'Guest',
           guestPhone: res.guestPhone,
           guestEmail: res.guestEmail,
@@ -330,6 +333,32 @@ export function BreakfastList() {
         breakfastServedDates: updatedDates,
         updatedAt: new Date().toISOString()
       });
+
+      if (!entry.isServed) {
+        logActivity(
+          hotel.id,
+          profile,
+          'BREAKFAST_SERVED',
+          'Dining',
+          `Breakfast served to ${entry.guestName} in Room ${entry.roomNumber} (${entry.numberOfGuests} guest(s), Entitlement: ${entry.breakfastEntitlement}) for date ${selectedDate}`,
+          entry.id,
+          null,
+          { isServed: true, date: selectedDate, entitlement: entry.breakfastEntitlement, numberOfGuests: entry.numberOfGuests },
+          { reservationId: entry.id, guestId: entry.guestId, roomNumber: entry.roomNumber, guestName: entry.guestName }
+        );
+      } else {
+        logActivity(
+          hotel.id,
+          profile,
+          'BREAKFAST_UNMARKED',
+          'Dining',
+          `Breakfast status marked Unclaimed/Pending for ${entry.guestName} in Room ${entry.roomNumber} for date ${selectedDate}`,
+          entry.id,
+          { isServed: true, date: selectedDate },
+          { isServed: false, date: selectedDate },
+          { reservationId: entry.id, guestId: entry.guestId, roomNumber: entry.roomNumber, guestName: entry.guestName }
+        );
+      }
     } catch (err: any) {
       toast.error('Failed to update breakfast served state');
     }

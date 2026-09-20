@@ -10,6 +10,7 @@ import { RoleBuilderModal } from './RoleBuilderModal';
 import { SessionControlCenter } from './SessionControlCenter';
 import { AccountCreationSummaryModal, UserSummaryData } from './AccountCreationSummaryModal';
 import { AdminResetPasswordModal } from './AdminResetPasswordModal';
+import { generateAccountActivationToken, resendAccountActivationEmail } from '../utils/passwordResetService';
 import { 
   UserPlus, 
   Search, 
@@ -25,6 +26,7 @@ import {
   Users,
   KeyRound,
   ShieldAlert,
+  ShieldCheck,
   Laptop,
   Plus,
   Edit2,
@@ -34,7 +36,10 @@ import {
   UserX,
   Phone,
   Building,
-  Hash
+  Hash,
+  Clock,
+  MailCheck,
+  Send
 } from 'lucide-react';
 import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
@@ -99,7 +104,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   // Pagination & Filtering state
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending_activation' | 'suspended'>('all');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,30 +120,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     roleType: 'base' as 'base' | 'custom',
     baseRole: 'frontDesk' as StaffRole,
     customRoleId: '',
-    forcePasswordChange: true,
-    temporaryPassword: '',
     overrides: [] as string[],
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
   const [showConfirmSuspend, setShowConfirmSuspend] = useState<{ member: UserProfile; willSuspend: boolean } | null>(null);
-
-  // Generate random strong password
-  const generateRandomPassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*';
-    let pwd = '';
-    for (let i = 0; i < 10; i++) {
-      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setNewStaff(prev => ({ ...prev, temporaryPassword: pwd }));
-  };
-
-  useEffect(() => {
-    if (isAddingStaff && !newStaff.temporaryPassword) {
-      generateRandomPassword();
-    }
-  }, [isAddingStaff]);
 
   // Role-based permission check for staff password reset
   const canResetPasswords = profile && (
@@ -175,8 +162,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       return;
     }
 
-    if (!newStaff.temporaryPassword || newStaff.temporaryPassword.length < 6) {
-      toast.error('Temporary password must be at least 6 characters');
+    if (!newStaff.email || !newStaff.email.includes('@')) {
+      toast.error('Please enter a valid email address.');
+      return;
+    }
+
+    const existing = staff.some(s => s.email?.toLowerCase() === newStaff.email.trim().toLowerCase());
+    if (existing) {
+      toast.error(`A staff member with email ${newStaff.email} already exists.`);
       return;
     }
 
@@ -197,9 +190,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       phoneNumber: newStaff.phone.trim() || undefined,
       department: newStaff.department,
       employeeId: newStaff.employeeId.trim() || undefined,
-      forcePasswordChange: newStaff.forcePasswordChange,
-      temporaryPassword: newStaff.temporaryPassword,
-      status: 'active',
+      status: 'pending_activation',
       isLocked: false,
       roles: newStaff.roleType === 'base' ? [newStaff.baseRole] : [],
       permissions: newStaff.overrides,
@@ -208,17 +199,28 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     };
 
     try {
+      toast.loading('Provisioning staff account and dispatching activation link...');
+
       await database.safeSet(doc(db, 'users', tempUid), staffProfile, {
         hotelId,
         module: 'Staff Security',
         action: 'CREATE_STAFF_ACCOUNT',
-        details: `Created staff account for ${staffProfile.email} with role '${roleLabel}' and force password change: ${newStaff.forcePasswordChange}`,
+        details: `Created staff account for ${staffProfile.email} with role '${roleLabel}' in Pending Activation status`,
         metadata: {
           uid: tempUid,
           email: staffProfile.email,
           role: roleLabel,
-          forcePasswordChange: newStaff.forcePasswordChange
+          status: 'pending_activation'
         }
+      });
+
+      // Generate secure activation token and dispatch email
+      const activationResult = await generateAccountActivationToken({
+        hotelId,
+        hotelName: authHotel?.name || 'Hotel Property',
+        targetUser: staffProfile,
+        adminProfile: profile!,
+        durationMinutes: 1440
       });
 
       // Role compliance audit log
@@ -234,7 +236,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           assignedRoles: [staffProfile.role, ...(staffProfile.roles || [])],
           hotelId,
           action: 'STAFF_ACCOUNT_CREATED',
-          details: `Provisioned staff profile with role '${roleLabel}'. Password displayed exclusively in confirmation overlay.`
+          details: `Provisioned staff profile in Pending Activation. Single-use 24h activation link dispatched to ${staffProfile.email}.`
         }, {
           hotelId,
           module: 'Staff Security',
@@ -245,7 +247,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         console.warn("Global audit log notice:", logErr);
       }
 
-      // Close create form and show the one-time credentials summary overlay
+      toast.dismiss();
+
+      // Close create form and show the activation summary modal
       setIsAddingStaff(false);
       setSummaryData({
         uid: tempUid,
@@ -259,9 +263,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         roleName: roleLabel,
         roleId: staffProfile.customRoleId || staffProfile.staffRole || staffProfile.role,
         employeeId: staffProfile.employeeId,
-        temporaryPassword: newStaff.temporaryPassword,
-        forcePasswordChange: newStaff.forcePasswordChange,
-        status: 'active',
+        activationLink: activationResult.activationUrl,
+        activationExpiresAt: activationResult.token.expiresAt,
+        emailDispatched: activationResult.emailSent,
+        status: 'pending_activation',
         createdAt: staffProfile.createdAt || new Date().toISOString(),
         createdBy: profile?.email || 'Administrator'
       });
@@ -276,15 +281,42 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         roleType: 'base',
         baseRole: 'frontDesk',
         customRoleId: '',
-        forcePasswordChange: true,
-        temporaryPassword: '',
         overrides: []
       });
 
-      toast.success('Staff account created. Please review credentials slip.');
+      if (activationResult.emailSent) {
+        toast.success(`Account created! Activation email dispatched to ${staffProfile.email}`);
+      } else {
+        toast.success('Account created in Pending Activation. Activation link generated.');
+      }
     } catch (err: any) {
+      toast.dismiss();
       handleFirestoreError(err, OperationType.WRITE, `users/${tempUid}`);
       toast.error('Failed to create staff member: ' + err.message);
+    }
+  };
+
+  // Resend activation email helper
+  const handleResendActivation = async (member: UserProfile) => {
+    if (!hotelId || !member.email || !profile) return;
+    try {
+      toast.loading(`Sending activation email to ${member.email}...`);
+      const res = await resendAccountActivationEmail(
+        hotelId,
+        authHotel?.name || 'Hotel Property',
+        member,
+        profile,
+        1440
+      );
+      toast.dismiss();
+      if (res.emailSent) {
+        toast.success(`Activation email successfully sent to ${member.email}`);
+      } else {
+        toast.success(`Activation link generated for ${member.email}`);
+      }
+    } catch (err: any) {
+      toast.dismiss();
+      toast.error(err.message || 'Failed to resend activation email');
     }
   };
 
@@ -547,6 +579,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               >
                 <option value="all">All Statuses</option>
                 <option value="active">Active Only</option>
+                <option value="pending_activation">Pending Activation Only</option>
                 <option value="suspended">Suspended Only</option>
               </select>
 
@@ -576,7 +609,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                     <th className="py-3.5 px-4">Staff Member</th>
                     <th className="py-3.5 px-4">Department</th>
                     <th className="py-3.5 px-4">Role</th>
-                    <th className="py-3.5 px-4">Password Policy</th>
+                    <th className="py-3.5 px-4">Account Security</th>
                     <th className="py-3.5 px-4">Status</th>
                     <th className="py-3.5 px-4 text-right">Actions</th>
                   </tr>
@@ -600,7 +633,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                           <td className="py-3.5 px-4">
                             <div className="flex items-center gap-3">
                               <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
-                                isSuspended ? 'bg-red-500/10 text-red-400' : 'bg-zinc-800 text-zinc-200'
+                                member.status === 'pending_activation' 
+                                  ? 'bg-amber-500/10 text-amber-400'
+                                  : isSuspended 
+                                    ? 'bg-red-500/10 text-red-400' 
+                                    : 'bg-zinc-800 text-zinc-200'
                               }`}>
                                 {member.displayName?.charAt(0).toUpperCase() || 'S'}
                               </div>
@@ -632,23 +669,35 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                           </td>
 
                           <td className="py-3.5 px-4">
-                            {member.forcePasswordChange ? (
+                            {member.status === 'pending_activation' ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-400">
+                                <Clock size={12} />
+                                Awaiting Activation
+                              </span>
+                            ) : member.forcePasswordChange ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400">
                                 <KeyRound size={12} />
                                 Change on Login
                               </span>
                             ) : (
-                              <span className="text-[11px] text-zinc-500">Standard</span>
+                              <span className="text-[11px] text-zinc-400">Active & Verified</span>
                             )}
                           </td>
 
                           <td className="py-3.5 px-4">
-                            {isSuspended ? (
+                            {member.status === 'pending_activation' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <Clock size={11} />
+                                Pending Activation
+                              </span>
+                            ) : isSuspended ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                                <UserX size={11} />
                                 Suspended
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <CheckCircle2 size={11} />
                                 Active
                               </span>
                             )}
@@ -656,12 +705,23 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* Admin Password Reset (Secure Email & Token System) */}
+                              {/* Resend Activation Email (One-time 24h link) */}
+                              {member.status === 'pending_activation' && canResetPasswords && (
+                                <button
+                                  onClick={() => handleResendActivation(member)}
+                                  className="p-1.5 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
+                                  title="Resend Account Activation Email"
+                                >
+                                  <MailCheck size={16} />
+                                </button>
+                              )}
+
+                              {/* Visible Admin Password Reset action on every user account */}
                               {canResetPasswords && (
                                 <button
                                   onClick={() => setResettingUser(member)}
                                   className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                                  title="Reset Staff Password (Send Secure Token Email)"
+                                  title="Reset Staff Password (Dispatches Secure Reset Email)"
                                 >
                                   <KeyRound size={16} />
                                 </button>
@@ -962,57 +1022,23 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 )}
               </div>
 
-              {/* Password & Security Policy */}
-              <div className="p-4 bg-zinc-950/60 rounded-xl border border-zinc-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300">
-                    Temporary Password
-                  </label>
-                  <button
-                    type="button"
-                    onClick={generateRandomPassword}
-                    className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
-                  >
-                    <RefreshCw size={12} />
-                    Generate New
-                  </button>
+              {/* Account Activation & Security Policy */}
+              <div className="p-4 bg-emerald-500/5 rounded-xl border border-emerald-500/20 space-y-3">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                  <ShieldCheck size={16} />
+                  <span>Secure Account Activation Policy</span>
                 </div>
-
-                <input 
-                  required
-                  type="text" 
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs font-mono text-amber-400 focus:border-emerald-500 outline-none"
-                  value={newStaff.temporaryPassword}
-                  onChange={(e) => setNewStaff({ ...newStaff, temporaryPassword: e.target.value })}
-                />
-
-                {/* Force Password Change Setting */}
-                <div className="pt-2 border-t border-zinc-800">
-                  <label className="flex items-start gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newStaff.forcePasswordChange}
-                      onChange={(e) => setNewStaff({ ...newStaff, forcePasswordChange: e.target.checked })}
-                      className="mt-0.5 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-zinc-200 block">
-                        Force Password Change on First Login
-                      </span>
-                      <span className="text-[11px] text-zinc-400 block">
-                        Staff member must choose their own private password upon signing in before accessing any hotel module.
-                      </span>
-                    </div>
-                  </label>
+                <div className="text-xs text-zinc-300 space-y-2 leading-relaxed">
+                  <p>
+                    Compliant with hotel security and PCI-DSS standards:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1.5 text-zinc-400 text-[11px]">
+                    <li>Staff members <strong className="text-zinc-200">do not receive a default password</strong>.</li>
+                    <li>The system will immediately dispatch a secure <strong className="text-zinc-200">one-time activation link</strong> to the staff's registered email.</li>
+                    <li>The link expires after <strong className="text-zinc-200">24 hours</strong> and becomes invalid immediately after use.</li>
+                    <li>The account will remain in <strong className="text-amber-400">Pending Activation</strong> status until the staff member creates their own password.</li>
+                  </ul>
                 </div>
-              </div>
-
-              {/* Security Warning */}
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-start gap-2">
-                <ShieldAlert size={16} className="text-amber-400 shrink-0 mt-0.5" />
-                <span>
-                  No automated credentials email or SMS will be sent. Credentials will be presented in a one-time copy/print handover slip upon creation.
-                </span>
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -1109,6 +1135,43 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           user={resettingUser}
           onClose={() => setResettingUser(null)}
           onSuccess={() => setResettingUser(null)}
+        />
+      )}
+
+      {/* Account Creation / Activation Summary Modal */}
+      {summaryData && (
+        <AccountCreationSummaryModal
+          data={summaryData}
+          onClose={() => setSummaryData(null)}
+          onResendActivation={async () => {
+            if (!summaryData.email || !hotelId || !profile) return;
+            const targetMember = staff.find(s => s.uid === summaryData.uid) || {
+              uid: summaryData.uid,
+              email: summaryData.email,
+              displayName: summaryData.fullName,
+              role: 'staff',
+              hotelId
+            } as UserProfile;
+            try {
+              toast.loading(`Resending activation email to ${summaryData.email}...`);
+              const res = await resendAccountActivationEmail(
+                hotelId,
+                summaryData.hotelName,
+                targetMember,
+                profile,
+                1440
+              );
+              toast.dismiss();
+              if (res.emailSent) {
+                toast.success(`Activation email resent to ${summaryData.email}`);
+              } else {
+                toast.success(`Activation link regenerated for ${summaryData.email}`);
+              }
+            } catch (err: any) {
+              toast.dismiss();
+              toast.error(err.message || 'Failed to resend activation email');
+            }
+          }}
         />
       )}
 

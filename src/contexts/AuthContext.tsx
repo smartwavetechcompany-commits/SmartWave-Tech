@@ -199,6 +199,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // Enforce account activation & status checks
+        if (data.status === 'pending_activation') {
+          toast.error("Your account is pending activation. Please use the activation link sent to your email to set your password.");
+          await fbSignOut(auth);
+          return;
+        }
+
+        if (data.status === 'suspended') {
+          toast.error("Your account has been suspended. Please contact your Hotel Administrator.");
+          await fbSignOut(auth);
+          return;
+        }
+
         setProfile(data);
         setLoading(false);
       } else if (user.email && SUPER_ADMIN_EMAILS.some(email => email.toLowerCase() === user.email?.toLowerCase())) {
@@ -235,7 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   ...tempData,
                   uid: currentUid,
                   initialPassword: null,
-                  status: 'active',
+                  status: tempData.status || 'active',
                   updatedAt: new Date().toISOString()
                 };
                 

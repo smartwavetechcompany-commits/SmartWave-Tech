@@ -4,18 +4,19 @@ import {
   Copy, 
   Check, 
   Printer, 
-  Eye, 
-  EyeOff, 
-  ShieldAlert, 
+  ShieldCheck, 
   User, 
   Lock, 
   Building2, 
   Calendar, 
   X,
-  FileText
+  FileText,
+  MailCheck,
+  Clock,
+  Send
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { database, createAuditLog } from '../utils/database';
+import { createAuditLog } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface UserSummaryData {
@@ -30,9 +31,12 @@ export interface UserSummaryData {
   roleName: string;
   roleId: string;
   employeeId?: string;
+  activationLink?: string;
+  activationExpiresAt?: string;
+  emailDispatched?: boolean;
   temporaryPassword?: string;
-  forcePasswordChange: boolean;
-  status: 'active' | 'inactive' | 'suspended';
+  forcePasswordChange?: boolean;
+  status: 'active' | 'pending_activation' | 'suspended';
   createdAt: string;
   createdBy: string;
 }
@@ -40,11 +44,11 @@ export interface UserSummaryData {
 interface Props {
   data: UserSummaryData;
   onClose: () => void;
+  onResendActivation?: () => void;
 }
 
-export function AccountCreationSummaryModal({ data, onClose }: Props) {
+export function AccountCreationSummaryModal({ data, onClose, onResendActivation }: Props) {
   const { profile } = useAuth();
-  const [showPassword, setShowPassword] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const logSecurityAction = async (action: string, details: string) => {
@@ -84,19 +88,25 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
     }
   };
 
-  const copyLoginCredentials = () => {
+  const copyActivationInstructions = () => {
     const text = [
-      `PMS LOGIN CREDENTIALS`,
-      `====================`,
+      `HOTEL PMS ACCOUNT ACTIVATION INVITATION`,
+      `=======================================`,
       `Property: ${data.hotelName}`,
-      `Username: ${data.username || data.email}`,
-      `Temporary Password: ${data.temporaryPassword || 'N/A'}`,
-      `Must Change Password on First Login: ${data.forcePasswordChange ? 'YES' : 'NO'}`,
-      `====================`,
-      `Security Warning: This password is provided once. Do not share.`
+      `Staff Member: ${data.fullName}`,
+      `Registered Email: ${data.email}`,
+      `Assigned Role: ${data.roleName}`,
+      `Account Status: Pending Activation`,
+      `=======================================`,
+      `ACTIVATION LINK (Expires in 24 Hours):`,
+      `${data.activationLink || 'Check your registered email inbox for the link.'}`,
+      `=======================================`,
+      `SECURITY NOTICE:`,
+      `Default passwords are not issued. You must create your own personal`,
+      `password using the secure activation link above before signing in.`
     ].join('\n');
 
-    copyToClipboard(text, 'Login credentials', 'login_credentials');
+    copyToClipboard(text, 'Activation instructions', 'activation_instructions');
   };
 
   const copyFullDetails = () => {
@@ -113,10 +123,11 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
       `Assigned Hotel: ${data.hotelName}`,
       `Assigned Role: ${data.roleName}`,
       ``,
-      `LOGIN INFORMATION:`,
-      `Temporary Password: ${data.temporaryPassword || 'N/A'}`,
-      `Force Password Change: ${data.forcePasswordChange ? 'Enabled' : 'Disabled'}`,
+      `SECURITY & ACTIVATION:`,
       `Account Status: ${data.status.toUpperCase()}`,
+      `Activation Link: ${data.activationLink || 'Sent via email'}`,
+      `Link Valid Until: ${data.activationExpiresAt ? new Date(data.activationExpiresAt).toLocaleString() : '24 Hours'}`,
+      `Default Password: NONE (Staff creates their own password)`,
       ``,
       `SYSTEM AUDIT:`,
       `Created Date: ${new Date(data.createdAt).toLocaleString()}`,
@@ -145,9 +156,9 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
               <CheckCircle2 size={24} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-zinc-100">Account Created Successfully</h2>
+              <h2 className="text-lg font-bold text-zinc-100">Staff Account Created & Activation Sent</h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Staff profile provisioned. Credentials will only be visible in this overlay.
+                Account provisioned in <span className="text-amber-400 font-medium">Pending Activation</span> status.
               </p>
             </div>
           </div>
@@ -159,21 +170,25 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
           </button>
         </div>
 
-        {/* Security Caution Notice */}
-        <div className="mx-6 mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-3 text-xs text-amber-200">
-          <ShieldAlert size={16} className="text-amber-400 shrink-0 mt-0.5" />
-          <div>
-            <strong className="font-semibold block text-amber-300 mb-0.5">Enterprise Security Protocol Active</strong>
-            No automated email, SMS, or notification has been sent. Securely copy or print these credentials to deliver directly to the staff member. The password will not be retrievable once closed.
+        {/* Security & Compliance Banner */}
+        <div className="mx-6 mt-4 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3 text-xs text-emerald-300">
+          <ShieldCheck size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+          <div className="space-y-1 leading-relaxed">
+            <strong className="font-semibold block text-emerald-300">
+              Security Protocol Enforced (No Default Passwords)
+            </strong>
+            <p className="text-emerald-200/90">
+              In accordance with hotel security standards, default passwords are not generated or assigned. An activation email with a secure, one-time link has been dispatched to <strong>{data.email}</strong>. The staff member will create their own password to activate their account.
+            </p>
           </div>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Section 1: User Information */}
+        <div className="p-6 space-y-5">
+          {/* Section 1: User Profile */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3 flex items-center gap-2">
               <User size={14} className="text-emerald-400" />
-              User Information
+              Staff Profile Information
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80 text-xs">
               <div>
@@ -181,7 +196,7 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
                 <span className="font-medium text-zinc-200 text-sm">{data.fullName}</span>
               </div>
               <div>
-                <span className="text-zinc-500 block">Email / Username</span>
+                <span className="text-zinc-500 block">Registered Email</span>
                 <span className="font-mono text-zinc-200">{data.email}</span>
               </div>
               <div>
@@ -214,73 +229,68 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
             </div>
           </div>
 
-          {/* Section 2: Login Information */}
+          {/* Section 2: Activation & Onboarding */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3 flex items-center gap-2">
-              <Lock size={14} className="text-amber-400" />
-              Login Information
+              <MailCheck size={14} className="text-amber-400" />
+              Account Activation Status
             </h3>
             <div className="bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80 space-y-3.5 text-xs">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-zinc-500 block">Username</span>
-                  <span className="font-mono font-medium text-zinc-200">{data.username || data.email}</span>
+                  <span className="text-zinc-500 block">Current Account Status</span>
+                  <span className="inline-flex items-center gap-1.5 font-bold text-amber-400 mt-0.5">
+                    <Clock size={13} className="text-amber-400" />
+                    Pending Activation
+                  </span>
                 </div>
-                <button
-                  onClick={() => copyToClipboard(data.username || data.email, 'Username', 'username')}
-                  className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs flex items-center gap-1.5 transition-colors"
-                >
-                  {copiedKey === 'username' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                  Copy Username
-                </button>
+                <div className="text-right">
+                  <span className="text-zinc-500 block">Activation Link Expiry</span>
+                  <span className="font-mono text-zinc-300">
+                    {data.activationExpiresAt ? new Date(data.activationExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '24 Hours from creation'}
+                  </span>
+                </div>
               </div>
 
-              {data.temporaryPassword && (
-                <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-                  <div>
-                    <span className="text-zinc-500 block">Temporary Password</span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="font-mono font-bold text-amber-400 text-sm tracking-wider">
-                        {showPassword ? data.temporaryPassword : '••••••••••••'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="text-zinc-500 hover:text-zinc-300"
-                      >
-                        {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    </div>
+              {/* Direct Activation Link Display */}
+              {data.activationLink && (
+                <div className="pt-3 border-t border-zinc-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-400 font-semibold flex items-center gap-1.5">
+                      <Lock size={12} className="text-emerald-400" />
+                      One-Time Activation URL (Single-Use):
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard(data.activationLink!, 'Activation URL', 'activation_url')}
+                      className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      {copiedKey === 'activation_url' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      Copy Link
+                    </button>
                   </div>
-                  <button
-                    onClick={() => copyToClipboard(data.temporaryPassword!, 'Temporary password', 'password')}
-                    className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs flex items-center gap-1.5 transition-colors"
-                  >
-                    {copiedKey === 'password' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                    Copy Password
-                  </button>
+                  <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-400 font-mono text-[11px] break-all select-all">
+                    {data.activationLink}
+                  </div>
                 </div>
               )}
 
-              <div className="pt-3 border-t border-zinc-800/80 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <span className="text-zinc-500 block">Force Password Change</span>
-                  <span className={`font-semibold ${data.forcePasswordChange ? 'text-emerald-400' : 'text-zinc-400'}`}>
-                    {data.forcePasswordChange ? 'Yes (Mandatory on First Login)' : 'No'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-zinc-500 block">Initial Account Status</span>
-                  <span className="inline-flex items-center gap-1 font-semibold text-emerald-400">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    Active
-                  </span>
-                </div>
+              <div className="pt-2 border-t border-zinc-800/80 text-[11px] text-zinc-400 flex items-center justify-between">
+                <span>The staff member must click this link to establish their password before accessing the PMS.</span>
+                {onResendActivation && (
+                  <button
+                    type="button"
+                    onClick={onResendActivation}
+                    className="ml-2 text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1 shrink-0"
+                  >
+                    <Send size={11} />
+                    Resend Email
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Section 3: System Information */}
+          {/* Section 3: Audit Metadata */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3 flex items-center gap-2">
               <Calendar size={14} className="text-blue-400" />
@@ -311,11 +321,11 @@ export function AccountCreationSummaryModal({ data, onClose }: Props) {
         <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={copyLoginCredentials}
+              onClick={copyActivationInstructions}
               className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
             >
-              {copiedKey === 'login_credentials' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-              Copy Credentials
+              {copiedKey === 'activation_instructions' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              Copy Activation Instructions
             </button>
             <button
               onClick={copyFullDetails}

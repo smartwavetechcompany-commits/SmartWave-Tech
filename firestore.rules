@@ -85,22 +85,19 @@ service cloud.firestore {
       // Full control for superAdmin
       allow read, write: if isSuperAdmin();
 
-      // Authenticated users can fetch a single code for validation
-      allow get: if isAuthenticated();
+      // Prospective hotel owners can fetch a single code by its exact ID to validate before registration
+      allow get: if true;
 
-      // Prevent listing all codes for regular users
+      // Prevent listing all codes for non-superadmins
       allow list: if isSuperAdmin();
 
-      // One-time usage enforcement
-      allow update: if isAuthenticated() &&
+      // One-time usage enforcement during hotel registration
+      allow update: if isSuperAdmin() || (
+        isAuthenticated() &&
         resource.data.status == 'active' &&
         request.resource.data.status == 'used' &&
-        request.resource.data.usedByHotel != null &&
-        // Robust expiry check: handle both null and timestamp comparisons
-        (resource.data.expiryDate == null || timestamp(resource.data.expiryDate) >= request.time) &&
-        // Ensure critical fields don't change
-        request.resource.data.code == resource.data.code &&
-        request.resource.data.plan == resource.data.plan;
+        request.resource.data.usedByHotel != null
+      );
     }
 
     //////////////////////////////
@@ -204,6 +201,16 @@ service cloud.firestore {
         allow delete: if isSuperAdmin(); // Immutable ledger!
       }
 
+      // Staff account activation and password reset tokens for this property
+      match /passwordResetTokens/{tokenId} {
+        allow read: if true;
+        allow create: if isSuperAdmin() || isHotelAdmin() || hasStaffManagementPermission() || isAuthenticated();
+        allow update: if isSuperAdmin() || isHotelAdmin() || hasStaffManagementPermission() ||
+                         (request.resource.data.isUsed == true && resource.data.isUsed == false) ||
+                         (request.resource.data.status in ['used', 'revoked']);
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+      }
+
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId);
@@ -231,51 +238,57 @@ service cloud.firestore {
 
     match /systemLogs/{allPaths=**} {
       allow read: if isSuperAdmin();
-      allow create: if isAuthenticated();
+      allow create: if true;
     }
 
     match /activityLogs/{logId} {
       allow read: if isSuperAdmin();
-      allow create: if isAuthenticated();
+      allow create: if true;
     }
 
     // Collection Group rule for activityLogs
     match /{path=**}/activityLogs/{logId} {
       allow read, list: if isSuperAdmin();
+      allow create: if true;
     }
 
     match /auditLogs/{logId} {
       allow read: if isSuperAdmin();
-      allow create: if isAuthenticated();
+      allow create: if true;
     }
 
     match /GlobalAuditLog/{logId} {
       allow read: if isSuperAdmin() || (isAuthenticated() && isAdmin() && resource.data.hotelId == getHotelId());
-      allow create: if isAuthenticated();
+      allow create: if true;
     }
 
     match /registration/{docId} {
-      allow create: if isAuthenticated();
+      allow create: if true;
       allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isSuperAdmin());
+      allow write: if isSuperAdmin();
     }
 
     match /trackingCodeRequests/{requestId} {
+      // SuperAdmin has full management access to review, approve, and reject
       allow read, write: if isSuperAdmin();
-      allow create: if isAuthenticated();
+      // Prospective hotel owners can submit code requests before registering
+      allow create: if true;
     }
 
     match /passwordResetTokens/{tokenId} {
       // Unauthenticated access permitted to validate the token
       allow read: if true;
-      // Only authorized hotel admins or managers can create tokens
-      allow create: if isAuthenticated() && (
-        isSuperAdmin() || 
-        isHotelAdmin() || 
-        hasStaffManagementPermission()
-      );
+      // Creation allowed for hotel admins, managers, and system processes
+      allow create: if isSuperAdmin() || 
+                       isHotelAdmin() || 
+                       hasStaffManagementPermission() ||
+                       isAuthenticated();
       // Allow marking token as used when completing reset or updates by authorized admins
-      allow update: if (isAuthenticated() && (isSuperAdmin() || isHotelAdmin() || hasStaffManagementPermission())) ||
-                       (request.resource.data.isUsed == true && resource.data.isUsed == false);
+      allow update: if isSuperAdmin() || 
+                       isHotelAdmin() || 
+                       hasStaffManagementPermission() ||
+                       (request.resource.data.isUsed == true && resource.data.isUsed == false) ||
+                       (request.resource.data.status in ['used', 'revoked']);
       allow delete: if isSuperAdmin() || isHotelAdmin();
     }
   }

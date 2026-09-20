@@ -50,17 +50,25 @@ export async function createAuditLog(
   if (!hotelId) return;
   try {
     const user = auth.currentUser;
+    // Extract targetId, reservationId, guestId if available in metadata
+    const reservationId = metadata?.reservationId || metadata?.data?.reservationId || metadata?.newData?.reservationId || undefined;
+    const guestId = metadata?.guestId || metadata?.data?.guestId || metadata?.newData?.guestId || undefined;
+    const targetId = metadata?.targetId || reservationId || guestId || (metadata?.docPath ? metadata.docPath.split('/').pop() : undefined);
+
     const logData: any = {
       action,
       userId: userContext?.uid || user?.uid || 'system',
       userEmail: userContext?.email || user?.email || 'system',
-      userName: userContext?.displayName || user?.displayName || userContext?.email || user?.email || 'System',
+      userName: userContext?.displayName || user?.displayName || userContext?.email || user?.email || 'System Staff',
       userRole: userContext?.role || 'staff',
       hotelId,
       timestamp: serverTimestamp(),
       module,
       details,
       status,
+      targetId: targetId || undefined,
+      reservationId: reservationId || undefined,
+      guestId: guestId || undefined,
       metadata: metadata ? deepCloneSafe(metadata) : undefined
     };
 
@@ -192,14 +200,14 @@ export const database = {
   async commitBatch(
     hotelId: string,
     batch: WriteBatch,
-    options: { module: string; action: string; details: string; userContext?: { uid?: string; email?: string; role?: string } }
+    options: { module: string; action: string; details: string; metadata?: any; userContext?: { uid?: string; email?: string; role?: string } }
   ) {
     try {
       await batch.commit();
-      createAuditLog(hotelId, options.module, options.action, options.details, 'success', undefined, options.userContext);
+      createAuditLog(hotelId, options.module, options.action, options.details, 'success', options.metadata, options.userContext);
       return { success: true };
     } catch (error) {
-      createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error) }, options.userContext);
+      createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error), ...(options.metadata || {}) }, options.userContext);
       
       await errorService.handleError(error, { 
         module: options.module, 

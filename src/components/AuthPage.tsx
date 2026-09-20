@@ -153,6 +153,30 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
     try {
       if (isLogin) {
         console.log("Attempting login for:", formData.email);
+        
+        // 1. Check account status prior to authentication
+        try {
+          const staffPreQuery = query(
+            collection(db, 'users'),
+            where('email', '==', formData.email.trim().toLowerCase())
+          );
+          const staffPreSnap = await getDocs(staffPreQuery);
+          if (!staffPreSnap.empty) {
+            const matchedProfile = staffPreSnap.docs[0].data() as UserProfile;
+            if (matchedProfile.status === 'pending_activation') {
+              throw new Error('Your account is pending activation. Please use the secure one-time activation link sent to your email to create your password before signing in.');
+            }
+            if (matchedProfile.status === 'suspended') {
+              throw new Error('Your account has been suspended. Please contact your Hotel Administrator for assistance.');
+            }
+          }
+        } catch (preCheckErr: any) {
+          if (preCheckErr.message?.includes('pending activation') || preCheckErr.message?.includes('suspended')) {
+            throw preCheckErr;
+          }
+          console.warn("Pre-auth status check bypassed:", preCheckErr?.message);
+        }
+
         try {
           const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
           const loggedInUser = userCredential.user;
@@ -172,14 +196,20 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
             const staffSnap = await getDocs(staffQuery);
             if (!staffSnap.empty) {
               const staffDoc = staffSnap.docs[0];
-              const staffData = staffDoc.data();
+              const staffData = staffDoc.data() as UserProfile;
+
+              if (staffData.status === 'pending_activation') {
+                await auth.signOut();
+                throw new Error('Your account is pending activation. Please use the activation link sent to your email to create your password.');
+              }
+
               if (staffDoc.id !== loggedInUser.uid) {
                 console.log(`Migrating profile from ${staffDoc.id} to ${loggedInUser.uid}`);
                 await database.safeSet(profileDocRef, {
                   ...staffData,
                   uid: loggedInUser.uid,
                   initialPassword: null,
-                  status: 'active',
+                  status: staffData.status || 'active',
                   updatedAt: new Date().toISOString()
                 }, {
                   hotelId: staffData.hotelId || 'SYSTEM',
@@ -198,80 +228,18 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
                 console.log(`Migration completed successfully in AuthPage!`);
               }
             }
-          }
-        } catch (authErr: any) {
-          // If login fails, check if it's a staff member with an initial password
-          if (authErr.code === 'auth/invalid-credential' || authErr.code === 'auth/user-not-found' || authErr.code === 'auth/wrong-password') {
-            const staffQuery = query(
-              collection(db, 'users'), 
-              where('email', '==', formData.email.toLowerCase()), 
-              where('initialPassword', '==', formData.password)
-            );
-            const staffSnap = await getDocs(staffQuery);
-            
-            if (!staffSnap.empty) {
-              const staffDoc = staffSnap.docs[0];
-              const staffData = staffDoc.data();
-              
-              // Create the Auth user on the fly
-              let newUser;
-              try {
-                const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-                newUser = userCredential.user;
-              } catch (createErr: any) {
-                if (createErr.code === 'auth/email-already-in-use') {
-                  throw new Error('This email address is already registered in our system from a previous assignment. To login, please sign in with your previous password, or click "Forgot Password" to reset your password. Once you log in, your new staff permissions will be automatically linked!');
-                }
-                throw createErr;
-              }
-              
-              // Update the user document: link to real UID and remove initialPassword
-              await database.safeSet(doc(db, 'users', newUser.uid), {
-                ...staffData,
-                uid: newUser.uid,
-                initialPassword: null, // Remove for security
-                status: 'active',
-                updatedAt: new Date().toISOString()
-              }, {
-                hotelId: staffData.hotelId || 'SYSTEM',
-                module: 'Auth',
-                action: 'STAFF_ACTIVATION',
-                details: `Activated staff account for ${newUser.email}`
-              });
-              
-              // Delete the temporary staff document if it had a different ID
-              if (staffDoc.id !== newUser.uid) {
-                await database.safeDelete(doc(db, 'users', staffDoc.id), {
-                  hotelId: staffData.hotelId || 'SYSTEM',
-                  module: 'Auth',
-                  action: 'STAFF_TEMP_DELETE',
-                  details: `Removed temporary staff document for ${newUser.email}`
-                });
-              }
-              
-              // Log the activation
-              if (staffData.hotelId) {
-                await database.safeAdd(collection(db, 'hotels', staffData.hotelId, 'activityLogs'), {
-                  timestamp: new Date().toISOString(),
-                  userId: newUser.uid,
-                  userEmail: newUser.email,
-                  userRole: 'staff',
-                  action: 'STAFF_ACTIVATED',
-                  resource: `Staff: ${newUser.email}`,
-                  hotelId: staffData.hotelId,
-                  module: 'Auth'
-                }, {
-                  hotelId: staffData.hotelId,
-                  module: 'Auth',
-                  action: 'ACTIVITY_LOG_CREATE',
-                  details: `Logged staff activation for ${newUser.email}`
-                });
-              }
-              
-              showNotification('Welcome! Your account has been activated. Please change your password in settings for better security.', 'success');
-              return;
+          } else if (profileSnap.exists()) {
+            const profileData = profileSnap.data() as UserProfile;
+            if (profileData.status === 'pending_activation') {
+              await auth.signOut();
+              throw new Error('Your account is pending activation. Please use the activation link sent to your email to create your password before accessing the PMS.');
+            }
+            if (profileData.status === 'suspended') {
+              await auth.signOut();
+              throw new Error('Your account has been suspended. Please contact your Hotel Administrator.');
             }
           }
+        } catch (authErr: any) {
           throw authErr;
         }
       } else {
@@ -279,17 +247,23 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         if (!user && formData.password !== formData.confirmPassword) {
           throw new Error('Passwords do not match');
         }
-        // 1. Check for existing staff profile by email
-        const staffQuery = query(collection(db, 'users'), where('email', '==', formData.email.toLowerCase()), where('role', '==', 'staff'));
-        const staffSnap = await getDocs(staffQuery);
+        // 1. Check for existing staff profile by email (only if no tracking code provided for hotel registration)
         let existingStaffProfile: UserProfile | null = null;
         let staffDocId: string | null = null;
 
-        if (!staffSnap.empty) {
-          // Found a pre-created staff profile
-          const doc = staffSnap.docs[0];
-          existingStaffProfile = doc.data() as UserProfile;
-          staffDocId = doc.id;
+        if (!formData.trackingCode && formData.email) {
+          try {
+            const staffQuery = query(collection(db, 'users'), where('email', '==', formData.email.toLowerCase()), where('role', '==', 'staff'));
+            const staffSnap = await getDocs(staffQuery);
+            if (!staffSnap.empty) {
+              // Found a pre-created staff profile
+              const doc = staffSnap.docs[0];
+              existingStaffProfile = doc.data() as UserProfile;
+              staffDocId = doc.id;
+            }
+          } catch (staffQueryErr) {
+            console.warn("Staff profile check skipped or denied:", staffQueryErr);
+          }
         }
 
         // 2. Verify Tracking Code (Only if not already a staff member)

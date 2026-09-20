@@ -393,6 +393,31 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["type", "itemId", "quantity", "userId", "timestamp"]
+    },
+    "PasswordResetToken": {
+      "title": "Password Reset & Activation Token",
+      "description": "Secure one-time token for staff account activation and admin-initiated password resets",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "token": { "type": "string" },
+        "type": { "type": "string", "enum": ["activation", "password_reset"] },
+        "targetUid": { "type": "string" },
+        "targetEmail": { "type": "string" },
+        "targetName": { "type": "string" },
+        "hotelId": { "type": "string" },
+        "hotelName": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdByEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "durationMinutes": { "type": "integer" },
+        "isUsed": { "type": "boolean" },
+        "usedAt": { "type": ["string", "null"] },
+        "status": { "type": "string", "enum": ["active", "used", "revoked", "expired"] },
+        "resetUrl": { "type": "string" }
+      },
+      "required": ["token", "type", "targetUid", "targetEmail", "hotelId", "createdAt", "expiresAt", "status"]
     }
   },
   "firestore": {
@@ -503,6 +528,14 @@
     "/registration/{regId}": {
       "schema": "Registration",
       "description": "Hotel registration records"
+    },
+    "/passwordResetTokens/{tokenId}": {
+      "schema": "PasswordResetToken",
+      "description": "Global password reset and activation tokens"
+    },
+    "/hotels/{hotelId}/passwordResetTokens/{tokenId}": {
+      "schema": "PasswordResetToken",
+      "description": "Hotel property staff password reset and activation tokens"
     }
   }
 }

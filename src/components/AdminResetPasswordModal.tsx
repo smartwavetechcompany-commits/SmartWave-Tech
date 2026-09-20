@@ -41,7 +41,7 @@ export function AdminResetPasswordModal({ user, onClose, onSuccess }: Props) {
   const [activeTab, setActiveTab] = useState<'emailLink' | 'manualTemp'>('emailLink');
 
   // Email reset link configuration
-  const [durationMinutes, setDurationMinutes] = useState<number>(60); // 1 hour default
+  const [durationMinutes, setDurationMinutes] = useState<number>(1440); // 24 hours default
   const [adminNote, setAdminNote] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<{
@@ -317,7 +317,7 @@ export function AdminResetPasswordModal({ user, onClose, onSuccess }: Props) {
                         }`}
                       >
                         {opt.label}
-                        {opt.value === 60 && (
+                        {opt.value === 1440 && (
                           <span className="block text-[9px] text-emerald-500/80 font-normal">Default</span>
                         )}
                       </button>
