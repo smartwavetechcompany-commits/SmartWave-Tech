@@ -15,6 +15,7 @@ import { LedgerDiagnosticModal } from './LedgerDiagnosticModal';
 import { LedgerAuditErrorBoundary } from './LedgerAuditErrorBoundary';
 import { PrincipalRoomManager } from './PrincipalRoomManager';
 import { GuestActivityTimeline } from './GuestActivityTimeline';
+import { GlobalErrorBoundary } from './GlobalErrorBoundary';
 import { 
   Receipt, 
   User, 
@@ -896,6 +897,23 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   };
 
+  if (!currentReservation) {
+    return (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center space-y-4 max-w-sm w-full">
+          <p className="text-sm text-zinc-300">Reservation data is currently unavailable.</p>
+          <button 
+            type="button"
+            onClick={onClose} 
+            className="px-4 py-2 bg-zinc-800 text-zinc-200 rounded-xl text-xs font-semibold hover:bg-zinc-700 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-2 sm:p-4">
       <div
@@ -1071,7 +1089,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
           {folioTab === 'timeline' ? (
             <div className="space-y-6">
-              <GuestActivityTimeline reservation={currentReservation} />
+              <GlobalErrorBoundary fallback={<div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-center text-zinc-400 text-xs">Activity timeline is currently unavailable.</div>}>
+                <GuestActivityTimeline reservation={currentReservation} />
+              </GlobalErrorBoundary>
             </div>
           ) : (
             <>
@@ -1325,11 +1345,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check In</p>
-                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkIn), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{safeFormatDate(currentReservation.checkIn, 'MMM d, yyyy')}</p>
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase">Check Out</p>
-                    <p className="text-sm text-zinc-50 font-medium">{format(new Date(currentReservation.checkOut), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-zinc-50 font-medium">{safeFormatDate(currentReservation.checkOut, 'MMM d, yyyy')}</p>
                   </div>
                 </div>
                 <div className="pt-2 mt-2 border-t border-zinc-800/50">
@@ -1573,7 +1593,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       {transferType === 'guest' ? (
                         activeReservationsForSearch.map(r => (
                           <option key={r.id} value={r.id}>
-                            {r.guestName} - Room {r.roomNumber} ({format(new Date(r.checkIn), 'MMM d')} - {format(new Date(r.checkOut), 'MMM d')})
+                            {r.guestName} - Room {r.roomNumber} ({safeFormatDate(r.checkIn, 'MMM d')} - {safeFormatDate(r.checkOut, 'MMM d')})
                           </option>
                         ))
                       ) : (
@@ -1733,7 +1753,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <div>
                             <p className="text-sm font-bold text-zinc-50">Room {res.roomNumber}</p>
                             <p className="text-xs text-zinc-500">
-                              {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                              {safeFormatDate(res.checkIn, 'MMM d, yyyy')} - {safeFormatDate(res.checkOut, 'MMM d, yyyy')}
                             </p>
                           </div>
                         </div>
@@ -2448,7 +2468,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </div>
 
           {/* Complete Guest Activity Timeline (In-line beneath Transaction Ledger) */}
-          <GuestActivityTimeline reservation={currentReservation} />
+          <GlobalErrorBoundary fallback={<div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-center text-zinc-400 text-xs">Activity timeline is currently unavailable.</div>}>
+            <GuestActivityTimeline reservation={currentReservation} />
+          </GlobalErrorBoundary>
           </>
           )}
         </div>

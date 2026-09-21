@@ -66,17 +66,16 @@ export interface StayDurationOptions {
  * A chargeable night must only be added when the guest exceeds the configured checkout time plus grace period.
  */
 export function getOverstayNightsFromSettings(
-  checkOutDate: string | Date,
+  checkOutDate: string | Date | any,
   checkOutTime: string = '12:00',
   gracePeriodMinutes: number = 0,
   now: Date = new Date()
 ): number {
-  const parseDateStr = (d: string | Date): string => {
+  const parseDateStr = (d: any): string => {
     if (!d) return format(new Date(), 'yyyy-MM-dd');
-    if (d instanceof Date) return format(d, 'yyyy-MM-dd');
-    if (typeof d === 'string') {
-      if (d.includes('T')) return d.split('T')[0];
-      return d;
+    const dt = parseTimestampToDate(d);
+    if (!isNaN(dt.getTime()) && dt.getTime() > 0) {
+      return format(dt, 'yyyy-MM-dd');
     }
     return format(new Date(), 'yyyy-MM-dd');
   };
@@ -118,26 +117,17 @@ export function getOverstayNightsFromSettings(
  * Single Authoritative Duration Engine for PMS
  */
 export function calculateStayDuration(
-  checkInDate: string | Date, 
-  checkoutDate: string | Date,
-  overstayNightsInput?: number | string | Date,
+  checkInDate: string | Date | any, 
+  checkoutDate: string | Date | any,
+  overstayNightsInput?: number | string | Date | any,
   status?: string,
   currentDateOrOptions?: Date | StayDurationOptions,
   legacyOptions?: StayDurationOptions
 ): StayDuration {
-  const parseDate = (d: string | Date): Date => {
+  const parseDate = (d: any): Date => {
     if (!d) return new Date();
-    if (d instanceof Date) return d;
-    if (typeof d === 'string') {
-      if (d.includes('T')) {
-        return parseISO(d);
-      }
-      const parts = d.split('-');
-      if (parts.length === 3) {
-        return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-      }
-      return new Date(d);
-    }
+    const dt = parseTimestampToDate(d);
+    if (!isNaN(dt.getTime()) && dt.getTime() > 0) return dt;
     return new Date();
   };
 

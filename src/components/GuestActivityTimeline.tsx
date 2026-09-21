@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format, parseISO, isValid } from 'date-fns';
+import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 
 interface GuestActivityTimelineProps {
   reservation: Reservation;
@@ -91,20 +92,28 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
             );
 
           if (matchesReservation || matchesGuest) {
+            const rawTs = data.timestamp || data.createdAt;
+            const normalizedDate = parseTimestampToDate(rawTs);
+            const normalizedTimestamp = (!isNaN(normalizedDate.getTime()) && normalizedDate.getTime() > 0)
+              ? normalizedDate.toISOString()
+              : new Date().toISOString();
+
             fetchedLogs.push({
               id: doc.id,
               ...data,
-              timestamp: data.timestamp || data.createdAt || new Date().toISOString(),
-              actor: data.actor || data.user || data.userName || data.userEmail || 'System User',
-              userRole: data.userRole || data.role || 'Staff'
+              timestamp: normalizedTimestamp,
+              actor: typeof data.actor === 'string'
+                ? data.actor
+                : (data.user || data.userName || data.userEmail || (data.actor && typeof data.actor === 'object' ? (data.actor.displayName || data.actor.name) : null) || 'System User'),
+              userRole: typeof data.userRole === 'string' ? data.userRole : (data.role || 'Staff')
             } as AuditLog);
           }
         });
 
         // Default sort descending (most recent first)
         fetchedLogs.sort((a, b) => {
-          const tA = new Date(a.timestamp).getTime() || 0;
-          const tB = new Date(b.timestamp).getTime() || 0;
+          const tA = parseTimestampToDate(a.timestamp).getTime() || 0;
+          const tB = parseTimestampToDate(b.timestamp).getTime() || 0;
           return tB - tA;
         });
 
@@ -321,10 +330,10 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
   };
 
   // Format timestamp helper
-  const formatEventDate = (timestampStr: string) => {
+  const formatEventDate = (timestampInput: any) => {
     try {
-      const date = parseISO(timestampStr);
-      if (isValid(date)) {
+      const date = parseTimestampToDate(timestampInput);
+      if (isValid(date) && date.getTime() > 0) {
         return {
           dateStr: format(date, 'MMM dd, yyyy'),
           timeStr: format(date, 'hh:mm:ss a'),
@@ -334,7 +343,7 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
     } catch {
       // Fallback
     }
-    return { dateStr: timestampStr, timeStr: '', relative: '' };
+    return { dateStr: 'Recent', timeStr: '', relative: '' };
   };
 
   // Filtered and sorted logs
@@ -367,8 +376,8 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
 
     // Sort order
     result.sort((a, b) => {
-      const tA = new Date(a.timestamp).getTime() || 0;
-      const tB = new Date(b.timestamp).getTime() || 0;
+      const tA = parseTimestampToDate(a.timestamp).getTime() || 0;
+      const tB = parseTimestampToDate(b.timestamp).getTime() || 0;
       return sortOrder === 'desc' ? tB - tA : tA - tB;
     });
 
@@ -569,7 +578,11 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
 
                     {/* Action Description / Details */}
                     <div className="mt-2 text-xs text-zinc-200 leading-relaxed">
-                      {log.details || log.action}
+                      {typeof log.details === 'string' 
+                        ? log.details 
+                        : (log.details && typeof log.details === 'object' 
+                            ? JSON.stringify(log.details) 
+                            : (typeof log.action === 'string' ? log.action : 'Activity recorded'))}
                     </div>
 
                     {/* Meta Bar: Actor User & Role */}
@@ -578,18 +591,22 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
                         <div className="flex items-center gap-1.5 text-zinc-400">
                           <User size={13} className="text-zinc-500" />
                           <span className="font-semibold text-zinc-200">
-                            {log.actor || 'System'}
+                            {typeof log.actor === 'string'
+                              ? log.actor
+                              : (log.actor && typeof log.actor === 'object'
+                                  ? ((log.actor as any).displayName || (log.actor as any).name || 'System')
+                                  : 'System')}
                           </span>
                         </div>
 
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700/60">
                           <Shield size={10} className="text-zinc-400" />
-                          {log.userRole || 'Staff'}
+                          {typeof log.userRole === 'string' ? log.userRole : 'Staff'}
                         </span>
 
                         {log.metadata?.roomNumber && (
                           <span className="text-[10px] text-zinc-400 bg-zinc-800/50 px-2 py-0.5 rounded border border-zinc-700/40">
-                            Room {log.metadata.roomNumber}
+                            Room {String(log.metadata.roomNumber)}
                           </span>
                         )}
                       </div>
