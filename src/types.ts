@@ -56,7 +56,7 @@ export interface UserProfile {
   permissions?: string[]; // Granular permissions
   staffRole?: StaffRole;
   customRoleId?: string; // Link to CustomRole
-  roles?: StaffRole[]; // Multi-role support
+  roles?: (StaffRole | string)[]; // Multi-role support
   subscriptionExpiry?: string;
   hasCompletedOnboarding?: boolean;
   department?: string; // Added for department-based tracking and navigation

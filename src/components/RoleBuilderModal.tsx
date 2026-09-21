@@ -1,21 +1,15 @@
 import React, { useState } from 'react';
 import { CustomRole, StaffRole } from '../types';
-import { Permission, PERMISSION_GROUPS, SYSTEM_ROLE_TEMPLATES, BASE_ROLE_PERMISSIONS } from '../utils/permissions';
+import { Permission, SYSTEM_ROLE_TEMPLATES, BASE_ROLE_PERMISSIONS } from '../utils/permissions';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { doc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { ModuleAssignmentMatrix } from './ModuleAssignmentMatrix';
 import { 
   Shield, 
-  Check, 
   X, 
-  Plus, 
-  Sparkles, 
-  CheckSquare, 
-  Square, 
-  Layers, 
-  HelpCircle,
-  AlertCircle
+  Sparkles
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -43,24 +37,6 @@ export function RoleBuilderModal({ role, onClose, onSuccess }: Props) {
       const merged = Array.from(new Set([...selectedPermissions, ...templatePerms])) as Permission[];
       setSelectedPermissions(merged);
       toast.info(`Applied base permissions from ${baseRole}`);
-    }
-  };
-
-  const togglePermission = (perm: Permission) => {
-    if (selectedPermissions.includes(perm)) {
-      setSelectedPermissions(selectedPermissions.filter(p => p !== perm));
-    } else {
-      setSelectedPermissions([...selectedPermissions, perm]);
-    }
-  };
-
-  const toggleGroupAll = (permissions: Permission[]) => {
-    const allSelected = permissions.every(p => selectedPermissions.includes(p));
-    if (allSelected) {
-      setSelectedPermissions(selectedPermissions.filter(p => !permissions.includes(p)));
-    } else {
-      const union = Array.from(new Set([...selectedPermissions, ...permissions]));
-      setSelectedPermissions(union);
     }
   };
 
@@ -191,89 +167,22 @@ export function RoleBuilderModal({ role, onClose, onSuccess }: Props) {
             </div>
           </div>
 
-          {/* Granular Permission Checklist */}
+          {/* Module Assignment & Capabilities Matrix */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
-                  Granular Permissions Matrix
-                </h3>
-                <p className="text-[11px] text-zinc-500">
-                  {selectedPermissions.length} capabilities selected
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedPermissions([])}
-                  className="text-xs text-zinc-400 hover:text-zinc-200"
-                >
-                  Clear All
-                </button>
-              </div>
+            <div className="mb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                Module Assignment & Capabilities
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Toggle entire operational modules (Front Desk, Housekeeping, Kitchen & F&B, Point of Sale, Folios, Finance, Inventory, Night Audit, etc.) or expand modules to customize individual permissions.
+              </p>
             </div>
 
-            <div className="space-y-4">
-              {PERMISSION_GROUPS.map((group) => {
-                const groupPerms = group.permissions.map(p => p.id);
-                const allSelected = groupPerms.every(p => selectedPermissions.includes(p));
-                const someSelected = groupPerms.some(p => selectedPermissions.includes(p));
-
-                return (
-                  <div 
-                    key={group.id}
-                    className="p-4 bg-zinc-950/60 rounded-xl border border-zinc-800/80 space-y-3"
-                  >
-                    <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2.5">
-                      <div>
-                        <span className="text-xs font-bold text-zinc-200">
-                          {group.label}
-                        </span>
-                        <span className="text-[11px] text-zinc-500 block">
-                          {group.description}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => toggleGroupAll(groupPerms)}
-                        className="text-xs text-emerald-400 hover:text-emerald-300 font-medium flex items-center gap-1"
-                      >
-                        {allSelected ? 'Deselect All' : 'Select All'}
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {group.permissions.map((perm) => {
-                        const isChecked = selectedPermissions.includes(perm.id);
-                        return (
-                          <label
-                            key={perm.id}
-                            className={`flex items-start gap-2.5 p-2 rounded-lg cursor-pointer transition-colors ${
-                              isChecked ? 'bg-emerald-500/10 border border-emerald-500/30' : 'hover:bg-zinc-900 border border-transparent'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => togglePermission(perm.id)}
-                              className="mt-0.5 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500"
-                            />
-                            <div className="text-xs">
-                              <span className={`font-medium block ${isChecked ? 'text-emerald-300' : 'text-zinc-300'}`}>
-                                {perm.label}
-                              </span>
-                              <span className="text-[11px] text-zinc-500 block">
-                                {perm.description}
-                              </span>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <ModuleAssignmentMatrix
+              selectedPermissions={selectedPermissions}
+              onChange={(perms) => setSelectedPermissions(perms as Permission[])}
+              allowSaveAsRole={false}
+            />
           </div>
         </form>
 

@@ -282,6 +282,25 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ]
   },
   {
+    id: 'maintenance',
+    label: 'Maintenance & Facility Management',
+    description: 'Work orders, equipment repairs, room maintenance blocks, and inspections',
+    permissions: [
+      { id: 'manage_maintenance', label: 'Access Maintenance', description: 'Access work orders and equipment tracking' },
+      { id: 'block_rooms', label: 'Place Room Maintenance Block', description: 'Take rooms out-of-order for repairs' },
+      { id: 'unblock_rooms', label: 'Clear Maintenance Block', description: 'Release rooms back into sellable inventory' },
+    ]
+  },
+  {
+    id: 'corporate',
+    label: 'Corporate Accounts & Direct Billing',
+    description: 'Corporate client contracts, company ledgers, credit limits, and invoicing',
+    permissions: [
+      { id: 'manage_corporate', label: 'Manage Corporate Accounts', description: 'Create and manage corporate customer accounts' },
+      { id: 'view_city_ledger', label: 'View Corporate Receivables', description: 'Inspect corporate billing and city ledger' },
+    ]
+  },
+  {
     id: 'reports',
     label: 'Reports & Business Intelligence',
     description: 'Managerial, occupancy, financial, and tax reports',
