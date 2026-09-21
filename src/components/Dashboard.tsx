@@ -35,8 +35,39 @@ import {
 } from 'recharts';
 import { AuditLogs } from './AuditLogs';
 import { exportToCSV } from '../utils';
-import { format, isToday } from 'date-fns';
+import { format, isToday, isValid } from 'date-fns';
 import { toast } from 'sonner';
+import { GlobalErrorBoundary } from './GlobalErrorBoundary';
+
+const getRecordDateString = (ts: any): string => {
+  if (!ts) return '';
+  if (typeof ts === 'string') return ts;
+  if (typeof ts.toDate === 'function') {
+    try { return ts.toDate().toISOString(); } catch { return ''; }
+  }
+  if (typeof ts.seconds === 'number') {
+    try { return new Date(ts.seconds * 1000).toISOString(); } catch { return ''; }
+  }
+  if (ts instanceof Date) {
+    try { return ts.toISOString(); } catch { return ''; }
+  }
+  return '';
+};
+
+const safeFormatTimestamp = (ts: any, formatStr: string = 'MMM d, HH:mm'): string => {
+  if (!ts) return 'N/A';
+  let d: Date;
+  if (typeof ts.toDate === 'function') {
+    d = ts.toDate();
+  } else if (typeof ts.seconds === 'number') {
+    d = new Date(ts.seconds * 1000);
+  } else if (ts instanceof Date) {
+    d = ts;
+  } else {
+    d = new Date(ts);
+  }
+  return isValid(d) ? format(d, formatStr) : 'N/A';
+};
 
 export function Dashboard() {
   const { hotel, profile, isSubscriptionActive, currency, exchangeRate } = useAuth();
@@ -105,8 +136,8 @@ export function Dashboard() {
  
         const chartData = last7Days.map(date => {
           const dayRevenue = records
-            .filter(r => r.type === 'income' && r.timestamp.startsWith(date))
-            .reduce((acc, curr) => acc + curr.amount, 0);
+            .filter(r => r.type === 'income' && getRecordDateString(r.timestamp).startsWith(date))
+            .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
           return {
             name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
             amount: dayRevenue
@@ -274,8 +305,8 @@ export function Dashboard() {
                   {Math.abs(Math.round(revenueGrowth))}%
                 </div>
               </div>
-              <div className="h-[200px] sm:h-[240px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[200px] sm:h-[240px] w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
                   <AreaChart data={revenueChartData}>
                     <defs>
                       <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -392,7 +423,7 @@ export function Dashboard() {
                         </div>
                         <div>
                           <div className="text-xs sm:text-sm font-medium text-zinc-50">{record.description}</div>
-                          <div className="text-[10px] text-zinc-500">{record.category} • {record.timestamp ? format(new Date(record.timestamp), 'MMM d, HH:mm') : 'N/A'}</div>
+                          <div className="text-[10px] text-zinc-500">{record.category} • {safeFormatTimestamp(record.timestamp, 'MMM d, HH:mm')}</div>
                         </div>
                       </div>
                       <div className={cn(
@@ -424,7 +455,9 @@ export function Dashboard() {
                 )}
                 {/* We use a simplified mini-logger for the dashboard */}
                 <div className="p-2">
-                   <AuditLogs />
+                   <GlobalErrorBoundary fallback={<div className="p-6 text-center text-xs text-zinc-500">Activity stream temporarily unavailable</div>}>
+                     <AuditLogs />
+                   </GlobalErrorBoundary>
                 </div>
               </div>
             </div>

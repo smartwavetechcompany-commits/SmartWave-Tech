@@ -41,8 +41,27 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { canManageGuest } from '../utils/policyUtils';
 import Fuse from 'fuse.js';
-import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenceInDays, parseISO } from 'date-fns';
+import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenceInDays, parseISO, isValid } from 'date-fns';
 import * as XLSX from 'xlsx';
+
+const safeDateFormat = (val: any, formatStr: string, fallback: string = 'N/A'): string => {
+  if (!val) return fallback;
+  try {
+    let d: Date;
+    if (typeof val.toDate === 'function') {
+      d = val.toDate();
+    } else if (typeof val.seconds === 'number') {
+      d = new Date(val.seconds * 1000);
+    } else if (val instanceof Date) {
+      d = val;
+    } else {
+      d = new Date(val);
+    }
+    return isValid(d) ? format(d, formatStr) : fallback;
+  } catch {
+    return fallback;
+  }
+};
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { toast } from 'sonner';
@@ -535,7 +554,7 @@ export function GuestManagement() {
           'Balance': getGuestLiveBalance(g),
           'Tags': (g.tags || []).join(', '),
           'Preferences': (g.preferences || []).join(', '),
-          'Created At': g.createdAt ? format(new Date(g.createdAt), 'yyyy-MM-dd') : 'N/A'
+          'Created At': safeDateFormat(g.createdAt, 'yyyy-MM-dd')
         };
       });
 
@@ -1178,7 +1197,7 @@ export function GuestManagement() {
                   </div>
                   <div className="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
                     <div className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">
-                      Last: {guest.lastStay ? format(new Date(guest.lastStay), 'MMM d, yy') : 'Never'}
+                      Last: {guest.lastStay ? safeDateFormat(guest.lastStay, 'MMM d, yy') : 'Never'}
                     </div>
                     <ChevronRight size={12} className="text-zinc-800" />
                   </div>
@@ -1382,7 +1401,7 @@ export function GuestManagement() {
                             <div>
                               <div className="text-xs font-bold text-zinc-50 leading-tight">Room {res.roomNumber}</div>
                               <div className="text-[10px] text-zinc-500 flex items-center gap-1.5">
-                                {format(new Date(res.checkIn), 'MMM d, yy')} - {format(new Date(res.checkOut), 'MMM d, yy')}
+                                {safeDateFormat(res.checkIn, 'MMM d, yy')} - {safeDateFormat(res.checkOut, 'MMM d, yy')}
                                 <StayDurationDisplay 
                                   checkIn={res.checkIn} 
                                   checkOut={res.checkOut} 
@@ -1515,7 +1534,7 @@ export function GuestManagement() {
                           <div>
                             <div className="text-xs font-bold text-zinc-50 leading-tight">{entry.description}</div>
                             <div className="text-[9px] text-zinc-500 flex items-center gap-2">
-                              {format(new Date(entry.timestamp), 'MMM d, yy HH:mm')}
+                              {safeDateFormat(entry.timestamp, 'MMM d, yy HH:mm')}
                               <span className="px-1 py-0.2 bg-zinc-900 rounded text-[7px] font-bold uppercase tracking-wider">
                                 {entry.category}
                               </span>

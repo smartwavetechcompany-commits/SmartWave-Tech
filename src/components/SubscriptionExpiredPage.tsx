@@ -88,15 +88,27 @@ export function SubscriptionExpiredPage() {
 
     try {
       // 1. Verify Tracking Code
-      const tcQuery = query(collection(db, 'trackingCodes'), where('code', '==', trackingCode.trim()));
-      const tcSnap = await getDocs(tcQuery);
+      const normalizedCode = trackingCode.trim().toUpperCase();
+      let tcDoc: any = null;
+      let tcData: TrackingCode | null = null;
 
-      if (tcSnap.empty) {
-        throw new Error('Invalid tracking code');
+      const directDocRef = doc(db, 'trackingCodes', normalizedCode);
+      const directSnap = await getDoc(directDocRef);
+      if (directSnap.exists()) {
+        tcDoc = directSnap;
+        tcData = directSnap.data() as TrackingCode;
+      } else {
+        const tcQuery = query(collection(db, 'trackingCodes'), where('code', 'in', [trackingCode.trim(), normalizedCode]));
+        const tcSnap = await getDocs(tcQuery);
+        if (!tcSnap.empty) {
+          tcDoc = tcSnap.docs[0];
+          tcData = tcDoc.data() as TrackingCode;
+        }
       }
 
-      const tcDoc = tcSnap.docs[0];
-      const tcData = tcDoc.data() as TrackingCode;
+      if (!tcDoc || !tcData) {
+        throw new Error('Invalid tracking code');
+      }
 
       const tcExpiryTime = new Date(tcData.expiryDate).getTime();
       if (tcData.status !== 'active' || (!isNaN(tcExpiryTime) && tcExpiryTime <= Date.now() - 3600000)) {

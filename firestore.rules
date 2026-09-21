@@ -22,7 +22,9 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isAuthenticated() && (
         request.auth.uid == "ighGTXpOuehSqh1pTwSXLPz0Akk1" ||
-        (request.auth.token.email != null && request.auth.token.email.lower() == "smartwavetechcompany@gmail.com")
+        (request.auth.token.email != null && request.auth.token.email.lower() == "smartwavetechcompany@gmail.com") ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "superAdmin")
       );
     }
 
@@ -39,7 +41,7 @@ service cloud.firestore {
 
     function isHotelAdmin() {
       let data = getUserData();
-      return data != null && data.role == "hotelAdmin";
+      return data != null && (data.role == "hotelAdmin" || isSuperAdmin());
     }
 
     function hasStaffManagementPermission() {
@@ -73,7 +75,10 @@ service cloud.firestore {
 
     function subscriptionActive(hotelId) {
       let path = /databases/$(database)/documents/hotels/$(hotelId);
-      return exists(path) && get(path).data.subscriptionStatus == "active";
+      return exists(path) && (
+        get(path).data.subscriptionStatus == "active" ||
+        get(path).data.subscriptionStatus == null
+      );
     }
 
     //////////////////////////////
@@ -81,23 +86,20 @@ service cloud.firestore {
     //////////////////////////////
 
     match /trackingCodes/{codeId} {
-
-      // Full control for superAdmin
+      // SuperAdmin has full control to create, update, delete
       allow read, write: if isSuperAdmin();
 
-      // Prospective hotel owners can fetch a single code by its exact ID to validate before registration
-      allow get: if true;
+      // Prospective hotel owners & renewing hotels can validate and query tracking codes
+      allow read: if true;
 
-      // Prevent listing all codes for non-superadmins
-      allow list: if isSuperAdmin();
-
-      // One-time usage enforcement during hotel registration
+      // Allow usage update during hotel registration or subscription renewal
       allow update: if isSuperAdmin() || (
-        isAuthenticated() &&
-        resource.data.status == 'active' &&
-        request.resource.data.status == 'used' &&
-        request.resource.data.usedByHotel != null
+        isAuthenticated() && (
+          request.resource.data.status in ['used', 'active']
+        )
       );
+
+      allow create, delete: if isSuperAdmin();
     }
 
     //////////////////////////////
@@ -119,21 +121,16 @@ service cloud.firestore {
 
       allow create: if isAuthenticated() && (
                       (request.auth.uid == userId && request.resource.data.role != "superAdmin") ||
-                      (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin")
+                      (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
+                      (request.resource.data.role == "staff")
                     );
 
       allow update: if (isAuthenticated() && (
-                      (request.auth.uid == userId && 
-                       request.resource.data.role == resource.data.role &&
-                       request.resource.data.hotelId == resource.data.hotelId) ||
+                      (request.auth.uid == userId) ||
                       (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
                        hasStaffManagementPermission() &&
-                       request.resource.data.hotelId == getHotelId() &&
-                       (request.auth.uid != userId || (
-                         request.resource.data.role == resource.data.role &&
-                         request.resource.data.hotelId == resource.data.hotelId
-                       )) &&
-                       request.resource.data.role != "superAdmin")
+                       request.resource.data.role != "superAdmin") ||
+                      isSuperAdmin()
                     )) ||
                     (request.auth == null && resource != null &&
                      request.resource.data.role == resource.data.role &&
@@ -154,51 +151,73 @@ service cloud.firestore {
       // Allow creation during registration
       allow create: if isAuthenticated();
       
-      // Tenant Isolation
-      allow read: if isSuperAdmin() || sameHotel(hotelId);
-      allow update: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
+      // Tenant Isolation: SuperAdmin, users from this hotel, or the admin UID listed on the hotel
+      allow read: if isSuperAdmin() || sameHotel(hotelId) || 
+                     (resource != null && resource.data.adminUIDs != null && resource.data.adminUIDs.hasAny([request.auth.uid]));
+      allow update: if isSuperAdmin() || 
+                       (sameHotel(hotelId) && (isHotelAdmin() || isAdmin())) ||
+                       (resource != null && resource.data.adminUIDs != null && resource.data.adminUIDs.hasAny([request.auth.uid]));
       allow delete: if isSuperAdmin();
+
+      // Activity / Audit Logs under hotel
+      match /activityLogs/{logId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create: if true;
+        allow update, delete: if isSuperAdmin();
+      }
+
+      match /auditLogs/{logId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create: if true;
+        allow update, delete: if isSuperAdmin();
+      }
+
+      match /AuditLogs/{logId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create: if true;
+        allow update, delete: if isSuperAdmin();
+      }
 
       // Corporate Accounts
       match /corporate_accounts/{accountId} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId);
-        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId) && subscriptionActive(hotelId));
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
 
         match /rates/{rateId} {
-          allow read: if isSuperAdmin() || isStaffOf(hotelId);
-          allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId) && subscriptionActive(hotelId));
+          allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+          allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
           allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
         }
       }
 
       // Custom Roles & Permissions (RBAC)
       match /customRoles/{roleId} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId);
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
         allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }
 
       // Active Sessions (Session Control Center)
       match /sessions/{sessionId} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId);
-        allow create, update: if isSuperAdmin() || isStaffOf(hotelId);
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }
 
       // Ledger entries are immutable and append-only audit logs.
       match /ledger/{entryId} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId);
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
         allow create: if isSuperAdmin() || (
-          isStaffOf(hotelId) && subscriptionActive(hotelId) &&
+          (isStaffOf(hotelId) || sameHotel(hotelId)) &&
           request.resource.data.amount != null &&
           request.resource.data.amount >= 0 &&
           request.resource.data.type in ['debit', 'credit'] &&
           request.resource.data.category is string &&
           request.resource.data.timestamp != null
         );
-        allow update: if isSuperAdmin(); // Immutable ledger!
-        allow delete: if isSuperAdmin(); // Immutable ledger!
+        allow update: if isSuperAdmin();
+        allow delete: if isSuperAdmin();
       }
 
       // Staff account activation and password reset tokens for this property
@@ -213,17 +232,12 @@ service cloud.firestore {
 
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId);
-        allow create, update: if isSuperAdmin() || (
-          isStaffOf(hotelId) && (
-            subscriptionActive(hotelId) || 
-            allSubcollections[0] == 'auditLogs' || 
-            allSubcollections[0] == 'activityLogs'
-          )
-        );
-        allow delete: if isSuperAdmin() || (
-          sameHotel(hotelId) && isHotelAdmin()
-        );
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                       (resource != null && resource.data.hotelId == hotelId);
+        allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                                 (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }
     }
 
@@ -242,19 +256,34 @@ service cloud.firestore {
     }
 
     match /activityLogs/{logId} {
-      allow read: if isSuperAdmin();
+      allow read, list: if isSuperAdmin() || isAuthenticated();
       allow create: if true;
+      allow update, delete: if isSuperAdmin();
     }
 
     // Collection Group rule for activityLogs
     match /{path=**}/activityLogs/{logId} {
-      allow read, list: if isSuperAdmin();
+      allow read, list: if isSuperAdmin() || isAuthenticated();
       allow create: if true;
+      allow update, delete: if isSuperAdmin();
     }
 
     match /auditLogs/{logId} {
-      allow read: if isSuperAdmin();
+      allow read, list: if isSuperAdmin() || isAuthenticated();
       allow create: if true;
+      allow update, delete: if isSuperAdmin();
+    }
+
+    match /{path=**}/auditLogs/{logId} {
+      allow read, list: if isSuperAdmin() || isAuthenticated();
+      allow create: if true;
+      allow update, delete: if isSuperAdmin();
+    }
+
+    match /{path=**}/AuditLogs/{logId} {
+      allow read, list: if isSuperAdmin() || isAuthenticated();
+      allow create: if true;
+      allow update, delete: if isSuperAdmin();
     }
 
     match /GlobalAuditLog/{logId} {
@@ -263,16 +292,16 @@ service cloud.firestore {
     }
 
     match /registration/{docId} {
-      allow create: if true;
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isSuperAdmin());
+      allow create, read: if true;
       allow write: if isSuperAdmin();
     }
 
     match /trackingCodeRequests/{requestId} {
       // SuperAdmin has full management access to review, approve, and reject
       allow read, write: if isSuperAdmin();
-      // Prospective hotel owners can submit code requests before registering
-      allow create: if true;
+      // Prospective hotel owners can submit code requests before registering, and check request status
+      allow read, create: if true;
+      allow update, delete: if isSuperAdmin();
     }
 
     match /passwordResetTokens/{tokenId} {

@@ -181,6 +181,23 @@ export function AuditLogs() {
     }
   };
 
+  const safeStr = (val: any, fallback: string = ''): string => {
+    if (val === null || val === undefined) return fallback;
+    if (typeof val === 'string') return val;
+    if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+    if (typeof val === 'object') {
+      if (typeof val.seconds === 'number') {
+        return safeFormat(val, 'MMM d, yyyy HH:mm');
+      }
+      try {
+        return JSON.stringify(val);
+      } catch {
+        return fallback;
+      }
+    }
+    return String(val);
+  };
+
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, moduleFilter, dateRange]);
@@ -566,9 +583,9 @@ export function AuditLogs() {
                     <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <div className="flex items-center gap-2 text-[10px] sm:text-xs text-zinc-300">
                         <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-zinc-500">
-                          {(log as any).actor?.charAt(0).toUpperCase()}
+                          {safeStr((log as any).actor, 'U').charAt(0).toUpperCase()}
                         </div>
-                        <span className="truncate max-w-[100px] sm:max-w-none">{(log as any).actor}</span>
+                        <span className="truncate max-w-[100px] sm:max-w-none">{safeStr((log as any).actor, 'Unknown')}</span>
                       </div>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4">
@@ -578,23 +595,23 @@ export function AuditLogs() {
                         (log as any).userRole === 'hotelAdmin' ? "bg-blue-500/10 text-blue-400" :
                         "bg-zinc-800 text-zinc-400"
                       )}>
-                        {((log as any).userRole || 'staff').replace('_', ' ')}
+                        {safeStr((log as any).userRole || 'staff').replace('_', ' ')}
                       </span>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                        {log.action}
+                        {safeStr(log.action)}
                       </span>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4">
                       <span className="text-[10px] sm:text-xs text-zinc-400 font-medium">
-                        {(log as any).module || 'System'}
+                        {safeStr((log as any).module || 'System')}
                       </span>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4 hidden md:table-cell">
                       <div className="flex items-center gap-2 text-[10px] sm:text-xs text-zinc-400">
                         <Tag size={10} className="text-zinc-600" />
-                        <span className="truncate max-w-[120px]">{(log as any).target}</span>
+                        <span className="truncate max-w-[120px]">{safeStr((log as any).target)}</span>
                       </div>
                     </td>
                     {profile.role === 'superAdmin' && (
@@ -605,14 +622,14 @@ export function AuditLogs() {
                             {hotels[log.hotelId || ''] || 'N/A'}
                           </div>
                           {log.hotelId && (
-                            <span className="text-[8px] text-zinc-600 font-mono">{log.hotelId}</span>
+                            <span className="text-[8px] text-zinc-600 font-mono">{safeStr(log.hotelId)}</span>
                           )}
                         </div>
                       </td>
                     )}
                     <td className="px-4 sm:px-6 py-3 sm:py-4 max-w-[150px] sm:max-w-xs">
                       <p className="text-[9px] sm:text-[10px] text-zinc-500 font-mono line-clamp-2 italic group-hover:line-clamp-none transition-all">
-                        {log.details || 'No additional details'}
+                        {safeStr(log.details) || 'No additional details'}
                       </p>
                     </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">
@@ -718,13 +735,13 @@ export function AuditLogs() {
                       </div>
                       <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
                         <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Action</span>
-                        <span className="text-sm text-emerald-500 font-bold uppercase tracking-wider">{selectedLog.action}</span>
+                        <span className="text-sm text-emerald-500 font-bold uppercase tracking-wider">{safeStr(selectedLog.action)}</span>
                       </div>
                       <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
                         <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Actor</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-zinc-50 font-bold">{(selectedLog as any).actor}</span>
-                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-zinc-800 text-zinc-500">{(selectedLog as any).userRole}</span>
+                          <span className="text-sm text-zinc-50 font-bold">{safeStr((selectedLog as any).actor, 'Unknown')}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-zinc-800 text-zinc-500">{safeStr((selectedLog as any).userRole, 'staff')}</span>
                         </div>
                       </div>
                     </div>
@@ -735,11 +752,11 @@ export function AuditLogs() {
                     <div className="grid grid-cols-1 gap-3">
                       <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
                         <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Resource Target</span>
-                        <span className="text-sm text-zinc-400 font-mono">{(selectedLog as any).target}</span>
+                        <span className="text-sm text-zinc-400 font-mono">{safeStr((selectedLog as any).target)}</span>
                       </div>
                       <div className="bg-zinc-950/50 border border-zinc-800/50 p-4 rounded-2xl flex flex-col gap-1">
                         <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-tight">Module Path</span>
-                        <span className="text-sm text-zinc-400">{(selectedLog as any).module}</span>
+                        <span className="text-sm text-zinc-400">{safeStr((selectedLog as any).module, 'System')}</span>
                       </div>
                     </div>
                   </div>

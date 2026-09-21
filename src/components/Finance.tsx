@@ -969,8 +969,8 @@ export function Finance() {
                     <PieChart size={18} className="text-emerald-500" />
                     Income vs Expense
                   </h3>
-                  <div className="h-[250px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[250px] w-full min-w-0">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
                       <BarChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                         <XAxis dataKey="name" stroke="#71717a" fontSize={10} axisLine={false} tickLine={false} />
