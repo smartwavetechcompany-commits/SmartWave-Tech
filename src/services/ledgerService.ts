@@ -4,7 +4,7 @@ import { LedgerEntry, Reservation, FinanceRecord, Hotel } from '../types';
 import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
@@ -1064,7 +1064,7 @@ export const processAutomatedBillingForReservation = async (
   profileUid: string,
   currentTime: Date = new Date()
 ) => {
-  if (!res.guestId || !res.autoNightDeduction || res.status !== 'checked_in') {
+  if (!res.guestId || res.autoNightDeduction === false || res.status !== 'checked_in') {
     return { chargedCount: 0, totalAmount: 0 };
   }
 
@@ -1179,10 +1179,9 @@ export const processAutomatedBillingForReservation = async (
   }
 
   // 4. Process Overstay Nights strictly capped by maxAllowedOverstayNights
-  const gracePeriodMinutes = hotel?.settings?.checkout?.gracePeriod ?? 0;
-  const minutesPastCheckout = (currentTime.getTime() - checkOutDateTime.getTime()) / (1000 * 60);
+  const graceInfo = getGracePeriodInfo(res, hotel, currentTime);
 
-  if (currentTime > checkOutDateTime && minutesPastCheckout > gracePeriodMinutes && hotel.autoChargeOverstays !== false && maxAllowedOverstayNights > 0) {
+  if (graceInfo.isOverstay && hotel.autoChargeOverstays !== false && maxAllowedOverstayNights > 0) {
     const policy = hotel?.overstayPolicy || 'grace';
     const graceHours = hotel?.overstayGraceHours ?? 2;
     const partialHours = hotel?.overstayPartialHours ?? 3;

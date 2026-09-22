@@ -10,6 +10,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { DigitalKeyModal } from './DigitalKeyModal';
+import { ExtendGracePeriodModal } from './ExtendGracePeriodModal';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -59,7 +60,7 @@ import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOf
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGracePeriodInfo } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 
@@ -83,6 +84,7 @@ export function FrontDesk() {
   } | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
+  const [selectedResForGraceModal, setSelectedResForGraceModal] = useState<Reservation | null>(null);
 
   // Automatic Nightly Audit Check
   useEffect(() => {
@@ -3998,15 +4000,41 @@ export function FrontDesk() {
               <Calendar size={12} className="text-zinc-600" /> 
               <span>{res.checkOut}</span>
             </div>
-            <div className="mt-1.5 flex items-center gap-1">
-              <Clock size={10} className="text-zinc-600" />
-              <StayDurationDisplay 
-                checkIn={res.checkIn} 
-                checkOut={res.checkOut} 
-                overstayNights={res.overstayNights}
-                status={res.status}
-                className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter"
-              />
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1">
+                <Clock size={10} className="text-zinc-600" />
+                <StayDurationDisplay 
+                  checkIn={res.checkIn} 
+                  checkOut={res.checkOut} 
+                  overstayNights={res.overstayNights}
+                  status={res.status}
+                  className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter"
+                />
+              </div>
+              {res.status === 'checked_in' && (() => {
+                const graceInfo = getGracePeriodInfo(res, hotel);
+                if (graceInfo.isWithinGracePeriod) {
+                  return (
+                    <span 
+                      title={`Within Grace Period until ${graceInfo.effectiveCheckoutTimeStr} (${graceInfo.minutesRemainingInGrace}m left)`}
+                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                      Grace ({graceInfo.minutesRemainingInGrace}m)
+                    </span>
+                  );
+                } else if (graceInfo.isOverstay) {
+                  return (
+                    <span 
+                      title="Grace period expired. Overstay fees active."
+                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/30"
+                    >
+                      Overstay
+                    </span>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </td>
                   <td className="px-6 py-4 text-sm">
@@ -4345,6 +4373,18 @@ export function FrontDesk() {
                             <Receipt size={14} />
                             View Folio
                           </button>
+
+                          {res.status === 'checked_in' && (
+                            <button 
+                              type="button"
+                              onClick={() => setSelectedResForGraceModal(res)}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                              title="Extend checkout grace period without penalty"
+                            >
+                              <Clock size={13} className="text-amber-400" />
+                              Grace
+                            </button>
+                          )}
 
                           <button 
                             onClick={() => setShowDigitalKeyModal(res)}
@@ -4986,6 +5026,18 @@ export function FrontDesk() {
             const targetRes = returningGuestDebtModalData.reservation;
             setReturningGuestDebtModalData(null);
             updateReservationStatus(targetRes, 'checked_in', true);
+          }}
+        />
+      )}
+      {selectedResForGraceModal && hotel && (
+        <ExtendGracePeriodModal
+          isOpen={!!selectedResForGraceModal}
+          onClose={() => setSelectedResForGraceModal(null)}
+          reservation={selectedResForGraceModal}
+          hotel={hotel}
+          currentUser={profile}
+          onSuccess={() => {
+            toast.success('Grace period extended successfully.');
           }}
         />
       )}

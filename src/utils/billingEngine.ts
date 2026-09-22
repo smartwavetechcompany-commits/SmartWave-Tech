@@ -1,7 +1,7 @@
 import { Reservation, Hotel, LedgerEntry, Tax, Guest } from '../types';
 import { startOfDay, parseISO, differenceInDays, format, addDays } from 'date-fns';
 import { calculateReservationAccount } from './financialUtils';
-import { calculateStayDuration, StayDuration } from './dateUtils';
+import { calculateStayDuration, StayDuration, getGracePeriodInfo } from './dateUtils';
 
 /**
  * Safely parses a date string (YYYY-MM-DD) and optional time string (HH:MM)
@@ -135,6 +135,7 @@ export class BillingEngine {
    * 2. Calculates Overstay Charges: roomRate * overstayNights
    */
   static calculateOverstay(res: Reservation, hotel: Hotel | null, options?: any): number {
+    if (res.autoNightDeduction === false) return 0;
     const allowOverstayCharges = options?.allowOverstayCharges ?? hotel?.autoChargeOverstays ?? true;
     if (!allowOverstayCharges) return 0;
 
@@ -650,27 +651,8 @@ export const BillingService = {
       const targetDateStr = format(addDays(checkInDateTime, charged), 'yyyy-MM-dd');
       return parseLocalDateTime(targetDateStr, checkOutTime);
     } else {
-      const policy = hotel?.overstayPolicy || 'grace';
-      const graceHours = hotel?.overstayGraceHours ?? 2;
-      const partialHours = hotel?.overstayPartialHours ?? 3;
-      const fullHours = hotel?.overstayFullHours ?? 6;
-
-      if (policy === 'grace') {
-        return new Date(checkOutDateTime.getTime() + graceHours * 60 * 60 * 1000);
-      } else if (policy === 'partial') {
-        const overstayNightsCharged = charged - originalNights;
-        if (overstayNightsCharged === 0) {
-          return new Date(checkOutDateTime.getTime() + partialHours * 60 * 60 * 1000);
-        } else if (overstayNightsCharged <= 0.5) {
-          return new Date(checkOutDateTime.getTime() + fullHours * 60 * 60 * 1000);
-        } else {
-          return new Date(checkOutDateTime.getTime() + (overstayNightsCharged + 1) * 24 * 60 * 60 * 1000);
-        }
-      } else if (policy === 'full') {
-        return new Date(checkOutDateTime.getTime() + fullHours * 60 * 60 * 1000);
-      } else {
-        return checkOutDateTime;
-      }
+      const graceInfo = getGracePeriodInfo(res, hotel);
+      return graceInfo.effectiveDeadlineDateTime;
     }
   },
 

@@ -131,7 +131,11 @@
         "createdBy": { "type": "string" },
         "guestId": { "type": "string" },
         "corporateId": { "type": "string" },
-        "ledgerEntries": { "type": "array", "items": { "type": "string" } }
+        "ledgerEntries": { "type": "array", "items": { "type": "string" } },
+        "autoNightDeduction": { "type": "boolean" },
+        "customGracePeriodMinutes": { "type": "number" },
+        "approvedLateCheckoutTime": { "type": "string" },
+        "effectiveCheckoutTime": { "type": "string" }
       },
       "required": ["guestName", "roomId", "checkIn", "checkOut", "status", "createdBy"]
     },

@@ -16,6 +16,7 @@ import { LedgerAuditErrorBoundary } from './LedgerAuditErrorBoundary';
 import { PrincipalRoomManager } from './PrincipalRoomManager';
 import { GuestActivityTimeline } from './GuestActivityTimeline';
 import { GlobalErrorBoundary } from './GlobalErrorBoundary';
+import { ExtendGracePeriodModal } from './ExtendGracePeriodModal';
 import { 
   Receipt, 
   User, 
@@ -44,7 +45,7 @@ import { cn, formatCurrency, safeStringify } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate, getGracePeriodInfo } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 
@@ -142,6 +143,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     reason: ''
   });
   const [discountingEntry, setDiscountingEntry] = useState<LedgerEntry | null>(null);
+  const [showExtendGraceModal, setShowExtendGraceModal] = useState(false);
+
+  const handleToggleAutoNightDeduction = async () => {
+    if (!hotel?.id || !currentReservation?.id) return;
+    const currentVal = currentReservation.autoNightDeduction !== false;
+    const newVal = !currentVal;
+
+    try {
+      const resRef = doc(db, 'hotels', hotel.id, 'reservations', currentReservation.id);
+      await updateDoc(resRef, {
+        autoNightDeduction: newVal
+      });
+      setCurrentReservation(prev => ({ ...prev, autoNightDeduction: newVal }));
+      toast.success(newVal 
+        ? 'Automatic Night Deduction enabled for this reservation.' 
+        : 'Automatic Night Deduction paused. Overstay and nightly charges halted.'
+      );
+    } catch (err: any) {
+      console.error('Error toggling autoNightDeduction:', err);
+      toast.error('Failed to update Auto Night Deduction setting.');
+    }
+  };
 
   const handleApplyFolioDiscount = async () => {
     if (!hotel?.id || !profile || !currentReservation) return;
@@ -1198,6 +1221,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               </div>
             </button>
 
+            {currentReservation.status === 'checked_in' && (
+              <button
+                type="button"
+                onClick={() => setShowExtendGraceModal(true)}
+                className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl sm:rounded-2xl text-amber-300 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
+              >
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                  <Clock size={16} className="sm:size-5" />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-tight">Grace</p>
+                  <p className="text-xs sm:text-sm font-bold">Extension</p>
+                </div>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setShowDiagnosticModal(true)}
@@ -1364,6 +1403,100 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     status={currentReservation.status}
                     mode="full"
                   />
+                </div>
+
+                {/* Grace Period & Departure Policy Card */}
+                <div className="pt-3 mt-2 border-t border-zinc-800/60 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Clock size={11} className="text-amber-400" />
+                      Checkout & Grace Period
+                    </p>
+                    {currentReservation.status === 'checked_in' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowExtendGraceModal(true)}
+                        className="text-[10px] font-bold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-md transition-colors"
+                      >
+                        Extend Grace
+                      </button>
+                    )}
+                  </div>
+
+                  {(() => {
+                    const graceInfo = getGracePeriodInfo(currentReservation, hotel);
+                    return (
+                      <div className="space-y-2 text-xs">
+                        <div className={cn(
+                          "p-2.5 rounded-xl border flex items-center justify-between gap-2",
+                          graceInfo.isWithinGracePeriod
+                            ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                            : graceInfo.isOverstay
+                            ? "bg-red-500/10 border-red-500/30 text-red-400"
+                            : "bg-zinc-900/60 border-zinc-800 text-zinc-300"
+                        )}>
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5 font-bold">
+                              {graceInfo.isWithinGracePeriod ? (
+                                <>
+                                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                                  <span>Within Grace Period</span>
+                                </>
+                              ) : graceInfo.isOverstay ? (
+                                <>
+                                  <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                                  <span>Grace Period Expired</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                  <span>Before Checkout</span>
+                                </>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-zinc-400">
+                              {graceInfo.isWithinGracePeriod ? (
+                                `Complimentary stay until ${graceInfo.effectiveCheckoutTimeStr} (${graceInfo.minutesRemainingInGrace}m remaining)`
+                              ) : graceInfo.isOverstay ? (
+                                `Overstay charges apply (grace ended ${graceInfo.effectiveCheckoutTimeStr})`
+                              ) : (
+                                `Checkout ${graceInfo.standardCheckoutTime} + ${Math.round(graceInfo.hotelGraceMinutes / 60)}h grace (ends ${graceInfo.effectiveCheckoutTimeStr})`
+                              )}
+                            </p>
+                          </div>
+                          {Number(currentReservation.customGracePeriodMinutes || 0) > 0 && (
+                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[9px] font-bold shrink-0 border border-amber-500/30">
+                              +{currentReservation.customGracePeriodMinutes}m
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Auto Night Deduction Toggle */}
+                        <div className="p-2.5 bg-zinc-900/40 rounded-xl border border-zinc-800/80 flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Auto Night Deduction</span>
+                            <p className="text-[10px] text-zinc-500">
+                              {currentReservation.autoNightDeduction !== false 
+                                ? 'Nightly & overstay fees post automatically' 
+                                : 'Nightly charges and overstay fees are paused'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleToggleAutoNightDeduction}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border",
+                              currentReservation.autoNightDeduction !== false
+                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                                : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200"
+                            )}
+                          >
+                            {currentReservation.autoNightDeduction !== false ? 'Active' : 'Paused'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -2723,6 +2856,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             }}
           />
         </LedgerAuditErrorBoundary>
+      )}
+
+      {showExtendGraceModal && hotel && (
+        <ExtendGracePeriodModal
+          isOpen={showExtendGraceModal}
+          onClose={() => setShowExtendGraceModal(false)}
+          reservation={currentReservation}
+          hotel={hotel}
+          currentUser={profile}
+          onSuccess={() => {
+            toast.success('Grace period updated successfully.');
+          }}
+        />
       )}
 
       <ConfirmModal

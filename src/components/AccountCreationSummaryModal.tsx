@@ -156,9 +156,22 @@ export function AccountCreationSummaryModal({ data, onClose, onResendActivation 
               <CheckCircle2 size={24} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-zinc-100">Staff Account Created & Activation Sent</h2>
-              <p className="text-xs text-zinc-400 mt-0.5">
+              <h2 className="text-lg font-bold text-zinc-100">
+                {data.emailDispatched ? 'Staff Account Created & Activation Sent' : 'Staff Account Created'}
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5 flex items-center gap-1.5">
                 Account provisioned in <span className="text-amber-400 font-medium">Pending Activation</span> status.
+                {data.emailDispatched ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <CheckCircle2 size={10} />
+                    Activation Sent
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    <Clock size={10} />
+                    Link Ready
+                  </span>
+                )}
               </p>
             </div>
           </div>

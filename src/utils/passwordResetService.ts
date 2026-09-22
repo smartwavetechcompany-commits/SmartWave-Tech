@@ -166,7 +166,8 @@ export async function generateAccountActivationToken(options: GenerateActivation
       })
     });
     if (resp.ok) {
-      emailSent = true;
+      const data = await resp.json().catch(() => null);
+      emailSent = data?.emailSent === true;
     }
   } catch (emailErr) {
     console.warn('Server activation email dispatch notice:', emailErr);

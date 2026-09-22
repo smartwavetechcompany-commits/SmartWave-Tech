@@ -466,6 +466,23 @@ export interface Reservation {
   idType?: string;
   advanceDeposit?: number;
   autoNightDeduction: boolean; // Mandatory toggle for automatic nightly charges
+  customGracePeriodMinutes?: number; // Ad-hoc extension in minutes for this specific guest
+  approvedLateCheckoutTime?: string; // e.g. "14:00" or ISO timestamp
+  effectiveCheckoutTime?: string; // ISO timestamp or time string representing effective checkout threshold
+  gracePeriodApprovedBy?: {
+    uid: string;
+    name: string;
+    timestamp: string;
+    reason?: string;
+  };
+  gracePeriodExtensionHistory?: {
+    minutes: number;
+    approvedBy: string;
+    timestamp: string;
+    reason?: string;
+    previousCheckoutTime?: string;
+    newEffectiveCheckoutTime: string;
+  }[];
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
   checkInDateTime?: string; // Complete ISO timestamp for actual check-in
   checkOutDateTime?: string; // Complete ISO timestamp for scheduled/actual checkout

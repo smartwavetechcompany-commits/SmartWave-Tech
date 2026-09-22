@@ -114,7 +114,12 @@ service cloud.firestore {
                             (resource != null && resource.data.hotelId == getHotelId()) ||
                             (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
                           )) ||
-                          (request.auth == null && resource != null && (resource.data.initialPassword != null || resource.data.temporaryPassword != null));
+                          (request.auth == null && resource != null && (
+                            resource.data.initialPassword != null || 
+                            resource.data.temporaryPassword != null ||
+                            resource.data.status in ['pending_activation', 'password_reset_pending'] ||
+                            resource.data.activationTokenId != null
+                          ));
       
       // SuperAdmin has full control
       allow write: if isSuperAdmin();
@@ -135,11 +140,12 @@ service cloud.firestore {
                     (request.auth == null && resource != null &&
                      request.resource.data.role == resource.data.role &&
                      request.resource.data.hotelId == resource.data.hotelId &&
-                     request.resource.data.email == resource.data.email);
+                     (request.resource.data.email == resource.data.email || request.resource.data.email.lower() == resource.data.email.lower()));
 
       allow delete: if isAuthenticated() && (
                       isSuperAdmin() ||
-                      (isHotelAdmin() && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId)
+                      ((isHotelAdmin() || hasStaffManagementPermission()) && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId) ||
+                      (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
                     );
     }
 
@@ -194,15 +200,28 @@ service cloud.firestore {
       // Custom Roles & Permissions (RBAC)
       match /customRoles/{roleId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
-        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow create, update: if isSuperAdmin() || ((isAdmin() || hasStaffManagementPermission()) && sameHotel(hotelId));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || hasStaffManagementPermission()));
       }
 
       // Active Sessions (Session Control Center)
       match /sessions/{sessionId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
         allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || hasStaffManagementPermission()));
+      }
+
+      // Email notifications / outbox
+      match /emailNotifications/{docId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create: if true;
+        allow update, delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || hasStaffManagementPermission()));
+      }
+
+      // User Settings & Preferences
+      match /user_settings/{userId} {
+        allow read, write: if isSuperAdmin() || (sameHotel(hotelId) && (request.auth.uid == userId || isHotelAdmin() || hasStaffManagementPermission()));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (request.auth.uid == userId || isHotelAdmin() || hasStaffManagementPermission()));
       }
 
       // Ledger entries are immutable and append-only audit logs.
@@ -227,7 +246,7 @@ service cloud.firestore {
         allow update: if isSuperAdmin() || isHotelAdmin() || hasStaffManagementPermission() ||
                          (request.resource.data.isUsed == true && resource.data.isUsed == false) ||
                          (request.resource.data.status in ['used', 'revoked']);
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || hasStaffManagementPermission()));
       }
 
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
@@ -318,7 +337,7 @@ service cloud.firestore {
                        hasStaffManagementPermission() ||
                        (request.resource.data.isUsed == true && resource.data.isUsed == false) ||
                        (request.resource.data.status in ['used', 'revoked']);
-      allow delete: if isSuperAdmin() || isHotelAdmin();
+      allow delete: if isSuperAdmin() || isHotelAdmin() || hasStaffManagementPermission();
     }
   }
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, doc, onSnapshot, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
@@ -107,7 +107,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
   // Pagination & Filtering state
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending_activation' | 'suspended'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending_activation' | 'password_reset_pending' | 'suspended' | 'disabled'>('all');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -337,9 +337,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       });
 
       if (activationResult.emailSent) {
-        toast.success(`Account created! Activation email dispatched to ${staffProfile.email}`);
+        toast.success(`Account created! Activation Sent to ${staffProfile.email}`);
       } else {
-        toast.success('Account created in Pending Activation. Activation link generated.');
+        toast.info(`Account created in Pending Activation. Activation link generated.`);
       }
     } catch (err: any) {
       toast.dismiss();
@@ -362,9 +362,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       );
       toast.dismiss();
       if (res.emailSent) {
-        toast.success(`Activation email successfully sent to ${member.email}`);
+        toast.success(`Activation Sent to ${member.email}`);
       } else {
-        toast.success(`Activation link generated for ${member.email}`);
+        toast.info(`Activation link generated for ${member.email}`);
       }
     } catch (err: any) {
       toast.dismiss();
@@ -372,14 +372,23 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     }
   };
 
-  // Suspend / Reactivate staff member with instant real-time sync
+  // Suspend / Reactivate staff member with instant real-time sync and session termination
   const handleToggleSuspend = async (member: UserProfile, willSuspend: boolean) => {
     if (!hotelId) return;
 
     try {
+      toast.loading(willSuspend ? `Suspending ${member.email} and terminating sessions...` : `Reactivating ${member.email}...`);
       const userRef = doc(db, 'users', member.uid);
+
+      // If reactivating: restore 'active' if they had previously set a password, else keep 'pending_activation'
+      const targetStatus = willSuspend 
+        ? 'suspended' 
+        : (member.status === 'pending_activation' || (!member.passwordChangedAt && member.temporaryPassword)
+            ? 'pending_activation' 
+            : 'active');
+
       await database.safeUpdate(userRef, {
-        status: willSuspend ? 'suspended' : 'active',
+        status: targetStatus,
         isLocked: willSuspend,
         forceLogout: willSuspend, // Triggers instant logout across all devices!
         lockedReason: willSuspend ? `Suspended by ${profile?.email || 'Administrator'}` : null,
@@ -391,26 +400,80 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         details: `${willSuspend ? 'Suspended' : 'Reactivated'} account for ${member.email}`
       });
 
-      toast.success(`Account for ${member.email} ${willSuspend ? 'suspended & logged out' : 'reactivated'}`);
+      // Revoke all active sessions immediately when suspending
+      if (willSuspend) {
+        try {
+          const sessionsQuery = query(
+            collection(db, 'hotels', hotelId, 'sessions'),
+            where('userEmail', '==', member.email.toLowerCase())
+          );
+          const sessionsSnap = await getDocs(sessionsQuery);
+          for (const sDoc of sessionsSnap.docs) {
+            await database.safeDelete(doc(db, 'hotels', hotelId, 'sessions', sDoc.id), {
+              hotelId,
+              module: 'Session Control',
+              action: 'SESSION_TERMINATED_ON_SUSPENSION',
+              details: `Terminated session ${sDoc.id} due to staff suspension`
+            }).catch(() => {});
+          }
+        } catch (sErr) {
+          console.warn("Session cleanup warning on suspension:", sErr);
+        }
+      }
+
+      toast.dismiss();
+      toast.success(`Account for ${member.email} ${willSuspend ? 'suspended & all active sessions terminated' : 'successfully reactivated'}`);
       setShowConfirmSuspend(null);
     } catch (err: any) {
+      toast.dismiss();
       toast.error('Failed to update account status: ' + err.message);
     }
   };
 
-  // Remove staff
+  // Permanently remove staff user and purge all associated records (no orphaned data)
   const removeStaff = async (staffUid: string, staffEmail: string) => {
     if (!hotelId) return;
     try {
-      await database.safeDelete(doc(db, 'users', staffUid), {
-        hotelId,
-        module: 'Staff',
-        action: 'DELETE_STAFF',
-        details: `Deleted staff member ${staffEmail}`
-      });
-      toast.success('Staff member removed');
+      toast.loading(`Permanently removing ${staffEmail} and purging records...`);
+
+      // 1. Call server API to delete Auth user and purge records
+      let apiSuccess = false;
+      try {
+        const resp = await fetch('/api/auth/delete-staff-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hotelId,
+            staffUid,
+            staffEmail,
+            adminUid: profile?.uid,
+            adminEmail: profile?.email
+          })
+        });
+        if (resp.ok) {
+          apiSuccess = true;
+        }
+      } catch (apiErr) {
+        console.warn("Server delete API notice:", apiErr);
+      }
+
+      // 2. Client-side database safeDelete cleanup as verification
+      try {
+        await database.safeDelete(doc(db, 'users', staffUid), {
+          hotelId,
+          module: 'Staff Security',
+          action: 'STAFF_DELETED',
+          details: `Permanently removed staff member ${staffEmail}`
+        });
+      } catch (delErr) {
+        if (!apiSuccess) throw delErr;
+      }
+
+      toast.dismiss();
+      toast.success(`Staff member ${staffEmail} and all associated records permanently purged.`);
       setShowConfirmRemove(null);
     } catch (err: any) {
+      toast.dismiss();
       toast.error('Failed to remove staff member: ' + err.message);
     }
   };
@@ -632,7 +695,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 <option value="all">All Statuses</option>
                 <option value="active">Active Only</option>
                 <option value="pending_activation">Pending Activation Only</option>
+                <option value="password_reset_pending">Password Reset Pending Only</option>
                 <option value="suspended">Suspended Only</option>
+                <option value="disabled">Disabled Only</option>
               </select>
 
               {/* Department Filter */}
@@ -742,10 +807,20 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                                 <Clock size={11} />
                                 Pending Activation
                               </span>
-                            ) : isSuspended ? (
+                            ) : member.status === 'password_reset_pending' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                <KeyRound size={11} />
+                                Password Reset Pending
+                              </span>
+                            ) : member.status === 'suspended' ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
                                 <UserX size={11} />
                                 Suspended
+                              </span>
+                            ) : member.status === 'disabled' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                <XCircle size={11} />
+                                Disabled
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">

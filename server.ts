@@ -290,7 +290,10 @@ async function startServer() {
     }
   });
 
-  // Email Dispatch Helper (SMTP with Ethereal / Diagnostic Fallback)
+  // Cached Ethereal test account for fast, persistent email dispatch
+  let cachedEtherealAccount: any = null;
+
+  // Email Dispatch Helper (Production SMTP with Ethereal Test Confirmation)
   async function dispatchEmailMessage({
     to,
     subject,
@@ -305,6 +308,7 @@ async function startServer() {
     let emailDispatched = false;
     let method = 'simulated';
     let previewUrl: string | false = false;
+    let deliveryError: string | null = null;
 
     // 1. Try production SMTP if credentials provided
     if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
@@ -320,32 +324,40 @@ async function startServer() {
           },
         });
 
-        await transporter.sendMail({
+        const info = await transporter.sendMail({
           from: `"${fromName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
           to,
           subject,
           html,
         });
-        emailDispatched = true;
-        method = 'smtp';
-        console.log(`[EMAIL DISPATCHED via SMTP] To: ${to} | Subject: ${subject}`);
-      } catch (smtpErr) {
-        console.error("[SMTP ERROR] Failed to send via configured SMTP:", smtpErr);
+
+        if (info && info.messageId) {
+          emailDispatched = true;
+          method = 'smtp';
+          console.log(`[EMAIL DISPATCHED via SMTP] To: ${to} | MessageId: ${info.messageId}`);
+        }
+      } catch (smtpErr: any) {
+        console.error("[SMTP ERROR] Failed to send via configured SMTP:", smtpErr?.message || smtpErr);
+        deliveryError = smtpErr?.message || 'SMTP delivery failed';
       }
     }
 
-    // 2. Fallback to Nodemailer Ethereal test transport if SMTP not configured or failed
+    // 2. Fallback to Nodemailer Ethereal real test transport if SMTP not configured or failed
     if (!emailDispatched) {
       try {
         const nodemailer = await import('nodemailer');
-        const testAccount = await nodemailer.createTestAccount();
+        if (!cachedEtherealAccount) {
+          cachedEtherealAccount = await nodemailer.createTestAccount();
+          console.log(`[ETHEREAL] Initialized test mailbox: ${cachedEtherealAccount.user}`);
+        }
+
         const testTransporter = nodemailer.createTransport({
           host: 'smtp.ethereal.email',
           port: 587,
           secure: false,
           auth: {
-            user: testAccount.user,
-            pass: testAccount.pass,
+            user: cachedEtherealAccount.user,
+            pass: cachedEtherealAccount.pass,
           },
         });
 
@@ -355,18 +367,22 @@ async function startServer() {
           subject,
           html,
         });
-        emailDispatched = true;
-        method = 'ethereal_test';
-        previewUrl = nodemailer.getTestMessageUrl(info);
-        console.log(`[EMAIL DISPATCHED via Ethereal Test] To: ${to} | Preview: ${previewUrl}`);
-      } catch (etherealErr) {
-        console.warn("[ETHEREAL FALLBACK] Nodemailer test transport notice:", etherealErr);
-        emailDispatched = true;
-        method = 'in_memory_log';
+
+        if (info && info.messageId) {
+          emailDispatched = true;
+          method = 'ethereal_test';
+          previewUrl = nodemailer.getTestMessageUrl(info);
+          console.log(`[EMAIL DISPATCHED via Ethereal Test] To: ${to} | Preview: ${previewUrl}`);
+        }
+      } catch (etherealErr: any) {
+        console.warn("[ETHEREAL NOTICE] Nodemailer test transport error:", etherealErr?.message || etherealErr);
+        deliveryError = etherealErr?.message || 'Ethereal transport unavailable';
+        emailDispatched = false;
+        method = 'delivery_failed';
       }
     }
 
-    return { emailDispatched, method, previewUrl };
+    return { emailDispatched, method, previewUrl, deliveryError };
   }
 
   // API Route: Send Account Activation Email
@@ -868,6 +884,154 @@ async function startServer() {
     } catch (err: any) {
       console.error("Error in complete-password-reset endpoint:", err);
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // API Route: Completely Delete Staff Account and Purge Associated Records
+  app.post("/api/auth/delete-staff-user", async (req, res) => {
+    const { hotelId, staffUid, staffEmail, adminUid, adminEmail } = req.body;
+    if (!hotelId || !staffUid || !staffEmail) {
+      return res.status(400).json({ error: "Missing hotelId, staffUid, or staffEmail" });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+
+    try {
+      const { doc, deleteDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const normalizedEmail = staffEmail.toLowerCase();
+      let purgedRecordsCount = 0;
+
+      // 1. Delete user profile doc from users/{staffUid}
+      try {
+        await deleteDoc(doc(db, 'users', staffUid));
+        purgedRecordsCount++;
+      } catch (uErr) {
+        console.warn(`[DELETE STAFF] users/${staffUid} delete warning:`, uErr);
+      }
+
+      // 2. Query users collection by email to clean up any duplicate or migration documents
+      try {
+        const uQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+        const uSnap = await getDocs(uQuery);
+        for (const d of uSnap.docs) {
+          if (d.id !== staffUid) {
+            await deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+            purgedRecordsCount++;
+          }
+        }
+      } catch (uQErr) {
+        console.warn("[DELETE STAFF] users query cleanup:", uQErr);
+      }
+
+      // 3. Purge password reset / activation tokens
+      // a. Root collection
+      try {
+        const tQuery = query(collection(db, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
+        const tSnap = await getDocs(tQuery);
+        for (const d of tSnap.docs) {
+          await deleteDoc(doc(db, 'passwordResetTokens', d.id)).catch(() => {});
+          purgedRecordsCount++;
+        }
+      } catch (tErr) {
+        console.warn("[DELETE STAFF] root token cleanup:", tErr);
+      }
+
+      // b. Hotel subcollection
+      try {
+        const htQuery = query(collection(db, 'hotels', hotelId, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
+        const htSnap = await getDocs(htQuery);
+        for (const d of htSnap.docs) {
+          await deleteDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', d.id)).catch(() => {});
+          purgedRecordsCount++;
+        }
+      } catch (htErr) {
+        console.warn("[DELETE STAFF] hotel token cleanup:", htErr);
+      }
+
+      // 4. Purge active sessions
+      try {
+        const sQuery = query(collection(db, 'hotels', hotelId, 'sessions'), where('userEmail', '==', normalizedEmail));
+        const sSnap = await getDocs(sQuery);
+        for (const d of sSnap.docs) {
+          await deleteDoc(doc(db, 'hotels', hotelId, 'sessions', d.id)).catch(() => {});
+          purgedRecordsCount++;
+        }
+      } catch (sErr) {
+        console.warn("[DELETE STAFF] session cleanup:", sErr);
+      }
+
+      // 5. Purge email notifications outbox records
+      try {
+        const nQuery = query(collection(db, 'hotels', hotelId, 'emailNotifications'), where('recipient', '==', normalizedEmail));
+        const nSnap = await getDocs(nQuery);
+        for (const d of nSnap.docs) {
+          await deleteDoc(doc(db, 'hotels', hotelId, 'emailNotifications', d.id)).catch(() => {});
+          purgedRecordsCount++;
+        }
+      } catch (nErr) {
+        console.warn("[DELETE STAFF] email notifications cleanup:", nErr);
+      }
+
+      // 6. Purge user settings
+      try {
+        await deleteDoc(doc(db, 'hotels', hotelId, 'user_settings', staffUid)).catch(() => {});
+        await deleteDoc(doc(db, 'user_settings', staffUid)).catch(() => {});
+      } catch (setErr) {
+        console.warn("[DELETE STAFF] user settings cleanup:", setErr);
+      }
+
+      // 7. Delete Auth user via Firebase Admin if initialized
+      let authUserDeleted = false;
+      try {
+        const adminModule = await import('firebase-admin');
+        const admin: any = (adminModule as any).default || adminModule;
+        if (admin && admin.apps && admin.apps.length > 0) {
+          try {
+            await admin.auth().deleteUser(staffUid);
+            authUserDeleted = true;
+          } catch (aErr: any) {
+            if (aErr?.code === 'auth/user-not-found') {
+              try {
+                const u = await admin.auth().getUserByEmail(normalizedEmail);
+                await admin.auth().deleteUser(u.uid);
+                authUserDeleted = true;
+              } catch (e2) {}
+            }
+          }
+        }
+      } catch (adminErr) {
+        console.warn("[DELETE STAFF] Firebase Admin Auth deletion check:", adminErr);
+      }
+
+      // 8. Immutable Audit Trail record (preserving historical audit and operational data)
+      try {
+        await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
+          action: 'STAFF_DELETED',
+          module: 'StaffManagement',
+          targetId: staffUid,
+          targetEmail: normalizedEmail,
+          performedBy: adminEmail || 'Administrator',
+          performedByUid: adminUid || 'admin',
+          details: `Staff member ${normalizedEmail} (UID: ${staffUid}) was deleted. All user records, tokens, active sessions, and preferences were permanently purged. Historical operational logs preserved.`,
+          purgedRecordsCount,
+          timestamp: serverTimestamp(),
+          createdAt: new Date().toISOString()
+        });
+      } catch (auditErr) {
+        console.warn("[DELETE STAFF] Audit log recording notice:", auditErr);
+      }
+
+      return res.json({
+        success: true,
+        message: `Staff member ${normalizedEmail} and all associated records were successfully purged.`,
+        purgedRecordsCount,
+        authUserDeleted
+      });
+    } catch (err: any) {
+      console.error("Staff deletion error in endpoint:", err);
+      return res.status(500).json({ error: err.message || "Failed to complete staff deletion" });
     }
   });
 
