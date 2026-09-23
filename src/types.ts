@@ -46,6 +46,7 @@ export interface ActiveSession {
 
 export interface UserProfile {
   uid: string;
+  firebase_uid?: string; // Explicitly links Staff Profile to Firebase Authentication UID
   email: string;
   username?: string;
   role: UserRole;

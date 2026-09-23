@@ -13,18 +13,54 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Initialize Firebase for server validation
+  // Initialize Firebase for server validation and Admin SDK
   let db: any = null;
+  let adminAuth: any = null;
+  let firebaseConfig: any = null;
+
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
     if (fs.existsSync(configPath)) {
-      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      const { initializeApp, getApp, getApps } = await import('firebase/app');
+      firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const { initializeApp: initClientApp, getApp: getClientApp, getApps: getClientApps } = await import('firebase/app');
       const { getFirestore } = await import('firebase/firestore');
       
-      const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+      const firebaseApp = getClientApps().length === 0 ? initClientApp(firebaseConfig) : getClientApp();
       db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-      console.log("Server e-ledger validator initialized.");
+      console.log("Server e-ledger and Firestore validator initialized.");
+
+      // Initialize Firebase Admin SDK
+      try {
+        const { initializeApp: initAdminApp, getApps: getAdminApps, cert } = await import('firebase-admin/app');
+        const { getAuth: getAdminAuth } = await import('firebase-admin/auth');
+
+        let adminCredential;
+        if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+          try {
+            const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+            adminCredential = cert(serviceAccount);
+          } catch (e) {
+            console.warn("Could not parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:", e);
+          }
+        }
+
+        if (adminCredential) {
+          const adminApp = getAdminApps().length === 0
+            ? initAdminApp({
+                credential: adminCredential,
+                projectId: firebaseConfig.projectId
+              })
+            : getAdminApps()[0];
+
+          adminAuth = getAdminAuth(adminApp);
+          console.log("Firebase Admin Auth initialized with Service Account credentials.");
+        } else {
+          adminAuth = null;
+          console.log("Firebase Auth Admin: No service account key configured. Using direct Identity Toolkit REST API with project API key.");
+        }
+      } catch (adminErr) {
+        console.warn("Firebase Admin Auth init notice:", adminErr);
+      }
     }
   } catch (err) {
     console.error("Failed to initialize server-side Firebase app:", err);
@@ -384,6 +420,900 @@ async function startServer() {
 
     return { emailDispatched, method, previewUrl, deliveryError };
   }
+
+  // Helper: Build branded activation email HTML
+  function buildActivationEmailHtml({
+    hotelName,
+    targetName,
+    targetEmail,
+    adminName,
+    adminEmail,
+    activationUrl,
+    durationHours = '24 hours',
+    formattedExpiry,
+    note
+  }: {
+    hotelName: string;
+    targetName: string;
+    targetEmail: string;
+    adminName: string;
+    adminEmail: string;
+    activationUrl: string;
+    durationHours?: string;
+    formattedExpiry?: string;
+    note?: string;
+  }) {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Activate Your Staff Account</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f4f4f5;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #09090b; padding: 40px 20px;">
+          <tr>
+            <td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+                <!-- Header -->
+                <tr>
+                  <td style="padding: 32px 32px 24px; background: linear-gradient(135deg, #18181b 0%, #27272a 100%); border-bottom: 1px solid #27272a;">
+                    <table width="100%">
+                      <tr>
+                        <td>
+                          <div style="display: inline-block; padding: 8px 14px; background-color: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; color: #10b981; font-weight: bold; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;">
+                            Account Activation
+                          </div>
+                          <h1 style="margin: 16px 0 4px; font-size: 22px; font-weight: 700; color: #ffffff;">
+                            Welcome to ${hotelName}
+                          </h1>
+                          <p style="margin: 0; font-size: 14px; color: #a1a1aa;">
+                            Property Management System (PMS) Staff Onboarding
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                
+                <!-- Body -->
+                <tr>
+                  <td style="padding: 32px;">
+                    <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #e4e4e7;">
+                      Hello <strong>${targetName || targetEmail}</strong>,
+                    </p>
+                    <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
+                      Your Hotel Administrator <strong>${adminName}</strong> (${adminEmail}) has created your staff account for <strong>${hotelName}</strong>.
+                    </p>
+
+                    <div style="background-color: #27272a; border-left: 3px solid #10b981; padding: 14px 18px; border-radius: 6px; margin-bottom: 24px;">
+                      <span style="font-size: 12px; font-weight: 700; color: #10b981; text-transform: uppercase;">Security Policy Note:</span>
+                      <p style="margin: 6px 0 0; font-size: 13px; color: #d4d4d8; line-height: 1.5;">
+                        Default passwords are not issued for security compliance. Before accessing the PMS, you must create your own personal password using this single-use activation link.
+                      </p>
+                    </div>
+
+                    ${note ? `
+                      <div style="background-color: #27272a; border-left: 3px solid #3b82f6; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px;">
+                        <span style="font-size: 12px; font-weight: 600; color: #60a5fa; text-transform: uppercase;">Admin Note:</span>
+                        <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${note}"</p>
+                      </div>
+                    ` : ''}
+
+                    <!-- Action Button -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
+                      <tr>
+                        <td align="center">
+                          <a href="${activationUrl}" style="display: inline-block; padding: 14px 36px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                            Activate Account & Set Password
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Security & Expiration Warning -->
+                    <div style="background-color: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 16px; margin: 24px 0 16px;">
+                      <table width="100%">
+                        <tr>
+                          <td width="24" valign="top" style="color: #f59e0b; font-size: 16px; padding-right: 10px;">⏳</td>
+                          <td>
+                            <p style="margin: 0; font-size: 13px; font-weight: 600; color: #fbbf24;">
+                              Activation Link Expiration
+                            </p>
+                            <p style="margin: 4px 0 0; font-size: 12px; color: #fde68a; line-height: 1.5;">
+                              This activation link is valid for <strong>${durationHours}</strong>${formattedExpiry ? ` (until <strong>${formattedExpiry}</strong>)` : ''} and will automatically deactivate once used.
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                    </div>
+
+                    <p style="margin: 24px 0 8px; font-size: 12px; color: #71717a;">
+                      If the button above does not open, copy and paste this link into your browser:
+                    </p>
+                    <p style="margin: 0 0 24px; font-size: 12px; color: #10b981; word-break: break-all; background-color: #18181b; border: 1px solid #27272a; padding: 10px; border-radius: 6px;">
+                      ${activationUrl}
+                    </p>
+                    
+                    <hr style="border: none; border-top: 1px solid #27272a; margin: 24px 0;">
+                    
+                    <p style="margin: 0; font-size: 12px; color: #71717a; line-height: 1.5;">
+                      <strong>Security Notice:</strong> If you did not expect this invitation, please contact your hotel management team (${adminEmail}).
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="padding: 20px 32px; background-color: #121215; border-top: 1px solid #27272a; text-align: center;">
+                    <p style="margin: 0; font-size: 11px; color: #71717a;">
+                      © ${new Date().getFullYear()} ${hotelName} • Property Management System (PMS)
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+  }
+
+  // In-memory activation token registry for instant, resilient staff onboarding & password setup
+  interface ActivationTokenEntry {
+    email: string;
+    name?: string;
+    tempPass?: string;
+    uid: string;
+    hotelId: string;
+    hotelName?: string;
+    expiresAt: number;
+  }
+  const activeActivationTokens = new Map<string, ActivationTokenEntry>();
+
+  // Helper: Create user in Firebase Authentication
+  async function createStaffAuthUser(email: string, displayName?: string): Promise<{ uid: string; email: string; idToken?: string; tempPass?: string }> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // 1. Try Firebase Admin SDK if configured with service account
+    if (adminAuth) {
+      try {
+        const userRecord = await adminAuth.createUser({
+          email: normalizedEmail,
+          displayName: displayName || undefined,
+          emailVerified: false,
+        });
+        console.log(`[FIREBASE AUTH ADMIN] User record created: ${userRecord.uid} (${normalizedEmail})`);
+        return { uid: userRecord.uid, email: userRecord.email || normalizedEmail };
+      } catch (adminErr: any) {
+        if (adminErr?.code === 'auth/email-already-in-use') {
+          const err: any = new Error('The email address is already in use by another account in Firebase Authentication.');
+          err.code = 'auth/email-already-in-use';
+          throw err;
+        }
+        console.warn(`[FIREBASE AUTH ADMIN NOTICE] Admin SDK createUser had non-fatal error, falling back to REST:`, adminErr?.message);
+      }
+    }
+
+    // 2. Identity Toolkit REST API Fallback
+    if (!firebaseConfig?.apiKey) {
+      throw new Error('Firebase configuration or API key is missing.');
+    }
+
+    const tempPass = 'Pms_' + Math.random().toString(36).substring(2, 10) + '!Z8#' + Math.random().toString(36).substring(2, 6);
+    const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password: tempPass,
+        returnSecureToken: true
+      })
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (data?.error?.message === 'EMAIL_EXISTS') {
+        const err: any = new Error('The email address is already in use by another account in Firebase Authentication.');
+        err.code = 'auth/email-already-in-use';
+        throw err;
+      }
+      throw new Error(data?.error?.message || 'Failed to create user in Firebase Authentication');
+    }
+
+    console.log(`[FIREBASE AUTH REST] User record created: ${data.localId} (${normalizedEmail})`);
+    return { uid: data.localId, email: data.email || normalizedEmail, idToken: data.idToken, tempPass };
+  }
+
+  // Helper: Save user profile to Firestore using Bearer ID token or client SDK
+  async function saveUserProfileToFirestore(uid: string, profileData: any, idToken?: string) {
+    if (idToken && firebaseConfig?.projectId) {
+      try {
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/users/${uid}`;
+        const fields: Record<string, any> = {};
+        for (const [key, val] of Object.entries(profileData)) {
+          if (val === undefined || val === null) {
+            fields[key] = { nullValue: null };
+          } else if (typeof val === 'string') {
+            fields[key] = { stringValue: val };
+          } else if (typeof val === 'number') {
+            fields[key] = Number.isInteger(val) ? { integerValue: val.toString() } : { doubleValue: val };
+          } else if (typeof val === 'boolean') {
+            fields[key] = { booleanValue: val };
+          } else if (Array.isArray(val)) {
+            fields[key] = {
+              arrayValue: {
+                values: val.map(item => ({ stringValue: String(item) }))
+              }
+            };
+          }
+        }
+
+        const patchResp = await fetch(firestoreUrl, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ fields })
+        });
+
+        if (patchResp.ok) {
+          console.log(`[FIRESTORE REST WRITE] Successfully saved profile for user ${uid}`);
+          return await patchResp.json();
+        } else {
+          console.warn("[FIRESTORE REST WRITE NOTICE]:", await patchResp.text());
+        }
+      } catch (restErr) {
+        console.warn("[FIRESTORE REST WRITE ERROR]:", restErr);
+      }
+    }
+
+    // Fallback: client SDK setDoc
+    const { doc, setDoc } = await import('firebase/firestore');
+    return await setDoc(doc(db, 'users', uid), profileData, { merge: true });
+  }
+
+  // Helper: Generate Firebase Password Reset / Activation Link
+  async function generateStaffActivationLink(
+    email: string, 
+    baseUrl: string, 
+    tokenId?: string, 
+    tempPass?: string
+  ): Promise<{ activationUrl: string; oobCode?: string; linkSource: 'firebase_admin' | 'firebase_oob' | 'direct_portal' }> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const cleanBase = baseUrl ? baseUrl.replace(/\/$/, '') : 'http://localhost:3000';
+    const continueUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}`;
+    const actionCodeSettings = {
+      url: continueUrl,
+      handleCodeInApp: true
+    };
+
+    // 1. Try Firebase Admin SDK generatePasswordResetLink if configured
+    if (adminAuth) {
+      try {
+        const link = await adminAuth.generatePasswordResetLink(normalizedEmail, actionCodeSettings);
+        console.log(`[FIREBASE AUTH ADMIN] Generated password reset link for: ${normalizedEmail}`);
+        let oobCode: string | undefined;
+        try {
+          const parsed = new URL(link);
+          oobCode = parsed.searchParams.get('oobCode') || undefined;
+        } catch (e) {}
+        return { activationUrl: link, oobCode, linkSource: 'firebase_admin' };
+      } catch (adminErr: any) {
+        console.warn(`[FIREBASE AUTH ADMIN NOTICE] generatePasswordResetLink notice:`, adminErr?.message);
+      }
+    }
+
+    // 2. Identity Toolkit REST API sendOobCode (triggers official Firebase reset email)
+    if (firebaseConfig?.apiKey) {
+      try {
+        await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${firebaseConfig.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestType: 'PASSWORD_RESET',
+            email: normalizedEmail,
+            continueUrl
+          })
+        });
+        console.log(`[FIREBASE AUTH REST] Dispatched official Firebase reset email to: ${normalizedEmail}`);
+      } catch (oobErr) {
+        console.warn('[FIREBASE AUTH REST] sendOobCode notice:', oobErr);
+      }
+    }
+
+    // 3. Fallback direct in-app activation link with tokenId
+    const directUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}&mode=resetPassword`;
+    return { activationUrl: directUrl, linkSource: 'direct_portal' };
+  }
+
+  // API Route: Create Staff Account (Phase 1: Firebase Auth user + Staff Profile with firebase_uid + Activation link)
+  app.post("/api/auth/create-staff", async (req, res) => {
+    const {
+      hotelId,
+      hotelName = "Hotel Property",
+      email,
+      fullName,
+      phone,
+      department = "General",
+      employeeId,
+      roleType = "base",
+      baseRole = "frontDesk",
+      customRoleId,
+      roleLabel = "Front Desk",
+      permissions = [],
+      adminEmail = "Hotel Administrator",
+      adminName = "Hotel Administrator",
+      adminUid = "admin",
+      baseUrl
+    } = req.body;
+
+    if (!hotelId || !email || !fullName) {
+      return res.status(400).json({ error: "Missing required fields: hotelId, email, and fullName are mandatory." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Database service is currently unavailable." });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const clientOrigin = baseUrl || req.headers.origin || process.env.APP_URL || `http://localhost:${PORT}`;
+
+    try {
+      const { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
+
+      // 1. Create user in Firebase Authentication
+      let authUser: { uid: string; email: string; idToken?: string; tempPass?: string };
+      try {
+        authUser = await createStaffAuthUser(normalizedEmail, fullName.trim());
+      } catch (authErr: any) {
+        if (authErr?.code === 'auth/email-already-in-use') {
+          return res.status(409).json({
+            error: `The email '${normalizedEmail}' is already registered in Firebase Authentication. Please use a different email or resend the password reset invitation.`,
+            code: 'auth/email-already-in-use'
+          });
+        }
+        throw authErr;
+      }
+
+      const firebase_uid = authUser.uid;
+      const tokenId = 'act_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
+      const now = new Date().toISOString();
+
+      // Store in memory for instant, seamless staff password setup
+      activeActivationTokens.set(tokenId, {
+        email: normalizedEmail,
+        name: fullName.trim(),
+        tempPass: authUser.tempPass,
+        uid: firebase_uid,
+        hotelId,
+        hotelName,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000
+      });
+
+      // 2. Generate official Firebase activation / password reset link
+      const linkResult = await generateStaffActivationLink(normalizedEmail, clientOrigin, tokenId, authUser.tempPass);
+      const activationUrl = linkResult.activationUrl;
+
+      // 3. Store activation token in passwordResetTokens for secure single-use validation & activation
+      try {
+        await setDoc(doc(db, 'passwordResetTokens', tokenId), {
+          id: tokenId,
+          tokenId,
+          type: 'activation',
+          targetUid: firebase_uid,
+          targetEmail: normalizedEmail,
+          targetName: fullName.trim(),
+          hotelId,
+          hotelName,
+          tempPass: authUser.tempPass || null,
+          isUsed: false,
+          status: 'active',
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          createdAt: now,
+          createdBy: adminEmail
+        });
+      } catch (tokenStoreErr) {
+        console.warn("[CREATE STAFF] Notice storing passwordResetToken:", tokenStoreErr);
+      }
+
+      const assignedUserRole = roleType === 'base' && baseRole === 'admin' ? 'hotelAdmin' : 'staff';
+
+      // 4. Save Staff Profile to application database explicitly linking firebase_uid
+      const staffProfile = {
+        uid: firebase_uid,
+        firebase_uid: firebase_uid,
+        email: normalizedEmail,
+        hotelId,
+        role: assignedUserRole,
+        staffRole: roleType === 'base' ? baseRole : undefined,
+        customRoleId: roleType === 'custom' ? customRoleId : undefined,
+        displayName: fullName.trim(),
+        phoneNumber: phone?.trim() || null,
+        department,
+        employeeId: employeeId?.trim() || null,
+        status: 'pending_activation',
+        isLocked: false,
+        roles: roleType === 'base' ? [baseRole] : [roleLabel],
+        permissions: permissions || [],
+        activationLink: activationUrl,
+        activationToken: tokenId,
+        activationEmailSentAt: now,
+        activationEmailSentBy: adminEmail,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      await saveUserProfileToFirestore(firebase_uid, staffProfile, authUser.idToken);
+
+      // 5. Dispatch branded activation email
+      const emailHtml = buildActivationEmailHtml({
+        hotelName,
+        targetName: fullName.trim(),
+        targetEmail: normalizedEmail,
+        adminName,
+        adminEmail,
+        activationUrl,
+        durationHours: '24 hours'
+      });
+
+      const emailResult = await dispatchEmailMessage({
+        to: normalizedEmail,
+        subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
+        html: emailHtml,
+        fromName: `${hotelName} Administration`
+      });
+
+      // 6. Record Audit Log in Firestore
+      try {
+        await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
+          action: 'STAFF_ACCOUNT_CREATED',
+          module: 'Staff Management',
+          targetId: firebase_uid,
+          targetEmail: normalizedEmail,
+          targetName: fullName.trim(),
+          performedBy: adminEmail,
+          performedByUid: adminUid,
+          details: `Created staff account for ${normalizedEmail} with role '${roleLabel}' in Firebase Auth (UID: ${firebase_uid}). Status set to Pending Activation.`,
+          timestamp: serverTimestamp(),
+          createdAt: now
+        });
+      } catch (logErr) {
+        console.warn("Could not write audit log:", logErr);
+      }
+
+      return res.status(201).json({
+        success: true,
+        firebase_uid,
+        user: staffProfile,
+        activationLink: activationUrl,
+        emailSent: emailResult.emailDispatched,
+        previewUrl: emailResult.previewUrl || null,
+        message: `Staff member created successfully in Firebase Auth with UID ${firebase_uid}. Account placed in Pending Activation.`
+      });
+    } catch (err: any) {
+      console.error("[CREATE STAFF ERROR]:", err);
+      return res.status(500).json({ error: err.message || "Failed to create staff account" });
+    }
+  });
+
+  // API Route: Resend Activation Link (Regenerate Firebase activation link and redispatch email)
+  app.post("/api/auth/resend-activation-link", async (req, res) => {
+    const {
+      hotelId,
+      hotelName = "Hotel Property",
+      targetUid,
+      targetEmail,
+      targetName,
+      adminEmail = "Hotel Administrator",
+      adminName = "Hotel Administrator",
+      adminUid = "admin",
+      baseUrl
+    } = req.body;
+
+    if (!hotelId || !targetEmail) {
+      return res.status(400).json({ error: "Missing hotelId or targetEmail." });
+    }
+
+    const normalizedEmail = targetEmail.trim().toLowerCase();
+    const clientOrigin = baseUrl || req.headers.origin || process.env.APP_URL || `http://localhost:${PORT}`;
+
+    try {
+      let targetDocId = targetUid || null;
+      let userDisplayName = targetName || null;
+
+      // Try looking up UID if not supplied
+      if (!targetDocId && adminAuth) {
+        try {
+          const userRecord = await adminAuth.getUserByEmail(normalizedEmail);
+          targetDocId = userRecord.uid;
+          if (!userDisplayName && userRecord.displayName) {
+            userDisplayName = userRecord.displayName;
+          }
+        } catch (e) {}
+      }
+
+      if (!targetDocId && db) {
+        try {
+          const { collection, query, where, getDocs } = await import('firebase/firestore');
+          const q = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            targetDocId = snap.docs[0].id;
+            const uData = snap.docs[0].data();
+            if (!userDisplayName && uData.displayName) {
+              userDisplayName = uData.displayName;
+            }
+          }
+        } catch (e) {
+          console.warn("[RESEND ACTIVATION] Notice during user lookup:", e);
+        }
+      }
+
+      if (!targetDocId) {
+        targetDocId = 'staff_' + normalizedEmail.replace(/[^a-zA-Z0-9]/g, '_');
+      }
+
+      // 2. Generate fresh Firebase password reset / activation link
+      const tokenId = 'act_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
+      const linkResult = await generateStaffActivationLink(normalizedEmail, clientOrigin, tokenId);
+      const activationUrl = linkResult.activationUrl;
+      const now = new Date().toISOString();
+
+      // Register in memory registry
+      activeActivationTokens.set(tokenId, {
+        email: normalizedEmail,
+        name: userDisplayName || normalizedEmail,
+        uid: targetDocId,
+        hotelId,
+        hotelName,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000
+      });
+
+      // Try updating staff user document
+      if (db && targetDocId) {
+        try {
+          const { updateDoc, doc } = await import('firebase/firestore');
+          await updateDoc(doc(db, 'users', targetDocId), {
+            activationLink: activationUrl,
+            activationToken: tokenId,
+            activationEmailSentAt: now,
+            activationEmailSentBy: adminEmail,
+            updatedAt: now
+          });
+        } catch (uErr) {
+          console.warn("[RESEND ACTIVATION] User doc update notice:", uErr);
+        }
+      }
+
+      // 3. Dispatch activation email
+      const emailHtml = buildActivationEmailHtml({
+        hotelName,
+        targetName: userDisplayName || normalizedEmail,
+        targetEmail: normalizedEmail,
+        adminName,
+        adminEmail,
+        activationUrl,
+        durationHours: '24 hours'
+      });
+
+      const emailResult = await dispatchEmailMessage({
+        to: normalizedEmail,
+        subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
+        html: emailHtml,
+        fromName: `${hotelName} Administration`
+      });
+
+      // 4. Audit Log
+      if (db) {
+        try {
+          const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+          await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
+            action: 'ACTIVATION_EMAIL_RESENT',
+            module: 'Staff Management',
+            targetId: targetDocId,
+            targetEmail: normalizedEmail,
+            performedBy: adminEmail,
+            performedByUid: adminUid,
+            details: `Regenerated Firebase activation link and dispatched email to ${normalizedEmail}.`,
+            timestamp: serverTimestamp(),
+            createdAt: now
+          });
+        } catch (logErr) {}
+      }
+
+      return res.json({
+        success: true,
+        activationLink: activationUrl,
+        emailSent: emailResult.emailDispatched,
+        previewUrl: emailResult.previewUrl || null,
+        message: `Fresh activation link generated and dispatched to ${normalizedEmail}.`
+      });
+    } catch (err: any) {
+      console.error("[RESEND ACTIVATION ERROR]:", err);
+      return res.status(500).json({ error: err.message || "Failed to resend activation link" });
+    }
+  });
+
+  // API Route: Activate Staff User (Phase 2 completion: updates database status to 'active' & verified)
+  app.post("/api/auth/activate-staff-user", async (req, res) => {
+    const { email, firebase_uid, password, oobCode, tokenId } = req.body;
+
+    if (!email && !firebase_uid) {
+      return res.status(400).json({ error: "Missing email or firebase_uid for activation." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Database service is currently unavailable." });
+    }
+
+    try {
+      const { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const now = new Date().toISOString();
+      let targetDocId = firebase_uid;
+      let userDocData: any = null;
+
+      if (targetDocId) {
+        try {
+          const snap = await getDoc(doc(db, 'users', targetDocId));
+          if (snap.exists()) {
+            userDocData = snap.data();
+          }
+        } catch (e) {
+          console.warn("Could not fetch user by doc ID:", e);
+        }
+      }
+
+      if (!userDocData && email) {
+        try {
+          const q = query(collection(db, 'users'), where('email', '==', email.trim().toLowerCase()));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            targetDocId = snap.docs[0].id;
+            userDocData = snap.docs[0].data();
+          }
+        } catch (e) {
+          console.warn("Could not query user by email:", e);
+        }
+      }
+
+      if (!targetDocId) {
+        targetDocId = firebase_uid;
+      }
+
+      // 1. Resolve tempPass and UID from in-memory token registry or passwordResetTokens
+      let resolvedTempPass: string | null = null;
+      let effectiveEmail = email ? email.trim().toLowerCase() : null;
+
+      if (tokenId && activeActivationTokens.has(tokenId)) {
+        const memToken = activeActivationTokens.get(tokenId)!;
+        resolvedTempPass = memToken.tempPass || null;
+        if (!targetDocId && memToken.uid) {
+          targetDocId = memToken.uid;
+        }
+        if (!effectiveEmail && memToken.email) {
+          effectiveEmail = memToken.email;
+        }
+      }
+
+      if (!resolvedTempPass && tokenId && db) {
+        try {
+          const tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+          if (tokenSnap.exists()) {
+            const tokData = tokenSnap.data();
+            resolvedTempPass = tokData.tempPass || null;
+            if (!targetDocId && tokData.targetUid) {
+              targetDocId = tokData.targetUid;
+            }
+            if (!effectiveEmail && tokData.targetEmail) {
+              effectiveEmail = tokData.targetEmail;
+            }
+          }
+        } catch (tokErr) {
+          console.warn("[ACTIVATE] Could not read token for tempPass:", tokErr);
+        }
+      }
+
+      let updatedUserToken: string | null = null;
+
+      // If password provided and adminAuth available, update password directly in Firebase Auth
+      if (adminAuth && password && targetDocId) {
+        try {
+          await adminAuth.updateUser(targetDocId, {
+            password: password,
+            emailVerified: true
+          });
+          console.log(`[FIREBASE AUTH ADMIN] Updated password for user ${targetDocId}`);
+        } catch (adminPwErr) {
+          console.warn("[FIREBASE AUTH ADMIN] updateUser password notice:", adminPwErr);
+        }
+      } else if (password && effectiveEmail && resolvedTempPass && firebaseConfig?.apiKey) {
+        // Update password via Identity Toolkit REST signInWithPassword + update
+        try {
+          const signInRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: effectiveEmail, password: resolvedTempPass, returnSecureToken: true })
+          });
+          const signInData = await signInRes.json();
+          if (signInData?.idToken) {
+            const updateRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ idToken: signInData.idToken, password: password, returnSecureToken: true })
+            });
+            const updateData = await updateRes.json();
+            if (updateData?.idToken) {
+              updatedUserToken = updateData.idToken;
+            }
+            console.log(`[FIREBASE AUTH REST] Updated password for user ${effectiveEmail}`);
+          }
+        } catch (restPwErr) {
+          console.warn("[FIREBASE AUTH REST] Password update notice:", restPwErr);
+        }
+      }
+
+      // Update user document to active & verified
+      const updatePayload = {
+        status: 'active',
+        isVerified: true,
+        emailVerified: true,
+        temporaryPassword: null,
+        initialPassword: null,
+        forcePasswordChange: false,
+        passwordChangedAt: now,
+        passwordChangedBy: effectiveEmail || userDocData?.email || 'user',
+        updatedAt: now
+      };
+
+      if (targetDocId) {
+        try {
+          await updateDoc(doc(db, 'users', targetDocId), updatePayload);
+        } catch (updateErr) {
+          console.warn("[ACTIVATE] updateDoc warning, attempting authenticated REST write:", updateErr);
+          try {
+            await saveUserProfileToFirestore(targetDocId, {
+              ...(userDocData || {}),
+              ...updatePayload
+            }, updatedUserToken || undefined);
+          } catch (restErr) {
+            console.warn("[ACTIVATE] REST write notice:", restErr);
+          }
+        }
+      }
+
+      // If tokenId was provided, mark it as used and clear from memory
+      if (tokenId) {
+        activeActivationTokens.delete(tokenId);
+        await updateDoc(doc(db, 'passwordResetTokens', tokenId), {
+          isUsed: true,
+          status: 'used',
+          usedAt: now,
+          updatedAt: now
+        }).catch(() => {});
+      }
+
+      // Record in audit log
+      const hotelId = userDocData?.hotelId;
+      if (hotelId && hotelId !== 'system') {
+        try {
+          await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
+            action: 'STAFF_ACTIVATION_COMPLETED',
+            module: 'Staff Security',
+            targetId: targetDocId,
+            targetEmail: userDocData?.email || email,
+            details: `Staff member ${userDocData?.email || email} (UID: ${targetDocId}) activated their account and set their password. Account status transitioned from Pending Activation to Active.`,
+            timestamp: serverTimestamp(),
+            createdAt: now
+          });
+        } catch (logErr) {}
+      }
+
+      return res.json({
+        success: true,
+        firebase_uid: targetDocId,
+        message: "Staff account successfully activated and verified. User is now Active."
+      });
+    } catch (err: any) {
+      console.error("[ACTIVATE STAFF ERROR]:", err);
+      return res.status(500).json({ error: err.message || "Failed to activate staff account" });
+    }
+  });
+
+  // API Route: Verify ID Token & Fetch Permissions (Phase 3: Verify Token & Check Pending Activation)
+  app.post("/api/auth/verify-token", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = req.body.idToken || (authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null);
+
+    if (!token) {
+      return res.status(400).json({ error: "Missing Firebase ID token." });
+    }
+
+    try {
+      let uid: string | null = null;
+      let email: string | null = null;
+
+      // 1. Verify via Admin SDK
+      if (adminAuth) {
+        try {
+          const decoded = await adminAuth.verifyIdToken(token);
+          uid = decoded.uid;
+          email = decoded.email || null;
+        } catch (adminErr: any) {
+          console.warn("[VERIFY TOKEN] Admin SDK verifyIdToken notice:", adminErr?.message);
+        }
+      }
+
+      // 2. Fallback via Identity Toolkit REST
+      if (!uid && firebaseConfig?.apiKey) {
+        try {
+          const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken: token })
+          });
+          const data = await resp.json();
+          if (resp.ok && data?.users?.[0]) {
+            uid = data.users[0].localId;
+            email = data.users[0].email;
+          }
+        } catch (restErr) {
+          console.warn("[VERIFY TOKEN] REST lookup notice:", restErr);
+        }
+      }
+
+      if (!uid) {
+        return res.status(401).json({ error: "Invalid or expired Firebase ID token." });
+      }
+
+      // 3. Lookup user profile in database
+      let profile: any = null;
+      if (db) {
+        const { doc, getDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+        const snap = await getDoc(doc(db, 'users', uid));
+        if (snap.exists()) {
+          profile = snap.data();
+        } else if (email) {
+          const q = query(collection(db, 'users'), where('email', '==', email.toLowerCase()));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            profile = qSnap.docs[0].data();
+          }
+        }
+      }
+
+      // 4. Strict enforcement of Pending Activation
+      if (profile) {
+        if (profile.status === 'pending_activation') {
+          return res.status(403).json({
+            error: "Your account is pending activation. Please use the activation link sent to your email to set your password before signing in.",
+            status: "pending_activation"
+          });
+        }
+        if (profile.status === 'suspended' || profile.status === 'disabled') {
+          return res.status(403).json({
+            error: "Your account has been suspended or deactivated. Please contact your Hotel Administrator.",
+            status: "suspended"
+          });
+        }
+      }
+
+      return res.json({
+        valid: true,
+        uid,
+        email,
+        profile: profile || null,
+        role: profile?.role || 'staff',
+        permissions: profile?.permissions || []
+      });
+    } catch (err: any) {
+      console.error("[VERIFY TOKEN ERROR]:", err);
+      return res.status(500).json({ error: err.message || "Failed to verify ID token" });
+    }
+  });
 
   // API Route: Send Account Activation Email
   app.post("/api/auth/send-account-activation-email", async (req, res) => {
@@ -764,6 +1694,25 @@ async function startServer() {
     const { token } = req.body;
     if (!token) {
       return res.status(400).json({ valid: false, error: "Token is required." });
+    }
+
+    // Check active in-memory token registry first
+    if (activeActivationTokens.has(token)) {
+      const memToken = activeActivationTokens.get(token)!;
+      if (Date.now() > memToken.expiresAt) {
+        activeActivationTokens.delete(token);
+        return res.json({ valid: false, error: "This link has expired. Please contact your Hotel Administrator for a new link.", errorCode: "EXPIRED" });
+      }
+      return res.json({
+        valid: true,
+        type: 'activation',
+        targetEmail: memToken.email,
+        targetName: memToken.name || memToken.email,
+        targetUid: memToken.uid,
+        hotelId: memToken.hotelId,
+        hotelName: memToken.hotelName,
+        expiresAt: new Date(memToken.expiresAt).toISOString()
+      });
     }
 
     if (!db) {

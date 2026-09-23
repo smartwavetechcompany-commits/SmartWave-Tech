@@ -180,7 +180,30 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         try {
           const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
           const loggedInUser = userCredential.user;
-          console.log("Login successful in AuthPage");
+          console.log("Login successful in AuthPage for UID:", loggedInUser.uid);
+
+          // Phase 3: Retrieve Firebase ID Token and verify session / permissions with backend
+          try {
+            const idToken = await loggedInUser.getIdToken();
+            const verifyResp = await fetch('/api/auth/verify-token', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+              },
+              body: JSON.stringify({ idToken })
+            });
+            if (verifyResp.status === 403) {
+              const errData = await verifyResp.json();
+              await auth.signOut();
+              throw new Error(errData.error || 'Your account is pending activation. Please use the activation link sent to your email to set your password before signing in.');
+            }
+          } catch (tokenVerifyErr: any) {
+            if (tokenVerifyErr.message?.includes('pending activation') || tokenVerifyErr.message?.includes('suspended')) {
+              throw tokenVerifyErr;
+            }
+            console.warn("Backend ID token check notice:", tokenVerifyErr?.message);
+          }
 
           // Auto-healing migration during successful login:
           // Check if a profile document exists for this user's UID

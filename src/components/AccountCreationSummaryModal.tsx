@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 export interface UserSummaryData {
   uid: string;
+  firebase_uid?: string;
   fullName: string;
   username: string;
   email: string;

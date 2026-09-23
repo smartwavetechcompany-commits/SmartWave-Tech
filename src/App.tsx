@@ -42,6 +42,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal';
 import { AccountSuspendedModal } from './components/AccountSuspendedModal';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
+import { SetPasswordPage } from './components/SetPasswordPage';
 
 function AppContent() {
   const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection } = useAuth();
@@ -51,9 +52,12 @@ function AppContent() {
 
   const searchParams = new URLSearchParams(location.search);
   const resetTokenParam = searchParams.get('resetToken') || searchParams.get('token');
-  const oobCodeParam = searchParams.get('oobCode');
+  const oobCodeParam = searchParams.get('oobCode') || searchParams.get('code');
   const modeParam = searchParams.get('mode');
-  const isResetFlow = !!resetTokenParam || (modeParam === 'resetPassword' && !!oobCodeParam) || location.pathname === '/reset-password';
+  
+  // Detect activation or password reset flows
+  const isSetPasswordRoute = location.pathname === '/set-password' || location.pathname === '/token-act';
+  const isResetFlow = !!resetTokenParam || (modeParam === 'resetPassword') || !!oobCodeParam || isSetPasswordRoute || location.pathname === '/reset-password';
 
   const currency: 'NGN' | 'USD' = hotel?.defaultCurrency || 'NGN';
   const exchangeRate: number = hotel?.exchangeRate || 1500;
@@ -80,21 +84,32 @@ function AppContent() {
     );
   }
 
-  // Intercept password reset token link for unauthenticated user or explicit reset URL
-  if (isResetFlow && (!user || resetTokenParam)) {
+  // Intercept password reset/activation link for unauthenticated user or explicit reset URL
+  if (isResetFlow && (!user || resetTokenParam || oobCodeParam || isSetPasswordRoute)) {
     return (
       <>
         <Toaster position="top-right" theme="dark" richColors />
-        <ResetPasswordPage
-          tokenParam={resetTokenParam || oobCodeParam || ''}
-          emailParam={searchParams.get('email') || ''}
-          onNavigateToLogin={(prefilledEmail, msg) => {
-            setResetCompletedInfo({ email: prefilledEmail, message: msg });
-            if (typeof window !== 'undefined') {
-              window.history.replaceState({}, document.title, '/');
-            }
-          }}
-        />
+        {oobCodeParam || isSetPasswordRoute ? (
+          <SetPasswordPage
+            onNavigateToLogin={(prefilledEmail, msg) => {
+              setResetCompletedInfo({ email: prefilledEmail, message: msg });
+              if (typeof window !== 'undefined') {
+                window.history.replaceState({}, document.title, '/');
+              }
+            }}
+          />
+        ) : (
+          <ResetPasswordPage
+            tokenParam={resetTokenParam || ''}
+            emailParam={searchParams.get('email') || ''}
+            onNavigateToLogin={(prefilledEmail, msg) => {
+              setResetCompletedInfo({ email: prefilledEmail, message: msg });
+              if (typeof window !== 'undefined') {
+                window.history.replaceState({}, document.title, '/');
+              }
+            }}
+          />
+        )}
       </>
     );
   }

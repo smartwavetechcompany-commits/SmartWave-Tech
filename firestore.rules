@@ -11,8 +11,9 @@ service cloud.firestore {
     }
 
     function getUserData() {
-      let path = /databases/$(database)/documents/users/$(request.auth.uid);
-      return exists(path) ? get(path).data : null;
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : null;
     }
 
     function userExists() {
@@ -107,45 +108,31 @@ service cloud.firestore {
     //////////////////////////////
 
     match /users/{userId} {
-      // Primary access: Self, SuperAdmin, anyone in the same hotel, or by email matching the authenticated token
-      allow read, list: if (isAuthenticated() && (
-                            request.auth.uid == userId || 
-                            isSuperAdmin() || 
-                            (resource != null && resource.data.hotelId == getHotelId()) ||
-                            (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
-                          )) ||
-                          (request.auth == null && resource != null && (
-                            resource.data.initialPassword != null || 
-                            resource.data.temporaryPassword != null ||
-                            resource.data.status in ['pending_activation', 'password_reset_pending'] ||
-                            resource.data.activationTokenId != null
-                          ));
-      
-      // SuperAdmin has full control
-      allow write: if isSuperAdmin();
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() ||
+        request.auth.uid == userId ||
+        (resource != null && sameHotel(resource.data.hotelId)) ||
+        (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
+      );
 
-      allow create: if isAuthenticated() && (
+      allow create: if (isAuthenticated() && (
                       (request.auth.uid == userId && request.resource.data.role != "superAdmin") ||
                       (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
-                      (request.resource.data.role == "staff")
-                    );
+                      isSuperAdmin()
+                    ));
 
       allow update: if (isAuthenticated() && (
                       (request.auth.uid == userId) ||
                       (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
                        hasStaffManagementPermission() &&
                        request.resource.data.role != "superAdmin") ||
+                      (hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
                       isSuperAdmin()
-                    )) ||
-                    (request.auth == null && resource != null &&
-                     request.resource.data.role == resource.data.role &&
-                     request.resource.data.hotelId == resource.data.hotelId &&
-                     (request.resource.data.email == resource.data.email || request.resource.data.email.lower() == resource.data.email.lower()));
+                    ));
 
       allow delete: if isAuthenticated() && (
                       isSuperAdmin() ||
-                      ((isHotelAdmin() || hasStaffManagementPermission()) && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId) ||
-                      (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
+                      ((isHotelAdmin() || hasStaffManagementPermission() || isAdmin()) && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId)
                     );
     }
 
@@ -324,20 +311,7 @@ service cloud.firestore {
     }
 
     match /passwordResetTokens/{tokenId} {
-      // Unauthenticated access permitted to validate the token
-      allow read: if true;
-      // Creation allowed for hotel admins, managers, and system processes
-      allow create: if isSuperAdmin() || 
-                       isHotelAdmin() || 
-                       hasStaffManagementPermission() ||
-                       isAuthenticated();
-      // Allow marking token as used when completing reset or updates by authorized admins
-      allow update: if isSuperAdmin() || 
-                       isHotelAdmin() || 
-                       hasStaffManagementPermission() ||
-                       (request.resource.data.isUsed == true && resource.data.isUsed == false) ||
-                       (request.resource.data.status in ['used', 'revoked']);
-      allow delete: if isSuperAdmin() || isHotelAdmin() || hasStaffManagementPermission();
+      allow read, write: if true;
     }
   }
 }
