@@ -69,23 +69,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     reservationRef.current = currentReservation;
   }, [currentReservation]);
 
-  // Temporary Diagnostic Hook: Verify stay duration calculation parity (totalNights === totalDays - 1)
-  useEffect(() => {
-    if (currentReservation?.checkIn && currentReservation?.checkOut) {
-      const duration = calculateStayDuration(
-        currentReservation.checkIn,
-        currentReservation.checkOut,
-        currentReservation.overstayNights,
-        currentReservation.status
-      );
-      if (duration.totalNights !== duration.totalDays - 1) {
-        console.warn(
-          `[StayDuration Diagnostic Warning] Inconsistent duration calculation in GuestFolio for Res #${currentReservation.id}: totalDays=${duration.totalDays}, totalNights=${duration.totalNights}. Expected totalNights = totalDays - 1.`
-        );
-      }
-    }
-  }, [currentReservation]);
-
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [folioTab, setFolioTab] = useState<'ledger' | 'timeline'>('ledger');
   const [guest, setGuest] = useState<Guest | null>(null);

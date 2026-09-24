@@ -232,22 +232,13 @@ export function GuestManagement() {
       const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
       const visitsCount = completedCount + activeCount;
 
-      let calculatedDays = 0;
-      guestRes.forEach(r => {
-        if (r.checkIn && r.checkOut && (r.status === 'checked_out' || r.status === 'checked_in')) {
-          const { totalDays } = calculateStayDuration(r.checkIn, r.checkOut, r.overstayNights, r.status);
-          calculatedDays += totalDays;
-        }
-      });
-
-      const calculatedSpentVal = guestRes
-        .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-        .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-      const totalSpentVal = Math.max(g.totalSpent || 0, calculatedSpentVal);
+      const position = calculateGuestFinancialPosition(g, guestRes, hotel);
+      const calculatedNights = position.totalNights;
+      const totalSpentVal = position.totalCharges;
 
       statsMap[g.id] = {
         visitsCount,
-        calculatedDays,
+        calculatedDays: calculatedNights,
         totalSpentVal
       };
     });
@@ -1145,8 +1136,8 @@ export function GuestManagement() {
                         <div className="text-sm font-bold text-zinc-100">{visitsCount}</div>
                       </div>
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Days</div>
-                        <div className="text-sm font-bold text-amber-500">{calculatedDays || ((guest as any).totalNights || 0) + (guest.totalStays || 0)}</div>
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Nights</div>
+                        <div className="text-sm font-bold text-amber-500">{calculatedDays || (guest as any).totalNights || 0}</div>
                       </div>
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
@@ -1260,10 +1251,8 @@ export function GuestManagement() {
                 const noshowCount = guestRes.filter(r => r.status === 'no_show').length;
                 const visitsCount = completedCount + activeCount;
                 
-                const calculatedSpentVal = guestRes
-                  .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-                  .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-                const totalSpentVal = Math.max(viewingHistory.totalSpent || 0, calculatedSpentVal);
+                const pos = calculateGuestFinancialPosition(viewingHistory, guestRes, hotel);
+                const totalSpentVal = pos.totalCharges;
 
                 return (
                   <>

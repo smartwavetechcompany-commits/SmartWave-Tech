@@ -253,14 +253,21 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         })
       });
 
-      const data = await resp.json();
+      let data: any = {};
+      const responseText = await resp.text();
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch (parseErr) {
+        console.error("Non-JSON response from /api/auth/create-staff:", responseText);
+        throw new Error(responseText || `Server responded with status ${resp.status} (${resp.statusText || 'Error'})`);
+      }
       toast.dismiss();
 
       if (!resp.ok) {
         if (data?.code === 'auth/email-already-in-use') {
           throw new Error('This email address is already registered in Firebase Authentication. Please use a different email or resend the password reset invitation.');
         }
-        throw new Error(data?.error || 'Failed to create staff account in Firebase Auth');
+        throw new Error(data?.error || `Failed to create staff account in Firebase Auth (status: ${resp.status})`);
       }
 
       const firebaseUid = data.firebase_uid;
@@ -337,11 +344,17 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         })
       });
 
-      const resData = await resp.json();
+      let resData: any = {};
+      const responseText = await resp.text();
+      try {
+        resData = responseText ? JSON.parse(responseText) : {};
+      } catch (parseErr) {
+        throw new Error(responseText || `Server responded with status ${resp.status} (${resp.statusText || 'Error'})`);
+      }
       toast.dismiss();
 
       if (!resp.ok) {
-        throw new Error(resData?.error || 'Failed to resend activation link');
+        throw new Error(resData?.error || `Failed to resend activation link (status: ${resp.status})`);
       }
 
       if (resData.emailSent) {

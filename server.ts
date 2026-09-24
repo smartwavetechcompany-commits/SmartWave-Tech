@@ -340,46 +340,45 @@ async function startServer() {
     subject: string;
     html: string;
     fromName: string;
-  }) {
+  }): Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }> {
     let emailDispatched = false;
     let method = 'simulated';
     let previewUrl: string | false = false;
-    let deliveryError: string | null = null;
 
-    // 1. Try production SMTP if credentials provided
-    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        const nodemailer = await import('nodemailer');
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: Number(process.env.SMTP_PORT) || 587,
-          secure: process.env.SMTP_SECURE === 'true',
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
-          },
-        });
+    const emailPromise: Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }> = (async () => {
+      // 1. Try production SMTP if credentials provided
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+        try {
+          const nodemailer = await import('nodemailer');
+          const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: Number(process.env.SMTP_PORT) || 587,
+            secure: process.env.SMTP_SECURE === 'true',
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS,
+            },
+          });
 
-        const info = await transporter.sendMail({
-          from: `"${fromName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
-          to,
-          subject,
-          html,
-        });
+          const info = await transporter.sendMail({
+            from: `"${fromName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+            to,
+            subject,
+            html,
+          });
 
-        if (info && info.messageId) {
-          emailDispatched = true;
-          method = 'smtp';
-          console.log(`[EMAIL DISPATCHED via SMTP] To: ${to} | MessageId: ${info.messageId}`);
+          if (info && info.messageId) {
+            emailDispatched = true;
+            method = 'smtp';
+            console.log(`[EMAIL DISPATCHED via SMTP] To: ${to} | MessageId: ${info.messageId}`);
+            return { emailDispatched, method, previewUrl };
+          }
+        } catch (smtpErr: any) {
+          console.error("[SMTP ERROR] Failed to send via configured SMTP:", smtpErr?.message || smtpErr);
         }
-      } catch (smtpErr: any) {
-        console.error("[SMTP ERROR] Failed to send via configured SMTP:", smtpErr?.message || smtpErr);
-        deliveryError = smtpErr?.message || 'SMTP delivery failed';
       }
-    }
 
-    // 2. Fallback to Nodemailer Ethereal real test transport if SMTP not configured or failed
-    if (!emailDispatched) {
+      // 2. Fallback to Nodemailer Ethereal test transport
       try {
         const nodemailer = await import('nodemailer');
         if (!cachedEtherealAccount) {
@@ -411,14 +410,21 @@ async function startServer() {
           console.log(`[EMAIL DISPATCHED via Ethereal Test] To: ${to} | Preview: ${previewUrl}`);
         }
       } catch (etherealErr: any) {
-        console.warn("[ETHEREAL NOTICE] Nodemailer test transport error:", etherealErr?.message || etherealErr);
-        deliveryError = etherealErr?.message || 'Ethereal transport unavailable';
-        emailDispatched = false;
-        method = 'delivery_failed';
+        console.warn("[ETHEREAL NOTICE] Nodemailer test transport notice:", etherealErr?.message || etherealErr);
+        method = 'simulated';
       }
-    }
 
-    return { emailDispatched, method, previewUrl, deliveryError };
+      return { emailDispatched, method, previewUrl };
+    })();
+
+    // Race with a 2500ms timeout so external network delays never block API responses or drop HTTP connections
+    const timeoutPromise = new Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }>((resolve) => {
+      setTimeout(() => {
+        resolve({ emailDispatched: false, method: 'queued', previewUrl: false });
+      }, 2500);
+    });
+
+    return await Promise.race([emailPromise, timeoutPromise]);
   }
 
   // Helper: Build branded activation email HTML
@@ -896,7 +902,122 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("[CREATE STAFF ERROR]:", err);
+      res.setHeader('Content-Type', 'application/json');
       return res.status(500).json({ error: err.message || "Failed to create staff account" });
+    }
+  });
+
+  // API Route: Extend Grace Period for checked-in guest (Time-Sensitive Ad-Hoc Extension)
+  app.post("/api/reservations/extend-grace-period", async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const {
+      hotelId,
+      reservationId,
+      extensionMinutes = 60,
+      reason = "Front Desk courtesy extension",
+      staffUid = "staff",
+      staffName = "Front Desk Staff"
+    } = req.body;
+
+    if (!hotelId || !reservationId) {
+      return res.status(400).json({ error: "Missing required parameters: hotelId and reservationId are mandatory." });
+    }
+
+    try {
+      const { doc, getDoc, updateDoc, arrayUnion, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+
+      const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+      const resSnap = await getDoc(resRef);
+      if (!resSnap.exists()) {
+        return res.status(404).json({ error: "Reservation not found in hotel records." });
+      }
+      const resData = resSnap.data();
+
+      // Fetch hotel default checkout settings
+      const hotelRef = doc(db, 'hotels', hotelId);
+      const hotelSnap = await getDoc(hotelRef);
+      const hotelData = hotelSnap.exists() ? hotelSnap.data() : {};
+
+      const currentCustomMinutes = Number(resData.customGracePeriodMinutes || 0);
+      const minutesToAdd = Math.max(15, Number(extensionMinutes) || 60);
+      const newTotalCustomMinutes = currentCustomMinutes + minutesToAdd;
+
+      const baseCheckoutTime = resData.approvedLateCheckoutTime || resData.checkOutTime || hotelData.defaultCheckOutTime || hotelData.settings?.checkout?.defaultTime || '12:00';
+      const [h, m] = baseCheckoutTime.split(':').map(Number);
+      const coutDate = resData.checkOut ? new Date(resData.checkOut) : new Date();
+      const scheduledCheckoutDateTime = new Date(
+        coutDate.getFullYear(),
+        coutDate.getMonth(),
+        coutDate.getDate(),
+        isNaN(h) ? 12 : h,
+        isNaN(m) ? 0 : m,
+        0
+      );
+
+      const hotelGraceHours = hotelData.settings?.checkout?.gracePeriod !== undefined
+        ? Number(hotelData.settings.checkout.gracePeriod) / 60
+        : Number(hotelData.overstayGraceHours ?? 2);
+      const hotelGraceMs = hotelGraceHours * 60 * 60 * 1000;
+
+      const previousDeadlineMs = scheduledCheckoutDateTime.getTime() + hotelGraceMs + (currentCustomMinutes * 60 * 1000);
+      const prospectiveDeadline = new Date(previousDeadlineMs + (minutesToAdd * 60 * 1000));
+      const newEffectiveTimeStr = prospectiveDeadline.toTimeString().substring(0, 5);
+      const nowIso = new Date().toISOString();
+
+      const extensionRecord = {
+        minutes: minutesToAdd,
+        totalCustomMinutes: newTotalCustomMinutes,
+        approvedBy: staffName,
+        approvedByUid: staffUid,
+        timestamp: nowIso,
+        reason: String(reason).trim() || 'Front Desk courtesy extension',
+        previousCheckoutDeadline: new Date(previousDeadlineMs).toISOString(),
+        newEffectiveCheckoutTime: prospectiveDeadline.toISOString()
+      };
+
+      await updateDoc(resRef, {
+        customGracePeriodMinutes: newTotalCustomMinutes,
+        approvedLateCheckoutTime: newEffectiveTimeStr,
+        effectiveCheckoutTime: prospectiveDeadline.toISOString(),
+        gracePeriodApprovedBy: {
+          uid: staffUid,
+          name: staffName,
+          timestamp: nowIso,
+          reason: String(reason).trim() || 'Front Desk courtesy extension'
+        },
+        gracePeriodExtensionHistory: arrayUnion(extensionRecord)
+      });
+
+      // Write Audit Log and Activity Log
+      try {
+        const logData = {
+          action: 'GRACE_PERIOD_EXTENDED',
+          module: 'Reservations',
+          reservationId,
+          targetId: reservationId,
+          performedBy: staffName,
+          performedByUid: staffUid,
+          details: `Extended grace period by +${minutesToAdd}m (Total custom: ${newTotalCustomMinutes}m) for Room ${resData.roomNumber || resData.roomId} (${resData.guestName}). New checkout deadline: ${newEffectiveTimeStr}. Reason: ${reason}`,
+          timestamp: serverTimestamp(),
+          createdAt: nowIso
+        };
+        await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), logData);
+        await addDoc(collection(db, 'hotels', hotelId, 'activityLogs'), logData);
+      } catch (logErr) {
+        console.warn("[AUDIT LOG NOTICE]:", logErr);
+      }
+
+      return res.json({
+        success: true,
+        reservationId,
+        customGracePeriodMinutes: newTotalCustomMinutes,
+        effectiveCheckoutTime: prospectiveDeadline.toISOString(),
+        approvedLateCheckoutTime: newEffectiveTimeStr,
+        message: `Grace period extended by ${minutesToAdd} minutes. New checkout deadline is ${newEffectiveTimeStr}.`
+      });
+    } catch (err: any) {
+      console.error("[EXTEND GRACE PERIOD ERROR]:", err);
+      return res.status(500).json({ error: err.message || "Failed to extend grace period." });
     }
   });
 

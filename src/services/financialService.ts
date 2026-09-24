@@ -2,6 +2,7 @@ import { db } from '../firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { LedgerEntry, Guest, Reservation, Hotel } from '../types';
 import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateReservationAccount } from '../utils/financialUtils';
 
 export interface GuestAccountSummary {
   totalCharges: number;
@@ -149,8 +150,47 @@ export function calculateGuestFinancialPosition(
     totalNights += duration.totalNights;
   });
 
-  if (validEntries.length > 0) {
-    // Authoritative calculation PURELY from posted ledger entries
+  if (matchingRes.length > 0) {
+    // 1. Authoritative calculation across reservations using unified reservation account engine
+    matchingRes.forEach(res => {
+      const resAccount = calculateReservationAccount(res, hotel, validEntries);
+      totalCharges += resAccount.totalCharges;
+      totalRoomCharges += resAccount.totalRoomCharges;
+      totalOverstayCharges += resAccount.totalOverstayCharges;
+      totalServiceCharges += resAccount.totalServiceCharges;
+      totalPayments += resAccount.totalPayments;
+      totalRefunds += resAccount.totalRefunds;
+      totalTransfers += resAccount.totalTransfers;
+    });
+
+    // Handle any standalone entries not attached to matching reservations
+    if (validEntries.length > 0) {
+      const resIds = new Set(matchingRes.map(r => r.id));
+      const unlinkedEntries = validEntries.filter(e => !e.reservationId || !resIds.has(e.reservationId));
+      unlinkedEntries.forEach(e => {
+        if (e.type === 'debit') {
+          if (e.category === 'refund') {
+            totalRefunds += e.amount;
+          } else {
+            totalCharges += e.amount;
+            if (e.category === 'room' || e.chargeType === 'room_rate') {
+              totalRoomCharges += e.amount;
+            } else if (e.chargeType === 'overstay') {
+              totalOverstayCharges += e.amount;
+            } else {
+              totalServiceCharges += e.amount;
+            }
+          }
+        } else if (e.type === 'credit') {
+          totalPayments += e.amount;
+          if (e.category === 'transfer') {
+            totalTransfers += e.amount;
+          }
+        }
+      });
+    }
+  } else if (validEntries.length > 0) {
+    // Authoritative calculation PURELY from posted ledger entries when no reservations exist
     validEntries.forEach(e => {
       if (e.type === 'debit') {
         if (e.category === 'refund') {
@@ -173,19 +213,6 @@ export function calculateGuestFinancialPosition(
             totalTransfers += e.amount;
           }
         }
-      }
-    });
-  } else if (matchingRes.length > 0) {
-    // If ledger entries aren't passed, calculate from reservation ledger balances or amounts
-    matchingRes.forEach(res => {
-      if (res.ledgerBalance !== undefined) {
-        if (res.ledgerBalance > 0) {
-          totalCharges += res.ledgerBalance;
-        } else {
-          totalPayments += Math.abs(res.ledgerBalance);
-        }
-      } else {
-        totalCharges += res.totalAmount || 0;
       }
     });
   } else {
