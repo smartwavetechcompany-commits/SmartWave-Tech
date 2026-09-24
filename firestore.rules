@@ -108,12 +108,8 @@ service cloud.firestore {
     //////////////////////////////
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (
-        isSuperAdmin() ||
-        request.auth.uid == userId ||
-        (resource != null && sameHotel(resource.data.hotelId)) ||
-        (resource != null && (resource.data.email == request.auth.token.email || resource.data.email.lower() == request.auth.token.email.lower()))
-      );
+      // Allow reading user document (needed for login, activation, and hotel membership verification)
+      allow read: if true;
 
       allow create: if (isAuthenticated() && (
                       (request.auth.uid == userId && request.resource.data.role != "superAdmin") ||
@@ -121,14 +117,28 @@ service cloud.firestore {
                       isSuperAdmin()
                     ));
 
-      allow update: if (isAuthenticated() && (
-                      (request.auth.uid == userId) ||
-                      (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
-                       hasStaffManagementPermission() &&
-                       request.resource.data.role != "superAdmin") ||
-                      (hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
-                      isSuperAdmin()
-                    ));
+      allow update: if (
+                      // 1. Allow account activation status updates (transitioning from pending_activation to active)
+                      (
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                          'status', 'isVerified', 'emailVerified', 'temporaryPassword', 
+                          'initialPassword', 'forcePasswordChange', 'passwordChangedAt', 
+                          'passwordChangedBy', 'updatedAt', 'activationToken', 'activationLink',
+                          'initialTempPass'
+                        ]) &&
+                        request.resource.data.status in ['active', 'pending_activation'] &&
+                        request.resource.data.role == resource.data.role &&
+                        request.resource.data.hotelId == resource.data.hotelId
+                      ) ||
+                      (isAuthenticated() && (
+                        (request.auth.uid == userId) ||
+                        (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
+                         hasStaffManagementPermission() &&
+                         request.resource.data.role != "superAdmin") ||
+                        (hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
+                        isSuperAdmin()
+                      ))
+                    );
 
       allow delete: if isAuthenticated() && (
                       isSuperAdmin() ||

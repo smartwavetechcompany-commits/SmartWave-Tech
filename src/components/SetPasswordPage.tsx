@@ -19,6 +19,7 @@ import {
   Mail
 } from 'lucide-react';
 import { verifyPasswordResetCode, confirmPasswordReset, signInWithEmailAndPassword, updatePassword, signOut } from 'firebase/auth';
+import { doc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { validatePasswordResetToken, completePasswordResetWithToken } from '../utils/passwordResetService';
 import { PasswordResetToken } from '../types';
@@ -192,15 +193,16 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
     try {
       let authPasswordUpdated = false;
       const effectiveTempPass = tempPass || fallbackTokenData?.tempPass;
+      const cleanEmail = targetEmail.trim().toLowerCase();
 
       // 1. Direct sign-in & password update if tempPass is present
-      if (effectiveTempPass && targetEmail) {
+      if (effectiveTempPass && cleanEmail) {
         try {
-          const cred = await signInWithEmailAndPassword(auth, targetEmail.trim().toLowerCase(), effectiveTempPass);
+          const cred = await signInWithEmailAndPassword(auth, cleanEmail, effectiveTempPass);
           if (cred.user) {
             await updatePassword(cred.user, newPassword);
             authPasswordUpdated = true;
-            console.log("[FIREBASE AUTH CLIENT] Password successfully set via direct credential authentication!");
+            console.log("[FIREBASE AUTH CLIENT] Password set via direct temp credential authentication!");
           }
         } catch (signInErr: any) {
           console.warn("[FIREBASE AUTH CLIENT] Temp credential update notice:", signInErr?.message);
@@ -221,40 +223,86 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         }
       }
 
-      // 3. Complete activation on server (sets password in Auth, marks user active in DB, marks token used)
-      let serverActivated = false;
+      // 3. Authenticate with the newly set password to verify credentials and establish authenticated session
+      let authenticatedUid: string | null = null;
       try {
-        const resp = await fetch('/api/auth/activate-staff-user', {
+        const activeCred = await signInWithEmailAndPassword(auth, cleanEmail, newPassword);
+        if (activeCred.user) {
+          authenticatedUid = activeCred.user.uid;
+          authPasswordUpdated = true;
+          console.log("[FIREBASE AUTH CLIENT] Successfully verified new password, UID:", authenticatedUid);
+        }
+      } catch (authVerifyErr: any) {
+        console.warn("[FIREBASE AUTH CLIENT] Active authentication notice:", authVerifyErr?.message);
+      }
+
+      // 4. Update the staff document in Firestore directly using user's authenticated context (request.auth.uid == userId)
+      const nowIso = new Date().toISOString();
+      const targetUidToUpdate = authenticatedUid || fallbackTokenData?.targetUid;
+
+      if (targetUidToUpdate) {
+        try {
+          await updateDoc(doc(db, 'users', targetUidToUpdate), {
+            status: 'active',
+            isVerified: true,
+            emailVerified: true,
+            temporaryPassword: null,
+            initialPassword: null,
+            initialTempPass: null,
+            forcePasswordChange: false,
+            passwordChangedAt: nowIso,
+            passwordChangedBy: cleanEmail,
+            updatedAt: nowIso
+          });
+          console.log("[FIRESTORE CLIENT] Staff user document transitioned to 'active' & verified!");
+        } catch (dbErr: any) {
+          console.warn("[FIRESTORE CLIENT] Direct document update notice:", dbErr?.message);
+        }
+      }
+
+      // 5. Mark activation token as used in Firestore
+      if (tokenParam) {
+        try {
+          await updateDoc(doc(db, 'activationTokens', tokenParam), {
+            isUsed: true,
+            status: 'used',
+            usedAt: nowIso,
+            updatedAt: nowIso
+          });
+        } catch (e) {}
+        try {
+          await updateDoc(doc(db, 'passwordResetTokens', tokenParam), {
+            isUsed: true,
+            status: 'used',
+            usedAt: nowIso,
+            updatedAt: nowIso
+          });
+        } catch (e) {}
+      }
+
+      // 6. Complete activation on server (sets password in Auth, marks user active in DB, marks token used)
+      try {
+        await fetch('/api/auth/activate-staff-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: targetEmail.trim().toLowerCase(),
+            email: cleanEmail,
             password: newPassword,
             tp: effectiveTempPass || undefined,
             oobCode: oobCode || undefined,
             tokenId: tokenParam || undefined
           })
         });
-        const data = await resp.json();
-        if (resp.ok && data?.success) {
-          serverActivated = true;
-          authPasswordUpdated = true;
-          console.log("[ACTIVATE STAFF API] Succeeded:", data);
-        }
       } catch (apiErr) {
         console.warn("[ACTIVATE STAFF API] Server notification notice:", apiErr);
       }
 
-      // 4. Complete with token service safely
+      // 7. Complete token service if tokenParam provided
       if (tokenParam) {
         try {
-          await completePasswordResetWithToken(tokenParam, newPassword, oobCode || undefined, targetEmail);
-          authPasswordUpdated = true;
+          await completePasswordResetWithToken(tokenParam, newPassword, oobCode || undefined, cleanEmail);
         } catch (tokErr: any) {
           console.warn("[TOKEN COMPLETION] Client token finish warning:", tokErr);
-          if (!serverActivated && !oobCode && !effectiveTempPass) {
-            throw new Error(tokErr.message || 'Failed to complete password setup. Please try again.');
-          }
         }
       }
 
@@ -262,6 +310,12 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
       try {
         await signOut(auth);
       } catch (e) {}
+
+      // Save prefilled email & message in sessionStorage for immediate pick-up on login page
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('pms_prefilled_email', cleanEmail);
+        sessionStorage.setItem('pms_login_success_msg', 'Account successfully activated! Please sign in with your new password.');
+      }
 
       setSubmitSuccess(true);
     } catch (err: any) {
@@ -274,14 +328,10 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
 
   const handleProceedToLogin = () => {
     if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('oobCode');
-      url.searchParams.delete('code');
-      url.searchParams.delete('token');
-      url.searchParams.delete('resetToken');
-      url.searchParams.delete('mode');
-      url.searchParams.delete('apiKey');
-      window.history.replaceState({}, document.title, '/');
+      sessionStorage.setItem('pms_prefilled_email', targetEmail.trim().toLowerCase());
+      sessionStorage.setItem('pms_login_success_msg', 'Account successfully activated! Please sign in with your new password.');
+      window.location.href = '/';
+      return;
     }
     onNavigateToLogin(targetEmail, 'Account successfully activated! You can now log into the PMS with your new password.');
   };

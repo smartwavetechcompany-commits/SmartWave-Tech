@@ -116,12 +116,14 @@ function AppContent() {
 
   // If no user is logged in, show AuthPage
   if (!user) {
+    const sessionEmail = typeof window !== 'undefined' ? sessionStorage.getItem('pms_prefilled_email') : null;
+    const sessionMsg = typeof window !== 'undefined' ? sessionStorage.getItem('pms_login_success_msg') : null;
     return (
       <>
         <Toaster position="top-right" theme="dark" richColors />
         <AuthPage 
-          initialEmail={resetCompletedInfo?.email}
-          initialSuccessMessage={resetCompletedInfo?.message}
+          initialEmail={resetCompletedInfo?.email || sessionEmail || undefined}
+          initialSuccessMessage={resetCompletedInfo?.message || sessionMsg || undefined}
         />
       </>
     );

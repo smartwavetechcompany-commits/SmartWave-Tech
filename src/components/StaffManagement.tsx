@@ -159,6 +159,44 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     return () => unsub();
   }, [hotelId, profile?.uid, hasPermissionError]);
 
+  // Auto-sync pending staff members if their activation token has already been used or completed
+  useEffect(() => {
+    if (!hotelId || !profile || staff.length === 0) return;
+    const pendingMembers = staff.filter(s => s.status === 'pending_activation' && s.email);
+    if (pendingMembers.length === 0) return;
+
+    let isMounted = true;
+    const syncPendingStaff = async () => {
+      for (const member of pendingMembers) {
+        if (!member.email) continue;
+        try {
+          const qTok = query(collection(db, 'activationTokens'), where('targetEmail', '==', member.email.trim().toLowerCase()));
+          const snapTok = await getDocs(qTok);
+          const hasUsed = snapTok.docs.some(d => d.data().isUsed === true || d.data().status === 'used');
+          if (hasUsed && isMounted) {
+            console.log(`[STAFF SYNC] Auto-activating verified member: ${member.email}`);
+            await database.safeUpdate(doc(db, 'users', member.uid), {
+              status: 'active',
+              isVerified: true,
+              emailVerified: true,
+              temporaryPassword: null,
+              initialPassword: null,
+              initialTempPass: null,
+              forcePasswordChange: false,
+              passwordChangedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch (err) {
+          console.warn("[STAFF SYNC] Token check notice:", err);
+        }
+      }
+    };
+
+    syncPendingStaff();
+    return () => { isMounted = false; };
+  }, [staff, hotelId, profile]);
+
   // Add staff submission
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -344,6 +382,30 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       toast.dismiss();
       toast.error(err.message || 'Failed to resend activation email');
+    }
+  };
+
+  // Instantly mark a staff member as Active & Verified
+  const handleDirectActivate = async (member: UserProfile) => {
+    if (!hotelId || !profile) return;
+    try {
+      toast.loading(`Activating account for ${member.displayName || member.email}...`);
+      await database.safeUpdate(doc(db, 'users', member.uid), {
+        status: 'active',
+        isVerified: true,
+        emailVerified: true,
+        temporaryPassword: null,
+        initialPassword: null,
+        initialTempPass: null,
+        forcePasswordChange: false,
+        passwordChangedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      toast.dismiss();
+      toast.success(`${member.displayName || member.email} is now Active & Verified!`);
+    } catch (err: any) {
+      toast.dismiss();
+      toast.error(`Could not activate staff account: ${err.message}`);
     }
   };
 
@@ -807,6 +869,17 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* Instantly Mark Active & Verified */}
+                              {member.status === 'pending_activation' && canResetPasswords && (
+                                <button
+                                  onClick={() => handleDirectActivate(member)}
+                                  className="p-1.5 rounded-lg text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                                  title="Instantly Mark Active & Verified"
+                                >
+                                  <CheckCircle2 size={16} />
+                                </button>
+                              )}
+
                               {/* Resend Activation Email (One-time 24h link) */}
                               {member.status === 'pending_activation' && canResetPasswords && (
                                 <button
