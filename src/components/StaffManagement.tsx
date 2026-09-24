@@ -12,6 +12,7 @@ import { SessionControlCenter } from './SessionControlCenter';
 import { AccountCreationSummaryModal, UserSummaryData } from './AccountCreationSummaryModal';
 import { AdminResetPasswordModal } from './AdminResetPasswordModal';
 import { generateAccountActivationToken, resendAccountActivationEmail } from '../utils/passwordResetService';
+import { provisionStaffAccount, resendStaffActivation } from '../services/staffProvisionService';
 import { 
   UserPlus, 
   Search, 
@@ -230,48 +231,22 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     try {
       toast.loading('Provisioning user in Firebase Authentication & database...');
 
-      const resp = await fetch('/api/auth/create-staff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hotelId,
-          hotelName: authHotel?.name || 'Hotel Property',
-          email: newStaff.email.trim().toLowerCase(),
-          fullName: newStaff.fullName.trim(),
-          phone: newStaff.phone.trim() || undefined,
-          department: newStaff.department,
-          employeeId: newStaff.employeeId.trim() || undefined,
-          roleType: newStaff.roleType,
-          baseRole: newStaff.baseRole,
-          customRoleId: newStaff.roleType === 'custom' ? assignedRoleId : undefined,
-          roleLabel,
-          permissions: permissionsToAssign,
-          adminEmail: profile?.email || 'Administrator',
-          adminName: profile?.displayName || profile?.email || 'Hotel Administrator',
-          adminUid: profile?.uid || 'admin',
-          baseUrl: window.location.origin
-        })
+      const result = await provisionStaffAccount({
+        hotelId,
+        hotelName: authHotel?.name || 'Hotel Property',
+        newStaff,
+        permissionsToAssign,
+        assignedRoleId: newStaff.roleType === 'custom' ? assignedRoleId : undefined,
+        roleLabel,
+        assignedUserRole,
+        profile,
+        baseUrl: window.location.origin
       });
 
-      let data: any = {};
-      const responseText = await resp.text();
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch (parseErr) {
-        console.error("Non-JSON response from /api/auth/create-staff:", responseText);
-        throw new Error(responseText || `Server responded with status ${resp.status} (${resp.statusText || 'Error'})`);
-      }
       toast.dismiss();
 
-      if (!resp.ok) {
-        if (data?.code === 'auth/email-already-in-use') {
-          throw new Error('This email address is already registered in Firebase Authentication. Please use a different email or resend the password reset invitation.');
-        }
-        throw new Error(data?.error || `Failed to create staff account in Firebase Auth (status: ${resp.status})`);
-      }
-
-      const firebaseUid = data.firebase_uid;
-      const staffProfile = data.user;
+      const firebaseUid = result.firebaseUid;
+      const staffProfile = result.staffProfile;
 
       // Close create form and show the activation summary modal
       setIsAddingStaff(false);
@@ -288,9 +263,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         roleName: roleLabel,
         roleId: staffProfile.customRoleId || staffProfile.staffRole || staffProfile.role,
         employeeId: staffProfile.employeeId,
-        activationLink: data.activationLink,
+        activationLink: result.activationLink,
         activationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        emailDispatched: data.emailSent,
+        emailDispatched: result.emailSent,
         status: 'pending_activation',
         createdAt: staffProfile.createdAt || new Date().toISOString(),
         createdBy: profile?.email || 'Administrator'
@@ -312,14 +287,14 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         customRoleDescription: '',
       });
 
-      if (data.emailSent) {
+      if (result.emailSent) {
         toast.success(`Staff user created in Firebase Auth! Activation email sent to ${staffProfile.email}`);
       } else {
         toast.info(`Staff user created in Firebase Auth. One-time activation link generated.`);
       }
     } catch (err: any) {
       toast.dismiss();
-      toast.error('Failed to create staff member: ' + err.message);
+      toast.error('Failed to create staff member: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -328,36 +303,18 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId || !member.email || !profile) return;
     try {
       toast.loading(`Regenerating Firebase activation link for ${member.email}...`);
-      const resp = await fetch('/api/auth/resend-activation-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hotelId,
-          hotelName: authHotel?.name || 'Hotel Property',
-          targetUid: member.uid || member.firebase_uid,
-          targetEmail: member.email,
-          targetName: member.displayName || member.email,
-          adminEmail: profile.email || 'Administrator',
-          adminName: profile.displayName || profile.email || 'Hotel Administrator',
-          adminUid: profile.uid,
-          baseUrl: window.location.origin
-        })
+
+      const result = await resendStaffActivation({
+        hotelId,
+        hotelName: authHotel?.name || 'Hotel Property',
+        member,
+        profile,
+        baseUrl: window.location.origin
       });
 
-      let resData: any = {};
-      const responseText = await resp.text();
-      try {
-        resData = responseText ? JSON.parse(responseText) : {};
-      } catch (parseErr) {
-        throw new Error(responseText || `Server responded with status ${resp.status} (${resp.statusText || 'Error'})`);
-      }
       toast.dismiss();
 
-      if (!resp.ok) {
-        throw new Error(resData?.error || `Failed to resend activation link (status: ${resp.status})`);
-      }
-
-      if (resData.emailSent) {
+      if (result.emailSent) {
         toast.success(`Activation email sent successfully to ${member.email}`);
       } else {
         toast.info(`New activation link generated for ${member.email}`);
@@ -377,9 +334,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         roleName: member.roles?.[0] || member.role,
         roleId: member.customRoleId || member.staffRole || member.role,
         employeeId: member.employeeId,
-        activationLink: resData.activationLink,
+        activationLink: result.activationLink,
         activationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        emailDispatched: resData.emailSent,
+        emailDispatched: result.emailSent,
         status: 'pending_activation',
         createdAt: member.createdAt || new Date().toISOString(),
         createdBy: profile?.email || 'Administrator'

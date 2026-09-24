@@ -7,6 +7,7 @@ import { safeStringify } from "./utils";
 import { errorService, ErrorSeverity } from "./services/errorService";
 import firebaseConfig from "../firebase-applet-config.json";
 
+export { firebaseConfig };
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);

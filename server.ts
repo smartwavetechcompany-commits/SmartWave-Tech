@@ -11,6 +11,17 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // CORS and Preflight Handling for all environments (prevents 405 Method Not Allowed)
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   app.use(express.json());
 
   // Initialize Firebase for server validation and Admin SDK
@@ -735,6 +746,11 @@ async function startServer() {
     const directUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}&mode=resetPassword`;
     return { activationUrl: directUrl, linkSource: 'direct_portal' };
   }
+
+  // Health/status check for create-staff endpoint to avoid 405 Method Not Allowed on misdirected GET requests
+  app.get("/api/auth/create-staff", (req, res) => {
+    return res.status(200).json({ status: "ready", endpoint: "/api/auth/create-staff", allowedMethods: ["POST"] });
+  });
 
   // API Route: Create Staff Account (Phase 1: Firebase Auth user + Staff Profile with firebase_uid + Activation link)
   app.post("/api/auth/create-staff", async (req, res) => {
