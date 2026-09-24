@@ -313,5 +313,9 @@ service cloud.firestore {
     match /passwordResetTokens/{tokenId} {
       allow read, write: if true;
     }
+
+    match /activationTokens/{tokenId} {
+      allow read, write: if true;
+    }
   }
 }

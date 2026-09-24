@@ -11,25 +11,12 @@ export { firebaseConfig };
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-// Use initializeFirestore with optimized settings for sandboxed environments
+// Use initializeFirestore with standard resilient transport settings
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  experimentalAutoDetectLongPolling: false,
   ignoreUndefinedProperties: true,
+  experimentalAutoDetectLongPolling: true,
 });
 export const storage = getStorage(app);
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firestore connection successful");
-  } catch (error) {
-    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('Could not reach Cloud Firestore backend'))) {
-      console.error("Please check your Firebase configuration. The client is offline.");
-    }
-  }
-}
-testConnection();
 
 /**
  * Helper to analyze and identify which Firestore security rule caused an access failure

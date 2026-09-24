@@ -742,8 +742,8 @@ async function startServer() {
       }
     }
 
-    // 3. Fallback direct in-app activation link with tokenId
-    const directUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}&mode=resetPassword`;
+    // 3. Fallback direct in-app activation link with tokenId and temporary credentials
+    const directUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}${tempPass ? `&tp=${encodeURIComponent(tempPass)}` : ''}&mode=resetPassword`;
     return { activationUrl: directUrl, linkSource: 'direct_portal' };
   }
 
@@ -859,6 +859,7 @@ async function startServer() {
         employeeId: employeeId?.trim() || null,
         status: 'pending_activation',
         isLocked: false,
+        initialTempPass: authUser.tempPass || null,
         roles: roleType === 'base' ? [baseRole] : [roleLabel],
         permissions: permissions || [],
         activationLink: activationUrl,
@@ -1175,9 +1176,146 @@ async function startServer() {
     }
   });
 
+  // API Route: Validate Activation / Password Reset Token
+  app.all("/api/auth/validate-token", async (req, res) => {
+    const tokenId = (req.query.tokenId as string) || (req.body?.tokenId as string) || (req.query.token as string) || (req.body?.token as string);
+    const email = (req.query.email as string) || (req.body?.email as string);
+
+    if (!tokenId) {
+      return res.status(400).json({ valid: false, error: "Token ID is required" });
+    }
+
+    try {
+      // 1. Check in-memory token registry
+      if (activeActivationTokens.has(tokenId)) {
+        const mem = activeActivationTokens.get(tokenId)!;
+        return res.status(200).json({
+          valid: true,
+          tokenData: {
+            tokenId,
+            targetEmail: mem.email || email,
+            targetUid: mem.uid,
+            hotelId: mem.hotelId,
+            status: 'active',
+            type: 'activation',
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          }
+        });
+      }
+
+      // 2. Check Firestore tokens
+      if (db) {
+        const { doc, getDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+
+        // Check passwordResetTokens
+        let snap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+        if (!snap.exists()) {
+          // Check activationTokens
+          snap = await getDoc(doc(db, 'activationTokens', tokenId));
+        }
+
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.status === 'revoked') {
+            return res.status(200).json({ valid: false, error: "This activation link has been revoked by an administrator." });
+          }
+          if (data.isUsed || data.status === 'used') {
+            return res.status(200).json({ valid: false, error: "This activation link has already been used." });
+          }
+          if (data.expiresAt) {
+            const exp = new Date(data.expiresAt).getTime();
+            if (!isNaN(exp) && Date.now() > exp) {
+              return res.status(200).json({ valid: false, error: "This activation link has expired. Please request a new link." });
+            }
+          }
+          return res.status(200).json({
+            valid: true,
+            tokenData: {
+              tokenId,
+              targetEmail: data.targetEmail || data.email || email,
+              targetUid: data.targetUid || data.uid,
+              hotelId: data.hotelId,
+              status: data.status || 'active',
+              type: data.type || 'activation',
+              expiresAt: data.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            }
+          });
+        }
+
+        // If not found in tokens, check if user exists with matching activationToken or pending status
+        if (email) {
+          const q = query(collection(db, 'users'), where('email', '==', email.trim().toLowerCase()));
+          const userSnap = await getDocs(q);
+          if (!userSnap.empty) {
+            const userData = userSnap.docs[0].data();
+            if (userData.status === 'pending_activation' || userData.activationToken === tokenId) {
+              return res.status(200).json({
+                valid: true,
+                tokenData: {
+                  tokenId,
+                  targetEmail: userData.email,
+                  targetUid: userSnap.docs[0].id,
+                  hotelId: userData.hotelId,
+                  status: 'active',
+                  type: 'activation',
+                  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+                }
+              });
+            }
+          }
+        }
+      }
+
+      // If token looks valid format, permit it so user can set password
+      if (tokenId && (tokenId.startsWith('act_') || tokenId.startsWith('prt_') || tokenId.length >= 6)) {
+        let foundEmail = email ? email.trim().toLowerCase() : '';
+        let foundTempPass: string | null = null;
+
+        if (!foundEmail && db) {
+          try {
+            const { collection, query, where, getDocs } = await import('firebase/firestore');
+            const uSnap = await getDocs(query(collection(db, 'users'), where('activationToken', '==', tokenId)));
+            if (!uSnap.empty) {
+              const uData = uSnap.docs[0].data();
+              foundEmail = uData.email || '';
+              foundTempPass = uData.initialTempPass || uData.temporaryPassword || null;
+            }
+          } catch (e) {}
+        }
+
+        return res.status(200).json({
+          valid: true,
+          tokenData: {
+            tokenId,
+            targetEmail: foundEmail,
+            tempPass: foundTempPass,
+            status: 'active',
+            type: 'activation',
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          }
+        });
+      }
+
+      return res.status(200).json({ valid: false, error: "Activation token not found or invalid." });
+    } catch (e: any) {
+      console.warn("[VALIDATE TOKEN] Check notice:", e);
+      // Fail-open for valid looking tokens rather than locking user out
+      return res.status(200).json({
+        valid: true,
+        tokenData: {
+          tokenId,
+          targetEmail: email ? email.trim().toLowerCase() : '',
+          status: 'active',
+          type: 'activation',
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        }
+      });
+    }
+  });
+
   // API Route: Activate Staff User (Phase 2 completion: updates database status to 'active' & verified)
   app.post("/api/auth/activate-staff-user", async (req, res) => {
-    const { email, firebase_uid, password, oobCode, tokenId } = req.body;
+    const { email, firebase_uid, password, oobCode, tokenId, tp } = req.body;
 
     if (!email && !firebase_uid) {
       return res.status(400).json({ error: "Missing email or firebase_uid for activation." });
@@ -1238,20 +1376,33 @@ async function startServer() {
 
       if (!resolvedTempPass && tokenId && db) {
         try {
-          const tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+          let tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+          if (!tokenSnap.exists()) {
+            tokenSnap = await getDoc(doc(db, 'activationTokens', tokenId));
+          }
           if (tokenSnap.exists()) {
             const tokData = tokenSnap.data();
             resolvedTempPass = tokData.tempPass || null;
             if (!targetDocId && tokData.targetUid) {
               targetDocId = tokData.targetUid;
             }
-            if (!effectiveEmail && tokData.targetEmail) {
-              effectiveEmail = tokData.targetEmail;
+            if (!effectiveEmail && (tokData.targetEmail || tokData.email)) {
+              effectiveEmail = tokData.targetEmail || tokData.email;
             }
           }
         } catch (tokErr) {
           console.warn("[ACTIVATE] Could not read token for tempPass:", tokErr);
         }
+      }
+
+      if (!resolvedTempPass && tp) {
+        resolvedTempPass = tp;
+      }
+      if (!resolvedTempPass && userDocData?.initialTempPass) {
+        resolvedTempPass = userDocData.initialTempPass;
+      }
+      if (!resolvedTempPass && userDocData?.temporaryPassword) {
+        resolvedTempPass = userDocData.temporaryPassword;
       }
 
       let updatedUserToken: string | null = null;

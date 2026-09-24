@@ -65,6 +65,7 @@ export interface UserProfile {
   phoneNumber?: string;
   initialPassword?: string | null;
   temporaryPassword?: string | null;
+  initialTempPass?: string | null;
   forcePasswordChange?: boolean;
   passwordChangedAt?: string;
   passwordChangedBy?: string;
@@ -99,6 +100,7 @@ export interface PasswordResetToken {
   targetName?: string;
   hotelId: string;
   hotelName?: string;
+  tempPass?: string | null;
   createdByUid: string;
   createdByEmail: string;
   createdByName?: string;

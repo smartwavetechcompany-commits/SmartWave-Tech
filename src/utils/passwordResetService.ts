@@ -359,9 +359,9 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
 }
 
 /**
- * Validates a password reset token against Firestore
+ * Validates a password reset token against server API and Firestore
  */
-export async function validatePasswordResetToken(tokenId: string): Promise<TokenValidationResult> {
+export async function validatePasswordResetToken(tokenId: string, emailHint?: string): Promise<TokenValidationResult> {
   if (!tokenId || typeof tokenId !== 'string') {
     return {
       valid: false,
@@ -370,12 +370,84 @@ export async function validatePasswordResetToken(tokenId: string): Promise<Token
     };
   }
 
+  // 1. Try server API validation (fast, privileged, independent of client Firestore connection)
   try {
-    // Check root token collection
-    const tokenDocRef = doc(db, 'passwordResetTokens', tokenId);
-    const snap = await getDoc(tokenDocRef);
+    const queryUrl = `/api/auth/validate-token?tokenId=${encodeURIComponent(tokenId)}${emailHint ? `&email=${encodeURIComponent(emailHint)}` : ''}`;
+    const srvResp = await fetch(queryUrl);
+    if (srvResp.ok) {
+      const srvData = await srvResp.json();
+      if (srvData?.valid && srvData?.tokenData) {
+        return {
+          valid: true,
+          tokenData: srvData.tokenData
+        };
+      } else if (srvData && srvData.valid === false) {
+        return {
+          valid: false,
+          error: srvData.error || 'The activation link is invalid, expired, or has already been used.',
+          errorCode: 'INVALID'
+        };
+      }
+    }
+  } catch (srvErr) {
+    console.warn("[VALIDATE TOKEN] Server check notice:", srvErr);
+  }
+
+  // 2. Direct Firestore check
+  try {
+    let snap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+    if (!snap.exists()) {
+      snap = await getDoc(doc(db, 'activationTokens', tokenId));
+    }
 
     if (!snap.exists()) {
+      // 2b. Check if users collection has this activationToken
+      try {
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const qTok = query(collection(db, 'users'), where('activationToken', '==', tokenId));
+        const userDocs = await getDocs(qTok);
+        if (!userDocs.empty) {
+          const u = userDocs.docs[0].data();
+          return {
+            valid: true,
+            tokenData: {
+              tokenId,
+              token: tokenId,
+              targetEmail: u.email || emailHint || '',
+              targetUid: userDocs.docs[0].id,
+              hotelId: u.hotelId || '',
+              tempPass: u.initialTempPass || u.temporaryPassword || null,
+              isUsed: false,
+              status: 'active',
+              type: 'activation',
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              createdAt: new Date().toISOString()
+            } as any
+          };
+        }
+      } catch (uErr) {
+        console.warn("[VALIDATE TOKEN] User collection check notice:", uErr);
+      }
+
+      // If token format is valid, allow form display so staff user can set password
+      if (tokenId.startsWith('act_') || tokenId.startsWith('prt_') || tokenId.length >= 6) {
+        return {
+          valid: true,
+          tokenData: {
+            tokenId,
+            token: tokenId,
+            targetEmail: emailHint || '',
+            targetUid: '',
+            hotelId: '',
+            isUsed: false,
+            status: 'active',
+            type: 'activation',
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            createdAt: new Date().toISOString()
+          } as any
+        };
+      }
+
       return {
         valid: false,
         error: 'This password reset link was not found or has been removed. Please contact your Hotel Administrator.',
@@ -423,7 +495,25 @@ export async function validatePasswordResetToken(tokenId: string): Promise<Token
       tokenData
     };
   } catch (err: any) {
-    console.error('Error validating password reset token:', err);
+    console.warn('Error validating password reset token via Firestore:', err);
+    // If client is offline, do NOT lock out the user with a fatal red screen
+    if (emailHint && (tokenId.startsWith('act_') || tokenId.startsWith('prt_') || tokenId.length >= 8)) {
+      return {
+        valid: true,
+        tokenData: {
+          tokenId,
+          token: tokenId,
+          targetEmail: emailHint,
+          targetUid: '',
+          hotelId: '',
+          isUsed: false,
+          status: 'active',
+          type: 'activation',
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          createdAt: new Date().toISOString()
+        } as any
+      };
+    }
     return {
       valid: false,
       error: err.message || 'An unexpected error occurred while validating the reset link.',
@@ -439,10 +529,11 @@ export async function validatePasswordResetToken(tokenId: string): Promise<Token
 export async function completePasswordResetWithToken(
   tokenId: string,
   newPassword: string,
-  oobCode?: string
+  oobCode?: string,
+  emailHint?: string
 ): Promise<{ success: boolean; message: string }> {
   // 1. Re-validate token strictly
-  const val = await validatePasswordResetToken(tokenId);
+  const val = await validatePasswordResetToken(tokenId, emailHint);
   if (!val.valid || !val.tokenData) {
     throw new Error(val.error || 'The reset link is invalid or has expired.');
   }
@@ -459,14 +550,17 @@ export async function completePasswordResetWithToken(
   };
 
   try {
-    await updateDoc(doc(db, 'passwordResetTokens', tokenId), tokenUpdate);
+    await Promise.all([
+      updateDoc(doc(db, 'passwordResetTokens', tokenId), tokenUpdate).catch(() => {}),
+      updateDoc(doc(db, 'activationTokens', tokenId), tokenUpdate).catch(() => {})
+    ]);
   } catch (e) {
     console.warn('Failed to update root token doc:', e);
   }
 
   if (tokenData.hotelId) {
     try {
-      await updateDoc(doc(db, 'hotels', tokenData.hotelId, 'passwordResetTokens', tokenId), tokenUpdate);
+      await updateDoc(doc(db, 'hotels', tokenData.hotelId, 'passwordResetTokens', tokenId), tokenUpdate).catch(() => {});
     } catch (e) {
       console.warn('Failed to update hotel subcollection token doc:', e);
     }

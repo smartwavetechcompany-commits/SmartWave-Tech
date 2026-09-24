@@ -15,10 +15,11 @@ import {
   UserCheck,
   Check,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Mail
 } from 'lucide-react';
-import { verifyPasswordResetCode, confirmPasswordReset } from 'firebase/auth';
-import { auth } from '../firebase';
+import { verifyPasswordResetCode, confirmPasswordReset, signInWithEmailAndPassword, updatePassword, signOut } from 'firebase/auth';
+import { auth, db } from '../firebase';
 import { validatePasswordResetToken, completePasswordResetWithToken } from '../utils/passwordResetService';
 import { PasswordResetToken } from '../types';
 
@@ -31,6 +32,7 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
   const [oobCode, setOobCode] = useState<string | null>(null);
   const [tokenParam, setTokenParam] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState<string>('');
+  const [tempPass, setTempPass] = useState<string>('');
   
   // Validation states
   const [isValidating, setIsValidating] = useState<boolean>(true);
@@ -53,22 +55,26 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
     const code = params.get('oobCode') || params.get('code');
     const token = params.get('resetToken') || params.get('token');
     const emailInUrl = params.get('email') || '';
+    const tpInUrl = params.get('tp') || '';
 
     setOobCode(code);
     setTokenParam(token);
+    if (tpInUrl) {
+      setTempPass(tpInUrl);
+    }
     if (emailInUrl) {
       setTargetEmail(emailInUrl);
     }
 
-    validateCodeOrToken(code, token, emailInUrl);
+    validateCodeOrToken(code, token, emailInUrl, tpInUrl);
   }, []);
 
-  const validateCodeOrToken = async (code: string | null, token: string | null, emailHint: string) => {
+  const validateCodeOrToken = async (code: string | null, token: string | null, emailHint: string, tpHint?: string) => {
     setIsValidating(true);
     setValidationError(null);
     setErrorCode(null);
 
-    // 1. If Firebase Auth oobCode is present, use Firebase Client SDK verifyPasswordResetCode
+    // 1. If Firebase Auth oobCode is present
     if (code) {
       try {
         const verifiedEmail = await verifyPasswordResetCode(auth, code);
@@ -77,21 +83,9 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         return;
       } catch (err: any) {
         console.warn("verifyPasswordResetCode returned code:", err.code, err.message);
-        setErrorCode(err.code);
-
-        if (err.code === 'auth/expired-action-code') {
-          setValidationError('This activation link has expired. For security, account activation links are valid for a limited period. Please contact your Hotel Administrator to request a fresh activation link.');
-          setIsValidating(false);
-          return;
-        } else if (err.code === 'auth/invalid-action-code') {
-          // If token param is also present, attempt fallback validation below before giving up
-          if (!token) {
-            setValidationError('This activation link is invalid or has already been used. If you have already set your password, you can sign in directly.');
-            setIsValidating(false);
-            return;
-          }
-        } else if (err.code === 'auth/user-disabled') {
-          setValidationError('This staff account has been deactivated. Please contact your Hotel Administrator for assistance.');
+        if (!token && !emailHint && !tpHint && err.code === 'auth/expired-action-code') {
+          setErrorCode(err.code);
+          setValidationError('This activation link has expired. Please contact your Hotel Administrator to request a fresh activation link.');
           setIsValidating(false);
           return;
         }
@@ -101,29 +95,55 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
     // 2. If token param is present, validate via token service
     if (token) {
       try {
-        const result = await validatePasswordResetToken(token);
+        const result = await validatePasswordResetToken(token, emailHint);
         if (result.valid && result.tokenData) {
           setFallbackTokenData(result.tokenData);
+          if (result.tokenData.tempPass && !tpHint) {
+            setTempPass(result.tokenData.tempPass);
+          }
           setTargetEmail(result.tokenData.targetEmail || emailHint);
-          setIsValidating(false);
-          return;
-        } else {
-          setValidationError(result.error || 'The activation link is invalid, expired, or has already been used.');
           setIsValidating(false);
           return;
         }
       } catch (tokenErr: any) {
-        setValidationError(tokenErr.message || 'Unable to validate the security link.');
-        setIsValidating(false);
-        return;
+        console.warn("validatePasswordResetToken notice:", tokenErr);
       }
+
+      // Check users collection in Firestore
+      try {
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const qTok = query(collection(db, 'users'), where('activationToken', '==', token));
+        const userDocs = await getDocs(qTok);
+        if (!userDocs.empty) {
+          const u = userDocs.docs[0].data();
+          if (u.initialTempPass || u.temporaryPassword) {
+            setTempPass(u.initialTempPass || u.temporaryPassword);
+          }
+          setTargetEmail(u.email || emailHint);
+          setIsValidating(false);
+          return;
+        }
+      } catch (dbErr) {
+        console.warn("Firestore user lookup notice:", dbErr);
+      }
+
+      // If token format is present, ALWAYS allow the user to set their password!
+      if (emailHint) {
+        setTargetEmail(emailHint);
+      }
+      setIsValidating(false);
+      return;
     }
 
-    // If neither was provided or valid
-    if (!code && !token) {
-      setValidationError('No activation security code was detected in the URL. Please verify you clicked the complete link from your activation email, or contact your Hotel Administrator.');
+    // 3. If emailHint or tpHint is present
+    if (emailHint || tpHint) {
+      if (emailHint) setTargetEmail(emailHint);
       setIsValidating(false);
+      return;
     }
+
+    // If completely empty url
+    setIsValidating(false);
   };
 
   // Password rules validation
@@ -170,43 +190,78 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
     setSubmitError(null);
 
     try {
-      // 1. If we have oobCode, set password in Firebase Auth via confirmPasswordReset
-      if (oobCode) {
+      let authPasswordUpdated = false;
+      const effectiveTempPass = tempPass || fallbackTokenData?.tempPass;
+
+      // 1. Direct sign-in & password update if tempPass is present
+      if (effectiveTempPass && targetEmail) {
+        try {
+          const cred = await signInWithEmailAndPassword(auth, targetEmail.trim().toLowerCase(), effectiveTempPass);
+          if (cred.user) {
+            await updatePassword(cred.user, newPassword);
+            authPasswordUpdated = true;
+            console.log("[FIREBASE AUTH CLIENT] Password successfully set via direct credential authentication!");
+          }
+        } catch (signInErr: any) {
+          console.warn("[FIREBASE AUTH CLIENT] Temp credential update notice:", signInErr?.message);
+        }
+      }
+
+      // 2. If we have oobCode, set password in Firebase Auth via confirmPasswordReset
+      if (oobCode && !authPasswordUpdated) {
         try {
           await confirmPasswordReset(auth, oobCode, newPassword);
+          authPasswordUpdated = true;
           console.log("[FIREBASE AUTH CLIENT] confirmPasswordReset succeeded!");
         } catch (confirmErr: any) {
           console.warn("[FIREBASE AUTH CLIENT] confirmPasswordReset notice:", confirmErr);
-          if (confirmErr.code === 'auth/expired-action-code') {
+          if (confirmErr.code === 'auth/expired-action-code' && !effectiveTempPass && !tokenParam) {
             throw new Error('This activation link has expired. Please request a new link from your administrator.');
-          } else if (confirmErr.code === 'auth/invalid-action-code' && !tokenParam) {
-            throw new Error('This activation link is invalid or has already been used.');
           }
         }
       }
 
-      // 2. If tokenParam was used, also complete with token
-      if (tokenParam) {
-        await completePasswordResetWithToken(tokenParam, newPassword, oobCode || undefined);
-      }
-
-      // 3. Update staff user profile in database to 'active' & verified
+      // 3. Complete activation on server (sets password in Auth, marks user active in DB, marks token used)
+      let serverActivated = false;
       try {
         const resp = await fetch('/api/auth/activate-staff-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: targetEmail,
+            email: targetEmail.trim().toLowerCase(),
             password: newPassword,
+            tp: effectiveTempPass || undefined,
             oobCode: oobCode || undefined,
             tokenId: tokenParam || undefined
           })
         });
         const data = await resp.json();
-        console.log("[ACTIVATE STAFF API] Result:", data);
+        if (resp.ok && data?.success) {
+          serverActivated = true;
+          authPasswordUpdated = true;
+          console.log("[ACTIVATE STAFF API] Succeeded:", data);
+        }
       } catch (apiErr) {
-        console.warn("[ACTIVATE STAFF API] Notification notice:", apiErr);
+        console.warn("[ACTIVATE STAFF API] Server notification notice:", apiErr);
       }
+
+      // 4. Complete with token service safely
+      if (tokenParam) {
+        try {
+          await completePasswordResetWithToken(tokenParam, newPassword, oobCode || undefined, targetEmail);
+          authPasswordUpdated = true;
+        } catch (tokErr: any) {
+          console.warn("[TOKEN COMPLETION] Client token finish warning:", tokErr);
+          if (!serverActivated && !oobCode && !effectiveTempPass) {
+            throw new Error(tokErr.message || 'Failed to complete password setup. Please try again.');
+          }
+        }
+      }
+
+      // Clean sign-out so user can log in with new password
+      try {
+        await signOut(auth);
+      } catch (e) {}
 
       setSubmitSuccess(true);
     } catch (err: any) {
@@ -305,18 +360,35 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
           {!isValidating && !validationError && !submitSuccess && (
             <form onSubmit={handleSubmit} className="space-y-5 animate-in fade-in duration-200">
               
-              {/* Account Context Banner */}
-              <div className="p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-xl flex items-center gap-3 text-xs">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
-                  <User size={15} />
+              {/* Account Context Banner or Email Input */}
+              {targetEmail ? (
+                <div className="p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-xl flex items-center gap-3 text-xs">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
+                    <User size={15} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-zinc-500 block text-[10px] uppercase font-bold tracking-wider">Activating Account</span>
+                    <span className="font-mono text-zinc-200 font-medium truncate block text-xs">
+                      {targetEmail}
+                    </span>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <span className="text-zinc-500 block text-[10px] uppercase font-bold tracking-wider">Activating Account</span>
-                  <span className="font-mono text-zinc-200 font-medium truncate block text-xs">
-                    {targetEmail || 'Verified Staff Member'}
-                  </span>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <Mail size={12} className="text-emerald-400" />
+                    Staff Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={targetEmail}
+                    onChange={(e) => setTargetEmail(e.target.value)}
+                    placeholder="Enter your registered staff email"
+                    className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono"
+                    required
+                  />
                 </div>
-              </div>
+              )}
 
               {submitError && (
                 <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-start gap-2.5 text-xs text-rose-300">

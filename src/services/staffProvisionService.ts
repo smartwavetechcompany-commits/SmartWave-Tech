@@ -143,7 +143,7 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
   const firebaseUid = authData.localId;
   const tokenId = 'act_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
   const cleanBase = baseUrl.replace(/\/+$/, '');
-  const activationLink = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}&token=${tokenId}&mode=resetPassword`;
+  const activationLink = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}&token=${tokenId}&tp=${encodeURIComponent(tempPass)}&mode=resetPassword`;
   const nowIso = new Date().toISOString();
 
   // 2. Persist Profile to Firestore `users/{firebaseUid}`
@@ -160,6 +160,8 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
     employeeId: newStaff.employeeId?.trim() || null,
     status: 'pending_activation',
     isLocked: false,
+    initialTempPass: tempPass,
+    temporaryPassword: tempPass,
     roles: [newStaff.baseRole],
     customRoleId: newStaff.roleType === 'custom' ? assignedRoleId : null,
     permissions: permissionsToAssign,
@@ -173,20 +175,31 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
 
   await setDoc(doc(db, 'users', firebaseUid), userProfileData, { merge: true });
 
-  // 3. Persist activation token document
+  // 3. Persist activation token document to both collections for guaranteed lookup
+  const tokenDocData = {
+    tokenId,
+    token: tokenId,
+    email: normalizedEmail,
+    targetEmail: normalizedEmail,
+    uid: firebaseUid,
+    targetUid: firebaseUid,
+    hotelId,
+    tempPass,
+    isUsed: false,
+    status: 'active',
+    type: 'activation',
+    createdAt: serverTimestamp(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    createdBy: profile?.email || 'Administrator'
+  };
+
   try {
-    await setDoc(doc(db, 'activationTokens', tokenId), {
-      tokenId,
-      email: normalizedEmail,
-      uid: firebaseUid,
-      hotelId,
-      createdAt: serverTimestamp(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      status: 'pending',
-      createdBy: profile?.email || 'Administrator'
-    });
+    await Promise.all([
+      setDoc(doc(db, 'passwordResetTokens', tokenId), tokenDocData),
+      setDoc(doc(db, 'activationTokens', tokenId), tokenDocData)
+    ]);
   } catch (tokenErr) {
-    console.warn("[Staff Provisioning] Could not write activationTokens doc:", tokenErr);
+    console.warn("[Staff Provisioning] Token doc write notice:", tokenErr);
   }
 
   // 4. Dispatch standard Firebase Password Reset email via Identity Toolkit sendOobCode
@@ -300,7 +313,8 @@ export async function resendStaffActivation(params: ResendActivationParams): Pro
   // Path 2: Direct Client Fallback
   const tokenId = 'act_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
   const cleanBase = baseUrl.replace(/\/+$/, '');
-  const activationLink = `${cleanBase}/set-password?email=${encodeURIComponent(targetEmail)}&token=${tokenId}&mode=resetPassword`;
+  const tempPass = member.initialTempPass || member.temporaryPassword || ('Pms_' + Math.random().toString(36).substring(2, 10) + '!Z8#' + Math.random().toString(36).substring(2, 6));
+  const activationLink = `${cleanBase}/set-password?email=${encodeURIComponent(targetEmail)}&token=${tokenId}&tp=${encodeURIComponent(tempPass)}&mode=resetPassword`;
   const nowIso = new Date().toISOString();
 
   const targetUid = member.uid || member.firebase_uid;
@@ -308,26 +322,39 @@ export async function resendStaffActivation(params: ResendActivationParams): Pro
     await setDoc(doc(db, 'users', targetUid), {
       activationToken: tokenId,
       activationLink,
+      initialTempPass: tempPass,
+      temporaryPassword: tempPass,
       activationEmailSentAt: nowIso,
       activationEmailSentBy: profile?.displayName || profile?.email || 'Hotel Administrator',
       updatedAt: serverTimestamp()
     }, { merge: true });
   }
 
-  // Persist token doc
+  // Persist token doc in both collections
+  const resendDocData = {
+    tokenId,
+    token: tokenId,
+    email: targetEmail,
+    targetEmail,
+    uid: targetUid,
+    targetUid,
+    hotelId,
+    tempPass,
+    isUsed: false,
+    status: 'active',
+    type: 'activation',
+    createdAt: serverTimestamp(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    createdBy: profile?.email || 'Administrator'
+  };
+
   try {
-    await setDoc(doc(db, 'activationTokens', tokenId), {
-      tokenId,
-      email: targetEmail,
-      uid: targetUid,
-      hotelId,
-      createdAt: serverTimestamp(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      status: 'pending',
-      createdBy: profile?.email || 'Administrator'
-    });
+    await Promise.all([
+      setDoc(doc(db, 'passwordResetTokens', tokenId), resendDocData),
+      setDoc(doc(db, 'activationTokens', tokenId), resendDocData)
+    ]);
   } catch (e) {
-    console.warn("Could not save activation token doc:", e);
+    console.warn("Could not save activation token docs:", e);
   }
 
   // Dispatch reset email
