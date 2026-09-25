@@ -84,8 +84,15 @@ function AppContent() {
     );
   }
 
-  // Intercept password reset/activation link for unauthenticated user or explicit reset URL
-  if (isResetFlow && (!user || resetTokenParam || oobCodeParam || isSetPasswordRoute)) {
+  // If user is already active and verified, redirect away from activation routes to main application immediately
+  const isUserActive = Boolean(user && profile && profile.status === 'active' && !profile.forcePasswordChange);
+
+  if (isUserActive && (isSetPasswordRoute || location.pathname === '/reset-password')) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Intercept password reset/activation link only if user is NOT yet active and verified
+  if (isResetFlow && !isUserActive) {
     return (
       <>
         <Toaster position="top-right" theme="dark" richColors />
@@ -94,7 +101,7 @@ function AppContent() {
             onNavigateToLogin={(prefilledEmail, msg) => {
               setResetCompletedInfo({ email: prefilledEmail, message: msg });
               if (typeof window !== 'undefined') {
-                window.history.replaceState({}, document.title, '/');
+                window.location.replace('/');
               }
             }}
           />
@@ -105,7 +112,7 @@ function AppContent() {
             onNavigateToLogin={(prefilledEmail, msg) => {
               setResetCompletedInfo({ email: prefilledEmail, message: msg });
               if (typeof window !== 'undefined') {
-                window.history.replaceState({}, document.title, '/');
+                window.location.replace('/');
               }
             }}
           />

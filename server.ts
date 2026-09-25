@@ -702,7 +702,7 @@ async function startServer() {
   ): Promise<{ activationUrl: string; oobCode?: string; linkSource: 'firebase_admin' | 'firebase_oob' | 'direct_portal' }> {
     const normalizedEmail = email.trim().toLowerCase();
     const cleanBase = baseUrl ? baseUrl.replace(/\/$/, '') : 'http://localhost:3000';
-    const continueUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}`;
+    const continueUrl = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}${tokenId ? `&token=${tokenId}` : ''}${tempPass ? `&tp=${encodeURIComponent(tempPass)}` : ''}&mode=resetPassword`;
     const actionCodeSettings = {
       url: continueUrl,
       handleCodeInApp: true
@@ -1407,7 +1407,6 @@ async function startServer() {
 
       let updatedUserToken: string | null = null;
 
-      // If password provided and adminAuth available, update password directly in Firebase Auth
       if (adminAuth && password && targetDocId) {
         try {
           await adminAuth.updateUser(targetDocId, {
@@ -1417,6 +1416,22 @@ async function startServer() {
           console.log(`[FIREBASE AUTH ADMIN] Updated password for user ${targetDocId}`);
         } catch (adminPwErr) {
           console.warn("[FIREBASE AUTH ADMIN] updateUser password notice:", adminPwErr);
+        }
+      } else if (password && oobCode && firebaseConfig?.apiKey) {
+        // Update password via Identity Toolkit REST resetPassword with oobCode
+        try {
+          const resetRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oobCode, newPassword: password })
+          });
+          const resetData = await resetRes.json();
+          if (resetData?.idToken) {
+            updatedUserToken = resetData.idToken;
+          }
+          console.log(`[FIREBASE AUTH REST] Password reset via oobCode for user ${effectiveEmail || targetDocId}`);
+        } catch (resetErr) {
+          console.warn("[FIREBASE AUTH REST] resetPassword notice:", resetErr);
         }
       } else if (password && effectiveEmail && resolvedTempPass && firebaseConfig?.apiKey) {
         // Update password via Identity Toolkit REST signInWithPassword + update
@@ -1451,6 +1466,7 @@ async function startServer() {
         emailVerified: true,
         temporaryPassword: null,
         initialPassword: null,
+        initialTempPass: null,
         forcePasswordChange: false,
         passwordChangedAt: now,
         passwordChangedBy: effectiveEmail || userDocData?.email || 'user',

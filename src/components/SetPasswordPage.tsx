@@ -138,7 +138,20 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
 
     // 3. If emailHint or tpHint is present
     if (emailHint || tpHint) {
-      if (emailHint) setTargetEmail(emailHint);
+      if (emailHint) {
+        setTargetEmail(emailHint);
+        try {
+          const { collection, query, where, getDocs } = await import('firebase/firestore');
+          const qEmail = query(collection(db, 'users'), where('email', '==', emailHint.trim().toLowerCase()));
+          const userSnap = await getDocs(qEmail);
+          if (!userSnap.empty) {
+            const u = userSnap.docs[0].data();
+            if (u.initialTempPass || u.temporaryPassword) {
+              setTempPass(u.initialTempPass || u.temporaryPassword);
+            }
+          }
+        } catch (e) {}
+      }
       setIsValidating(false);
       return;
     }
@@ -165,7 +178,7 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleProceedToLogin();
+          handleEnterPms();
           return 0;
         }
         return prev - 1;
@@ -192,8 +205,24 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
 
     try {
       let authPasswordUpdated = false;
-      const effectiveTempPass = tempPass || fallbackTokenData?.tempPass;
       const cleanEmail = targetEmail.trim().toLowerCase();
+
+      // Look up staff user doc to retrieve UID and temporary password
+      let targetDocId: string | null = null;
+      let userDocData: any = null;
+      try {
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const qEmail = query(collection(db, 'users'), where('email', '==', cleanEmail));
+        const userSnap = await getDocs(qEmail);
+        if (!userSnap.empty) {
+          targetDocId = userSnap.docs[0].id;
+          userDocData = userSnap.docs[0].data();
+        }
+      } catch (lookupErr) {
+        console.warn("User lookup notice:", lookupErr);
+      }
+
+      const effectiveTempPass = tempPass || fallbackTokenData?.tempPass || userDocData?.initialTempPass || userDocData?.temporaryPassword;
 
       // 1. Direct sign-in & password update if tempPass is present
       if (effectiveTempPass && cleanEmail) {
@@ -223,7 +252,25 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         }
       }
 
-      // 3. Authenticate with the newly set password to verify credentials and establish authenticated session
+      // 3. Complete activation on server (sets password in Auth, marks user active in DB, marks token used)
+      try {
+        await fetch('/api/auth/activate-staff-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            firebase_uid: targetDocId || undefined,
+            password: newPassword,
+            tp: effectiveTempPass || undefined,
+            oobCode: oobCode || undefined,
+            tokenId: tokenParam || undefined
+          })
+        });
+      } catch (apiErr) {
+        console.warn("[ACTIVATE STAFF API] Server notification notice:", apiErr);
+      }
+
+      // 4. Authenticate with the newly set password to verify credentials and establish authenticated session
       let authenticatedUid: string | null = null;
       try {
         const activeCred = await signInWithEmailAndPassword(auth, cleanEmail, newPassword);
@@ -236,9 +283,9 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         console.warn("[FIREBASE AUTH CLIENT] Active authentication notice:", authVerifyErr?.message);
       }
 
-      // 4. Update the staff document in Firestore directly using user's authenticated context (request.auth.uid == userId)
+      // 5. Update the staff document in Firestore directly transitioning to 'active'
       const nowIso = new Date().toISOString();
-      const targetUidToUpdate = authenticatedUid || fallbackTokenData?.targetUid;
+      const targetUidToUpdate = authenticatedUid || targetDocId || fallbackTokenData?.targetUid;
 
       if (targetUidToUpdate) {
         try {
@@ -260,7 +307,7 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         }
       }
 
-      // 5. Mark activation token as used in Firestore
+      // 6. Mark activation token as used in Firestore
       if (tokenParam) {
         try {
           await updateDoc(doc(db, 'activationTokens', tokenParam), {
@@ -280,23 +327,6 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         } catch (e) {}
       }
 
-      // 6. Complete activation on server (sets password in Auth, marks user active in DB, marks token used)
-      try {
-        await fetch('/api/auth/activate-staff-user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: cleanEmail,
-            password: newPassword,
-            tp: effectiveTempPass || undefined,
-            oobCode: oobCode || undefined,
-            tokenId: tokenParam || undefined
-          })
-        });
-      } catch (apiErr) {
-        console.warn("[ACTIVATE STAFF API] Server notification notice:", apiErr);
-      }
-
       // 7. Complete token service if tokenParam provided
       if (tokenParam) {
         try {
@@ -306,15 +336,10 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
         }
       }
 
-      // Clean sign-out so user can log in with new password
-      try {
-        await signOut(auth);
-      } catch (e) {}
-
-      // Save prefilled email & message in sessionStorage for immediate pick-up on login page
+      // Save prefilled email & message in sessionStorage for immediate pick-up if user chooses manual sign-in
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('pms_prefilled_email', cleanEmail);
-        sessionStorage.setItem('pms_login_success_msg', 'Account successfully activated! Please sign in with your new password.');
+        sessionStorage.setItem('pms_login_success_msg', 'Account successfully activated! Welcome to the PMS.');
       }
 
       setSubmitSuccess(true);
@@ -326,11 +351,24 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
     }
   };
 
-  const handleProceedToLogin = () => {
+  // Direct Entry into PMS Dashboard (keeps verified active session)
+  const handleEnterPms = () => {
+    if (typeof window !== 'undefined') {
+      window.location.replace('/');
+      return;
+    }
+    onNavigateToLogin(targetEmail, 'Account successfully activated! Welcome to the PMS.');
+  };
+
+  // Manual Sign In (signs out and redirects to login form)
+  const handleProceedToLogin = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {}
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('pms_prefilled_email', targetEmail.trim().toLowerCase());
       sessionStorage.setItem('pms_login_success_msg', 'Account successfully activated! Please sign in with your new password.');
-      window.location.href = '/';
+      window.location.replace('/');
       return;
     }
     onNavigateToLogin(targetEmail, 'Account successfully activated! You can now log into the PMS with your new password.');
@@ -570,17 +608,27 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
 
               <div className="p-3 bg-zinc-950/60 rounded-xl border border-zinc-800 text-xs text-zinc-400 flex items-center justify-center gap-2">
                 <Clock size={14} className="text-emerald-400" />
-                <span>Redirecting to sign in screen in <strong>{countdown}s</strong>...</span>
+                <span>Entering PMS Workspace in <strong>{countdown}s</strong>...</span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleProceedToLogin()}
-                className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-sm shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
-              >
-                <span>Sign In Now</span>
-                <ArrowRight size={16} />
-              </button>
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleEnterPms()}
+                  className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-sm shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <span>Enter PMS Workspace Directly</span>
+                  <ArrowRight size={16} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleProceedToLogin()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold text-xs border border-zinc-700 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span>Sign In Manually with New Password</span>
+                </button>
+              </div>
             </div>
           )}
 

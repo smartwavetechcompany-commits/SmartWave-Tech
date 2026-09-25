@@ -154,7 +154,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
       if (isLogin) {
         console.log("Attempting login for:", formData.email);
         
-        // 1. Check account status prior to authentication
+        // 1. Check account status prior to authentication (suspended check)
         try {
           const staffPreQuery = query(
             collection(db, 'users'),
@@ -163,15 +163,12 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
           const staffPreSnap = await getDocs(staffPreQuery);
           if (!staffPreSnap.empty) {
             const matchedProfile = staffPreSnap.docs[0].data() as UserProfile;
-            if (matchedProfile.status === 'pending_activation') {
-              throw new Error('Your account is pending activation. Please use the secure one-time activation link sent to your email to create your password before signing in.');
-            }
             if (matchedProfile.status === 'suspended') {
               throw new Error('Your account has been suspended. Please contact your Hotel Administrator for assistance.');
             }
           }
         } catch (preCheckErr: any) {
-          if (preCheckErr.message?.includes('pending activation') || preCheckErr.message?.includes('suspended')) {
+          if (preCheckErr.message?.includes('suspended')) {
             throw preCheckErr;
           }
           console.warn("Pre-auth status check bypassed:", preCheckErr?.message);
@@ -195,11 +192,13 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
             });
             if (verifyResp.status === 403) {
               const errData = await verifyResp.json();
-              await auth.signOut();
-              throw new Error(errData.error || 'Your account is pending activation. Please use the activation link sent to your email to set your password before signing in.');
+              if (errData.error?.includes('suspended')) {
+                await auth.signOut();
+                throw new Error(errData.error);
+              }
             }
           } catch (tokenVerifyErr: any) {
-            if (tokenVerifyErr.message?.includes('pending activation') || tokenVerifyErr.message?.includes('suspended')) {
+            if (tokenVerifyErr.message?.includes('suspended')) {
               throw tokenVerifyErr;
             }
             console.warn("Backend ID token check notice:", tokenVerifyErr?.message);
@@ -221,18 +220,18 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
               const staffDoc = staffSnap.docs[0];
               const staffData = staffDoc.data() as UserProfile;
 
-              if (staffData.status === 'pending_activation') {
-                await auth.signOut();
-                throw new Error('Your account is pending activation. Please use the activation link sent to your email to create your password.');
-              }
-
               if (staffDoc.id !== loggedInUser.uid) {
                 console.log(`Migrating profile from ${staffDoc.id} to ${loggedInUser.uid}`);
                 await database.safeSet(profileDocRef, {
                   ...staffData,
                   uid: loggedInUser.uid,
                   initialPassword: null,
-                  status: staffData.status || 'active',
+                  temporaryPassword: null,
+                  initialTempPass: null,
+                  forcePasswordChange: false,
+                  status: 'active',
+                  isVerified: true,
+                  emailVerified: true,
                   updatedAt: new Date().toISOString()
                 }, {
                   hotelId: staffData.hotelId || 'SYSTEM',
@@ -249,13 +248,32 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
                   details: `Removed temporary staff document for ${loggedInUser.email}`
                 });
                 console.log(`Migration completed successfully in AuthPage!`);
+              } else {
+                // Same doc id: activate it
+                await updateDoc(profileDocRef, {
+                  status: 'active',
+                  isVerified: true,
+                  emailVerified: true,
+                  forcePasswordChange: false,
+                  temporaryPassword: null,
+                  initialTempPass: null,
+                  updatedAt: new Date().toISOString()
+                }).catch(() => {});
               }
             }
           } else if (profileSnap.exists()) {
             const profileData = profileSnap.data() as UserProfile;
             if (profileData.status === 'pending_activation') {
-              await auth.signOut();
-              throw new Error('Your account is pending activation. Please use the activation link sent to your email to create your password before accessing the PMS.');
+              console.log("Staff member successfully signed in. Transitioning status to 'active'.");
+              await updateDoc(profileDocRef, {
+                status: 'active',
+                isVerified: true,
+                emailVerified: true,
+                forcePasswordChange: false,
+                temporaryPassword: null,
+                initialTempPass: null,
+                updatedAt: new Date().toISOString()
+              }).catch(() => {});
             }
             if (profileData.status === 'suspended') {
               await auth.signOut();

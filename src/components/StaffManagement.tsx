@@ -114,7 +114,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
-  // New staff form state
+  // New staff form state with preset modules enabled by default
   const [newStaff, setNewStaff] = useState({
     fullName: '',
     email: '',
@@ -124,7 +124,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     roleType: 'base' as 'base' | 'custom',
     baseRole: 'frontDesk' as StaffRole,
     customRoleId: '',
-    overrides: [] as string[],
+    overrides: (BASE_ROLE_PERMISSIONS['frontDesk'] || []) as string[],
     saveAsRole: false,
     customRoleName: '',
     customRoleDescription: '',
@@ -185,6 +185,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               forcePasswordChange: false,
               passwordChangedAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
+            }, {
+              hotelId: member.hotelId || hotelId || 'system',
+              module: 'Staff Security',
+              action: 'AUTO_ACTIVATE_VERIFIED_STAFF',
+              details: `Auto-activated verified staff member ${member.email}`
             });
           }
         } catch (err) {
@@ -218,8 +223,12 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       return;
     }
 
-    if (newStaff.roleType === 'custom' && newStaff.overrides.length === 0) {
-      toast.error('Please assign at least one module or permission to this custom role.');
+    const permissionsToAssign = newStaff.overrides.length > 0
+      ? newStaff.overrides
+      : (BASE_ROLE_PERMISSIONS[newStaff.baseRole] || []);
+
+    if (permissionsToAssign.length === 0) {
+      toast.error('Please assign at least one module or capability to this staff member.');
       return;
     }
 
@@ -261,10 +270,6 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     }
 
     const assignedUserRole: UserRole = newStaff.roleType === 'base' && newStaff.baseRole === 'admin' ? 'hotelAdmin' : 'staff';
-
-    const permissionsToAssign = newStaff.roleType === 'custom'
-      ? newStaff.overrides
-      : (newStaff.overrides.length > 0 ? newStaff.overrides : (BASE_ROLE_PERMISSIONS[newStaff.baseRole] || []));
 
     try {
       toast.loading('Provisioning user in Firebase Authentication & database...');
@@ -319,7 +324,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         roleType: 'base',
         baseRole: 'frontDesk',
         customRoleId: '',
-        overrides: [],
+        overrides: (BASE_ROLE_PERMISSIONS['frontDesk'] || []) as string[],
         saveAsRole: false,
         customRoleName: '',
         customRoleDescription: '',
@@ -400,6 +405,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         forcePasswordChange: false,
         passwordChangedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
+      }, {
+        hotelId: member.hotelId || hotelId || 'system',
+        module: 'Staff Security',
+        action: 'DIRECT_ACTIVATE_STAFF',
+        details: `Administrator manually activated staff account ${member.email}`
       });
       toast.dismiss();
       toast.success(`${member.displayName || member.email} is now Active & Verified!`);
@@ -868,7 +878,23 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                           </td>
 
                           <td className="py-3.5 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-2">
+                              {/* Manage Modules Button */}
+                              <button
+                                onClick={() => {
+                                  setEditingPermissions(member);
+                                  setEditingPermsList((member.permissions || member.roles || []) as string[]);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-emerald-500/20 text-zinc-200 hover:text-emerald-300 text-xs font-semibold border border-zinc-700/60 transition-all shadow-sm"
+                                title="Manage assigned modules and granular permissions for this staff member"
+                              >
+                                <Shield size={13} className="text-emerald-400" />
+                                <span>Manage Modules</span>
+                                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+                                  {member.permissions?.length || member.roles?.length || 0}
+                                </span>
+                              </button>
+
                               {/* Instantly Mark Active & Verified */}
                               {member.status === 'pending_activation' && canResetPasswords && (
                                 <button
@@ -916,18 +942,6 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                                   {isSuspended ? <UserCheck size={16} /> : <UserX size={16} />}
                                 </button>
                               )}
-
-                              {/* Manage Overrides */}
-                              <button
-                                onClick={() => {
-                                  setEditingPermissions(member);
-                                  setEditingPermsList((member.permissions || member.roles || []) as string[]);
-                                }}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
-                                title="Configure Module Access & Permissions"
-                              >
-                                <Lock size={16} />
-                              </button>
 
                               {/* Remove */}
                               {member.uid !== profile?.uid && member.role !== 'hotelAdmin' && (
@@ -1168,67 +1182,111 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               </div>
 
               {/* Role Selection & Module Assignment */}
-              <div className="p-4 bg-zinc-950/60 rounded-xl border border-zinc-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-300">
-                    Role & Access Assignment
-                  </label>
-                  {newStaff.roleType === 'custom' && (
-                    <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      Module Assignment Active
-                    </span>
-                  )}
-                </div>
-                
-                <div className="flex gap-4 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="roleType"
-                      checked={newStaff.roleType === 'base'}
-                      onChange={() => setNewStaff({ ...newStaff, roleType: 'base' })}
-                      className="text-emerald-500"
-                    />
-                    <span className="text-zinc-200">Standard System Role</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="roleType"
-                      checked={newStaff.roleType === 'custom'}
-                      onChange={() => {
-                        const initialPerms = newStaff.overrides.length > 0 
-                          ? newStaff.overrides 
-                          : (BASE_ROLE_PERMISSIONS[newStaff.baseRole] || []);
-                        setNewStaff({ 
-                          ...newStaff, 
-                          roleType: 'custom',
-                          overrides: initialPerms as string[]
-                        });
-                      }}
-                      className="text-emerald-500"
-                    />
-                    <span className="text-zinc-200 font-medium">Custom Role / Assign Modules ({customRoles.length} saved)</span>
-                  </label>
+              <div className="p-4 bg-zinc-950/70 rounded-xl border border-zinc-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-zinc-200 flex items-center gap-1.5">
+                      <Shield size={14} className="text-emerald-400" />
+                      Assign Role & Operational Modules *
+                    </label>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      Select a role preset and toggle the exact PMS modules this staff member can access.
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <CheckCircle2 size={12} />
+                    <span>{newStaff.overrides.length} Capabilities Assigned</span>
+                  </div>
                 </div>
 
-                {newStaff.roleType === 'base' ? (
-                  <div className="space-y-2">
-                    <select
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
-                      value={newStaff.baseRole}
-                      onChange={(e) => setNewStaff({ ...newStaff, baseRole: e.target.value as StaffRole })}
-                    >
+                {/* Preset Role Selector */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-zinc-300">Role Preset:</span>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = AVAILABLE_PERMISSIONS.map(p => p.id);
+                          setNewStaff({ ...newStaff, overrides: allIds, roleType: 'custom' });
+                        }}
+                        className="text-emerald-400 hover:text-emerald-300 hover:underline"
+                      >
+                        Select All Modules
+                      </button>
+                      <span className="text-zinc-600">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const perms = newStaff.roleType === 'custom' && newStaff.customRoleId
+                            ? (customRoles.find(r => r.id === newStaff.customRoleId)?.permissions || [])
+                            : (BASE_ROLE_PERMISSIONS[newStaff.baseRole] || []);
+                          setNewStaff({ ...newStaff, overrides: perms as string[] });
+                        }}
+                        className="text-zinc-400 hover:text-zinc-200 hover:underline"
+                      >
+                        Reset Defaults
+                      </button>
+                      <span className="text-zinc-600">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setNewStaff({ ...newStaff, overrides: [] })}
+                        className="text-red-400 hover:text-red-300 hover:underline"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                    value={newStaff.roleType === 'custom' && newStaff.customRoleId ? `custom_${newStaff.customRoleId}` : newStaff.baseRole}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.startsWith('custom_')) {
+                        const customId = val.replace('custom_', '');
+                        const r = customRoles.find(cr => cr.id === customId);
+                        setNewStaff({
+                          ...newStaff,
+                          roleType: 'custom',
+                          customRoleId: customId,
+                          overrides: (r?.permissions || []) as string[]
+                        });
+                      } else {
+                        const role = val as StaffRole;
+                        const perms = BASE_ROLE_PERMISSIONS[role] || [];
+                        setNewStaff({
+                          ...newStaff,
+                          roleType: 'base',
+                          baseRole: role,
+                          customRoleId: '',
+                          overrides: perms as string[]
+                        });
+                      }
+                    }}
+                  >
+                    <optgroup label="Standard System Roles">
                       {BASE_ROLES.map(role => (
                         <option key={role.id} value={role.id}>{role.label}</option>
                       ))}
-                    </select>
-                    <p className="text-[11px] text-zinc-400">
-                      Standard roles grant predefined operational access. Choose "Custom Role / Assign Modules" to pick specific modules to assign.
-                    </p>
+                    </optgroup>
+                    {customRoles.length > 0 && (
+                      <optgroup label="Property Custom Roles">
+                        {customRoles.map(cr => (
+                          <option key={cr.id} value={`custom_${cr.id}`}>{cr.name} ({cr.permissions?.length || 0} perms)</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+
+                {/* Module Assignment Matrix (Interactive & Always Visible) */}
+                <div className="pt-2 border-t border-zinc-800/80">
+                  <div className="mb-2">
+                    <span className="text-xs font-semibold text-zinc-300 block">Assigned Modules & Granular Capabilities:</span>
+                    <span className="text-[11px] text-zinc-500">Toggle any module on or off for this staff member before creating their account.</span>
                   </div>
-                ) : (
-                  <div className="pt-2 border-t border-zinc-800/80">
+                  <div className="max-h-64 overflow-y-auto pr-1 border border-zinc-800/80 rounded-xl p-2 bg-zinc-950/40">
                     <ModuleAssignmentMatrix
                       selectedPermissions={newStaff.overrides}
                       onChange={(perms) => setNewStaff({ ...newStaff, overrides: perms })}
@@ -1244,7 +1302,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                       onRoleDescriptionChange={(val) => setNewStaff({ ...newStaff, customRoleDescription: val })}
                     />
                   </div>
-                )}
+                </div>
               </div>
 
               {/* Account Activation & Security Policy */}
