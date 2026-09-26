@@ -66,6 +66,7 @@ export interface UserProfile {
   initialPassword?: string | null;
   temporaryPassword?: string | null;
   initialTempPass?: string | null;
+  systemAuthSecret?: string | null;
   forcePasswordChange?: boolean;
   passwordChangedAt?: string;
   passwordChangedBy?: string;

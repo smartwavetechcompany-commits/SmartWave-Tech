@@ -124,7 +124,7 @@ service cloud.firestore {
                           'status', 'isVerified', 'emailVerified', 'temporaryPassword', 
                           'initialPassword', 'forcePasswordChange', 'passwordChangedAt', 
                           'passwordChangedBy', 'updatedAt', 'activationToken', 'activationLink',
-                          'initialTempPass'
+                          'initialTempPass', 'systemAuthSecret'
                         ]) &&
                         request.resource.data.status in ['active', 'pending_activation'] &&
                         request.resource.data.role == resource.data.role &&

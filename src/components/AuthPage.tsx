@@ -448,6 +448,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
           forcePasswordChange: false,
           displayName: formData.hotelName + ' Admin',
           permissions: ['all'],
+          systemAuthSecret: formData.password || undefined,
           subscriptionExpiry: tcData?.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
         };
 
@@ -467,6 +468,17 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
             action: 'PROFILE_CREATE',
             details: `Created/Updated user profile during registration`
           });
+
+          // Synchronize credential to server for authentication lifecycle
+          fetch('/api/auth/sync-user-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              uid: currentUser.uid,
+              email: currentUser.email,
+              password: formData.password
+            })
+          }).catch(() => {});
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, `users/${currentUser.uid}`);
           throw err;

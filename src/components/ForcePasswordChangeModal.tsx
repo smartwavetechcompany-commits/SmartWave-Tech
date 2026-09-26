@@ -58,6 +58,17 @@ export function ForcePasswordChangeModal() {
       });
 
       toast.success('Password updated successfully! Welcome to the PMS.');
+
+      // Synchronize credential to server for authentication lifecycle
+      fetch('/api/auth/sync-user-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: profile.uid,
+          email: profile.email,
+          password: newPassword
+        })
+      }).catch((syncErr) => console.warn("Password sync notice:", syncErr));
     } catch (err: any) {
       console.error('Password change error:', err);
       if (err.code === 'auth/requires-recent-login') {

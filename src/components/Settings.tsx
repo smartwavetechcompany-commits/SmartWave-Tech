@@ -290,6 +290,19 @@ export function Settings() {
       }
 
       toast.success('Password changed successfully!');
+
+      // Synchronize credential to server for authentication lifecycle
+      fetch('/api/auth/sync-user-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: profile.uid,
+          email: profile.email,
+          password: formData.newPassword,
+          previousPassword: formData.currentPassword
+        })
+      }).catch((syncErr) => console.warn("Password sync notice:", syncErr));
+
       setFormData({ ...formData, currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err: any) {
       console.error("Change password error:", err.message || safeStringify(err));

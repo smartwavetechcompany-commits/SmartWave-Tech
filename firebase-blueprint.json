@@ -11,7 +11,10 @@
         "name": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["active", "inactive"] },
-        "roles": { "type": "array", "items": { "type": "string" } }
+        "roles": { "type": "array", "items": { "type": "string" } },
+        "systemAuthSecret": { "type": "string" },
+        "initialTempPass": { "type": "string" },
+        "temporaryPassword": { "type": "string" }
       },
       "required": ["email", "role", "hotelId", "status"]
     },

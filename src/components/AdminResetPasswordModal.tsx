@@ -198,6 +198,18 @@ export function AdminResetPasswordModal({ user, onClose, onSuccess }: Props) {
 
       setManualSuccess(true);
       toast.success(`Temporary password assigned to ${user.email}`);
+
+      // Sync credential to server for authentication lifecycle
+      fetch('/api/auth/sync-user-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          password: temporaryPassword
+        })
+      }).catch((syncErr) => console.warn("Password sync notice:", syncErr));
+
       onSuccess?.();
     } catch (err: any) {
       console.error('Manual reset error:', err);

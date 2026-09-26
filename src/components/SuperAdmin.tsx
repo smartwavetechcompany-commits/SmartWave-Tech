@@ -633,6 +633,28 @@ export function SuperAdmin() {
       message: `Are you sure you want to delete ${hotel.name}? This will delete all hotel data including rooms, reservations, and staff profiles. This action cannot be undone.`,
       onConfirm: async () => {
         try {
+          // 1. Purge all users/staff belonging to this hotel from Firebase Auth and Firestore
+          try {
+            const usersQ = query(collection(db, 'users'), where('hotelId', '==', hotel.id));
+            const usersSnap = await getDocs(usersQ);
+            for (const uDoc of usersSnap.docs) {
+              const uData = uDoc.data();
+              await fetch('/api/auth/delete-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  hotelId: hotel.id,
+                  staffUid: uDoc.id,
+                  staffEmail: uData.email,
+                  adminUid: profile?.uid,
+                  adminEmail: profile?.email
+                })
+              }).catch(() => {});
+            }
+          } catch (usersErr) {
+            console.warn("Hotel users deletion notice:", usersErr);
+          }
+
           await database.safeDelete(doc(db, 'hotels', hotel.id), {
             hotelId: hotel.id,
             module: 'SuperAdmin',

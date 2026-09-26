@@ -861,6 +861,7 @@ async function startServer() {
         status: 'pending_activation',
         isLocked: false,
         initialTempPass: authUser.tempPass || null,
+        systemAuthSecret: authUser.tempPass || null,
         roles: isHotelAdminRole ? ['admin', 'hotelAdmin'] : (roleType === 'base' ? [baseRole] : [roleLabel]),
         permissions: permissions && permissions.length > 0 ? permissions : (isHotelAdminRole ? ['all'] : []),
         activationLink: activationUrl,
@@ -1482,6 +1483,7 @@ async function startServer() {
         temporaryPassword: null,
         initialPassword: null,
         initialTempPass: null,
+        systemAuthSecret: password || userDocData?.systemAuthSecret || resolvedTempPass || null,
         forcePasswordChange: false,
         passwordChangedAt: now,
         passwordChangedBy: effectiveEmail || userDocData?.email || 'user',
@@ -1551,6 +1553,68 @@ async function startServer() {
     } catch (err: any) {
       console.error("[ACTIVATE STAFF ERROR]:", err);
       return res.status(500).json({ error: err.message || "Failed to activate staff account" });
+    }
+  });
+
+  // API Route: Synchronize user password credential for server-side auth lifecycle management
+  app.post("/api/auth/sync-user-password", async (req, res) => {
+    const { uid, email, password, previousPassword } = req.body;
+    if ((!uid && !email) || !password) {
+      return res.status(400).json({ error: "Missing uid/email or password." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Database service unavailable." });
+    }
+
+    try {
+      const { doc, getDoc, updateDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+      const now = new Date().toISOString();
+      let targetDocId = uid;
+      const normalizedEmail = email ? email.trim().toLowerCase() : null;
+
+      if (!targetDocId && normalizedEmail) {
+        const q = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          targetDocId = snap.docs[0].id;
+        }
+      }
+
+      // Update user doc in Firestore
+      if (targetDocId) {
+        await updateDoc(doc(db, 'users', targetDocId), {
+          systemAuthSecret: password,
+          updatedAt: now
+        }).catch(() => {});
+      }
+
+      // If adminAuth is available, update in Firebase Auth
+      if (adminAuth && targetDocId) {
+        try {
+          await adminAuth.updateUser(targetDocId, { password });
+        } catch (e) {}
+      } else if (normalizedEmail && previousPassword && firebaseConfig?.apiKey) {
+        try {
+          const sRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: normalizedEmail, password: previousPassword, returnSecureToken: true })
+          });
+          const sData = await sRes.json();
+          if (sData?.idToken) {
+            await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ idToken: sData.idToken, password, returnSecureToken: true })
+            });
+          }
+        } catch (e) {}
+      }
+
+      return res.json({ success: true, message: "Credential synchronized." });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -2279,11 +2343,109 @@ async function startServer() {
     }
   });
 
-  // API Route: Completely Delete Staff Account and Purge Associated Records
-  app.post("/api/auth/delete-staff-user", async (req, res) => {
-    const { hotelId, staffUid, staffEmail, adminUid, adminEmail } = req.body;
-    if (!hotelId || !staffUid || !staffEmail) {
-      return res.status(400).json({ error: "Missing hotelId, staffUid, or staffEmail" });
+  // Helper: Delete User from Firebase Auth using Admin SDK or Direct Identity Toolkit REST
+  async function deleteUserFromFirebaseAuth(
+    uid: string,
+    email: string,
+    candidatePasswords: string[] = [],
+    userToken?: string
+  ): Promise<{ deleted: boolean; method: string; details?: string }> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Strategy 1: Firebase Admin SDK (if service account configured)
+    if (adminAuth) {
+      try {
+        await adminAuth.deleteUser(uid);
+        console.log(`[AUTH DELETE] Deleted user ${uid} via Firebase Admin SDK.`);
+        return { deleted: true, method: 'admin_sdk' };
+      } catch (adminErr: any) {
+        if (adminErr?.code === 'auth/user-not-found') {
+          try {
+            const u = await adminAuth.getUserByEmail(normalizedEmail);
+            await adminAuth.deleteUser(u.uid);
+            return { deleted: true, method: 'admin_sdk_email' };
+          } catch (e) {
+            return { deleted: true, method: 'admin_sdk_already_deleted' };
+          }
+        }
+        console.warn(`[AUTH DELETE NOTICE] Admin SDK notice:`, adminErr?.message);
+      }
+    }
+
+    // Strategy 2: Directly delete if caller supplied a valid idToken
+    if (userToken && firebaseConfig?.apiKey) {
+      try {
+        const delRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${firebaseConfig.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: userToken })
+        });
+        if (delRes.ok) {
+          console.log(`[AUTH DELETE] Deleted user ${normalizedEmail} via caller idToken.`);
+          return { deleted: true, method: 'caller_id_token' };
+        }
+      } catch (tokErr) {
+        console.warn(`[AUTH DELETE NOTICE] idToken delete warning:`, tokErr);
+      }
+    }
+
+    // Strategy 3: REST API signInWithPassword -> accounts:delete with candidate passwords
+    if (firebaseConfig?.apiKey && candidatePasswords.length > 0) {
+      const uniquePasswords = Array.from(new Set(candidatePasswords.filter(p => typeof p === 'string' && p.trim().length > 0)));
+      for (const pwd of uniquePasswords) {
+        try {
+          const signRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              password: pwd,
+              returnSecureToken: true
+            })
+          });
+          const signData = await signRes.json();
+          if (signData?.idToken) {
+            const delRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${firebaseConfig.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ idToken: signData.idToken })
+            });
+            if (delRes.ok) {
+              console.log(`[AUTH DELETE] Successfully deleted user ${normalizedEmail} (${uid}) from Firebase Auth via REST API.`);
+              return { deleted: true, method: 'rest_credentials_delete' };
+            }
+          } else if (signData?.error?.message === 'EMAIL_NOT_FOUND') {
+            console.log(`[AUTH DELETE] User ${normalizedEmail} is already removed from Firebase Auth.`);
+            return { deleted: true, method: 'already_deleted' };
+          }
+        } catch (passErr) {
+          console.warn(`[AUTH DELETE NOTICE] Candidate password trial notice:`, passErr);
+        }
+      }
+    }
+
+    return { deleted: false, method: 'none', details: 'No valid credential or admin SDK available to remove from Firebase Auth' };
+  }
+
+  // Master User Deletion Handler (Deletes from Firebase Auth AND purges all Firestore records)
+  const handleUserDeletion = async (req: express.Request, res: express.Response) => {
+    const { 
+      hotelId, 
+      staffUid, 
+      staffEmail, 
+      targetUid, 
+      targetEmail, 
+      adminUid, 
+      adminEmail,
+      userPassword,
+      userToken
+    } = req.body;
+
+    const effectiveUid = staffUid || targetUid;
+    const effectiveEmail = staffEmail || targetEmail;
+
+    if (!effectiveUid && !effectiveEmail) {
+      return res.status(400).json({ error: "Missing user identification: provide staffUid/targetUid or staffEmail/targetEmail" });
     }
 
     if (!db) {
@@ -2291,141 +2453,231 @@ async function startServer() {
     }
 
     try {
-      const { doc, deleteDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
-      const normalizedEmail = staffEmail.toLowerCase();
+      const { doc, getDoc, deleteDoc, collection, query, where, getDocs, addDoc, updateDoc, arrayRemove, serverTimestamp } = await import('firebase/firestore');
+      const normalizedEmail = (effectiveEmail || '').trim().toLowerCase();
       let purgedRecordsCount = 0;
+      let finalTargetUid = effectiveUid;
 
-      // 1. Delete user profile doc from users/{staffUid}
-      try {
-        await deleteDoc(doc(db, 'users', staffUid));
-        purgedRecordsCount++;
-      } catch (uErr) {
-        console.warn(`[DELETE STAFF] users/${staffUid} delete warning:`, uErr);
+      // STEP 1: Fetch target user profile BEFORE deleting to harvest all auth credentials
+      let userDocData: any = null;
+      if (finalTargetUid) {
+        try {
+          const userSnap = await getDoc(doc(db, 'users', finalTargetUid));
+          if (userSnap.exists()) {
+            userDocData = userSnap.data();
+          }
+        } catch (uGetErr) {
+          console.warn("[DELETE USER] Fetch user doc warning:", uGetErr);
+        }
+      }
+
+      if (!userDocData && normalizedEmail) {
+        try {
+          const uQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+          const uSnap = await getDocs(uQuery);
+          if (!uSnap.empty) {
+            userDocData = uSnap.docs[0].data();
+            if (!finalTargetUid) {
+              finalTargetUid = uSnap.docs[0].id;
+            }
+          }
+        } catch (uQErr) {
+          console.warn("[DELETE USER] Query user by email warning:", uQErr);
+        }
+      }
+
+      // STEP 2: Harvest candidate passwords for Firebase Auth deletion
+      const candidatePasswords: string[] = [];
+      if (userPassword) candidatePasswords.push(userPassword);
+      if (userDocData?.systemAuthSecret) candidatePasswords.push(userDocData.systemAuthSecret);
+      if (userDocData?.initialTempPass) candidatePasswords.push(userDocData.initialTempPass);
+      if (userDocData?.temporaryPassword) candidatePasswords.push(userDocData.temporaryPassword);
+      if (userDocData?.initialPassword) candidatePasswords.push(userDocData.initialPassword);
+
+      // Check active in-memory tokens
+      if (normalizedEmail) {
+        for (const [_, memTok] of activeActivationTokens.entries()) {
+          if (memTok.email?.toLowerCase() === normalizedEmail && memTok.tempPass) {
+            candidatePasswords.push(memTok.tempPass);
+          }
+        }
+      }
+
+      // Query root passwordResetTokens for stored tempPass
+      if (normalizedEmail) {
+        try {
+          const tQuery = query(collection(db, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
+          const tSnap = await getDocs(tQuery);
+          for (const d of tSnap.docs) {
+            const data = d.data();
+            if (data.tempPass) candidatePasswords.push(data.tempPass);
+          }
+        } catch (tErr) {
+          console.warn("[DELETE USER] passwordResetTokens lookup warning:", tErr);
+        }
+      }
+
+      // Query hotel passwordResetTokens if hotelId known
+      const effectiveHotelId = hotelId || userDocData?.hotelId;
+      if (effectiveHotelId && effectiveHotelId !== 'system' && normalizedEmail) {
+        try {
+          const htQuery = query(collection(db, 'hotels', effectiveHotelId, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
+          const htSnap = await getDocs(htQuery);
+          for (const d of htSnap.docs) {
+            const data = d.data();
+            if (data.tempPass) candidatePasswords.push(data.tempPass);
+          }
+        } catch (htErr) {
+          console.warn("[DELETE USER] hotel passwordResetTokens lookup warning:", htErr);
+        }
+      }
+
+      // STEP 3: DELETE FROM FIREBASE AUTH FIRST
+      let authUserDeleted = false;
+      let deletionMethod = 'none';
+
+      if (finalTargetUid && normalizedEmail) {
+        const authDelResult = await deleteUserFromFirebaseAuth(
+          finalTargetUid,
+          normalizedEmail,
+          candidatePasswords,
+          userToken
+        );
+        authUserDeleted = authDelResult.deleted;
+        deletionMethod = authDelResult.method;
+      }
+
+      // STEP 4: PURGE FIRESTORE APPLICATION RECORDS
+      // 1. Delete user profile doc from users/{finalTargetUid}
+      if (finalTargetUid) {
+        try {
+          await deleteDoc(doc(db, 'users', finalTargetUid));
+          purgedRecordsCount++;
+        } catch (uErr) {
+          console.warn(`[DELETE USER] users/${finalTargetUid} delete warning:`, uErr);
+        }
       }
 
       // 2. Query users collection by email to clean up any duplicate or migration documents
-      try {
-        const uQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
-        const uSnap = await getDocs(uQuery);
-        for (const d of uSnap.docs) {
-          if (d.id !== staffUid) {
-            await deleteDoc(doc(db, 'users', d.id)).catch(() => {});
-            purgedRecordsCount++;
+      if (normalizedEmail) {
+        try {
+          const uQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+          const uSnap = await getDocs(uQuery);
+          for (const d of uSnap.docs) {
+            if (d.id !== finalTargetUid) {
+              await deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+              purgedRecordsCount++;
+            }
           }
+        } catch (uQErr) {
+          console.warn("[DELETE USER] users query cleanup:", uQErr);
         }
-      } catch (uQErr) {
-        console.warn("[DELETE STAFF] users query cleanup:", uQErr);
       }
 
       // 3. Purge password reset / activation tokens
-      // a. Root collection
-      try {
-        const tQuery = query(collection(db, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
-        const tSnap = await getDocs(tQuery);
-        for (const d of tSnap.docs) {
-          await deleteDoc(doc(db, 'passwordResetTokens', d.id)).catch(() => {});
-          purgedRecordsCount++;
-        }
-      } catch (tErr) {
-        console.warn("[DELETE STAFF] root token cleanup:", tErr);
-      }
+      if (normalizedEmail) {
+        try {
+          const tQuery = query(collection(db, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
+          const tSnap = await getDocs(tQuery);
+          for (const d of tSnap.docs) {
+            await deleteDoc(doc(db, 'passwordResetTokens', d.id)).catch(() => {});
+            purgedRecordsCount++;
+          }
+        } catch (tErr) {}
 
-      // b. Hotel subcollection
-      try {
-        const htQuery = query(collection(db, 'hotels', hotelId, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
-        const htSnap = await getDocs(htQuery);
-        for (const d of htSnap.docs) {
-          await deleteDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', d.id)).catch(() => {});
-          purgedRecordsCount++;
+        if (effectiveHotelId && effectiveHotelId !== 'system') {
+          try {
+            const htQuery = query(collection(db, 'hotels', effectiveHotelId, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
+            const htSnap = await getDocs(htQuery);
+            for (const d of htSnap.docs) {
+              await deleteDoc(doc(db, 'hotels', effectiveHotelId, 'passwordResetTokens', d.id)).catch(() => {});
+              purgedRecordsCount++;
+            }
+          } catch (htErr) {}
         }
-      } catch (htErr) {
-        console.warn("[DELETE STAFF] hotel token cleanup:", htErr);
       }
 
       // 4. Purge active sessions
-      try {
-        const sQuery = query(collection(db, 'hotels', hotelId, 'sessions'), where('userEmail', '==', normalizedEmail));
-        const sSnap = await getDocs(sQuery);
-        for (const d of sSnap.docs) {
-          await deleteDoc(doc(db, 'hotels', hotelId, 'sessions', d.id)).catch(() => {});
-          purgedRecordsCount++;
-        }
-      } catch (sErr) {
-        console.warn("[DELETE STAFF] session cleanup:", sErr);
+      if (effectiveHotelId && effectiveHotelId !== 'system' && normalizedEmail) {
+        try {
+          const sQuery = query(collection(db, 'hotels', effectiveHotelId, 'sessions'), where('userEmail', '==', normalizedEmail));
+          const sSnap = await getDocs(sQuery);
+          for (const d of sSnap.docs) {
+            await deleteDoc(doc(db, 'hotels', effectiveHotelId, 'sessions', d.id)).catch(() => {});
+            purgedRecordsCount++;
+          }
+        } catch (sErr) {}
       }
 
       // 5. Purge email notifications outbox records
-      try {
-        const nQuery = query(collection(db, 'hotels', hotelId, 'emailNotifications'), where('recipient', '==', normalizedEmail));
-        const nSnap = await getDocs(nQuery);
-        for (const d of nSnap.docs) {
-          await deleteDoc(doc(db, 'hotels', hotelId, 'emailNotifications', d.id)).catch(() => {});
-          purgedRecordsCount++;
-        }
-      } catch (nErr) {
-        console.warn("[DELETE STAFF] email notifications cleanup:", nErr);
+      if (effectiveHotelId && effectiveHotelId !== 'system' && normalizedEmail) {
+        try {
+          const nQuery = query(collection(db, 'hotels', effectiveHotelId, 'emailNotifications'), where('recipient', '==', normalizedEmail));
+          const nSnap = await getDocs(nQuery);
+          for (const d of nSnap.docs) {
+            await deleteDoc(doc(db, 'hotels', effectiveHotelId, 'emailNotifications', d.id)).catch(() => {});
+            purgedRecordsCount++;
+          }
+        } catch (nErr) {}
       }
 
       // 6. Purge user settings
-      try {
-        await deleteDoc(doc(db, 'hotels', hotelId, 'user_settings', staffUid)).catch(() => {});
-        await deleteDoc(doc(db, 'user_settings', staffUid)).catch(() => {});
-      } catch (setErr) {
-        console.warn("[DELETE STAFF] user settings cleanup:", setErr);
-      }
-
-      // 7. Delete Auth user via Firebase Admin if initialized
-      let authUserDeleted = false;
-      try {
-        const adminModule = await import('firebase-admin');
-        const admin: any = (adminModule as any).default || adminModule;
-        if (admin && admin.apps && admin.apps.length > 0) {
-          try {
-            await admin.auth().deleteUser(staffUid);
-            authUserDeleted = true;
-          } catch (aErr: any) {
-            if (aErr?.code === 'auth/user-not-found') {
-              try {
-                const u = await admin.auth().getUserByEmail(normalizedEmail);
-                await admin.auth().deleteUser(u.uid);
-                authUserDeleted = true;
-              } catch (e2) {}
-            }
+      if (finalTargetUid) {
+        try {
+          if (effectiveHotelId && effectiveHotelId !== 'system') {
+            await deleteDoc(doc(db, 'hotels', effectiveHotelId, 'user_settings', finalTargetUid)).catch(() => {});
           }
-        }
-      } catch (adminErr) {
-        console.warn("[DELETE STAFF] Firebase Admin Auth deletion check:", adminErr);
+          await deleteDoc(doc(db, 'user_settings', finalTargetUid)).catch(() => {});
+        } catch (setErr) {}
       }
 
-      // 8. Immutable Audit Trail record (preserving historical audit and operational data)
-      try {
-        await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
-          action: 'STAFF_DELETED',
-          module: 'StaffManagement',
-          targetId: staffUid,
-          targetEmail: normalizedEmail,
-          performedBy: adminEmail || 'Administrator',
-          performedByUid: adminUid || 'admin',
-          details: `Staff member ${normalizedEmail} (UID: ${staffUid}) was deleted. All user records, tokens, active sessions, and preferences were permanently purged. Historical operational logs preserved.`,
-          purgedRecordsCount,
-          timestamp: serverTimestamp(),
-          createdAt: new Date().toISOString()
-        });
-      } catch (auditErr) {
-        console.warn("[DELETE STAFF] Audit log recording notice:", auditErr);
+      // 7. If user had admin role on hotel, remove UID from hotel's adminUIDs array
+      if (effectiveHotelId && effectiveHotelId !== 'system' && finalTargetUid) {
+        try {
+          await updateDoc(doc(db, 'hotels', effectiveHotelId), {
+            adminUIDs: arrayRemove(finalTargetUid)
+          }).catch(() => {});
+        } catch (admRemErr) {}
+      }
+
+      // 8. Immutable Audit Trail record
+      const auditPayload = {
+        action: 'USER_DELETED',
+        module: 'StaffManagement',
+        targetId: finalTargetUid || 'unknown',
+        targetEmail: normalizedEmail,
+        performedBy: adminEmail || 'Administrator',
+        performedByUid: adminUid || 'admin',
+        details: `User ${normalizedEmail} (UID: ${finalTargetUid}) was deleted from the app and Firebase Authentication. All user records, tokens, active sessions, and settings were purged. Auth deletion status: ${authUserDeleted ? 'Success' : 'Notice'} (Method: ${deletionMethod}).`,
+        purgedRecordsCount,
+        authUserDeleted,
+        deletionMethod,
+        timestamp: serverTimestamp(),
+        createdAt: new Date().toISOString()
+      };
+
+      if (effectiveHotelId && effectiveHotelId !== 'system') {
+        await addDoc(collection(db, 'hotels', effectiveHotelId, 'auditLogs'), auditPayload).catch(() => {});
+      } else {
+        await addDoc(collection(db, 'activityLogs'), auditPayload).catch(() => {});
       }
 
       return res.json({
         success: true,
-        message: `Staff member ${normalizedEmail} and all associated records were successfully purged.`,
+        message: `User ${normalizedEmail} and all associated records were successfully purged.`,
         purgedRecordsCount,
-        authUserDeleted
+        authUserDeleted,
+        deletionMethod
       });
     } catch (err: any) {
-      console.error("Staff deletion error in endpoint:", err);
-      return res.status(500).json({ error: err.message || "Failed to complete staff deletion" });
+      console.error("User deletion error in endpoint:", err);
+      return res.status(500).json({ error: err.message || "Failed to complete user deletion" });
     }
-  });
+  };
+
+  // API Routes: Completely Delete User / Staff Account and Purge Associated Records
+  app.post("/api/auth/delete-staff-user", handleUserDeletion);
+  app.post("/api/auth/delete-user", handleUserDeletion);
 
   // API Route: Verify Email System Status (Diagnostic & Validation)
   app.get("/api/auth/verify-email-system", (req, res) => {

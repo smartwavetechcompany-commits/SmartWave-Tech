@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, doc, onSnapshot, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { auth, db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -481,24 +481,42 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const removeStaff = async (staffUid: string, staffEmail: string) => {
     if (!hotelId) return;
     try {
-      toast.loading(`Permanently removing ${staffEmail} and purging records...`);
+      toast.loading(`Permanently removing ${staffEmail} and deleting from Firebase Auth...`);
+
+      // If user is deleting their own account on this device, delete from client auth
+      if (auth.currentUser && auth.currentUser.uid === staffUid) {
+        try {
+          await auth.currentUser.delete();
+          console.log("[AUTH CLIENT] Deleted current user from Firebase Auth directly.");
+        } catch (selfDelErr) {
+          console.warn("[AUTH CLIENT] Direct self-deletion notice:", selfDelErr);
+        }
+      }
 
       // 1. Call server API to delete Auth user and purge records
       let apiSuccess = false;
+      let authUserDeleted = false;
       try {
+        const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
         const resp = await fetch('/api/auth/delete-staff-user', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+          },
           body: JSON.stringify({
             hotelId,
             staffUid,
             staffEmail,
             adminUid: profile?.uid,
-            adminEmail: profile?.email
+            adminEmail: profile?.email,
+            userToken: auth.currentUser?.uid === staffUid ? callerToken : undefined
           })
         });
         if (resp.ok) {
           apiSuccess = true;
+          const resData = await resp.json().catch(() => ({}));
+          authUserDeleted = !!resData.authUserDeleted;
         }
       } catch (apiErr) {
         console.warn("Server delete API notice:", apiErr);
@@ -517,7 +535,11 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       }
 
       toast.dismiss();
-      toast.success(`Staff member ${staffEmail} and all associated records permanently purged.`);
+      if (authUserDeleted) {
+        toast.success(`User ${staffEmail} successfully deleted from the app and Firebase Authentication.`);
+      } else {
+        toast.success(`Staff member ${staffEmail} and all associated records permanently purged.`);
+      }
       setShowConfirmRemove(null);
     } catch (err: any) {
       toast.dismiss();
