@@ -38,84 +38,107 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { profile, hotel, isSubscriptionActive, systemSettings, setSelectedHotelId } = useAuth();
-  const { canAccessModule } = useModuleAccess();
+  const { canAccessModule, canAccessPMSModule } = useModuleAccess();
   const location = useLocation();
 
   const menuItems = [
-    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', capability: null, module: 'dashboard' },
-    { icon: Activity, label: 'Operations', path: '/operations', capability: 'access_front_desk', module: 'dashboard' },
-    { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', capability: 'access_front_desk', module: 'frontDesk' },
-    { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', capability: 'manage_rooms', module: 'rooms' },
-    { icon: Activity, label: 'Room Status', path: '/room-status', capability: 'manage_rooms', module: 'rooms' },
-    { icon: ClipboardList, label: t('sidebar.housekeeping'), path: '/housekeeping', capability: 'manage_rooms', module: 'housekeeping' },
-    { icon: ChefHat, label: 'F & B', path: '/f-and-b', capability: 'manage_kitchen', module: 'kitchen' },
-    { icon: Coffee, label: 'Breakfast List', path: '/breakfast-list', capability: null, module: 'kitchen' },
-    { icon: Package, label: t('sidebar.inventory'), path: '/inventory', capability: 'manage_inventory', module: 'inventory' },
-    { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', capability: 'manage_maintenance', module: 'maintenance' },
-    { icon: CheckCircle, label: 'Tasks', path: '/tasks', capability: null, module: 'dashboard' },
-    { icon: Users, label: t('sidebar.guests'), path: '/guests', capability: 'edit_guest_profiles', module: 'guests' },
-    { icon: Building2, label: 'Corporate', path: '/corporate', capability: 'manage_corporate', module: 'corporate' },
-    { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'view_financial_records', module: 'finance' },
-    { icon: Receipt, label: 'Debt Ledger (AR)', path: '/debt-ledger', capability: 'view_debt_ledger', module: 'finance' },
-    { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports' },
-    { icon: FileText, label: 'DSS Report', path: '/dss-report', capability: 'view_reports', module: 'reports' },
-    { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff' },
-    { icon: ShieldCheck, label: 'Admin Controls', path: '/admin-settings', capability: 'edit_hotel_settings', module: 'settings' },
-    { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff' },
+    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', capability: null, module: 'dashboard', pmsModuleId: 'dashboard' },
+    { icon: Activity, label: 'Operations', path: '/operations', capability: 'access_front_desk', module: 'dashboard', pmsModuleId: 'reservations' },
+    { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', capability: 'access_front_desk', module: 'frontDesk', pmsModuleId: 'reservations' },
+    { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', capability: 'manage_rooms', module: 'rooms', pmsModuleId: 'rooms' },
+    { icon: Activity, label: 'Room Status', path: '/room-status', capability: 'manage_rooms', module: 'rooms', pmsModuleId: 'rooms' },
+    { icon: ClipboardList, label: t('sidebar.housekeeping'), path: '/housekeeping', capability: 'view_housekeeping', module: 'housekeeping', pmsModuleId: 'housekeeping' },
+    { icon: ChefHat, label: 'F & B', path: '/f-and-b', capability: 'manage_kitchen', module: 'kitchen', pmsModuleId: 'kitchen' },
+    { icon: Coffee, label: 'Breakfast List', path: '/breakfast-list', capability: 'manage_kitchen', module: 'kitchen', pmsModuleId: 'kitchen' },
+    { icon: Package, label: t('sidebar.inventory'), path: '/inventory', capability: 'manage_inventory', module: 'inventory', pmsModuleId: 'inventory' },
+    { icon: Wrench, label: t('sidebar.maintenance'), path: '/maintenance', capability: 'manage_maintenance', module: 'maintenance', pmsModuleId: 'maintenance' },
+    { icon: CheckCircle, label: 'Tasks', path: '/tasks', capability: 'view_dashboard', module: 'dashboard', pmsModuleId: 'dashboard' },
+    { icon: Users, label: t('sidebar.guests'), path: '/guests', capability: 'edit_guest_profiles', module: 'guests', pmsModuleId: 'guests' },
+    { icon: Building2, label: 'Corporate', path: '/corporate', capability: 'manage_corporate', module: 'corporate', pmsModuleId: 'corporate' },
+    { icon: DollarSign, label: t('sidebar.finance'), path: '/finance', capability: 'view_financial_records', module: 'finance', pmsModuleId: 'finance' },
+    { icon: Receipt, label: 'Debt Ledger (AR)', path: '/debt-ledger', capability: 'view_debt_ledger', module: 'finance', pmsModuleId: 'finance' },
+    { icon: BarChart3, label: t('sidebar.reports'), path: '/reports', capability: 'view_reports', module: 'reports', pmsModuleId: 'reports' },
+    { icon: FileText, label: 'DSS Report', path: '/dss-report', capability: 'view_reports', module: 'reports', pmsModuleId: 'reports' },
+    { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff', pmsModuleId: 'staff' },
+    { icon: ShieldCheck, label: 'Admin Controls', path: '/admin-settings', capability: 'edit_hotel_settings', module: 'settings', pmsModuleId: 'settings' },
+    { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff', pmsModuleId: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', capability: 'access_super_admin' },
-    { icon: Settings, label: t('sidebar.settings'), path: '/settings', capability: null, module: 'settings' },
+    { icon: Settings, label: t('sidebar.settings'), path: '/settings', capability: 'view_settings', module: 'settings', pmsModuleId: 'settings' },
   ];
 
   const filteredItems = menuItems.filter(item => {
     if (!profile) return false;
     
-    // 1. Check Role-based Capability
-    if (item.capability && !canAccessModule(item.capability as any)) {
+    // Super Admins have complete visibility
+    if (profile.role === 'superAdmin') {
+      return true;
+    }
+
+    // Hotel Admins see everything within hotel except super-admin
+    if (profile.role === 'hotelAdmin' || profile.role === 'admin') {
+      if (item.capability === 'access_super_admin') return false;
+      if (item.module && !isModuleEnabled(hotel, item.module)) return false;
+      return true;
+    }
+
+    // SuperAdmin portal is never shown to regular staff
+    if (item.capability === 'access_super_admin') return false;
+
+    // 1. Check Role-based Capability / Module Assignment
+    // A staff user has access if they have the specific capability OR if they have the module assigned
+    const hasExplicitCapability = item.capability ? canAccessModule(item.capability as any) : true;
+    const hasModuleAssigned = item.pmsModuleId 
+      ? canAccessPMSModule(item.pmsModuleId)
+      : false;
+
+    if (!hasExplicitCapability && !hasModuleAssigned) {
       return false;
     }
 
-    // 2. Check Module toggles for the hotel
-    if (item.module && profile?.role !== 'superAdmin') {
+    // 2. Check Module toggles for the hotel plan
+    if (item.module) {
       if (!isModuleEnabled(hotel, item.module)) return false;
     }
 
     // Check dynamic visibility for Finance
     if (item.path === '/finance') {
       const allowed = hotel?.settings?.financial?.allowFinancialReportViewing ?? true;
-      if (!allowed && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      if (!allowed) {
         return false;
       }
     }
 
     // 3. Check Department-based Restriction from Hotel Admin Settings
-    if (hotel?.settings?.staff?.restrictByDepartment && profile?.department && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
-      const dep = profile.department.toLowerCase();
-      
-      // Map modules to departments
-      const moduleMap: Record<string, string[]> = {
-        'frontDesk': ['front desk', 'reception', 'reservations'],
-        'rooms': ['front desk', 'reception', 'housekeeping'],
-        'housekeeping': ['housekeeping'],
-        'kitchen': ['kitchen', 'f&b', 'restaurant', 'food & beverage'],
-        'inventory': ['store', 'purchase', 'kitchen', 'maintenance'],
-        'maintenance': ['maintenance', 'engineering'],
-        'finance': ['accounts', 'finance'],
-        'reports': ['management', 'finance', 'accounts'],
-        'staff': ['hr', 'admin'],
-        'corporate': ['sales', 'reservations', 'front desk'],
-        'guests': ['front desk', 'reception', 'reservations'],
-      };
-      
-      if (item.module && moduleMap[item.module]) {
-        const allowedDepartments = moduleMap[item.module];
-        const isAllowed = allowedDepartments.some(d => dep.includes(d) || d.includes(dep));
+    if (hotel?.settings?.staff?.restrictByDepartment && profile?.department) {
+      // If the admin explicitly granted this capability or module, it always takes precedence
+      const isExplicitlyAssigned = hasExplicitCapability || hasModuleAssigned;
+      if (!isExplicitlyAssigned) {
+        const dep = profile.department.toLowerCase();
         
-        // Settings/Dashboard are usually allowed for everyone, but let's be strict if module is defined
-        if (!isAllowed) return false;
+        // Map modules to departments
+        const moduleMap: Record<string, string[]> = {
+          'frontDesk': ['front desk', 'reception', 'reservations'],
+          'rooms': ['front desk', 'reception', 'housekeeping'],
+          'housekeeping': ['housekeeping'],
+          'kitchen': ['kitchen', 'f&b', 'restaurant', 'food & beverage'],
+          'inventory': ['store', 'purchase', 'kitchen', 'maintenance'],
+          'maintenance': ['maintenance', 'engineering'],
+          'finance': ['accounts', 'finance'],
+          'reports': ['management', 'finance', 'accounts'],
+          'staff': ['hr', 'admin'],
+          'corporate': ['sales', 'reservations', 'front desk'],
+          'guests': ['front desk', 'reception', 'reservations'],
+        };
+        
+        if (item.module && moduleMap[item.module]) {
+          const allowedDepartments = moduleMap[item.module];
+          const isAllowed = allowedDepartments.some(d => dep.includes(d) || d.includes(dep));
+          
+          if (!isAllowed) return false;
+        }
       }
     }
 
-    // Default: allow (Super Admins pass through here for items without modules)
     return true;
   });
 

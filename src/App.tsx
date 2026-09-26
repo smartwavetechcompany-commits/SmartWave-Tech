@@ -238,7 +238,9 @@ function AppContent() {
               </PermissionGuard>
             } />
             <Route path="/breakfast-list" element={
-              <BreakfastList />
+              <PermissionGuard permission="manage_kitchen" showError>
+                <BreakfastList />
+              </PermissionGuard>
             } />
             <Route path="/dss-report" element={
               <PermissionGuard permission="view_reports" showError>
@@ -251,7 +253,7 @@ function AppContent() {
               </PermissionGuard>
             } />
             <Route path="/housekeeping" element={
-              <PermissionGuard permission="manage_rooms" showError>
+              <PermissionGuard permission="view_housekeeping" showError>
                 <Housekeeping />
               </PermissionGuard>
             } />
@@ -331,8 +333,16 @@ function AppContent() {
                 </div>
               </PermissionGuard>
             } />
-            <Route path="/tasks" element={<Tasks />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/tasks" element={
+              <PermissionGuard permission="view_dashboard" showError>
+                <Tasks />
+              </PermissionGuard>
+            } />
+            <Route path="/settings" element={
+              <PermissionGuard permission="view_settings" showError>
+                <Settings />
+              </PermissionGuard>
+            } />
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>
         </AnimatePresence>

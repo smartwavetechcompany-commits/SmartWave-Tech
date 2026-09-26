@@ -464,13 +464,17 @@ const ALIAS_MAP: Record<string, Permission[]> = {
   reset_passwords: ['reset_passwords', 'manage_staff', 'manage_users_admin'],
   manage_staff: ['manage_staff', 'manage_users_admin', 'view_users', 'create_users', 'edit_users', 'assign_roles', 'reset_passwords'],
   manage_roles: ['manage_roles', 'manage_roles_admin', 'assign_roles', 'manage_permissions_admin'],
-  manage_rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms'],
+  manage_rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms', 'unblock_rooms', 'view_housekeeping'],
+  view_rooms: ['view_rooms', 'manage_rooms', 'create_rooms', 'edit_rooms', 'block_rooms', 'unblock_rooms'],
+  view_housekeeping: ['view_housekeeping', 'manage_rooms', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
   access_front_desk: ['access_front_desk', 'view_reservations', 'create_reservations', 'check_in_guests'],
   edit_guest_profiles: ['edit_guest_profiles', 'view_guests', 'edit_guests', 'add_guests'],
   process_payments: ['process_payments', 'receive_payments', 'receive_payment', 'post_charges'],
   view_financial_records: ['view_financial_records', 'view_ledger', 'export_financial_data', 'view_city_ledger'],
+  view_debt_ledger: ['view_debt_ledger', 'view_financial_records', 'view_city_ledger', 'transfer_debt', 'adjust_debt', 'write_off_debt'],
   view_reports: ['view_reports', 'export_reports', 'print_reports'],
   export_reports: ['export_reports'],
+  view_settings: ['view_settings', 'edit_hotel_settings', 'edit_settings', 'manage_roles', 'manage_roles_admin'],
   edit_hotel_settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_hotels'],
   manage_kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders'],
   manage_inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
@@ -478,7 +482,9 @@ const ALIAS_MAP: Record<string, Permission[]> = {
   manage_corporate: ['manage_corporate', 'view_city_ledger'],
   nightly_audit: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
   void_transaction: ['void_transaction', 'reverse_transactions', 'reverse_payment'],
-  process_refunds: ['process_refunds', 'approve_refund']
+  process_refunds: ['process_refunds', 'approve_refund'],
+  view_activity_logs: ['view_activity_logs', 'manage_staff', 'edit_hotel_settings'],
+  view_dashboard: ['view_dashboard', 'export_dashboard', 'access_front_desk', 'view_reservations', 'manage_rooms', 'view_housekeeping', 'manage_kitchen', 'manage_inventory', 'manage_maintenance', 'manage_corporate', 'view_financial_records', 'view_reports', 'manage_staff']
 };
 
 /**
@@ -506,15 +512,45 @@ export const hasPermission = (
     return permission !== 'access_super_admin';
   }
 
-  const userPermissions: string[] = profile.permissions || profile.roles || [];
+  const userPermissions: string[] = profile.permissions || [];
   const requiredAliases = ALIAS_MAP[permission] || [permission];
 
-  // 1. Direct match on user permissions (or override)
-  if (requiredAliases.some(alias => userPermissions.includes(alias))) {
-    return true;
+  // 1. Direct match on explicitly assigned user permissions
+  if (userPermissions.length > 0) {
+    if (requiredAliases.some(alias => userPermissions.includes(alias))) {
+      return true;
+    }
   }
 
-  // 2. Custom Role assigned to this user
+  // 2. Direct match on assigned modules if present
+  if (Array.isArray(profile.assignedModules) && profile.assignedModules.length > 0) {
+    const modulePermMap: Record<string, string[]> = {
+      dashboard: ['view_dashboard', 'export_dashboard'],
+      reservations: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay'],
+      frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay'],
+      guests: ['edit_guest_profiles', 'view_guests', 'add_guests', 'edit_guests'],
+      rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms'],
+      housekeeping: ['view_housekeeping', 'manage_rooms', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
+      kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders'],
+      inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
+      maintenance: ['manage_maintenance', 'block_rooms', 'unblock_rooms'],
+      corporate: ['manage_corporate', 'view_city_ledger'],
+      finance: ['view_financial_records', 'process_payments', 'view_ledger', 'post_charges', 'receive_payments', 'receive_payment', 'export_financial_data', 'view_city_ledger', 'view_debt_ledger'],
+      audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit', 'view_financial_records'],
+      reports: ['view_reports', 'export_reports', 'print_reports'],
+      staff: ['manage_staff', 'view_users', 'view_activity_logs'],
+      settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
+    };
+
+    for (const modId of profile.assignedModules) {
+      const allowed = modulePermMap[modId] || [];
+      if (requiredAliases.some(alias => allowed.includes(alias))) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Custom Role assigned to this user
   if (profile.customRoleId && customRoles.length > 0) {
     const customRole = customRoles.find(r => r.id === profile.customRoleId);
     if (customRole && customRole.status !== 'disabled' && customRole.status !== 'archived') {
@@ -534,22 +570,70 @@ export const hasPermission = (
     }
   }
 
-  // 3. Fallback to Staff Role
-  if (profile.staffRole) {
-    const staffPerms = BASE_ROLE_PERMISSIONS[profile.staffRole] || 
-      SYSTEM_ROLE_TEMPLATES[profile.staffRole]?.permissions || [];
-    if (requiredAliases.some(alias => staffPerms.includes(alias))) {
+  // 4. Fallback ONLY if no explicit permissions array has been set on the user document (legacy profiles)
+  if (!profile.permissions || profile.permissions.length === 0) {
+    // Fallback to Staff Role
+    if (profile.staffRole) {
+      const staffPerms = BASE_ROLE_PERMISSIONS[profile.staffRole] || 
+        SYSTEM_ROLE_TEMPLATES[profile.staffRole]?.permissions || [];
+      if (requiredAliases.some(alias => staffPerms.includes(alias))) {
+        return true;
+      }
+    }
+
+    // Fallback to roles array (e.g. ['frontDesk'])
+    if (Array.isArray(profile.roles) && profile.roles.length > 0) {
+      for (const r of profile.roles) {
+        const rPerms = BASE_ROLE_PERMISSIONS[r] || [];
+        if (requiredAliases.some(alias => rPerms.includes(alias))) {
+          return true;
+        }
+      }
+    }
+
+    // Fallback to Base Role
+    const basePerms = BASE_ROLE_PERMISSIONS[role] || [];
+    if (requiredAliases.some(alias => basePerms.includes(alias))) {
       return true;
     }
   }
 
-  // 4. Fallback to Base Role
-  const basePerms = BASE_ROLE_PERMISSIONS[role] || [];
-  if (requiredAliases.some(alias => basePerms.includes(alias))) {
+  return false;
+};
+
+/**
+ * Checks whether a given PMS module is assigned to a user profile
+ */
+export const isPMSModuleAssigned = (
+  profile: any,
+  moduleId: string,
+  customRoles: any[] = []
+): boolean => {
+  if (!profile) return false;
+  if (profile.role === 'superAdmin' || profile.role === 'hotelAdmin' || profile.role === 'admin') return true;
+  if (Array.isArray(profile.assignedModules) && (profile.assignedModules.includes(moduleId) || (moduleId === 'frontDesk' && profile.assignedModules.includes('reservations')) || (moduleId === 'reservations' && profile.assignedModules.includes('frontDesk')))) {
     return true;
   }
-
-  return false;
+  const modulePermMap: Record<string, Permission[]> = {
+    dashboard: ['view_dashboard'],
+    reservations: ['access_front_desk', 'view_reservations', 'create_reservations'],
+    frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations'],
+    guests: ['edit_guest_profiles', 'view_guests', 'add_guests'],
+    rooms: ['manage_rooms', 'view_rooms'],
+    housekeeping: ['view_housekeeping', 'manage_rooms', 'assign_housekeeping_tasks'],
+    kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders'],
+    inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
+    maintenance: ['manage_maintenance', 'block_rooms'],
+    corporate: ['manage_corporate', 'view_city_ledger'],
+    finance: ['view_financial_records', 'view_ledger', 'process_payments', 'view_debt_ledger'],
+    audits: ['nightly_audit', 'run_night_audit'],
+    reports: ['view_reports', 'export_reports'],
+    staff: ['manage_staff', 'view_users'],
+    settings: ['edit_hotel_settings', 'view_settings']
+  };
+  const perms = modulePermMap[moduleId];
+  if (!perms) return false;
+  return perms.some(p => hasPermission(profile, p, customRoles));
 };
 
 /**

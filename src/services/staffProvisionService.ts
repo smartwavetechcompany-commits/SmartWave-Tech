@@ -16,6 +16,7 @@ export interface ProvisionStaffParams {
     customRoleId?: string;
   };
   permissionsToAssign: string[];
+  assignedModules?: string[];
   assignedRoleId?: string;
   roleLabel: string;
   assignedUserRole: UserRole;
@@ -42,6 +43,7 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
     hotelName,
     newStaff,
     permissionsToAssign,
+    assignedModules = [],
     assignedRoleId,
     roleLabel,
     assignedUserRole,
@@ -74,6 +76,7 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
         roleLabel,
         assignedUserRole,
         permissions: permissionsToAssign,
+        assignedModules,
         adminEmail: profile?.email || 'Administrator',
         adminName: profile?.displayName || profile?.email || 'Hotel Administrator',
         adminUid: profile?.uid || 'admin',
@@ -166,6 +169,7 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
     roles: [newStaff.baseRole],
     customRoleId: newStaff.roleType === 'custom' ? assignedRoleId : null,
     permissions: permissionsToAssign,
+    assignedModules: assignedModules || [],
     activationToken: tokenId,
     activationLink,
     activationEmailSentAt: nowIso,

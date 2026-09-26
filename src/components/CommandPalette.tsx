@@ -58,11 +58,11 @@ export function CommandPalette() {
     { icon: Activity, label: 'Operations Dashboard', category: 'Navigation', path: '/operations', keywords: ['operations', 'arrivals', 'checkins', 'inhouse', 'occupancy', 'live'], capability: 'access_front_desk', module: 'dashboard' },
     { icon: CalendarDays, label: 'Room Calendar (Front Desk)', category: 'Navigation', path: '/front-desk', keywords: ['calendar', 'booking', 'reservation', 'frontdesk', 'reception'], capability: 'access_front_desk', module: 'frontDesk' },
     { icon: Bed, label: 'Rooms Inventory & Types', category: 'Navigation', path: '/rooms', keywords: ['rooms', 'beds', 'categories', 'hotel rooms', 'inventory'], capability: 'manage_rooms', module: 'rooms' },
-    { icon: ClipboardList, label: 'Housekeeping Rules & Status', category: 'Navigation', path: '/housekeeping', keywords: ['housekeeping', 'clean', 'dirty', 'maid', 'room cleaning'], capability: 'manage_rooms', module: 'housekeeping' },
+    { icon: ClipboardList, label: 'Housekeeping Rules & Status', category: 'Navigation', path: '/housekeeping', keywords: ['housekeeping', 'clean', 'dirty', 'maid', 'room cleaning'], capability: 'view_housekeeping', module: 'housekeeping' },
     { icon: ChefHat, label: 'Food & Beverage Service', category: 'Navigation', path: '/f-and-b', keywords: ['food', 'beverage', 'kitchen', 'restaurant', 'bar', 'f&b'], capability: 'manage_kitchen', module: 'kitchen' },
     { icon: Package, label: 'Inventory Stock & Supplies', category: 'Navigation', path: '/inventory', keywords: ['inventory', 'supplies', 'stock', 'warehouse', 'purchase'], capability: 'manage_inventory', module: 'inventory' },
     { icon: Wrench, label: 'Maintenance & Fault Tickets', category: 'Navigation', path: '/maintenance', keywords: ['maintenance', 'repair', 'broken', 'fault', 'ticket', 'engineering'], capability: 'manage_maintenance', module: 'maintenance' },
-    { icon: CheckCircle, label: 'Tasks & Reminders', category: 'Navigation', path: '/tasks', keywords: ['tasks', 'reminders', 'to-do', 'checklist'], capability: null, module: 'dashboard' },
+    { icon: CheckCircle, label: 'Tasks & Reminders', category: 'Navigation', path: '/tasks', keywords: ['tasks', 'reminders', 'to-do', 'checklist'], capability: 'view_dashboard', module: 'dashboard' },
     { icon: Users, label: 'Guest Directory', category: 'Navigation', path: '/guests', keywords: ['guests', 'customers', 'clients', 'profiles', 'directory'], capability: 'edit_guest_profiles', module: 'guests' },
     { icon: Building2, label: 'Corporate Accounts & Partners', category: 'Navigation', path: '/corporate', keywords: ['corporate', 'companies', 'accounts', 'partners', 'b2b'], capability: 'manage_corporate', module: 'corporate' },
     { icon: DollarSign, label: 'Financial Ledger & Folios', category: 'Navigation', path: '/finance', keywords: ['finance', 'ledger', 'invoice', 'credit', 'debit', 'payments'], capability: 'view_financial_records', module: 'finance' },
@@ -70,7 +70,7 @@ export function CommandPalette() {
     { icon: UserCog, label: 'Staff Management', category: 'Navigation', path: '/staff', keywords: ['staff', 'employees', 'roles', 'users', 'departments'], capability: 'manage_staff', module: 'staff' },
     { icon: ClipboardList, label: 'Audit Logs & Security', category: 'Navigation', path: '/activity-logs', keywords: ['logs', 'audit', 'activity', 'security', 'history'], capability: 'view_activity_logs', module: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin Control Center', category: 'Navigation', path: '/super-admin', keywords: ['superadmin', 'hotels', 'system', 'licensing'], capability: 'access_super_admin', module: null },
-    { icon: Settings, label: 'Hotel Branding & Preferences', category: 'Navigation', path: '/settings', keywords: ['branding', 'settings', 'logo', 'receipts', 'colors', 'personalization'], capability: null, module: 'settings' },
+    { icon: Settings, label: 'Hotel Branding & Preferences', category: 'Navigation', path: '/settings', keywords: ['branding', 'settings', 'logo', 'receipts', 'colors', 'personalization'], capability: 'view_settings', module: 'settings' },
   ];
 
   // Filter commands by permissions, subscription, and search text

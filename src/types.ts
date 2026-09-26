@@ -55,6 +55,7 @@ export interface UserProfile {
   status: 'pending_activation' | 'active' | 'password_reset_pending' | 'disabled' | 'suspended' | 'inactive';
   displayName?: string;
   permissions?: string[]; // Granular permissions
+  assignedModules?: string[]; // PMS module IDs explicitly assigned to the user
   staffRole?: StaffRole;
   customRoleId?: string; // Link to CustomRole
   roles?: (StaffRole | string)[]; // Multi-role support

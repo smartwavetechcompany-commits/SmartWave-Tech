@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Permission, hasPermission } from '../utils/permissions';
+import { Permission, hasPermission, isPMSModuleAssigned } from '../utils/permissions';
 import { ShieldCheck } from 'lucide-react';
 
 interface PermissionGuardProps {
@@ -56,8 +56,13 @@ export const useModuleAccess = () => {
     return hasPermission(profile, capability, customRoles);
   };
 
+  const canAccessPMSModule = (moduleId: string): boolean => {
+    return isPMSModuleAssigned(profile, moduleId, customRoles);
+  };
+
   return {
     canAccessModule,
+    canAccessPMSModule,
     hasPermission: (perm: Permission) => hasPermission(profile, perm, customRoles),
     profile,
     customRoles

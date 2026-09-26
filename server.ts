@@ -767,6 +767,7 @@ async function startServer() {
       customRoleId,
       roleLabel = "Front Desk",
       permissions = [],
+      assignedModules = [],
       adminEmail = "Hotel Administrator",
       adminName = "Hotel Administrator",
       adminUid = "admin",
@@ -864,6 +865,7 @@ async function startServer() {
         systemAuthSecret: authUser.tempPass || null,
         roles: isHotelAdminRole ? ['admin', 'hotelAdmin'] : (roleType === 'base' ? [baseRole] : [roleLabel]),
         permissions: permissions && permissions.length > 0 ? permissions : (isHotelAdminRole ? ['all'] : []),
+        assignedModules: assignedModules && assignedModules.length > 0 ? assignedModules : [],
         activationLink: activationUrl,
         activationToken: tokenId,
         activationEmailSentAt: now,
@@ -1553,6 +1555,76 @@ async function startServer() {
     } catch (err: any) {
       console.error("[ACTIVATE STAFF ERROR]:", err);
       return res.status(500).json({ error: err.message || "Failed to activate staff account" });
+    }
+  });
+
+  // API Route: Update Staff User Permissions & Modules in real-time
+  app.post("/api/auth/update-user-permissions", async (req, res) => {
+    try {
+      const {
+        uid,
+        email,
+        hotelId,
+        permissions = [],
+        assignedModules = [],
+        adminEmail = "Administrator",
+        adminUid = "admin"
+      } = req.body;
+
+      if (!uid) {
+        return res.status(400).json({ error: "Missing required field: uid" });
+      }
+
+      const now = new Date().toISOString();
+      const updateData: any = {
+        permissions,
+        assignedModules,
+        updatedAt: now
+      };
+
+      if (!db) {
+        return res.status(500).json({ error: "Database connection not initialized" });
+      }
+
+      const { doc, updateDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+
+      // 1. Direct Firestore write
+      try {
+        const userRef = doc(db, 'users', uid);
+        await updateDoc(userRef, updateData);
+      } catch (sdkErr) {
+        console.warn("[UPDATE PERMS] SDK update warning, falling back to REST write:", sdkErr);
+        await saveUserProfileToFirestore(uid, updateData);
+      }
+
+      // 2. Audit log
+      if (hotelId && hotelId !== 'system') {
+        try {
+          await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
+            action: 'UPDATE_STAFF_PERMISSIONS',
+            module: 'Staff Security',
+            targetId: uid,
+            targetEmail: email || null,
+            performedBy: adminEmail,
+            performedByUid: adminUid,
+            details: `Updated assigned modules (${(assignedModules || []).join(', ')}) and permissions (${permissions.length} capabilities) for staff member ${email || uid}`,
+            timestamp: serverTimestamp()
+          });
+        } catch (auditErr) {
+          console.warn("[UPDATE PERMS] Audit log notice:", auditErr);
+        }
+      }
+
+      console.log(`[UPDATE PERMS] Successfully updated modules & permissions for user ${uid} (${email || ''})`);
+      return res.status(200).json({
+        success: true,
+        uid,
+        permissionsCount: permissions.length,
+        assignedModules
+      });
+    } catch (err: any) {
+      console.error("[UPDATE PERMS] Failed to update user permissions:", err);
+      return res.status(500).json({ error: err.message || "Failed to update permissions" });
     }
   });
 
