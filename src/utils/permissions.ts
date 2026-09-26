@@ -445,6 +445,7 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; description: 
 export const BASE_ROLE_PERMISSIONS: Record<string, Permission[]> = {
   superAdmin: ALL_PERMISSIONS,
   hotelAdmin: ALL_PERMISSIONS.filter(p => p !== 'access_super_admin'),
+  admin: ALL_PERMISSIONS.filter(p => p !== 'access_super_admin'),
   manager: SYSTEM_ROLE_TEMPLATES.hotelManager.permissions,
   frontDesk: SYSTEM_ROLE_TEMPLATES.frontDeskAgent.permissions,
   receptionist: SYSTEM_ROLE_TEMPLATES.frontDeskAgent.permissions,
@@ -501,7 +502,7 @@ export const hasPermission = (
   }
 
   // Hotel Admins have access to everything within their hotel except superAdmin portal
-  if (role === 'hotelAdmin') {
+  if (role === 'hotelAdmin' || role === 'admin') {
     return permission !== 'access_super_admin';
   }
 

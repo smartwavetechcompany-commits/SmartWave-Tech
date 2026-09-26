@@ -403,7 +403,6 @@ export async function validatePasswordResetToken(tokenId: string, emailHint?: st
     if (!snap.exists()) {
       // 2b. Check if users collection has this activationToken
       try {
-        const { collection, query, where, getDocs } = await import('firebase/firestore');
         const qTok = query(collection(db, 'users'), where('activationToken', '==', tokenId));
         const userDocs = await getDocs(qTok);
         if (!userDocs.empty) {

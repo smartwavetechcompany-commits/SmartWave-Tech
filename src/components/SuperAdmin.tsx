@@ -27,7 +27,9 @@ import {
   Building2,
   ClipboardList,
   LayoutDashboard,
-  ArrowRight
+  ArrowRight,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 import { format, isValid, startOfDay } from 'date-fns';
 import { logActivity } from '../utils/activityLogger';
@@ -235,6 +237,26 @@ export function SuperAdmin() {
       });
 
       toast.success(`Code ${code} approved for ${request.hotelName}`);
+
+      // 4. Dispatch branded email invitation to prospective hotel admin
+      try {
+        await fetch('/api/admin/send-tracking-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: request.email,
+            code,
+            hotelName: request.hotelName,
+            plan: request.plan || 'Standard',
+            duration: request.message?.includes('1 year') ? '1 year' : (request.message?.includes('6 months') ? '6 months' : '1 month'),
+            adminEmail: profile?.email || 'System Owner',
+            baseUrl: window.location.origin
+          })
+        });
+        toast.info(`Invitation email with code ${code} sent to ${request.email}`);
+      } catch (emailErr) {
+        console.warn("Could not dispatch tracking code email:", emailErr);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
       toast.error('Failed to approve request');
@@ -324,8 +346,31 @@ export function SuperAdmin() {
       });
 
       setGeneratedCode(code);
+      const recipientEmail = newCode.targetEmail;
       setNewCode({ duration: '1 month', type: 'Standard', price: 0, targetEmail: '' });
       toast.success('Tracking code generated successfully');
+
+      if (recipientEmail) {
+        try {
+          await fetch('/api/admin/send-tracking-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: recipientEmail,
+              code,
+              hotelName: 'Your Property',
+              plan: tc.plan,
+              duration: tc.expiryDate ? 'Valid' : '1 month',
+              price: tc.price,
+              adminEmail: profile?.email || 'System Owner',
+              baseUrl: window.location.origin
+            })
+          });
+          toast.info(`Invitation email with code ${code} dispatched to ${recipientEmail}`);
+        } catch (emailErr) {
+          console.warn("Could not dispatch tracking code email:", emailErr);
+        }
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trackingCodes');
       toast.error('Failed to generate code');
@@ -1127,17 +1172,30 @@ export function SuperAdmin() {
                 <h3 className="text-xl font-bold text-zinc-50 mb-2">Code Generated!</h3>
                 <p className="text-zinc-400 text-sm mb-6">Share this code with the hotel admin</p>
                 
-                <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 mb-8 relative group">
+                <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 mb-6 relative group">
                   <div className="text-3xl font-mono font-bold text-emerald-500 tracking-[0.2em]">{generatedCode}</div>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(generatedCode);
-                      toast.success('Code copied to clipboard!');
-                    }}
-                    className="mt-4 text-xs font-bold text-zinc-500 hover:text-emerald-500 transition-colors uppercase tracking-widest"
-                  >
-                    Click to Copy
-                  </button>
+                  <div className="flex items-center justify-center gap-4 mt-4">
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedCode);
+                        toast.success('Registration code copied to clipboard!');
+                      }}
+                      className="text-xs font-bold text-zinc-400 hover:text-emerald-400 transition-colors uppercase tracking-wider flex items-center gap-1.5"
+                    >
+                      <Copy size={14} /> Copy Code
+                    </button>
+                    <span className="text-zinc-700">&bull;</span>
+                    <button 
+                      onClick={() => {
+                        const directUrl = `${window.location.origin}/?trackingCode=${encodeURIComponent(generatedCode)}&mode=register`;
+                        navigator.clipboard.writeText(directUrl);
+                        toast.success('Direct registration link copied to clipboard!');
+                      }}
+                      className="text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors uppercase tracking-wider flex items-center gap-1.5"
+                    >
+                      <ExternalLink size={14} /> Copy 1-Click Link
+                    </button>
+                  </div>
                 </div>
 
                 <button 

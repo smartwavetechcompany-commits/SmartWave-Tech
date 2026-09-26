@@ -53,6 +53,34 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
   }, [user, profile]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlCode = searchParams.get('trackingCode') || searchParams.get('code');
+      const urlEmail = searchParams.get('email');
+      const urlHotelName = searchParams.get('hotelName') || searchParams.get('hotel');
+      const urlMode = searchParams.get('mode') || searchParams.get('action');
+
+      if (urlCode || urlMode === 'register' || urlMode === 'signup') {
+        setIsLogin(false);
+      }
+      if (urlCode) {
+        const cleanCode = urlCode.trim().toUpperCase();
+        setFormData(prev => ({ ...prev, trackingCode: cleanCode }));
+        showNotification(`Tracking code ${cleanCode} applied! Fill in details below to create your Administrator account.`, 'success');
+      }
+      if (urlEmail) {
+        setFormData(prev => ({ ...prev, email: urlEmail.trim().toLowerCase() }));
+      }
+      if (urlHotelName) {
+        setFormData(prev => ({ ...prev, hotelName: decodeURIComponent(urlHotelName) }));
+      }
+    } catch (e) {
+      console.warn("Could not read url params:", e);
+    }
+  }, []);
+
+  useEffect(() => {
     const fetchSettings = async () => {
       try {
         const snap = await getDoc(doc(db, 'system', 'settings'));
@@ -336,7 +364,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
               throw new Error('This tracking code is inactive.');
             }
 
-            if (tcData.targetEmail && tcData.targetEmail.toLowerCase() !== formData.email.toLowerCase()) {
+            if (tcData.targetEmail && tcData.targetEmail.trim().toLowerCase() !== formData.email.trim().toLowerCase()) {
               throw new Error(`This tracking code is uniquely assigned to ${tcData.targetEmail}. Please use the correct email address to register.`);
             }
           } catch (err: any) {
@@ -351,7 +379,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         // 3. Create User if not already logged in
         let currentUser = user;
         if (!currentUser) {
-          const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+          const userCredential = await createUserWithEmailAndPassword(auth, formData.email.trim().toLowerCase(), formData.password);
           currentUser = userCredential.user;
         }
 
@@ -359,7 +387,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         try {
           await database.safeAdd(collection(db, 'registration'), {
             uid: currentUser.uid,
-            email: formData.email,
+            email: formData.email.trim().toLowerCase(),
             hotelName: formData.hotelName || (existingStaffProfile ? 'Staff Registration' : ''),
             trackingCode: formData.trackingCode,
             timestamp: new Date().toISOString(),
@@ -377,7 +405,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         // 3. Generate IDs and Prepare Data
         // If it's a staff member, they already have a hotelId from the existing profile
         const hotelId = existingStaffProfile ? existingStaffProfile.hotelId : `hotel_${Math.random().toString(36).substr(2, 9)}`;
-        const selectedPlan = (tcData.plan?.toLowerCase() as PlanType) || 'standard';
+        const selectedPlan = (tcData?.plan?.toLowerCase() as PlanType) || 'standard';
         
         // Define plan features
         const planFeatures = {
@@ -395,24 +423,32 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
           }
         };
 
-        const features = planFeatures[selectedPlan];
+        const features = planFeatures[selectedPlan] || planFeatures.standard;
 
         // 4. Create User Profile
         const profileData: UserProfile = existingStaffProfile ? {
           ...existingStaffProfile,
           uid: currentUser.uid, // Update with real UID
           status: 'active',
+          isVerified: true,
+          emailVerified: true,
+          forcePasswordChange: false,
           displayName: formData.hotelName || existingStaffProfile.displayName || currentUser.displayName || formData.email.split('@')[0]
         } : {
           uid: currentUser.uid,
-          email: formData.email,
+          email: formData.email.trim().toLowerCase(),
           hotelId: hotelId,
           role: 'hotelAdmin',
+          roles: ['admin', 'hotelAdmin'],
+          staffRole: 'admin',
           createdAt: new Date().toISOString(),
           status: 'active',
+          isVerified: true,
+          emailVerified: true,
+          forcePasswordChange: false,
           displayName: formData.hotelName + ' Admin',
           permissions: ['all'],
-          subscriptionExpiry: tcData.expiryDate
+          subscriptionExpiry: tcData?.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
         };
 
         try {

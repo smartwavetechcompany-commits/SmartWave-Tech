@@ -1,4 +1,4 @@
-import { doc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, addDoc, collection, serverTimestamp, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, firebaseConfig } from '../firebase';
 import { UserProfile, UserRole, StaffRole } from '../types';
 
@@ -72,6 +72,7 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
         baseRole: newStaff.baseRole,
         customRoleId: newStaff.roleType === 'custom' ? assignedRoleId : undefined,
         roleLabel,
+        assignedUserRole,
         permissions: permissionsToAssign,
         adminEmail: profile?.email || 'Administrator',
         adminName: profile?.displayName || profile?.email || 'Hotel Administrator',
@@ -174,6 +175,16 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
   };
 
   await setDoc(doc(db, 'users', firebaseUid), userProfileData, { merge: true });
+
+  if (assignedUserRole === 'hotelAdmin') {
+    try {
+      await updateDoc(doc(db, 'hotels', hotelId), {
+        adminUIDs: arrayUnion(firebaseUid)
+      });
+    } catch (hotelErr) {
+      console.warn("[Staff Provisioning] AdminUID arrayUnion notice:", hotelErr);
+    }
+  }
 
   // 3. Persist activation token document to both collections for guaranteed lookup
   const tokenDocData = {

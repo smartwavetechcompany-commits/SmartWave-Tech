@@ -19,7 +19,7 @@ import {
   Mail
 } from 'lucide-react';
 import { verifyPasswordResetCode, confirmPasswordReset, signInWithEmailAndPassword, updatePassword, signOut } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { validatePasswordResetToken, completePasswordResetWithToken } from '../utils/passwordResetService';
 import { PasswordResetToken } from '../types';
@@ -112,7 +112,6 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
 
       // Check users collection in Firestore
       try {
-        const { collection, query, where, getDocs } = await import('firebase/firestore');
         const qTok = query(collection(db, 'users'), where('activationToken', '==', token));
         const userDocs = await getDocs(qTok);
         if (!userDocs.empty) {
@@ -141,7 +140,6 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
       if (emailHint) {
         setTargetEmail(emailHint);
         try {
-          const { collection, query, where, getDocs } = await import('firebase/firestore');
           const qEmail = query(collection(db, 'users'), where('email', '==', emailHint.trim().toLowerCase()));
           const userSnap = await getDocs(qEmail);
           if (!userSnap.empty) {
@@ -211,7 +209,6 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
       let targetDocId: string | null = null;
       let userDocData: any = null;
       try {
-        const { collection, query, where, getDocs } = await import('firebase/firestore');
         const qEmail = query(collection(db, 'users'), where('email', '==', cleanEmail));
         const userSnap = await getDocs(qEmail);
         if (!userSnap.empty) {

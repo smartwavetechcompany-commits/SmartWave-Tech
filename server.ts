@@ -842,7 +842,8 @@ async function startServer() {
         console.warn("[CREATE STAFF] Notice storing passwordResetToken:", tokenStoreErr);
       }
 
-      const assignedUserRole = roleType === 'base' && baseRole === 'admin' ? 'hotelAdmin' : 'staff';
+      const assignedUserRole = req.body.assignedUserRole || (roleType === 'base' && baseRole === 'admin' ? 'hotelAdmin' : 'staff');
+      const isHotelAdminRole = assignedUserRole === 'hotelAdmin';
 
       // 4. Save Staff Profile to application database explicitly linking firebase_uid
       const staffProfile = {
@@ -851,7 +852,7 @@ async function startServer() {
         email: normalizedEmail,
         hotelId,
         role: assignedUserRole,
-        staffRole: roleType === 'base' ? baseRole : undefined,
+        staffRole: roleType === 'base' ? baseRole : (isHotelAdminRole ? 'admin' : undefined),
         customRoleId: roleType === 'custom' ? customRoleId : undefined,
         displayName: fullName.trim(),
         phoneNumber: phone?.trim() || null,
@@ -860,8 +861,8 @@ async function startServer() {
         status: 'pending_activation',
         isLocked: false,
         initialTempPass: authUser.tempPass || null,
-        roles: roleType === 'base' ? [baseRole] : [roleLabel],
-        permissions: permissions || [],
+        roles: isHotelAdminRole ? ['admin', 'hotelAdmin'] : (roleType === 'base' ? [baseRole] : [roleLabel]),
+        permissions: permissions && permissions.length > 0 ? permissions : (isHotelAdminRole ? ['all'] : []),
         activationLink: activationUrl,
         activationToken: tokenId,
         activationEmailSentAt: now,
@@ -871,6 +872,18 @@ async function startServer() {
       };
 
       await saveUserProfileToFirestore(firebase_uid, staffProfile, authUser.idToken);
+
+      // If user has administrative role, ensure hotel document adminUIDs array contains their UID
+      if (isHotelAdminRole) {
+        try {
+          const { arrayUnion, updateDoc: updateHotelDoc } = await import('firebase/firestore');
+          await updateHotelDoc(doc(db, 'hotels', hotelId), {
+            adminUIDs: arrayUnion(firebase_uid)
+          });
+        } catch (hotelUpdateErr) {
+          console.warn("[CREATE ADMIN] Notice adding admin UID to hotel:", hotelUpdateErr);
+        }
+      }
 
       // 5. Dispatch branded activation email
       const emailHtml = buildActivationEmailHtml({
@@ -885,7 +898,9 @@ async function startServer() {
 
       const emailResult = await dispatchEmailMessage({
         to: normalizedEmail,
-        subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
+        subject: isHotelAdminRole
+          ? `[ACTION REQUIRED] Activate your Administrator account - ${hotelName}`
+          : `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: emailHtml,
         fromName: `${hotelName} Administration`
       });
@@ -893,14 +908,14 @@ async function startServer() {
       // 6. Record Audit Log in Firestore
       try {
         await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
-          action: 'STAFF_ACCOUNT_CREATED',
+          action: isHotelAdminRole ? 'ADMIN_ACCOUNT_CREATED' : 'STAFF_ACCOUNT_CREATED',
           module: 'Staff Management',
           targetId: firebase_uid,
           targetEmail: normalizedEmail,
           targetName: fullName.trim(),
           performedBy: adminEmail,
           performedByUid: adminUid,
-          details: `Created staff account for ${normalizedEmail} with role '${roleLabel}' in Firebase Auth (UID: ${firebase_uid}). Status set to Pending Activation.`,
+          details: `Created ${isHotelAdminRole ? 'administrator' : 'staff'} account for ${normalizedEmail} with role '${roleLabel}' in Firebase Auth (UID: ${firebase_uid}). Status set to Pending Activation.`,
           timestamp: serverTimestamp(),
           createdAt: now
         });
@@ -1487,6 +1502,18 @@ async function startServer() {
             console.warn("[ACTIVATE] REST write notice:", restErr);
           }
         }
+
+        // If user is a hotelAdmin, ensure their UID is recorded in the hotel's adminUIDs array
+        if ((userDocData?.role === 'hotelAdmin' || userDocData?.role === 'admin') && userDocData?.hotelId && userDocData.hotelId !== 'system') {
+          try {
+            const { arrayUnion, updateDoc: updateHotelDoc } = await import('firebase/firestore');
+            await updateHotelDoc(doc(db, 'hotels', userDocData.hotelId), {
+              adminUIDs: arrayUnion(targetDocId)
+            });
+          } catch (adminUidErr) {
+            console.warn("[ACTIVATE ADMIN] Notice appending admin UID to hotel:", adminUidErr);
+          }
+        }
       }
 
       // If tokenId was provided, mark it as used and clear from memory
@@ -1505,11 +1532,11 @@ async function startServer() {
       if (hotelId && hotelId !== 'system') {
         try {
           await addDoc(collection(db, 'hotels', hotelId, 'auditLogs'), {
-            action: 'STAFF_ACTIVATION_COMPLETED',
+            action: (userDocData?.role === 'hotelAdmin' || userDocData?.role === 'admin') ? 'ADMIN_ACTIVATION_COMPLETED' : 'STAFF_ACTIVATION_COMPLETED',
             module: 'Staff Security',
             targetId: targetDocId,
             targetEmail: userDocData?.email || email,
-            details: `Staff member ${userDocData?.email || email} (UID: ${targetDocId}) activated their account and set their password. Account status transitioned from Pending Activation to Active.`,
+            details: `User ${userDocData?.email || email} (UID: ${targetDocId}) activated their account and set their password. Account status transitioned from Pending Activation to Active.`,
             timestamp: serverTimestamp(),
             createdAt: now
           });
@@ -1519,11 +1546,123 @@ async function startServer() {
       return res.json({
         success: true,
         firebase_uid: targetDocId,
-        message: "Staff account successfully activated and verified. User is now Active."
+        message: "Account successfully activated and verified. User is now Active."
       });
     } catch (err: any) {
       console.error("[ACTIVATE STAFF ERROR]:", err);
       return res.status(500).json({ error: err.message || "Failed to activate staff account" });
+    }
+  });
+
+  // API Route: Send Tracking Code & Admin Registration Invitation via Email
+  app.post("/api/admin/send-tracking-code", async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const {
+      email,
+      code,
+      hotelName = "Hotel Property",
+      plan = "Standard",
+      duration = "1 month",
+      price = 0,
+      adminEmail = "Super Administrator",
+      baseUrl
+    } = req.body;
+
+    if (!email || !code) {
+      return res.status(400).json({ error: "Missing required fields: email and code are required." });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const cleanCode = code.trim().toUpperCase();
+    const clientOrigin = baseUrl || req.headers.origin || process.env.APP_URL || `http://localhost:${PORT}`;
+    const registrationUrl = `${clientOrigin.replace(/\/+$/, '')}/?trackingCode=${encodeURIComponent(cleanCode)}&email=${encodeURIComponent(normalizedEmail)}${hotelName ? `&hotelName=${encodeURIComponent(hotelName)}` : ''}&mode=register`;
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Your Hotel Property PMS Registration Code</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f4f4f5;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #09090b; padding: 40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+          <tr>
+            <td style="padding: 36px 40px; background: linear-gradient(135deg, #059669 0%, #047857 100%);">
+              <h1 style="margin: 0 0 8px 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.025em;">Property Registration Invitation</h1>
+              <p style="margin: 0; color: #d1fae5; font-size: 14px; font-weight: 500;">Hotel Administrator Onboarding</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px;">
+              <p style="margin: 0 0 20px 0; font-size: 16px; line-height: 24px; color: #e4e4e7;">
+                Hello,
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 24px; color: #a1a1aa;">
+                Your property registration access code has been generated. Use this code to register your hotel and activate your <strong>Master Hotel Administrator</strong> account on the Property Management System.
+              </p>
+
+              <div style="background-color: #09090b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 28px;">
+                <span style="display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #10b981; margin-bottom: 8px;">Your Unique Registration Code</span>
+                <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 32px; font-weight: 900; letter-spacing: 0.25em; color: #ffffff;">${cleanCode}</span>
+                <div style="margin-top: 12px; font-size: 13px; color: #71717a;">Plan: <strong style="color: #e4e4e7;">${plan}</strong> &bull; Duration: <strong style="color: #e4e4e7;">${duration}</strong></div>
+              </div>
+
+              <div style="text-align: center; margin-bottom: 32px;">
+                <a href="${registrationUrl}" style="display: inline-block; background-color: #10b981; color: #000000; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 36px; border-radius: 10px;">
+                  Register Hotel & Administrator Account &rarr;
+                </a>
+              </div>
+
+              <div style="background-color: #27272a33; border: 1px solid #27272a; border-radius: 10px; padding: 20px; margin-bottom: 28px;">
+                <h4 style="margin: 0 0 12px 0; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #e4e4e7;">Quick Registration Steps:</h4>
+                <ol style="margin: 0; padding-left: 20px; font-size: 14px; line-height: 22px; color: #a1a1aa;">
+                  <li style="margin-bottom: 6px;">Click the button above (your code and email will be pre-filled).</li>
+                  <li style="margin-bottom: 6px;">Enter your property name and choose your Administrator password.</li>
+                  <li>Sign in immediately with full master access to all property modules.</li>
+                </ol>
+              </div>
+
+              <p style="margin: 0; font-size: 12px; line-height: 18px; color: #71717a; border-top: 1px solid #27272a; padding-top: 20px;">
+                Direct Registration Link: <br />
+                <a href="${registrationUrl}" style="color: #10b981; word-break: break-all;">${registrationUrl}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 24px 40px; background-color: #121215; border-top: 1px solid #27272a; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #52525b;">Property Management System &bull; System Administration</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `;
+
+    try {
+      const emailResult = await dispatchEmailMessage({
+        to: normalizedEmail,
+        subject: `[INVITATION] Hotel Registration & Administrator Setup - Code: ${cleanCode}`,
+        html: htmlContent,
+        fromName: "PMS System Administration"
+      });
+
+      return res.status(200).json({
+        success: true,
+        code: cleanCode,
+        registrationUrl,
+        emailSent: emailResult.emailDispatched,
+        previewUrl: emailResult.previewUrl || null,
+        message: `Tracking code invitation dispatched to ${normalizedEmail}`
+      });
+    } catch (err: any) {
+      console.error("[SEND TRACKING CODE ERROR]:", err);
+      return res.status(500).json({ error: err.message || "Failed to dispatch tracking code email" });
     }
   });
 

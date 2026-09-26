@@ -83,6 +83,10 @@ export interface UserProfile {
   lastLoginDevice?: string;
   lastActivityAt?: string;
   updatedAt?: string;
+  isVerified?: boolean;
+  emailVerified?: boolean;
+  activationToken?: string;
+  activationLink?: string;
   lastPasswordResetRequestedAt?: string;
   lastPasswordResetRequestedBy?: string;
   activationTokenId?: string;
