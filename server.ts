@@ -846,6 +846,30 @@ async function startServer() {
       const assignedUserRole = req.body.assignedUserRole || (roleType === 'base' && baseRole === 'admin' ? 'hotelAdmin' : 'staff');
       const isHotelAdminRole = assignedUserRole === 'hotelAdmin';
 
+      const moduleMap: Record<string, string[]> = {
+        dashboard: ['view_dashboard', 'export_dashboard'],
+        reservations: ['access_front_desk', 'view_reservations', 'create_reservations', 'check_in_guests', 'check_out_guests'],
+        frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations'],
+        guests: ['edit_guest_profiles', 'view_guests', 'add_guests', 'edit_guests'],
+        rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms'],
+        housekeeping: ['view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
+        kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders'],
+        inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
+        maintenance: ['manage_maintenance'],
+        corporate: ['manage_corporate'],
+        finance: ['view_financial_records', 'view_ledger', 'process_payments', 'view_debt_ledger', 'receive_payment', 'receive_payments'],
+        audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
+        reports: ['view_reports', 'export_reports', 'print_reports'],
+        staff: ['manage_staff', 'view_users', 'view_activity_logs'],
+        settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
+      };
+
+      const resolvedAssignedModules = (Array.isArray(assignedModules) && assignedModules.length > 0)
+        ? assignedModules
+        : (Array.isArray(permissions) && permissions.length > 0
+            ? Object.keys(moduleMap).filter(modId => moduleMap[modId].some(p => permissions.includes(p)))
+            : (isHotelAdminRole ? Object.keys(moduleMap) : []));
+
       // 4. Save Staff Profile to application database explicitly linking firebase_uid
       const staffProfile = {
         uid: firebase_uid,
@@ -865,7 +889,7 @@ async function startServer() {
         systemAuthSecret: authUser.tempPass || null,
         roles: isHotelAdminRole ? ['admin', 'hotelAdmin'] : (roleType === 'base' ? [baseRole] : [roleLabel]),
         permissions: permissions && permissions.length > 0 ? permissions : (isHotelAdminRole ? ['all'] : []),
-        assignedModules: assignedModules && assignedModules.length > 0 ? assignedModules : [],
+        assignedModules: resolvedAssignedModules,
         activationLink: activationUrl,
         activationToken: tokenId,
         activationEmailSentAt: now,
@@ -1571,14 +1595,34 @@ async function startServer() {
         adminUid = "admin"
       } = req.body;
 
-      if (!uid) {
-        return res.status(400).json({ error: "Missing required field: uid" });
-      }
+      const moduleMap: Record<string, string[]> = {
+        dashboard: ['view_dashboard', 'export_dashboard'],
+        reservations: ['access_front_desk', 'view_reservations', 'create_reservations', 'check_in_guests', 'check_out_guests'],
+        frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations'],
+        guests: ['edit_guest_profiles', 'view_guests', 'add_guests', 'edit_guests'],
+        rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms'],
+        housekeeping: ['view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
+        kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders'],
+        inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
+        maintenance: ['manage_maintenance'],
+        corporate: ['manage_corporate'],
+        finance: ['view_financial_records', 'view_ledger', 'process_payments', 'view_debt_ledger', 'receive_payment', 'receive_payments'],
+        audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
+        reports: ['view_reports', 'export_reports', 'print_reports'],
+        staff: ['manage_staff', 'view_users', 'view_activity_logs'],
+        settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
+      };
+
+      const resolvedAssignedModules = (Array.isArray(assignedModules) && assignedModules.length > 0)
+        ? assignedModules
+        : (Array.isArray(permissions) && permissions.length > 0
+            ? Object.keys(moduleMap).filter(modId => moduleMap[modId].some(p => permissions.includes(p)))
+            : []);
 
       const now = new Date().toISOString();
       const updateData: any = {
         permissions,
-        assignedModules,
+        assignedModules: resolvedAssignedModules,
         updatedAt: now
       };
 

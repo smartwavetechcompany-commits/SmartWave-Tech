@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from './components/Sidebar';
-import { WifiOff, RefreshCw } from 'lucide-react';
+import { WifiOff, RefreshCw, ShieldCheck } from 'lucide-react';
 import { AuthPage } from './components/AuthPage';
 import { Dashboard } from './components/Dashboard';
 import { SuperAdmin } from './components/SuperAdmin';
@@ -30,7 +30,7 @@ import { Notifications } from './components/Notifications';
 import { AuditLogs } from './components/AuditLogs';
 import { Tasks } from './components/Tasks';
 import { TopBar } from './components/TopBar';
-import { PermissionGuard } from './components/PermissionGuard';
+import { PermissionGuard, useModuleAccess } from './components/PermissionGuard';
 import { cn } from './utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -43,6 +43,56 @@ import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal'
 import { AccountSuspendedModal } from './components/AccountSuspendedModal';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { SetPasswordPage } from './components/SetPasswordPage';
+
+function DashboardRoute() {
+  const { profile } = useAuth();
+  const { canAccessPMSModule } = useModuleAccess();
+
+  if (!profile) return null;
+  if (profile.role === 'superAdmin' || profile.role === 'hotelAdmin' || profile.staffRole === 'admin') {
+    return <Dashboard />;
+  }
+
+  if (canAccessPMSModule('dashboard')) {
+    return <Dashboard />;
+  }
+
+  // Find first assigned module route for regular staff
+  const moduleRoutes: Record<string, string> = {
+    reservations: '/operations',
+    frontDesk: '/front-desk',
+    rooms: '/rooms',
+    housekeeping: '/housekeeping',
+    kitchen: '/f-and-b',
+    inventory: '/inventory',
+    maintenance: '/maintenance',
+    guests: '/guests',
+    corporate: '/corporate',
+    finance: '/finance',
+    reports: '/reports',
+    staff: '/staff',
+    settings: '/settings'
+  };
+
+  const assigned = Array.isArray(profile.assignedModules) ? profile.assignedModules : [];
+  for (const mod of assigned) {
+    if (moduleRoutes[mod]) {
+      return <Navigate to={moduleRoutes[mod]} replace />;
+    }
+  }
+
+  return (
+    <div className="p-12 text-center flex flex-col items-center justify-center space-y-4">
+      <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500">
+        <ShieldCheck size={32} />
+      </div>
+      <div className="space-y-1">
+        <h2 className="text-xl font-bold text-zinc-50">No Modules Assigned</h2>
+        <p className="text-sm text-zinc-400">Please contact your Hotel Administrator to assign operational modules to your account.</p>
+      </div>
+    </div>
+  );
+}
 
 function AppContent() {
   const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection } = useAuth();
@@ -226,7 +276,7 @@ function AppContent() {
         <div className="flex-1 overflow-y-auto relative print:overflow-visible print:h-auto">
           <AnimatePresence mode="wait">
           <Routes location={location} key={location.pathname}>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<DashboardRoute />} />
             <Route path="/rooms" element={
               <PermissionGuard permission="manage_rooms" showError>
                 <Rooms />

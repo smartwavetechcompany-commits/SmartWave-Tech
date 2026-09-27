@@ -82,8 +82,8 @@ export function CommandPalette() {
       return false;
     }
 
-    // Check Plan active modules
-    if (item.module && profile?.role !== 'superAdmin') {
+    // Check Plan active modules for regular staff
+    if (item.module && profile?.role !== 'superAdmin' && profile?.role !== 'hotelAdmin' && profile?.staffRole !== 'admin') {
       if (!isModuleEnabled(hotel, item.module)) return false;
     }
 

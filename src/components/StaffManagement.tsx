@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, StaffRole, OperationType, CustomRole, UserRole } from '../types';
 import { hasPermission, BASE_ROLE_PERMISSIONS } from '../utils/permissions';
 import { RoleBuilderModal } from './RoleBuilderModal';
-import { ModuleAssignmentMatrix } from './ModuleAssignmentMatrix';
+import { ModuleAssignmentMatrix, PMS_MODULES, getAssignedModulesFromPermissions } from './ModuleAssignmentMatrix';
 import { SessionControlCenter } from './SessionControlCenter';
 import { AccountCreationSummaryModal, UserSummaryData } from './AccountCreationSummaryModal';
 import { AdminResetPasswordModal } from './AdminResetPasswordModal';
@@ -270,6 +270,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     }
 
     const assignedUserRole: UserRole = newStaff.roleType === 'base' && newStaff.baseRole === 'admin' ? 'hotelAdmin' : 'staff';
+    const assignedModules = getAssignedModulesFromPermissions(permissionsToAssign);
 
     try {
       toast.loading('Provisioning user in Firebase Authentication & database...');
@@ -279,6 +280,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
         hotelName: authHotel?.name || 'Hotel Property',
         newStaff,
         permissionsToAssign,
+        assignedModules,
         assignedRoleId: newStaff.roleType === 'custom' ? assignedRoleId : undefined,
         roleLabel,
         assignedUserRole,
@@ -904,8 +906,13 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                               {/* Manage Modules Button */}
                               <button
                                 onClick={() => {
+                                  const initialPerms = Array.isArray(member.permissions)
+                                    ? member.permissions
+                                    : Array.isArray(member.assignedModules) && member.assignedModules.length > 0
+                                      ? PMS_MODULES.filter(m => member.assignedModules?.includes(m.id)).flatMap(m => [...m.primaryPermissions, ...m.granularPermissions.map(p => p.id)])
+                                      : (BASE_ROLE_PERMISSIONS[member.staffRole || member.role] || []) as string[];
                                   setEditingPermissions(member);
-                                  setEditingPermsList((member.permissions || member.roles || []) as string[]);
+                                  setEditingPermsList(initialPerms);
                                 }}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-emerald-500/20 text-zinc-200 hover:text-emerald-300 text-xs font-semibold border border-zinc-700/60 transition-all shadow-sm"
                                 title="Manage assigned modules and granular permissions for this staff member"
@@ -913,7 +920,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                                 <Shield size={13} className="text-emerald-400" />
                                 <span>Manage Modules</span>
                                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
-                                  {member.permissions?.length || member.roles?.length || 0}
+                                  {Array.isArray(member.assignedModules) ? member.assignedModules.length : (member.permissions?.length || 0)}
                                 </span>
                               </button>
 
@@ -1419,15 +1426,41 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   if (!hotelId || !editingPermissions) return;
                   setIsSavingOverrides(true);
                   try {
-                    await database.safeUpdate(doc(db, 'users', editingPermissions.uid), {
-                      roles: editingPermsList,
+                    const assignedModules = getAssignedModulesFromPermissions(editingPermsList);
+
+                    // 1. Call server API endpoint for audit log and robust server-side write
+                    try {
+                      const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
+                      await fetch('/api/auth/update-user-permissions', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+                        },
+                        body: JSON.stringify({
+                          uid: editingPermissions.uid,
+                          email: editingPermissions.email,
+                          hotelId,
+                          permissions: editingPermsList,
+                          assignedModules,
+                          adminEmail: profile?.email || 'Administrator',
+                          adminUid: profile?.uid || 'admin'
+                        })
+                      });
+                    } catch (apiErr) {
+                      console.warn("Server permission update notice:", apiErr);
+                    }
+
+                    // 2. Direct client Firestore update with merge: true to instantly trigger onSnapshot for active sessions
+                    await database.safeSet(doc(db, 'users', editingPermissions.uid), {
                       permissions: editingPermsList,
+                      assignedModules,
                       updatedAt: new Date().toISOString()
                     }, {
                       hotelId,
                       module: 'Staff Security',
                       action: 'OVERRIDE_PERMISSIONS',
-                      details: `Updated assigned modules and permissions (${editingPermsList.length} permissions) for ${editingPermissions.email}`
+                      details: `Updated assigned modules (${assignedModules.join(', ') || 'none'}) and permissions (${editingPermsList.length} capabilities) for ${editingPermissions.email}`
                     });
 
                     toast.success('Module access and permissions successfully updated');

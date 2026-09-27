@@ -42,7 +42,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const location = useLocation();
 
   const menuItems = [
-    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', capability: null, module: 'dashboard', pmsModuleId: 'dashboard' },
+    { icon: LayoutDashboard, label: t('sidebar.dashboard'), path: '/', capability: 'view_dashboard', module: 'dashboard', pmsModuleId: 'dashboard' },
     { icon: Activity, label: 'Operations', path: '/operations', capability: 'access_front_desk', module: 'dashboard', pmsModuleId: 'reservations' },
     { icon: CalendarDays, label: t('sidebar.calendar'), path: '/front-desk', capability: 'access_front_desk', module: 'frontDesk', pmsModuleId: 'reservations' },
     { icon: Bed, label: t('sidebar.rooms'), path: '/rooms', capability: 'manage_rooms', module: 'rooms', pmsModuleId: 'rooms' },
@@ -69,73 +69,38 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const filteredItems = menuItems.filter(item => {
     if (!profile) return false;
     
-    // Super Admins have complete visibility
+    // 1. Super Admins have complete visibility across the whole system
     if (profile.role === 'superAdmin') {
       return true;
     }
 
-    // Hotel Admins see everything within hotel except super-admin
-    if (profile.role === 'hotelAdmin' || profile.role === 'admin') {
-      if (item.capability === 'access_super_admin') return false;
-      if (item.module && !isModuleEnabled(hotel, item.module)) return false;
-      return true;
+    // 2. Hotel Admins automatically see every module within their hotel
+    if (profile.role === 'hotelAdmin' || profile.staffRole === 'admin') {
+      return item.capability !== 'access_super_admin';
     }
 
     // SuperAdmin portal is never shown to regular staff
     if (item.capability === 'access_super_admin') return false;
 
-    // 1. Check Role-based Capability / Module Assignment
-    // A staff user has access if they have the specific capability OR if they have the module assigned
-    const hasExplicitCapability = item.capability ? canAccessModule(item.capability as any) : true;
-    const hasModuleAssigned = item.pmsModuleId 
-      ? canAccessPMSModule(item.pmsModuleId)
-      : false;
-
-    if (!hasExplicitCapability && !hasModuleAssigned) {
-      return false;
-    }
-
-    // 2. Check Module toggles for the hotel plan
-    if (item.module) {
-      if (!isModuleEnabled(hotel, item.module)) return false;
-    }
-
-    // Check dynamic visibility for Finance
-    if (item.path === '/finance') {
-      const allowed = hotel?.settings?.financial?.allowFinancialReportViewing ?? true;
-      if (!allowed) {
+    // 3. Regular staff: MUST ONLY see the modules assigned to them!
+    // Check if the PMS module is assigned to this staff user
+    if (item.pmsModuleId) {
+      const isAssigned = canAccessPMSModule(item.pmsModuleId);
+      if (!isAssigned) {
         return false;
       }
     }
 
-    // 3. Check Department-based Restriction from Hotel Admin Settings
-    if (hotel?.settings?.staff?.restrictByDepartment && profile?.department) {
-      // If the admin explicitly granted this capability or module, it always takes precedence
-      const isExplicitlyAssigned = hasExplicitCapability || hasModuleAssigned;
-      if (!isExplicitlyAssigned) {
-        const dep = profile.department.toLowerCase();
-        
-        // Map modules to departments
-        const moduleMap: Record<string, string[]> = {
-          'frontDesk': ['front desk', 'reception', 'reservations'],
-          'rooms': ['front desk', 'reception', 'housekeeping'],
-          'housekeeping': ['housekeeping'],
-          'kitchen': ['kitchen', 'f&b', 'restaurant', 'food & beverage'],
-          'inventory': ['store', 'purchase', 'kitchen', 'maintenance'],
-          'maintenance': ['maintenance', 'engineering'],
-          'finance': ['accounts', 'finance'],
-          'reports': ['management', 'finance', 'accounts'],
-          'staff': ['hr', 'admin'],
-          'corporate': ['sales', 'reservations', 'front desk'],
-          'guests': ['front desk', 'reception', 'reservations'],
-        };
-        
-        if (item.module && moduleMap[item.module]) {
-          const allowedDepartments = moduleMap[item.module];
-          const isAllowed = allowedDepartments.some(d => dep.includes(d) || d.includes(dep));
-          
-          if (!isAllowed) return false;
-        }
+    // If an item specifies a specific capability requirement, verify it
+    if (item.capability && !canAccessModule(item.capability as any)) {
+      return false;
+    }
+
+    // Check dynamic visibility for Finance if configured in hotel settings
+    if (item.path === '/finance' || item.path === '/debt-ledger') {
+      const allowed = hotel?.settings?.financial?.allowFinancialReportViewing ?? true;
+      if (!allowed) {
+        return false;
       }
     }
 

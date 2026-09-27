@@ -125,7 +125,6 @@ export const PMS_MODULES: ModuleDefinition[] = [
     icon: ClipboardList,
     color: 'teal',
     primaryPermissions: [
-      'manage_rooms', 
       'view_housekeeping', 
       'assign_housekeeping_tasks', 
       'edit_housekeeping_tasks', 
@@ -231,7 +230,7 @@ export const PMS_MODULES: ModuleDefinition[] = [
     description: 'End-of-day business date roll, room charge posting, automatic tariff deductions, and ledger closing',
     icon: Clock,
     color: 'amber',
-    primaryPermissions: ['nightly_audit', 'run_night_audit', 'approve_night_audit', 'view_financial_records'],
+    primaryPermissions: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
     granularPermissions: [
       { id: 'nightly_audit', name: 'Access Nightly Audit', description: 'Open EOD audit dashboard and pre-audit checklists' },
       { id: 'run_night_audit', name: 'Execute Nightly Audit', description: 'Roll system date and trigger room rate postings' },
@@ -286,6 +285,17 @@ export const PMS_MODULES: ModuleDefinition[] = [
     ]
   }
 ];
+
+/**
+ * Derive assigned PMS module IDs from a list of assigned permission strings
+ */
+export const getAssignedModulesFromPermissions = (permissions: string[]): string[] => {
+  if (!Array.isArray(permissions) || permissions.length === 0) return [];
+  return PMS_MODULES.filter(m => {
+    const allPerms = [...m.primaryPermissions, ...m.granularPermissions.map(p => p.id)];
+    return allPerms.some(p => permissions.includes(p));
+  }).map(m => m.id);
+};
 
 export interface ModuleAssignmentMatrixProps {
   selectedPermissions: string[];
@@ -363,25 +373,15 @@ export function ModuleAssignmentMatrix({
     switch (presetName) {
       case 'frontDesk':
         targetPerms = [
-          ...PMS_MODULES.find(m => m.id === 'dashboard')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'reservations')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'guests')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'rooms')?.primaryPermissions || [],
-          'view_housekeeping',
-          'view_fb_orders',
-          'create_fb_orders',
-          'view_ledger',
-          'post_charges',
-          'receive_payments',
-          'receive_payment'
         ];
         break;
 
       case 'housekeeping':
         targetPerms = [
           ...PMS_MODULES.find(m => m.id === 'housekeeping')?.primaryPermissions || [],
-          'view_rooms',
-          'manage_rooms'
         ];
         break;
 
@@ -394,25 +394,19 @@ export function ModuleAssignmentMatrix({
       case 'maintenance':
         targetPerms = [
           ...PMS_MODULES.find(m => m.id === 'maintenance')?.primaryPermissions || [],
-          'view_rooms',
-          'view_inventory'
         ];
         break;
 
       case 'accountant':
         targetPerms = [
-          ...PMS_MODULES.find(m => m.id === 'dashboard')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'finance')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'audits')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'reports')?.primaryPermissions || [],
-          'view_reservations',
-          'view_guests'
         ];
         break;
 
       case 'nightAuditor':
         targetPerms = [
-          ...PMS_MODULES.find(m => m.id === 'dashboard')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'reservations')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'rooms')?.primaryPermissions || [],
           ...PMS_MODULES.find(m => m.id === 'finance')?.primaryPermissions || [],
