@@ -656,6 +656,9 @@ export function Rooms() {
           status: 'checked_out',
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
+          checkOutDateTime: now.toISOString(),
+          actualCheckOut: now.toISOString(),
+          checkedOutBy: profile.email || 'System',
           paymentStatus: freshResData.paymentStatus || (outstandingBalance <= 0.01 ? 'paid' : (freshResData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'),
           financialStatus: outstandingBalance > 0.01 ? ((freshResData.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
           ledgerBalance: outstandingBalance
@@ -708,6 +711,8 @@ export function Rooms() {
         try {
           const checkoutHistoryRef = doc(db, 'hotels', hotel.id, 'checkout_history', res.id);
           await setDoc(checkoutHistoryRef, {
+            ...res,
+            ...freshResData,
             id: res.id,
             reservationId: res.id,
             guestId: res.guestId || 'unknown_guest',
@@ -716,9 +721,13 @@ export function Rooms() {
             guestPhone: res.guestPhone || '',
             roomNumber: res.roomNumber,
             roomId: res.roomId,
+            nights: res.nights || 1,
+            nightlyRate: res.nightlyRate || 0,
             checkIn: res.checkIn,
             checkOut: format(now, 'yyyy-MM-dd'),
             checkOutTime: format(now, 'HH:mm'),
+            checkOutDateTime: now.toISOString(),
+            actualCheckOut: now.toISOString(),
             checkOutTimestamp: now.toISOString(),
             bookedBy: res.bookedBy || '',
             checkedOutBy: profile.email || 'System',
@@ -727,7 +736,7 @@ export function Rooms() {
             totalAmount: totalDebits,
             paidAmount: res.paidAmount || 0,
             paymentStatus: (res.paidAmount || 0) >= totalDebits ? 'paid' : (res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
-          });
+          }, { merge: true });
         } catch (err) {
           console.error("Failed to write to checkout_history:", err);
         }

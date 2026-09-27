@@ -494,7 +494,13 @@ export interface Reservation {
   }[];
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
   checkInDateTime?: string; // Complete ISO timestamp for actual check-in
+  actualCheckIn?: string; // Complete ISO timestamp for operational check-in
   checkOutDateTime?: string; // Complete ISO timestamp for scheduled/actual checkout
+  actualCheckOut?: string; // Complete ISO timestamp for operational checkout
+  checkedInBy?: string; // Staff member email/name who checked in
+  checkedOutBy?: string; // Staff member email/name who checked out
+  bookingSource?: string; // Source channel: Direct, OTA, Walk-In, Corporate, etc.
+  source?: string; // Alternative alias for booking source
   nextChargeDateTime?: string; // Complete ISO timestamp of next expected charge boundary
   lastChargeDateTime?: string; // Complete ISO timestamp of the last generated charge
   bookedBy?: string; // Added for tracking who made the reservation
@@ -850,6 +856,8 @@ export interface Guest {
   phone: string;
   idType?: string;
   idNumber?: string;
+  nationality?: string;
+  country?: string;
   address?: string;
   notes?: string;
   tags?: string[]; // VIP, Corporate, Frequent, etc.

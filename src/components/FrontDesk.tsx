@@ -264,23 +264,80 @@ export function FrontDesk() {
   const filteredReservations = React.useMemo(() => {
     let baseList: any[] = [];
     if (activeTab === 'checkin_history') {
-      baseList = checkInHistory;
+      const checkinRes = reservations.filter(r => r.status === 'checked_in' || r.status === 'checked_out');
+      const checkinMap = new Map<string, any>();
+      checkinRes.forEach(r => checkinMap.set(r.id, r));
+      checkInHistory.forEach(h => {
+        const id = h.reservationId || h.id;
+        const existing = checkinMap.get(id);
+        if (existing) {
+          checkinMap.set(id, {
+            ...existing,
+            ...h,
+            id: existing.id,
+            totalAmount: existing.totalAmount ?? h.totalAmount,
+            paidAmount: existing.paidAmount ?? h.paidAmount,
+            ledgerBalance: existing.ledgerBalance ?? h.ledgerBalance,
+            roomNumber: existing.roomNumber || h.roomNumber,
+            roomId: existing.roomId || h.roomId,
+            checkIn: existing.checkIn || h.checkIn,
+            checkInTime: h.checkInTime || existing.checkInTime,
+            checkInDateTime: h.checkInDateTime || existing.checkInDateTime || existing.actualCheckIn,
+            actualCheckIn: h.actualCheckIn || existing.actualCheckIn,
+            checkedInBy: h.checkedInBy || existing.checkedInBy,
+          });
+        } else {
+          checkinMap.set(id, h);
+        }
+      });
+      baseList = Array.from(checkinMap.values());
     } else if (activeTab === 'checkout_history') {
-      baseList = checkOutHistory;
+      const checkoutRes = reservations.filter(r => r.status === 'checked_out');
+      const checkoutMap = new Map<string, any>();
+      checkoutRes.forEach(r => checkoutMap.set(r.id, r));
+      checkOutHistory.forEach(h => {
+        const id = h.reservationId || h.id;
+        const existing = checkoutMap.get(id);
+        if (existing) {
+          checkoutMap.set(id, {
+            ...existing,
+            ...h,
+            id: existing.id,
+            totalAmount: existing.totalAmount ?? h.totalAmount,
+            paidAmount: existing.paidAmount ?? h.paidAmount,
+            ledgerBalance: existing.ledgerBalance ?? h.ledgerBalance,
+            roomNumber: existing.roomNumber || h.roomNumber,
+            roomId: existing.roomId || h.roomId,
+            checkIn: existing.checkIn || h.checkIn,
+            checkOut: h.checkOut || existing.checkOut,
+            checkOutTime: h.checkOutTime || existing.checkOutTime,
+            checkOutDateTime: h.checkOutDateTime || existing.checkOutDateTime || existing.actualCheckOut,
+            actualCheckOut: h.actualCheckOut || existing.actualCheckOut,
+            checkedOutBy: h.checkedOutBy || existing.checkedOutBy,
+          });
+        } else {
+          checkoutMap.set(id, h);
+        }
+      });
+      baseList = Array.from(checkoutMap.values());
     } else {
       baseList = reservations;
     }
 
     return baseList.filter(res => {
-      const matchesSearch = fuzzySearch(res.guestName || '', searchTerm) ||
+      const matchesSearch = !searchTerm ||
+        fuzzySearch(res.guestName || '', searchTerm) ||
         fuzzySearch(res.roomNumber || '', searchTerm) ||
-        fuzzySearch(res.id || '', searchTerm);
+        fuzzySearch(res.id || '', searchTerm) ||
+        fuzzySearch(res.guestPhone || '', searchTerm) ||
+        fuzzySearch(res.guestEmail || '', searchTerm) ||
+        fuzzySearch(res.corporateReference || '', searchTerm);
       
       if (!matchesSearch) return false;
 
       // History Tab Date Filter Requirements
       if (activeTab === 'checkin_history' || activeTab === 'checkout_history') {
-        const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : res.checkOut;
+        const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : (res.checkOut || res.actualCheckOut?.slice(0, 10));
         if (compareDateStr) {
           const itemDate = new Date(compareDateStr);
           const today = new Date();
@@ -301,12 +358,33 @@ export function FrontDesk() {
 
         // Custom range filters if present
         if (dateRange.start) {
-          const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : res.checkOut;
           if (compareDateStr && new Date(compareDateStr) < new Date(dateRange.start)) return false;
         }
         if (dateRange.end) {
-          const compareDateStr = activeTab === 'checkin_history' ? res.checkIn : res.checkOut;
           if (compareDateStr && new Date(compareDateStr) > new Date(dateRange.end)) return false;
+        }
+
+        // Apply payment status filter to history items as well
+        if (paymentStatusFilter !== 'all') {
+          const bal = getReservationLiveBalance(res, hotel);
+          const isPaid = res.paymentStatus === 'paid' || Math.abs(bal) <= 0.01;
+          const isUnpaid = (res.paymentStatus === 'unpaid' || (res.paidAmount || 0) <= 0) && bal > 0.01;
+          const isPartial = res.paymentStatus === 'partial' || ((res.paidAmount || 0) > 0 && bal > 0.01);
+          if (paymentStatusFilter === 'paid' && !isPaid) return false;
+          if (paymentStatusFilter === 'unpaid' && !isUnpaid) return false;
+          if (paymentStatusFilter === 'partial' && !isPartial) return false;
+        }
+
+        // Apply room type filter to history items
+        if (roomTypeFilter !== 'all') {
+          const room = rooms.find(r => r.id === res.roomId || r.roomNumber === res.roomNumber);
+          if (room && room.type !== roomTypeFilter) return false;
+        }
+
+        // Apply staff filter to history items
+        if (staffFilter !== 'all') {
+          const matchesStaff = res.bookedBy === staffFilter || res.checkedOutBy === staffFilter || res.checkedInBy === staffFilter;
+          if (!matchesStaff) return false;
         }
 
         return true;
@@ -316,8 +394,15 @@ export function FrontDesk() {
       const matchesStatus = statusFilter === 'all' || res.status === statusFilter;
       if (!matchesStatus) return false;
 
-      const matchesPaymentStatus = paymentStatusFilter === 'all' || res.paymentStatus === paymentStatusFilter;
-      if (!matchesPaymentStatus) return false;
+      if (paymentStatusFilter !== 'all') {
+        const bal = getReservationLiveBalance(res, hotel);
+        const isPaid = res.paymentStatus === 'paid' || Math.abs(bal) <= 0.01;
+        const isUnpaid = (res.paymentStatus === 'unpaid' || (res.paidAmount || 0) <= 0) && bal > 0.01;
+        const isPartial = res.paymentStatus === 'partial' || ((res.paidAmount || 0) > 0 && bal > 0.01);
+        if (paymentStatusFilter === 'paid' && !isPaid) return false;
+        if (paymentStatusFilter === 'unpaid' && !isUnpaid) return false;
+        if (paymentStatusFilter === 'partial' && !isPartial) return false;
+      }
 
       const matchesRoomType = roomTypeFilter === 'all' || rooms.find(r => r.id === res.roomId)?.type === roomTypeFilter;
       if (!matchesRoomType) return false;
@@ -349,8 +434,8 @@ export function FrontDesk() {
         return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
       }
 
-      // Automatically hide fully paid (ledgerBalance = 0) checkout reservations from other active tabs
-      if (activeTab === 'all') {
+      // Automatically hide fully paid (ledgerBalance = 0) checkout reservations from other active tabs ONLY when statusFilter is 'all'
+      if (activeTab === 'all' && statusFilter === 'all') {
         const isCompleted = res.status === 'checked_out' && Math.abs(res.ledgerBalance || 0) < 0.01;
         if (isCompleted) return false;
       }
@@ -362,8 +447,8 @@ export function FrontDesk() {
       else if (sortBy === 'roomNumber') result = (a.roomNumber || '').localeCompare(b.roomNumber || '');
       else if (sortBy === 'status') result = (a.status || '').localeCompare(b.status || '');
       else {
-        const dateA = activeTab === 'checkout_history' ? a.checkOut : a.checkIn;
-        const dateB = activeTab === 'checkout_history' ? b.checkOut : b.checkIn;
+        const dateA = activeTab === 'checkout_history' ? (a.actualCheckOut || a.checkOut) : a.checkIn;
+        const dateB = activeTab === 'checkout_history' ? (b.actualCheckOut || b.checkOut) : b.checkIn;
         result = new Date(dateA || '').getTime() - new Date(dateB || '').getTime();
       }
       return sortOrder === 'desc' ? -result : result;
@@ -1614,7 +1699,16 @@ export function FrontDesk() {
       
       // 1. Update reservation status immediately if not checking out
       if (status !== 'checked_out') {
-        await database.safeUpdate(resRef, { status }, {
+        const updateData: any = { status };
+        const now = new Date();
+        if (status === 'checked_in') {
+          updateData.checkInDateTime = now.toISOString();
+          updateData.actualCheckIn = now.toISOString();
+          updateData.checkInTime = format(now, 'HH:mm');
+          updateData.checkedInBy = profile.email || 'System';
+        }
+
+        await database.safeUpdate(resRef, updateData, {
           hotelId: hotel.id,
           module: 'Front Desk',
           action: 'UPDATE_RESERVATION_STATUS',
@@ -1647,8 +1741,10 @@ export function FrontDesk() {
       if (status === 'checked_in') {
         // Write to Check-In History
         try {
+          const now = new Date();
           const checkInHistoryRef = doc(db, 'hotels', hotel.id, 'checkin_history', res.id);
           await setDoc(checkInHistoryRef, {
+            ...res,
             id: res.id,
             reservationId: res.id,
             guestId: res.guestId || 'unknown_guest',
@@ -1657,10 +1753,12 @@ export function FrontDesk() {
             guestPhone: res.guestPhone || '',
             roomNumber: res.roomNumber,
             roomId: res.roomId,
-            checkIn: res.checkIn,
-            checkInTime: res.checkInTime || '14:00',
+            checkIn: res.checkIn || format(now, 'yyyy-MM-dd'),
+            checkInTime: format(now, 'HH:mm'),
+            checkInDateTime: now.toISOString(),
+            actualCheckIn: now.toISOString(),
             checkOut: res.checkOut,
-            checkInTimestamp: new Date().toISOString(),
+            checkInTimestamp: now.toISOString(),
             bookedBy: res.bookedBy || '',
             checkedInBy: profile.email || 'System',
             status: 'checked_in',
@@ -1668,7 +1766,7 @@ export function FrontDesk() {
             totalAmount: res.totalAmount || 0,
             paidAmount: res.paidAmount || 0,
             paymentStatus: res.paymentStatus || 'unpaid'
-          });
+          }, { merge: true });
         } catch (err) {
           console.error("Failed to write to checkin_history:", err);
         }
@@ -1794,6 +1892,9 @@ export function FrontDesk() {
           status: 'checked_out',
           checkOut: format(now, 'yyyy-MM-dd'),
           checkOutTime: format(now, 'HH:mm'),
+          checkOutDateTime: now.toISOString(),
+          actualCheckOut: now.toISOString(),
+          checkedOutBy: profile.email || 'System',
           paymentStatus: freshResData.paymentStatus || (outstandingBalance <= 0.01 ? 'paid' : (freshResData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'),
           financialStatus: outstandingBalance > 0.01 ? ((freshResData.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
           ledgerBalance: outstandingBalance
@@ -1903,6 +2004,8 @@ export function FrontDesk() {
           
           const checkoutHistoryRef = doc(db, 'hotels', hotel.id, 'checkout_history', res.id);
           await setDoc(checkoutHistoryRef, {
+            ...res,
+            ...freshData,
             id: res.id,
             reservationId: res.id,
             guestId: res.guestId || 'unknown_guest',
@@ -1911,9 +2014,13 @@ export function FrontDesk() {
             guestPhone: res.guestPhone || '',
             roomNumber: res.roomNumber,
             roomId: res.roomId,
+            nights: res.nights || 1,
+            nightlyRate: res.nightlyRate || 0,
             checkIn: res.checkIn,
             checkOut: format(now, 'yyyy-MM-dd'),
             checkOutTime: format(now, 'HH:mm'),
+            checkOutDateTime: now.toISOString(),
+            actualCheckOut: now.toISOString(),
             checkOutTimestamp: now.toISOString(),
             bookedBy: res.bookedBy || '',
             checkedOutBy: profile.email || 'System',
@@ -1922,7 +2029,7 @@ export function FrontDesk() {
             totalAmount: totalDebits,
             paidAmount: freshData.paidAmount || 0,
             paymentStatus: (freshData.paidAmount || 0) >= totalDebits ? 'paid' : (freshData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
-          });
+          }, { merge: true });
         } catch (err) {
           console.error("Failed to write to checkout_history:", err);
         }
@@ -3910,6 +4017,13 @@ export function FrontDesk() {
                             return null;
                           })()}
                         </div>
+                        {(res.guestPhone || res.guestEmail) && (
+                          <div className="text-[10px] text-zinc-400 font-normal flex items-center gap-1.5 flex-wrap mt-0.5">
+                            {res.guestPhone && <span>{res.guestPhone}</span>}
+                            {res.guestPhone && res.guestEmail && <span className="text-zinc-600">•</span>}
+                            {res.guestEmail && <span className="text-zinc-500">{res.guestEmail}</span>}
+                          </div>
+                        )}
                         {(() => {
                           const linkedGuest = guests.find(g => g.id === res.guestId);
                           const corpId = res.corporateId || linkedGuest?.corporateId;
@@ -3978,12 +4092,21 @@ export function FrontDesk() {
           <td className="px-6 py-4 text-xs text-zinc-400">
             <div className="flex items-center gap-1.5 mb-1">
               <Calendar size={12} className="text-emerald-500" /> 
-              <span className="font-bold text-zinc-200">{res.checkIn}</span>
+              <span className="font-bold text-zinc-200">
+                In: {res.checkIn} {res.checkInTime ? `@ ${res.checkInTime}` : ''}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 opacity-60">
-              <Calendar size={12} className="text-zinc-600" /> 
-              <span>{res.checkOut}</span>
+            <div className="flex items-center gap-1.5 text-zinc-400">
+              <Calendar size={12} className={res.status === 'checked_out' ? "text-blue-400" : "text-zinc-600"} /> 
+              <span className={res.status === 'checked_out' ? "text-zinc-300 font-medium" : "text-zinc-400"}>
+                {res.status === 'checked_out' ? 'Out:' : 'Due:'} {res.checkOut} {res.checkOutTime ? `@ ${res.checkOutTime}` : ''}
+              </span>
             </div>
+            {res.checkedOutBy && res.status === 'checked_out' && (
+              <div className="text-[9px] text-zinc-500 mt-0.5 truncate max-w-[160px]" title={`Checked out by ${res.checkedOutBy}`}>
+                Staff: {res.checkedOutBy}
+              </div>
+            )}
             <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
               <div className="flex items-center gap-1">
                 <Clock size={10} className="text-zinc-600" />
@@ -4127,6 +4250,14 @@ export function FrontDesk() {
                           >
                             <Receipt size={14} />
                             View Folio
+                          </button>
+                          <button 
+                            onClick={() => setShowReceipt({ res, type: 'comprehensive' })}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                            title="Print Comprehensive Receipt"
+                          >
+                            <FileText size={14} />
+                            Receipt
                           </button>
                           {res.status === 'checked_out' && (res.ledgerBalance || 0) > 0.01 && (
                             <button 

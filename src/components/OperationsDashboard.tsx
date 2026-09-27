@@ -470,7 +470,11 @@ export function OperationsDashboard() {
 
   // Check-ins: Guests who checked in today
   const checkins = useMemo(() => 
-    reservations.filter(r => r.checkIn === today && r.status === 'checked_in'), 
+    reservations.filter(r => (r.status === 'checked_in' || r.status === 'checked_out') && (
+      r.checkIn === today || 
+      r.checkInDateTime?.startsWith(today) || 
+      r.actualCheckIn?.startsWith(today)
+    )), 
     [reservations, today]
   );
 
@@ -484,7 +488,12 @@ export function OperationsDashboard() {
   // Completed Check-outs: Guests who HAVE actually checked out (status === 'checked_out')
   // Under NO circumstances should an active checked-in guest appear here!
   const checkouts = useMemo(() => 
-    reservations.filter(r => r.status === 'checked_out' && (r.checkOutDateTime?.startsWith(today) || r.checkOut === today)), 
+    reservations.filter(r => r.status === 'checked_out' && (
+      r.checkOut === today || 
+      r.checkOutDateTime?.startsWith(today) || 
+      r.actualCheckOut?.startsWith(today) ||
+      (r.updatedAt && format(new Date(r.updatedAt), 'yyyy-MM-dd') === today)
+    )), 
     [reservations, today]
   );
 

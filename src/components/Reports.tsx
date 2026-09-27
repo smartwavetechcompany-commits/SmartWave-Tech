@@ -189,11 +189,15 @@ export function Reports() {
         const chartData = Object.entries(dailyRevenue).map(([name, revenue]) => ({ name, revenue }));
         setRevenueData(chartData.length > 0 ? chartData : [{ name: 'No Data', revenue: 0 }]);
 
+        const roomRevenue = filteredEntries
+          .filter(e => e.category === 'room' && e.type === 'debit')
+          .reduce((acc, curr) => acc + curr.amount, 0);
+
         setStats({
           occupancy: currentOccupancy,
-          revPar: totalRevenue / (totalRooms || 1),
-          adr: totalRevenue / (occupiedRooms || 1),
-          totalGuests: new Set(filteredEntries.map(e => e.reservationId)).size,
+          revPar: totalRooms > 0 ? roomRevenue / totalRooms : 0,
+          adr: occupiedRooms > 0 ? roomRevenue / occupiedRooms : 0,
+          totalGuests: new Set(filteredEntries.map(e => e.reservationId).filter(Boolean)).size,
           corporateRevenue: corpRev,
           individualRevenue: indivRev,
           totalRevenue
@@ -234,18 +238,22 @@ export function Reports() {
     const headers = (() => {
       switch (type) {
         case 'occupancy': return ['Date', 'Total Rooms', 'Occupied', 'Occupancy %'];
-        case 'inhouse': return ['Room', 'Guest Name', 'Arrival', 'Departure', 'Stay Duration', 'Balance'];
-        case 'reservations': return ['Res #', 'Guest Name', 'Room', 'Arrival', 'Departure', 'Stay Duration', 'Status', 'Total'];
-        case 'daily_sales': return ['Date', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
-        case 'monthly_sales': return ['Month', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
+        case 'occupancy_ratio': return ['Room Type', 'Total Rooms', 'Occupied Rooms', 'Occupancy %', 'Room Revenue', 'ADR', 'RevPAR'];
+        case 'inhouse': return ['Room', 'Guest Name', 'Phone', 'Email', 'Arrival', 'Departure', 'Stay Duration', 'Payment Status', 'Balance'];
+        case 'reservations': return ['Res #', 'Guest Name', 'Phone', 'Room', 'Arrival', 'Departure', 'Stay Duration', 'Status', 'Total Charges', 'Total Paid', 'Balance'];
+        case 'daily_sales': return ['Date', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Taxes', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
+        case 'monthly_sales': return ['Month', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Taxes', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
         case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
         case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Transaction ID'];
-        case 'balance': return ['Guest Name', 'Room', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
+        case 'balance': return ['Guest Name', 'Room', 'Status', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Expected Revenue', 'Paid Revenue', 'Outstanding Balance', 'Occupancy Count'];
         case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Visits', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
         case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
+        case 'taxation': return ['Date', 'Tax Type', 'Description', 'Amount', 'Reservation #', 'Guest Name', 'Recorded By'];
+        case 'source': return ['Booking Source', 'Total Bookings', 'Total Nights', 'Total Revenue', 'Avg Booking Value'];
+        case 'countries': return ['Country / Nationality', 'Total Guests', 'Completed Stays', 'Active Stays', 'Total Spent'];
         case 'profit_loss': return ['Description', 'Income', 'Expense', 'Net'];
         case 'expenses_detail': return ['Date', 'Category', 'Description', 'Amount', 'Method'];
         case 'supplier_balances': return ['Supplier', 'Category', 'Phone', 'Balance'];
@@ -294,13 +302,18 @@ export function Reports() {
         return reservations
           .filter(res => res.status === 'checked_in')
           .map(res => {
+            const guest = guests.find(g => g.id === res.guestId);
+            const bal = getReservationLiveBalance(res, hotel);
             return {
               Room: res.roomNumber,
               'Guest Name': res.guestName,
+              Phone: res.guestPhone || guest?.phone || 'N/A',
+              Email: res.guestEmail || guest?.email || 'N/A',
               Arrival: res.checkIn,
               Departure: res.checkOut,
               'Stay Duration': formatStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0),
-              Balance: getReservationLiveBalance(res, hotel),
+              'Payment Status': res.paymentStatus ? res.paymentStatus.toUpperCase() : (bal <= 0.01 ? 'PAID' : 'UNPAID'),
+              Balance: bal,
               _id: res.id,
               _collection: 'reservations',
               _label: `In-House Reservation: ${res.guestName}`
@@ -310,19 +323,26 @@ export function Reports() {
       case 'reservations': {
         return reservations
           .filter(res => {
-            const date = new Date(res.createdAt || res.checkIn);
-            return isWithinInterval(date, { start: startDate, end: endDate });
+            const checkInDate = new Date(res.checkIn);
+            const createdDate = res.createdAt ? new Date(res.createdAt) : null;
+            return isWithinInterval(checkInDate, { start: startDate, end: endDate }) ||
+              (createdDate && isWithinInterval(createdDate, { start: startDate, end: endDate }));
           })
           .map(res => {
+            const guest = guests.find(g => g.id === res.guestId);
+            const bal = getReservationLiveBalance(res, hotel);
             return {
               'Res #': (res.id || '').slice(-6).toUpperCase(),
               'Guest Name': res.guestName,
+              Phone: res.guestPhone || guest?.phone || 'N/A',
               Room: res.roomNumber,
               Arrival: res.checkIn,
               Departure: res.checkOut,
               'Stay Duration': formatStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0),
               Status: res.status.replace('_', ' ').toUpperCase(),
-              Total: res.totalAmount,
+              'Total Charges': res.totalAmount,
+              'Total Paid': res.paidAmount || 0,
+              Balance: bal,
               _id: res.id,
               _collection: 'reservations',
               _label: `Reservation ${(res.id || '').slice(-6).toUpperCase()}`
@@ -335,17 +355,27 @@ export function Reports() {
         while (curr <= endDate) {
           const dayStr = format(curr, 'yyyy-MM-dd');
           const dayEntries = ledgerEntries.filter(e => format(new Date(e.timestamp), 'yyyy-MM-dd') === dayStr);
+          
           const roomRev = dayEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-          const fbRev = dayEntries.filter(e => e.category === 'F & B' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-          const otherRev = dayEntries.filter(e => !['room', 'F & B'].includes(e.category) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-          const paidCollected = dayEntries.filter(e => e.category === 'payment' && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-          const totalExpected = roomRev + fbRev + otherRev;
+          const fbRev = dayEntries.filter(e => ['restaurant', 'f & b', 'food', 'bar', 'beverage'].includes((e.category || '').toLowerCase()) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const taxRev = dayEntries.filter(e => (e.category || '').toLowerCase() === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const otherRev = dayEntries.filter(e => {
+            const cat = (e.category || '').toLowerCase();
+            return !['room', 'restaurant', 'f & b', 'food', 'bar', 'beverage', 'tax', 'payment', 'refund'].includes(cat) && e.type === 'debit';
+          }).reduce((acc, e) => acc + e.amount, 0);
+
+          const paidCredits = dayEntries.filter(e => e.category === 'payment' && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+          const refundDebits = dayEntries.filter(e => (e.category === 'refund' || e.category === 'payment') && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+          const paidCollected = Math.max(0, paidCredits - refundDebits);
+
+          const totalExpected = roomRev + fbRev + otherRev + taxRev;
 
           data.push({
             Date: dayStr,
             'Expected Room Rev': roomRev,
             'Expected F & B': fbRev,
             'Expected Other': otherRev,
+            Taxes: taxRev,
             'Total Expected': totalExpected,
             'Actual Paid Collected': paidCollected,
             'Outstanding Balance': Math.max(0, totalExpected - paidCollected)
@@ -355,24 +385,27 @@ export function Reports() {
         return data;
       }
       case 'monthly_sales': {
-        const months: Record<string, { roomRev: number; fbRev: number; otherRev: number; paidCollected: number }> = {};
+        const months: Record<string, { roomRev: number; fbRev: number; otherRev: number; taxRev: number; paidCollected: number }> = {};
         
         ledgerEntries.forEach(e => {
           const mDate = new Date(e.timestamp);
           const monthStr = format(mDate, 'yyyy-MM');
           if (!months[monthStr]) {
-            months[monthStr] = { roomRev: 0, fbRev: 0, otherRev: 0, paidCollected: 0 };
+            months[monthStr] = { roomRev: 0, fbRev: 0, otherRev: 0, taxRev: 0, paidCollected: 0 };
           }
           
+          const cat = (e.category || '').toLowerCase();
           if (e.type === 'debit') {
-            if (e.category === 'room') {
+            if (cat === 'room') {
               months[monthStr].roomRev += e.amount;
-            } else if (e.category === 'F & B') {
+            } else if (['restaurant', 'f & b', 'food', 'bar', 'beverage'].includes(cat)) {
               months[monthStr].fbRev += e.amount;
-            } else {
+            } else if (cat === 'tax') {
+              months[monthStr].taxRev += e.amount;
+            } else if (cat !== 'refund') {
               months[monthStr].otherRev += e.amount;
             }
-          } else if (e.type === 'credit' && e.category === 'payment') {
+          } else if (e.type === 'credit' && cat === 'payment') {
             months[monthStr].paidCollected += e.amount;
           }
         });
@@ -380,12 +413,13 @@ export function Reports() {
         return Object.entries(months)
           .sort((a, b) => b[0].localeCompare(a[0]))
           .map(([month, data]) => {
-            const totalExpected = data.roomRev + data.fbRev + data.otherRev;
+            const totalExpected = data.roomRev + data.fbRev + data.otherRev + data.taxRev;
             return {
               Month: month,
               'Expected Room Rev': data.roomRev,
               'Expected F & B': data.fbRev,
               'Expected Other': data.otherRev,
+              Taxes: data.taxRev,
               'Total Expected': totalExpected,
               'Actual Paid Collected': data.paidCollected,
               'Outstanding Balance': Math.max(0, totalExpected - data.paidCollected)
@@ -434,17 +468,22 @@ export function Reports() {
       }
       case 'balance': {
         return reservations
-          .filter(res => res.status === 'checked_in')
+          .filter(res => {
+            const bal = getReservationLiveBalance(res, hotel);
+            return res.status === 'checked_in' || (res.status === 'checked_out' && Math.abs(bal) > 0.01);
+          })
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
             const billingState = calculateBilling(res, hotel);
+            const bal = getReservationLiveBalance(res, hotel);
             return {
               'Guest Name': res.guestName,
               Room: res.roomNumber,
-              Phone: guest?.phone || 'N/A',
+              Status: res.status === 'checked_in' ? 'In-House' : 'Departed / Debtor',
+              Phone: res.guestPhone || guest?.phone || 'N/A',
               'Total Charges': billingState.totalCharges,
               'Total Paid': billingState.totalPayments,
-              Balance: getReservationLiveBalance(res, hotel),
+              Balance: bal,
               _id: res.id,
               _collection: 'reservations',
               _label: `Balance Record: ${res.guestName}`
@@ -609,6 +648,87 @@ export function Reports() {
           'Total Expense': expense,
           'Net Income': income - expense
         }];
+      }
+      case 'taxation': {
+        return ledgerEntries
+          .filter(e => (e.category || '').toLowerCase() === 'tax' && e.type === 'debit')
+          .map(e => {
+            const res = reservations.find(r => r.id === e.reservationId);
+            const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
+            return {
+              Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+              'Tax Type': e.description.includes('(') ? e.description.split('(')[0].trim() : 'Tax/VAT',
+              Description: e.description,
+              Amount: e.amount,
+              'Reservation #': (res?.id || e.reservationId || '').slice(-6).toUpperCase(),
+              'Guest Name': res?.guestName || 'N/A',
+              'Recorded By': staffMember?.name || staffMember?.displayName || e.postedBy || 'System'
+            };
+          });
+      }
+      case 'occupancy_ratio': {
+        const distinctRoomTypes = Array.from(new Set(rooms.map(r => r.type).filter(Boolean)));
+        return distinctRoomTypes.map(typeName => {
+          const typeRooms = rooms.filter(r => r.type === typeName);
+          const typeTotal = typeRooms.length;
+          const occupiedCount = typeRooms.filter(r => r.status === 'occupied').length;
+          const ratio = typeTotal > 0 ? `${Math.round((occupiedCount / typeTotal) * 100)}%` : '0%';
+          
+          const typeResIds = new Set(reservations.filter(r => typeRooms.some(tr => tr.id === r.roomId)).map(r => r.id));
+          const typeEntries = ledgerEntries.filter(e => e.reservationId && typeResIds.has(e.reservationId) && e.category === 'room' && e.type === 'debit');
+          const roomRev = typeEntries.reduce((acc, e) => acc + e.amount, 0);
+
+          return {
+            'Room Type': typeName,
+            'Total Rooms': typeTotal,
+            'Occupied Rooms': occupiedCount,
+            'Occupancy %': ratio,
+            'Room Revenue': roomRev,
+            ADR: occupiedCount > 0 ? Math.round(roomRev / occupiedCount) : 0,
+            RevPAR: typeTotal > 0 ? Math.round(roomRev / typeTotal) : 0
+          };
+        });
+      }
+      case 'source': {
+        const sourceMap: Record<string, { count: number; nights: number; revenue: number }> = {};
+        reservations.forEach(r => {
+          const src = r.bookingSource || r.source || (r.corporateId ? 'Corporate Account' : 'Front Desk / Walk-In');
+          if (!sourceMap[src]) sourceMap[src] = { count: 0, nights: 0, revenue: 0 };
+          sourceMap[src].count += 1;
+          sourceMap[src].nights += (r.nights || 1);
+          sourceMap[src].revenue += (r.totalAmount || 0);
+        });
+        return Object.entries(sourceMap).map(([src, d]) => ({
+          'Booking Source': src,
+          'Total Bookings': d.count,
+          'Total Nights': d.nights,
+          'Total Revenue': d.revenue,
+          'Avg Booking Value': d.count > 0 ? Math.round(d.revenue / d.count) : 0
+        }));
+      }
+      case 'countries': {
+        const countryMap: Record<string, { count: number; completed: number; active: number; spent: number }> = {};
+        guests.forEach(g => {
+          const c = g.nationality || (g as any).country || 'Domestic / Local';
+          if (!countryMap[c]) countryMap[c] = { count: 0, completed: 0, active: 0, spent: 0 };
+          countryMap[c].count += 1;
+          countryMap[c].spent += (g.totalSpent || 0);
+        });
+        reservations.forEach(r => {
+          const g = guests.find(guest => guest.id === r.guestId);
+          const c = g?.nationality || (g as any)?.country || 'Domestic / Local';
+          if (countryMap[c]) {
+            if (r.status === 'checked_out') countryMap[c].completed += 1;
+            if (r.status === 'checked_in') countryMap[c].active += 1;
+          }
+        });
+        return Object.entries(countryMap).map(([c, d]) => ({
+          'Country / Nationality': c,
+          'Total Guests': d.count,
+          'Completed Stays': d.completed,
+          'Active Stays': d.active,
+          'Total Spent': d.spent
+        }));
       }
       default: return [];
     }
