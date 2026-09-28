@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, CorporateRate, Room, OperationType, RoomType, Reservation } from '../types';
+import { printDocument } from '../utils/printUtils';
 import { 
   Building2, 
   Plus, 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Reservation, Hotel, LedgerEntry, CorporateAccount, Tax } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
@@ -9,6 +9,7 @@ import { calculateReservationAccount } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '../firebase';
+import { printDocument } from '../utils/printUtils';
 
 const getSafeStr = (val: any, fallback: string = ''): string => {
   if (typeof val === 'string') return val;
@@ -235,57 +236,30 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
   const balance = grandTotal - totalPaid;
 
+  const receiptContainerRef = useRef<HTMLDivElement>(null);
+
+  const handlePrint = () => {
+    const isDocket = type === 'restaurant';
+    const guestOrAccountName = type === 'corporate' ? (account?.name || 'Corporate') : (reservation?.guestName || 'Guest');
+    const docTitle = `${hotel.name || 'Hotel'} - ${isDocket ? 'Docket' : 'Official Receipt'} - ${guestOrAccountName}`;
+
+    printDocument(receiptContainerRef.current, {
+      title: docTitle,
+      pageSize: isDocket ? '80mm auto' : 'A4 portrait',
+      pageMargin: isDocket ? '0' : '8mm'
+    });
+  };
+
   return (
-    <div className={cn(
-      "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
-      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] print:min-h-0 pt-8 px-12 pb-12 receipt-container" : "w-[80mm] p-4 docket-container",
-      "printable-document"
-    )}>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          @page { 
-            size: ${type === 'restaurant' ? '80mm auto' : 'A4 portrait'}; 
-            margin: ${type === 'restaurant' ? '0' : '8mm'}; 
-          }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            height: auto !important;
-            min-height: 0 !important;
-            overflow: visible !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          body * { 
-            visibility: hidden; 
-          }
-          .receipt-container, .receipt-container *, 
-          .docket-container, .docket-container *,
-          .printable-document, .printable-document * { 
-            visibility: visible !important; 
-          }
-          .receipt-container, .docket-container, .printable-document { 
-            position: absolute !important; 
-            left: 0 !important; 
-            top: 0 !important; 
-            width: ${type === 'restaurant' ? '80mm' : '100%'} !important;
-            max-width: ${type === 'restaurant' ? '80mm' : '100%'} !important;
-            height: auto !important;
-            min-height: 0 !important;
-            margin: 0 auto !important;
-            padding: ${type === 'restaurant' ? '4mm' : '4mm 8mm'} !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            box-shadow: none !important;
-            border: none !important;
-            z-index: 999999 !important;
-            overflow: visible !important;
-          }
-          .print-hidden, .no-print, [data-sonner-toaster] { 
-            display: none !important; 
-          }
-        }
-      `}} />
+    <div 
+      ref={receiptContainerRef}
+      id="active-hotel-receipt"
+      data-printable="true"
+      className={cn(
+        "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
+        (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] print:min-h-0 pt-8 px-12 pb-12 receipt-container" : "w-[80mm] p-4 docket-container"
+      )}
+    >
       {/* Hotel Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         {(branding.showLogoOnReceipt ?? true) && (
@@ -685,7 +659,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       {/* Print Button (Hidden during print) */}
       <div className="mt-8 flex justify-center print:hidden">
         <button 
-          onClick={() => window.print()}
+          onClick={handlePrint}
           className="bg-zinc-900 text-white px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-zinc-200 flex items-center gap-2"
         >
           <Printer size={18} />

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { TrackingCodeRequest, SystemSettings, PlanType } from '../types';
 import { formatCurrency } from '../utils';
 import { format } from 'date-fns';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail, CheckCircle2 } from 'lucide-react';
+import { printDocument } from '../utils/printUtils';
 
 interface SuperAdminReceiptProps {
   request: TrackingCodeRequest;
@@ -10,6 +11,8 @@ interface SuperAdminReceiptProps {
 }
 
 export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps) {
+  const receiptRef = useRef<HTMLDivElement>(null);
+
   const planPrices: Record<PlanType, number> = {
     standard: 50000,
     premium: 100000,
@@ -18,47 +21,20 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
 
   const amount = planPrices[request.plan] || 0;
 
+  const handlePrint = () => {
+    printDocument(receiptRef.current, {
+      title: `Tyyl-Tech-Subscription-Receipt-${request.hotelName}`,
+      pageSize: 'A4 portrait',
+      pageMargin: '10mm'
+    });
+  };
+
   return (
-    <div className="bg-white text-zinc-900 p-10 max-w-[500px] mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 superadmin-receipt printable-document">
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          @page { size: A4 portrait; margin: 10mm; }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            height: auto !important;
-            min-height: 0 !important;
-            overflow: visible !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          body * { 
-            visibility: hidden; 
-          }
-          .superadmin-receipt, .superadmin-receipt *,
-          .printable-document, .printable-document * { 
-            visibility: visible !important; 
-          }
-          .superadmin-receipt { 
-            position: absolute !important; 
-            left: 0 !important; 
-            top: 0 !important; 
-            width: 100% !important;
-            max-width: 550px !important;
-            margin: 0 auto !important;
-            padding: 0 !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            box-shadow: none !important;
-            border: none !important;
-            z-index: 999999 !important;
-            overflow: visible !important;
-          }
-          .print-hidden, .no-print, [data-sonner-toaster] { 
-            display: none !important; 
-          }
-        }
-      `}} />
+    <div 
+      ref={receiptRef}
+      id="superadmin-subscription-receipt"
+      className="bg-white text-zinc-900 p-10 max-w-[500px] mx-auto font-sans shadow-2xl border border-zinc-200 superadmin-receipt"
+    >
       {/* Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         <div className="w-16 h-16 bg-emerald-500 text-black rounded-2xl flex items-center justify-center mx-auto mb-3 font-black text-2xl">
@@ -153,7 +129,7 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
       {/* Print Button */}
       <div className="mt-8 flex justify-center print:hidden">
         <button 
-          onClick={() => window.print()}
+          onClick={handlePrint}
           className="bg-zinc-900 text-zinc-50 px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-zinc-200 flex items-center gap-2"
         >
           <Printer size={18} />

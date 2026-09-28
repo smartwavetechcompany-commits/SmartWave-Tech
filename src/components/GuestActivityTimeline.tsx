@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, AuditLog } from '../types';
+import { printDocument } from '../utils/printUtils';
 import { 
   History, 
   Calendar, 
@@ -384,51 +385,23 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
     return result;
   }, [logs, categoryFilter, searchQuery, sortOrder]);
 
+  const timelineRef = useRef<HTMLDivElement>(null);
+
   // Print Timeline function
   const handlePrint = () => {
-    window.print();
+    printDocument(timelineRef.current, {
+      title: `Guest-Activity-Audit-${reservation.guestName || 'Guest'}-${reservation.roomNumber || ''}`,
+      pageSize: 'A4 portrait',
+      pageMargin: '8mm'
+    });
   };
 
   return (
-    <div className={cn("space-y-4 guest-timeline-document printable-document", className)}>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          @page { size: A4 portrait; margin: 10mm; }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          body * { 
-            visibility: hidden; 
-          }
-          .guest-timeline-document, .guest-timeline-document *,
-          .printable-document, .printable-document * { 
-            visibility: visible !important; 
-          }
-          .guest-timeline-document { 
-            position: absolute !important; 
-            left: 0 !important; 
-            top: 0 !important; 
-            width: 100% !important; 
-            margin: 0 auto !important; 
-            padding: 4mm !important;
-            background: #ffffff !important; 
-            color: #000000 !important; 
-            z-index: 999999 !important;
-            overflow: visible !important;
-          }
-          .guest-timeline-document * {
-            color: #000000 !important;
-            background: transparent !important;
-            border-color: #e4e4e7 !important;
-          }
-          .print-hidden, .no-print, [data-sonner-toaster] { 
-            display: none !important; 
-          }
-        }
-      `}} />
+    <div 
+      ref={timelineRef}
+      id="active-guest-timeline"
+      className={cn("space-y-4 guest-timeline-document bg-zinc-900/40 p-4 rounded-2xl", className)}
+    >
 
       {/* Official Print Header */}
       <div className="hidden print:block text-black p-4 mb-4 border-b-2 border-black bg-white">

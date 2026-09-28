@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   CheckCircle2, 
   Copy, 
@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { createAuditLog } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
+import { printDocument } from '../utils/printUtils';
 
 export interface UserSummaryData {
   uid: string;
@@ -141,59 +142,24 @@ export function AccountCreationSummaryModal({ data, onClose, onResendActivation 
     copyToClipboard(text, 'Full user details', 'full_details');
   };
 
+  const slipRef = useRef<HTMLDivElement>(null);
+
   const handlePrint = () => {
     logSecurityAction('USER_DETAILS_PRINTED', `Printed account handover slip for user ${data.email}`);
-    window.print();
+    printDocument(slipRef.current, {
+      title: `Staff-Handover-Slip-${data.fullName}`,
+      pageSize: 'A4 portrait',
+      pageMargin: '10mm'
+    });
   };
 
   return (
     <div className="fixed inset-0 z-[9999] bg-zinc-950/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
-      <div className="w-full max-w-2xl bg-zinc-900 border border-emerald-500/30 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 my-8 staff-handover-slip printable-document print:border-black print:rounded-none print:shadow-none print:my-0">
-        <style dangerouslySetInnerHTML={{ __html: `
-          @media print {
-            @page { size: A4 portrait; margin: 12mm; }
-            html, body {
-              margin: 0 !important;
-              padding: 0 !important;
-              height: auto !important;
-              min-height: 0 !important;
-              overflow: visible !important;
-              background: #ffffff !important;
-              color: #000000 !important;
-            }
-            body * { 
-              visibility: hidden; 
-            }
-            .staff-handover-slip, .staff-handover-slip *,
-            .printable-document, .printable-document * { 
-              visibility: visible !important; 
-            }
-            .staff-handover-slip { 
-              position: absolute !important; 
-              left: 0 !important; 
-              top: 0 !important; 
-              width: 100% !important;
-              max-width: 700px !important;
-              margin: 0 auto !important;
-              padding: 8mm !important;
-              background: #ffffff !important;
-              color: #000000 !important;
-              box-shadow: none !important;
-              border: 1px solid #18181b !important;
-              z-index: 999999 !important;
-              overflow: visible !important;
-            }
-            .staff-handover-slip * {
-              color: #000000 !important;
-              background: transparent !important;
-              border-color: #d4d4d8 !important;
-            }
-            .print-hidden, .no-print, [data-sonner-toaster] { 
-              display: none !important; 
-            }
-          }
-        `}} />
-        
+      <div 
+        ref={slipRef}
+        id="staff-handover-slip"
+        className="w-full max-w-2xl bg-zinc-900 border border-emerald-500/30 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 my-8 staff-handover-slip print:border-black print:rounded-none print:shadow-none print:my-0"
+      >
         {/* Header */}
         <div className="p-6 bg-gradient-to-r from-emerald-950/40 via-zinc-900 to-zinc-900 border-b border-zinc-800 flex items-start justify-between print:p-0 print:border-b-2 print:border-black print:pb-4 print:mb-4">
           <div className="flex items-center gap-3.5">

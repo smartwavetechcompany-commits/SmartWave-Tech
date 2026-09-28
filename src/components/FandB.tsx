@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
 import { postToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
+import { printDocument } from '../utils/printUtils';
 import { 
   ChefHat, 
   Clock, 
@@ -1125,46 +1126,10 @@ export function FandB() {
             </button>
             
             {/* Docket View */}
-            <div className="bg-white text-black p-8 font-mono shadow-2xl print:shadow-none print:p-0 fandb-docket printable-document">
-              <style dangerouslySetInnerHTML={{ __html: `
-                @media print {
-                  @page { size: 80mm auto; margin: 0; }
-                  html, body {
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    background: #ffffff !important;
-                    color: #000000 !important;
-                    height: auto !important;
-                    min-height: 0 !important;
-                    overflow: visible !important;
-                  }
-                  body * { 
-                    visibility: hidden; 
-                  }
-                  .fandb-docket, .fandb-docket *,
-                  .printable-document, .printable-document * { 
-                    visibility: visible !important; 
-                  }
-                  .fandb-docket { 
-                    position: absolute !important; 
-                    left: 0 !important; 
-                    top: 0 !important; 
-                    width: 80mm !important;
-                    max-width: 80mm !important;
-                    margin: 0 !important;
-                    padding: 4mm !important;
-                    background: #ffffff !important;
-                    color: #000000 !important;
-                    box-shadow: none !important;
-                    border: none !important;
-                    z-index: 999999 !important;
-                    overflow: visible !important;
-                  }
-                  .print-hidden, .no-print, [data-sonner-toaster] { 
-                    display: none !important; 
-                  }
-                }
-              `}} />
+            <div 
+              id="fandb-kitchen-docket"
+              className="bg-white text-black p-8 font-mono shadow-2xl print:shadow-none print:p-0 fandb-docket"
+            >
               <div className="text-center border-b-2 border-black pb-4 mb-4">
                 <h2 className="text-xl font-black uppercase tracking-tighter">F & B DOCKET</h2>
                 <p className="text-xs font-bold mt-1">{hotel?.name}</p>
@@ -1278,7 +1243,13 @@ export function FandB() {
               
               <div className="mt-8 flex justify-center print:hidden">
                 <button 
-                  onClick={() => window.print()}
+                  onClick={() => {
+                    printDocument(document.getElementById('fandb-kitchen-docket'), {
+                      title: `F&B-Docket-Order-${printingOrder.id.slice(-6)}`,
+                      pageSize: '80mm auto',
+                      pageMargin: '0'
+                    });
+                  }}
                   className="bg-black text-zinc-50 px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 flex items-center gap-2"
                 >
                   <Printer size={18} />

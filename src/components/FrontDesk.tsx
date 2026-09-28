@@ -11,6 +11,7 @@ import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { DigitalKeyModal } from './DigitalKeyModal';
 import { ExtendGracePeriodModal } from './ExtendGracePeriodModal';
+import { printDocument } from '../utils/printUtils';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -4911,7 +4912,14 @@ export function FrontDesk() {
           )}>
             <div className="absolute -top-12 right-0 flex gap-4 print:hidden">
               <button 
-                onClick={() => window.print()}
+                onClick={() => {
+                  const isDocket = showReceipt.type === 'restaurant';
+                  printDocument(document.getElementById('active-hotel-receipt') || document.querySelector('.receipt-container, .docket-container'), {
+                    title: `${hotel.name || 'Hotel'} - ${isDocket ? 'Docket' : 'Official Receipt'} - ${showReceipt.res.guestName}`,
+                    pageSize: isDocket ? '80mm auto' : 'A4 portrait',
+                    pageMargin: isDocket ? '0' : '8mm'
+                  });
+                }}
                 className="text-zinc-50 hover:text-emerald-400 font-bold flex items-center gap-2"
               >
                 <Receipt size={20} />

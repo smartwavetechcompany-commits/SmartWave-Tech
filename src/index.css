@@ -100,7 +100,59 @@
   @apply mb-4;
 }
 
+#print-root {
+  display: none !important;
+}
+
 @media print {
+  /* ================================================================ */
+  /* ISOLATED DOCUMENT PRINTING MODE                                  */
+  /* When is-printing-active is set on body, HIDE #root entirely      */
+  /* (preventing any background page, other open modals, or timelines */
+  /* from leaking into print) and display ONLY #print-root.           */
+  /* ================================================================ */
+  body.is-printing-active {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body.is-printing-active #root {
+    display: none !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+  }
+
+  body.is-printing-active #print-root {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+    visibility: visible !important;
+  }
+
+  body.is-printing-active #print-root * {
+    visibility: visible !important;
+  }
+
+  body.is-printing-active #print-root button,
+  body.is-printing-active #print-root .print\\:hidden,
+  body.is-printing-active #print-root .no-print,
+  body.is-printing-active #print-root [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  /* ================================================================ */
+  /* FALLBACK PRINTING MODE (e.g., standard browser Print command)   */
+  /* ================================================================ */
   /* Hide all app navigation, sidebars, headers, action bars, toasts, and non-printable buttons */
   aside,
   nav,
