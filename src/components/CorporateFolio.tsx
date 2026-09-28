@@ -276,11 +276,11 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   const balance = totalDebits - totalCredits;
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh] print:max-h-none print:overflow-visible print:border-none print:bg-transparent print:w-full"
       >
         {/* Header */}
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
@@ -302,9 +302,9 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               <Receipt size={20} />
             </button>
             <button 
-              onClick={() => window.print()}
+              onClick={() => setShowReceipt(true)}
               className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
-              title="Print Folio"
+              title="Print Corporate Statement & Folio"
             >
               <Printer size={20} />
             </button>
@@ -318,11 +318,11 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         </div>
 
         {showReceipt && hotel && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-start justify-center p-4 overflow-y-auto">
-            <div className="relative w-full max-w-md my-8">
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
+            <div className="relative w-full max-w-5xl my-8 print:my-0 print:w-full print:static">
               <button 
                 onClick={() => setShowReceipt(false)}
-                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"
+                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all print:hidden"
               >
                 <XCircle size={32} />
               </button>

@@ -1007,11 +1007,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         </div>
 
         {showReceipt && hotel && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[90] flex items-start justify-center p-4 overflow-y-auto">
-            <div className="relative w-full max-w-5xl my-8">
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[90] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
+            <div className="relative w-full max-w-5xl my-8 print:my-0 print:w-full print:static">
               <button 
                 onClick={() => setShowReceipt(false)}
-                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all"
+                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all print:hidden"
               >
                 <XCircle size={32} />
               </button>
@@ -2483,14 +2483,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${String(entry.id || (entry as any).firestoreId || '').slice(-8).toUpperCase()}`}
                               </span>
                               {(() => {
+                                const postedName = (entry as any).postedByName;
                                 const rawP = entry.postedBy;
                                 const pByStr = typeof rawP === 'string' 
                                   ? rawP 
                                   : (rawP && typeof rawP === 'object' ? String((rawP as any).displayName || (rawP as any).uid || 'system') : '');
-                                if (!pByStr || hotel?.settings?.payments?.trackPaymentStaff === false) return null;
+                                if (!pByStr && !postedName) return null;
+                                const displayStaff = postedName || (pByStr === 'system' ? 'System' : (pByStr === profile?.uid ? (profile?.displayName || 'You') : (pByStr.includes('@') ? pByStr : `Staff (${pByStr.slice(-6).toUpperCase()})`)));
                                 return (
-                                  <span className="text-[9px] text-zinc-500 font-medium">
-                                    • By: {pByStr === 'system' ? 'System' : (pByStr === profile?.uid ? 'You' : `Staff (${pByStr.slice(-6).toUpperCase()})`)}
+                                  <span className="text-[9px] text-zinc-400 font-medium">
+                                    • Posted by: <strong className="text-zinc-300 font-semibold">{displayStaff}</strong>
                                   </span>
                                 );
                               })()}

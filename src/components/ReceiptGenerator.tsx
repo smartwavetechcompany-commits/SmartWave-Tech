@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Reservation, Hotel, LedgerEntry, CorporateAccount, Tax } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
@@ -7,6 +7,8 @@ import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from
 import { calculateBilling } from '../utils/billingEngine';
 import { calculateReservationAccount } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
+import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const getSafeStr = (val: any, fallback: string = ''): string => {
   if (typeof val === 'string') return val;
@@ -94,10 +96,45 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
 
+  // Auto-fetch ledger entries if not passed
+  const [fetchedLedger, setFetchedLedger] = useState<LedgerEntry[]>([]);
+  useEffect(() => {
+    if (ledgerEntries && ledgerEntries.length > 0) return;
+    if (!hotel?.id) return;
+
+    if (reservation?.id) {
+      const q = query(
+        collection(db, 'hotels', hotel.id, 'ledger'),
+        where('reservationId', '==', reservation.id),
+        limit(1000)
+      );
+      const unsub = onSnapshot(q, (snap) => {
+        const entries: LedgerEntry[] = [];
+        snap.forEach((doc) => entries.push({ id: doc.id, ...doc.data() } as LedgerEntry));
+        setFetchedLedger(entries);
+      });
+      return () => unsub();
+    } else if (account?.id) {
+      const q = query(
+        collection(db, 'hotels', hotel.id, 'ledger'),
+        where('corporateId', '==', account.id),
+        limit(1000)
+      );
+      const unsub = onSnapshot(q, (snap) => {
+        const entries: LedgerEntry[] = [];
+        snap.forEach((doc) => entries.push({ id: doc.id, ...doc.data() } as LedgerEntry));
+        setFetchedLedger(entries);
+      });
+      return () => unsub();
+    }
+  }, [hotel?.id, reservation?.id, account?.id, ledgerEntries]);
+
+  const activeLedger = (ledgerEntries && ledgerEntries.length > 0) ? ledgerEntries : fetchedLedger;
+
   // Filter entries based on folioType if reservation is corporate
   const filteredEntries = (reservation?.corporateId && folioType !== 'all')
-    ? ledgerEntries.filter(e => folioType === 'company' ? !!e.corporateId : !e.corporateId)
-    : ledgerEntries;
+    ? activeLedger.filter(e => folioType === 'company' ? !!e.corporateId : !e.corporateId)
+    : activeLedger;
   
   // Merge hidden taxes into their parent entries based on active settings
   const processedEntries = processLedgerTaxes(filteredEntries, hotel.taxes || [], 'showOnReceipt');
@@ -194,48 +231,59 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   }
 
   const grandTotal = subtotal + exclusiveTaxTotal;
-  const hasPaymentInLedger = ledgerEntries.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
+  const hasPaymentInLedger = activeLedger.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
   const balance = grandTotal - totalPaid;
 
   return (
     <div className={cn(
       "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
-      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] print:min-h-0 pt-8 px-12 pb-12 receipt-container" : "w-[80mm] p-4 docket-container"
+      (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] print:min-h-0 pt-8 px-12 pb-12 receipt-container" : "w-[80mm] p-4 docket-container",
+      "printable-document"
     )}>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           @page { 
-            size: ${type === 'restaurant' ? '80mm auto' : 'A4'}; 
-            margin: 0; 
+            size: ${type === 'restaurant' ? '80mm auto' : 'A4 portrait'}; 
+            margin: ${type === 'restaurant' ? '0' : '8mm'}; 
           }
           html, body {
             margin: 0 !important;
             padding: 0 !important;
             height: auto !important;
-            background: white !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+            color: #000000 !important;
           }
           body * { 
-            visibility: hidden !important; 
+            visibility: hidden; 
           }
-          .receipt-container, .receipt-container *, .docket-container, .docket-container * { 
+          .receipt-container, .receipt-container *, 
+          .docket-container, .docket-container *,
+          .printable-document, .printable-document * { 
             visibility: visible !important; 
           }
-          .receipt-container, .docket-container { 
-            position: fixed !important; 
+          .receipt-container, .docket-container, .printable-document { 
+            position: absolute !important; 
             left: 0 !important; 
             top: 0 !important; 
-            width: ${type === 'restaurant' ? '80mm' : '210mm'} !important;
+            width: ${type === 'restaurant' ? '80mm' : '100%'} !important;
+            max-width: ${type === 'restaurant' ? '80mm' : '100%'} !important;
             height: auto !important;
             min-height: 0 !important;
-            margin: 0 !important;
-            padding: ${type === 'restaurant' ? '5mm' : '10mm 15mm'} !important;
-            background: white !important;
+            margin: 0 auto !important;
+            padding: ${type === 'restaurant' ? '4mm' : '4mm 8mm'} !important;
+            background: #ffffff !important;
+            color: #000000 !important;
             box-shadow: none !important;
             border: none !important;
-            z-index: 99999 !important;
+            z-index: 999999 !important;
+            overflow: visible !important;
           }
-          .print-hidden { display: none !important; }
+          .print-hidden, .no-print, [data-sonner-toaster] { 
+            display: none !important; 
+          }
         }
       `}} />
       {/* Hotel Header */}

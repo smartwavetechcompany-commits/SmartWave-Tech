@@ -2137,8 +2137,8 @@ export function SuperAdmin() {
       )}
       {/* Receipt Modal */}
       {viewingReceipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl print:max-h-none print:overflow-visible print:w-full print:static">
             <button 
               onClick={() => setViewingReceipt(null)}
               className="absolute top-4 right-4 z-10 p-2 bg-white/10 hover:bg-white/20 text-zinc-50 rounded-full transition-all print:hidden"

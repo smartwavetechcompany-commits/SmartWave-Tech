@@ -390,9 +390,64 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
   };
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className={cn("space-y-4 guest-timeline-document printable-document", className)}>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+          body * { 
+            visibility: hidden; 
+          }
+          .guest-timeline-document, .guest-timeline-document *,
+          .printable-document, .printable-document * { 
+            visibility: visible !important; 
+          }
+          .guest-timeline-document { 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 100% !important; 
+            margin: 0 auto !important; 
+            padding: 4mm !important;
+            background: #ffffff !important; 
+            color: #000000 !important; 
+            z-index: 999999 !important;
+            overflow: visible !important;
+          }
+          .guest-timeline-document * {
+            color: #000000 !important;
+            background: transparent !important;
+            border-color: #e4e4e7 !important;
+          }
+          .print-hidden, .no-print, [data-sonner-toaster] { 
+            display: none !important; 
+          }
+        }
+      `}} />
+
+      {/* Official Print Header */}
+      <div className="hidden print:block text-black p-4 mb-4 border-b-2 border-black bg-white">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-xl font-black uppercase text-black">Guest Activity & Folio Audit Trail</h1>
+            <p className="text-xs text-zinc-700 mt-1">Guest: <strong className="text-black">{reservation.guestName}</strong> | Room: <strong className="text-black">{reservation.roomNumber}</strong> | Folio: <strong className="text-black">#{reservation.id.slice(-8).toUpperCase()}</strong></p>
+            <p className="text-[10px] text-zinc-600">Stay: {safeFormatDate(reservation.checkIn)} to {safeFormatDate(reservation.checkOut)}</p>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-bold text-black">AUTHORITATIVE AUDIT LOG</p>
+            <p className="text-zinc-600">Printed: {format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
+            <p className="text-zinc-600">Events: {filteredLogs.length}</p>
+          </div>
+        </div>
+      </div>
+
       {/* Timeline Controls & Filter Bar */}
-      <div className="bg-zinc-950 border border-zinc-800/90 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+      <div className="bg-zinc-950 border border-zinc-800/90 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4 print:hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">

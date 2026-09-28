@@ -19,7 +19,46 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
   const amount = planPrices[request.plan] || 0;
 
   return (
-    <div className="bg-white text-zinc-900 p-10 max-w-[500px] mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0">
+    <div className="bg-white text-zinc-900 p-10 max-w-[500px] mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 superadmin-receipt printable-document">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+          body * { 
+            visibility: hidden; 
+          }
+          .superadmin-receipt, .superadmin-receipt *,
+          .printable-document, .printable-document * { 
+            visibility: visible !important; 
+          }
+          .superadmin-receipt { 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 100% !important;
+            max-width: 550px !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            box-shadow: none !important;
+            border: none !important;
+            z-index: 999999 !important;
+            overflow: visible !important;
+          }
+          .print-hidden, .no-print, [data-sonner-toaster] { 
+            display: none !important; 
+          }
+        }
+      `}} />
       {/* Header */}
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         <div className="w-16 h-16 bg-emerald-500 text-black rounded-2xl flex items-center justify-center mx-auto mb-3 font-black text-2xl">

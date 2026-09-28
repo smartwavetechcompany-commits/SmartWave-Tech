@@ -133,7 +133,8 @@ export const postToLedger = async (
     guestId,
     reservationId,
     corporateId: finalCorporateId,
-    postedBy
+    postedBy,
+    postedByName: userContext?.displayName || (entry as any).postedByName || userContext?.email || (typeof postedBy === 'string' && postedBy.includes('@') ? postedBy : undefined)
   };
   entries.push(mainEntry);
 

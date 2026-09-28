@@ -12,9 +12,10 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 // Use initializeFirestore with standard resilient transport settings
+// experimentalForceLongPolling prevents WebChannel streaming connection aborts in proxy/iframe environments
 export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
-  experimentalAutoDetectLongPolling: true,
+  experimentalForceLongPolling: true,
 });
 export const storage = getStorage(app);
 

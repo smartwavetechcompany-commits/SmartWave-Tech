@@ -1181,11 +1181,11 @@ export function CorporateManagement() {
 
       {/* Bulk Settle Debt Modal */}
       {showBulkSettleModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl print:max-h-none print:overflow-visible print:w-full print:border-none print:bg-transparent print:rounded-none"
           >
             {bulkSettleReceipt ? (
               /* Receipt View (Invoice) */

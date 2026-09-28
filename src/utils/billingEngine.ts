@@ -720,10 +720,30 @@ export function getReservationLiveBalance(
   hotel: Hotel | null,
   ledgerEntries?: LedgerEntry[]
 ): number {
-  if (res.ledgerBalance !== undefined && (!ledgerEntries || ledgerEntries.length === 0)) {
+  const account = calculateReservationAccount(res, hotel, ledgerEntries);
+  
+  // 1. If explicit ledger entries are provided, account.outstandingBalance is the exact live source of truth
+  if (ledgerEntries && ledgerEntries.length > 0) {
+    return account.outstandingBalance;
+  }
+
+  // 2. If reservation is checked out and has a recorded ledger balance, use it if non-zero or if account is also settled
+  if (res.status === 'checked_out') {
+    if (res.ledgerBalance !== undefined && Math.abs(res.ledgerBalance) > 0.01) {
+      return Number(res.ledgerBalance.toFixed(2));
+    }
+    return account.outstandingBalance;
+  }
+
+  // 3. For active stays (checked_in, pending, etc.):
+  // If res.ledgerBalance is set to a non-zero value, use it if explicit; otherwise use account.outstandingBalance
+  if (res.ledgerBalance !== undefined && Math.abs(res.ledgerBalance) > 0.01) {
     return Number(res.ledgerBalance.toFixed(2));
   }
-  return calculateReservationAccount(res, hotel, ledgerEntries).outstandingBalance;
+
+  // Fallback to calculated reservation account (room charges + debits - payments)
+  // Prevents uninitialized ledgerBalance (e.g. 0) on new/checked-in reservations from masquerading as settled
+  return account.outstandingBalance;
 }
 
 export { calculateStayDuration };

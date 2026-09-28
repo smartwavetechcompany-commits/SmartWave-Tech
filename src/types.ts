@@ -54,6 +54,7 @@ export interface UserProfile {
   createdAt: string;
   status: 'pending_activation' | 'active' | 'password_reset_pending' | 'disabled' | 'suspended' | 'inactive';
   displayName?: string;
+  name?: string;
   permissions?: string[]; // Granular permissions
   assignedModules?: string[]; // PMS module IDs explicitly assigned to the user
   staffRole?: StaffRole;
@@ -504,6 +505,9 @@ export interface Reservation {
   nextChargeDateTime?: string; // Complete ISO timestamp of next expected charge boundary
   lastChargeDateTime?: string; // Complete ISO timestamp of the last generated charge
   bookedBy?: string; // Added for tracking who made the reservation
+  bookedByName?: string; // Staff member display name who booked
+  checkedInByName?: string; // Staff member display name who checked in
+  checkedOutByName?: string; // Staff member display name who checked out
   processedBy?: {
     uid: string;
     name: string;

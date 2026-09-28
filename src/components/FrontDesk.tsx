@@ -46,7 +46,9 @@ import {
   TrendingUp,
   ArrowDownRight,
   Users,
-  Sparkles
+  Sparkles,
+  History,
+  UserCheck
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
@@ -181,6 +183,19 @@ export function FrontDesk() {
   const [sortBy, setSortBy] = useState<'checkIn' | 'guestName' | 'roomNumber' | 'status'>('checkIn');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [showAuditModal, setShowAuditModal] = useState<Reservation | null>(null);
+
+  const getStaffDisplay = React.useCallback((staffIdOrEmail?: string, staffName?: string) => {
+    if (staffName && staffName.trim()) return staffName.trim();
+    if (!staffIdOrEmail) return 'Front Desk';
+    const staff = staffMembers.find(s => s.id === staffIdOrEmail || s.uid === staffIdOrEmail || s.email === staffIdOrEmail);
+    if (staff) return staff.displayName || staff.name || staff.email;
+    if (staffIdOrEmail.includes('@')) return staffIdOrEmail;
+    if (staffIdOrEmail === 'System' || staffIdOrEmail === 'system') return 'System';
+    if (staffIdOrEmail.length > 8) return `Staff (${staffIdOrEmail.slice(-6).toUpperCase()})`;
+    return staffIdOrEmail;
+  }, [staffMembers]);
   const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [editForm, setEditForm] = useState({
     checkIn: '',
@@ -272,19 +287,27 @@ export function FrontDesk() {
         const existing = checkinMap.get(id);
         if (existing) {
           checkinMap.set(id, {
-            ...existing,
             ...h,
+            ...existing,
             id: existing.id,
-            totalAmount: existing.totalAmount ?? h.totalAmount,
-            paidAmount: existing.paidAmount ?? h.paidAmount,
+            totalAmount: (existing.totalAmount && existing.totalAmount > 0) ? existing.totalAmount : (h.totalAmount || 0),
+            paidAmount: (existing.paidAmount !== undefined && existing.paidAmount !== null) ? existing.paidAmount : (h.paidAmount || 0),
             ledgerBalance: existing.ledgerBalance ?? h.ledgerBalance,
             roomNumber: existing.roomNumber || h.roomNumber,
             roomId: existing.roomId || h.roomId,
             checkIn: existing.checkIn || h.checkIn,
-            checkInTime: h.checkInTime || existing.checkInTime,
-            checkInDateTime: h.checkInDateTime || existing.checkInDateTime || existing.actualCheckIn,
-            actualCheckIn: h.actualCheckIn || existing.actualCheckIn,
-            checkedInBy: h.checkedInBy || existing.checkedInBy,
+            checkInTime: existing.checkInTime || h.checkInTime,
+            checkInDateTime: existing.checkInDateTime || h.checkInDateTime || existing.actualCheckIn || h.actualCheckIn,
+            actualCheckIn: existing.actualCheckIn || h.actualCheckIn,
+            checkedInBy: existing.checkedInBy || h.checkedInBy,
+            checkedInByName: (existing as any).checkedInByName || (h as any).checkedInByName,
+            bookedBy: existing.bookedBy || h.bookedBy,
+            bookedByName: (existing as any).bookedByName || (h as any).bookedByName,
+            checkedOutBy: existing.checkedOutBy || h.checkedOutBy,
+            checkedOutByName: (existing as any).checkedOutByName || (h as any).checkedOutByName,
+            guestPhone: existing.guestPhone || h.guestPhone,
+            guestEmail: existing.guestEmail || h.guestEmail,
+            guestName: existing.guestName || h.guestName,
           });
         } else {
           checkinMap.set(id, h);
@@ -300,20 +323,28 @@ export function FrontDesk() {
         const existing = checkoutMap.get(id);
         if (existing) {
           checkoutMap.set(id, {
-            ...existing,
             ...h,
+            ...existing,
             id: existing.id,
-            totalAmount: existing.totalAmount ?? h.totalAmount,
-            paidAmount: existing.paidAmount ?? h.paidAmount,
+            totalAmount: (existing.totalAmount && existing.totalAmount > 0) ? existing.totalAmount : (h.totalAmount || 0),
+            paidAmount: (existing.paidAmount !== undefined && existing.paidAmount !== null) ? existing.paidAmount : (h.paidAmount || 0),
             ledgerBalance: existing.ledgerBalance ?? h.ledgerBalance,
             roomNumber: existing.roomNumber || h.roomNumber,
             roomId: existing.roomId || h.roomId,
             checkIn: existing.checkIn || h.checkIn,
             checkOut: h.checkOut || existing.checkOut,
             checkOutTime: h.checkOutTime || existing.checkOutTime,
-            checkOutDateTime: h.checkOutDateTime || existing.checkOutDateTime || existing.actualCheckOut,
+            checkOutDateTime: h.checkOutDateTime || existing.checkOutDateTime || existing.actualCheckOut || h.actualCheckOut,
             actualCheckOut: h.actualCheckOut || existing.actualCheckOut,
-            checkedOutBy: h.checkedOutBy || existing.checkedOutBy,
+            checkedOutBy: existing.checkedOutBy || h.checkedOutBy,
+            checkedOutByName: (existing as any).checkedOutByName || (h as any).checkedOutByName,
+            checkedInBy: existing.checkedInBy || h.checkedInBy,
+            checkedInByName: (existing as any).checkedInByName || (h as any).checkedInByName,
+            bookedBy: existing.bookedBy || h.bookedBy,
+            bookedByName: (existing as any).bookedByName || (h as any).bookedByName,
+            guestPhone: existing.guestPhone || h.guestPhone,
+            guestEmail: existing.guestEmail || h.guestEmail,
+            guestName: existing.guestName || h.guestName,
           });
         } else {
           checkoutMap.set(id, h);
@@ -366,7 +397,8 @@ export function FrontDesk() {
 
         // Apply payment status filter to history items as well
         if (paymentStatusFilter !== 'all') {
-          const bal = getReservationLiveBalance(res, hotel);
+          const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+          const bal = getReservationLiveBalance(res, hotel, resLedger);
           const isPaid = res.paymentStatus === 'paid' || Math.abs(bal) <= 0.01;
           const isUnpaid = (res.paymentStatus === 'unpaid' || (res.paidAmount || 0) <= 0) && bal > 0.01;
           const isPartial = res.paymentStatus === 'partial' || ((res.paidAmount || 0) > 0 && bal > 0.01);
@@ -383,7 +415,13 @@ export function FrontDesk() {
 
         // Apply staff filter to history items
         if (staffFilter !== 'all') {
-          const matchesStaff = res.bookedBy === staffFilter || res.checkedOutBy === staffFilter || res.checkedInBy === staffFilter;
+          const targetStaff = staffMembers.find(s => s.id === staffFilter || s.uid === staffFilter || s.email === staffFilter);
+          const staffEmail = targetStaff?.email?.toLowerCase();
+          const staffUid = targetStaff?.uid || targetStaff?.id;
+          const matchesStaff = 
+            res.bookedBy === staffFilter || res.bookedBy === staffUid || (staffEmail && res.bookedBy?.toLowerCase() === staffEmail) ||
+            res.checkedInBy === staffFilter || res.checkedInBy === staffUid || (staffEmail && res.checkedInBy?.toLowerCase() === staffEmail) ||
+            res.checkedOutBy === staffFilter || res.checkedOutBy === staffUid || (staffEmail && res.checkedOutBy?.toLowerCase() === staffEmail);
           if (!matchesStaff) return false;
         }
 
@@ -395,7 +433,8 @@ export function FrontDesk() {
       if (!matchesStatus) return false;
 
       if (paymentStatusFilter !== 'all') {
-        const bal = getReservationLiveBalance(res, hotel);
+        const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+        const bal = getReservationLiveBalance(res, hotel, resLedger);
         const isPaid = res.paymentStatus === 'paid' || Math.abs(bal) <= 0.01;
         const isUnpaid = (res.paymentStatus === 'unpaid' || (res.paidAmount || 0) <= 0) && bal > 0.01;
         const isPartial = res.paymentStatus === 'partial' || ((res.paidAmount || 0) > 0 && bal > 0.01);
@@ -407,7 +446,13 @@ export function FrontDesk() {
       const matchesRoomType = roomTypeFilter === 'all' || rooms.find(r => r.id === res.roomId)?.type === roomTypeFilter;
       if (!matchesRoomType) return false;
 
-      const matchesStaff = staffFilter === 'all' || res.bookedBy === staffFilter;
+      const targetStaff = staffMembers.find(s => s.id === staffFilter || s.uid === staffFilter || s.email === staffFilter);
+      const staffEmail = targetStaff?.email?.toLowerCase();
+      const staffUid = targetStaff?.uid || targetStaff?.id;
+      const matchesStaff = staffFilter === 'all' || 
+        res.bookedBy === staffFilter || res.bookedBy === staffUid || (staffEmail && res.bookedBy?.toLowerCase() === staffEmail) ||
+        res.checkedInBy === staffFilter || res.checkedInBy === staffUid || (staffEmail && res.checkedInBy?.toLowerCase() === staffEmail) ||
+        res.checkedOutBy === staffFilter || res.checkedOutBy === staffUid || (staffEmail && res.checkedOutBy?.toLowerCase() === staffEmail);
       if (!matchesStaff) return false;
 
       if (dateRange.start) {
@@ -466,6 +511,8 @@ export function FrontDesk() {
     rooms,
     roomTypeFilter,
     staffFilter,
+    staffMembers,
+    ledgerEntries,
     hotel,
     sortBy,
     sortOrder
@@ -536,6 +583,10 @@ export function FrontDesk() {
       setRateConfigs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    const unsubLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
+      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+    });
+
     return () => {
       unsubRes();
       unsubRooms();
@@ -547,6 +598,7 @@ export function FrontDesk() {
       unsubCheckInHist();
       unsubCheckOutHist();
       unsubRateConfigs();
+      unsubLedger();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -1042,7 +1094,7 @@ export function FrontDesk() {
           paymentStatus: 'unpaid',
           notes: newBooking.notes,
           corporateReference: newBooking.corporateReference,
-          ledgerBalance: 0,
+          ledgerBalance: totalAmount,
           nightlyRate: pricePerNight,
           autoNightDeduction: newBooking.autoNightDeduction,
           numberOfGuests: stay.numberOfGuests || newBooking.numberOfGuests || 1,
@@ -1050,6 +1102,7 @@ export function FrontDesk() {
           breakfastEntitlement: stay.breakfastEntitlement || newBooking.breakfastEntitlement || 'Standard Breakfast Included',
           isPrincipalRoom: newBooking.isPrincipalRoom || false,
           bookedBy: profile.uid,
+          bookedByName: profile.displayName || profile.name || profile.email || 'Front Desk Staff',
           createdAt: new Date().toISOString(),
         };
 
@@ -1680,15 +1733,15 @@ export function FrontDesk() {
     }
 
     // Permission checks
-    if (status === 'checked_in' && !hasPermission(profile, 'manage_rooms')) {
-      toast.error('Permission denied: Check-in');
+    if (status === 'checked_in' && !hasPermission(profile, 'check_in_guests') && !hasPermission(profile, 'manage_rooms') && !hasPermission(profile, 'access_front_desk')) {
+      toast.error('Permission denied: Check-in requires check-in permission');
       return;
     }
-    if (status === 'checked_out' && !hasPermission(profile, 'manage_rooms')) {
-      toast.error('Permission denied: Check-out');
+    if (status === 'checked_out' && !hasPermission(profile, 'check_out_guests') && !hasPermission(profile, 'manage_rooms') && !hasPermission(profile, 'access_front_desk')) {
+      toast.error('Permission denied: Check-out requires check-out permission');
       return;
     }
-    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'delete_reservation')) {
+    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'cancel_reservations') && !hasPermission(profile, 'delete_reservation') && !hasPermission(profile, 'delete_reservations') && !hasPermission(profile, 'access_front_desk')) {
       toast.error('Permission denied: Cancellation');
       return;
     }
@@ -1701,11 +1754,13 @@ export function FrontDesk() {
       if (status !== 'checked_out') {
         const updateData: any = { status };
         const now = new Date();
+        const staffName = profile.displayName || profile.name || profile.email || 'Front Desk Staff';
         if (status === 'checked_in') {
           updateData.checkInDateTime = now.toISOString();
           updateData.actualCheckIn = now.toISOString();
           updateData.checkInTime = format(now, 'HH:mm');
           updateData.checkedInBy = profile.email || 'System';
+          updateData.checkedInByName = staffName;
         }
 
         await database.safeUpdate(resRef, updateData, {
@@ -1743,8 +1798,14 @@ export function FrontDesk() {
         try {
           const now = new Date();
           const checkInHistoryRef = doc(db, 'hotels', hotel.id, 'checkin_history', res.id);
+          const staffName = profile.displayName || profile.name || profile.email || 'Front Desk Staff';
+          const freshResSnap = await getDoc(resRef);
+          const freshData = freshResSnap.data() || res;
+          const freshLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+          const currentBal = getReservationLiveBalance({ ...res, ...freshData }, hotel, freshLedger);
           await setDoc(checkInHistoryRef, {
             ...res,
+            ...freshData,
             id: res.id,
             reservationId: res.id,
             guestId: res.guestId || 'unknown_guest',
@@ -1759,13 +1820,15 @@ export function FrontDesk() {
             actualCheckIn: now.toISOString(),
             checkOut: res.checkOut,
             checkInTimestamp: now.toISOString(),
-            bookedBy: res.bookedBy || '',
-            checkedInBy: profile.email || 'System',
+            bookedBy: freshData.bookedBy || res.bookedBy || '',
+            bookedByName: freshData.bookedByName || (res as any).bookedByName || '',
+            checkedInBy: profile.email || profile.uid || 'System',
+            checkedInByName: staffName,
             status: 'checked_in',
-            ledgerBalance: res.ledgerBalance || 0,
-            totalAmount: res.totalAmount || 0,
-            paidAmount: res.paidAmount || 0,
-            paymentStatus: res.paymentStatus || 'unpaid'
+            ledgerBalance: currentBal,
+            totalAmount: freshData.totalAmount || res.totalAmount || 0,
+            paidAmount: freshData.paidAmount || res.paidAmount || 0,
+            paymentStatus: currentBal <= 0.01 ? 'paid' : (freshData.paidAmount || res.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
           }, { merge: true });
         } catch (err) {
           console.error("Failed to write to checkin_history:", err);
@@ -1888,6 +1951,7 @@ export function FrontDesk() {
         }
 
         // 3. Update reservation status to checked_out - preserving exact debt (RULE 7)
+        const checkoutStaffName = profile.displayName || profile.name || profile.email || 'Front Desk Staff';
         await database.safeUpdate(resRef, { 
           status: 'checked_out',
           checkOut: format(now, 'yyyy-MM-dd'),
@@ -1895,6 +1959,7 @@ export function FrontDesk() {
           checkOutDateTime: now.toISOString(),
           actualCheckOut: now.toISOString(),
           checkedOutBy: profile.email || 'System',
+          checkedOutByName: checkoutStaffName,
           paymentStatus: freshResData.paymentStatus || (outstandingBalance <= 0.01 ? 'paid' : (freshResData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'),
           financialStatus: outstandingBalance > 0.01 ? ((freshResData.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
           ledgerBalance: outstandingBalance
@@ -2022,10 +2087,14 @@ export function FrontDesk() {
             checkOutDateTime: now.toISOString(),
             actualCheckOut: now.toISOString(),
             checkOutTimestamp: now.toISOString(),
-            bookedBy: res.bookedBy || '',
+            bookedBy: freshData.bookedBy || res.bookedBy || '',
+            bookedByName: freshData.bookedByName || (res as any).bookedByName || '',
+            checkedInBy: freshData.checkedInBy || res.checkedInBy || '',
+            checkedInByName: freshData.checkedInByName || (res as any).checkedInByName || '',
             checkedOutBy: profile.email || 'System',
+            checkedOutByName: checkoutStaffName,
             status: 'checked_out',
-            ledgerBalance: freshData.ledgerBalance || 0,
+            ledgerBalance: outstandingBalance !== undefined ? outstandingBalance : (freshData.ledgerBalance || 0),
             totalAmount: totalDebits,
             paidAmount: freshData.paidAmount || 0,
             paymentStatus: (freshData.paidAmount || 0) >= totalDebits ? 'paid' : (freshData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'
@@ -3879,6 +3948,20 @@ export function FrontDesk() {
               ))}
             </select>
 
+            <select
+              value={staffFilter}
+              onChange={(e) => setStaffFilter(e.target.value)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[10px] font-bold text-zinc-400 focus:outline-none focus:border-emerald-500 max-w-[160px] truncate"
+              title="Filter records by Staff Member"
+            >
+              <option value="all">Staff: All Staff</option>
+              {staffMembers.map(s => (
+                <option key={s.id || s.uid} value={s.id || s.uid || s.email}>
+                  Staff: {s.displayName || s.name || s.email}
+                </option>
+              ))}
+            </select>
+
             <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5">
               <Calendar size={12} className="text-emerald-500" />
               <input 
@@ -3973,7 +4056,9 @@ export function FrontDesk() {
                 </tr>
               ) : (
                 filteredReservations.map(res => {
-                  const billing = calculateBilling(res, hotel);
+                  const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+                  const billing = calculateBilling(res, hotel, resLedger);
+                  const bal = getReservationLiveBalance(res, hotel, resLedger);
                   return (
                     <tr key={res.id} className={cn(
                   "hover:bg-zinc-800/50 transition-colors",
@@ -4017,13 +4102,19 @@ export function FrontDesk() {
                             return null;
                           })()}
                         </div>
-                        {(res.guestPhone || res.guestEmail) && (
-                          <div className="text-[10px] text-zinc-400 font-normal flex items-center gap-1.5 flex-wrap mt-0.5">
-                            {res.guestPhone && <span>{res.guestPhone}</span>}
-                            {res.guestPhone && res.guestEmail && <span className="text-zinc-600">•</span>}
-                            {res.guestEmail && <span className="text-zinc-500">{res.guestEmail}</span>}
-                          </div>
-                        )}
+                        {(() => {
+                          const linkedGuest = guests.find(g => g.id === res.guestId);
+                          const gPhone = res.guestPhone || linkedGuest?.phone;
+                          const gEmail = res.guestEmail || linkedGuest?.email;
+                          if (!gPhone && !gEmail) return null;
+                          return (
+                            <div className="text-[10px] text-zinc-400 font-normal flex items-center gap-1.5 flex-wrap mt-0.5">
+                              {gPhone && <span>{gPhone}</span>}
+                              {gPhone && gEmail && <span className="text-zinc-600">•</span>}
+                              {gEmail && <span className="text-zinc-500">{gEmail}</span>}
+                            </div>
+                          );
+                        })()}
                         {(() => {
                           const linkedGuest = guests.find(g => g.id === res.guestId);
                           const corpId = res.corporateId || linkedGuest?.corporateId;
@@ -4102,11 +4193,7 @@ export function FrontDesk() {
                 {res.status === 'checked_out' ? 'Out:' : 'Due:'} {res.checkOut} {res.checkOutTime ? `@ ${res.checkOutTime}` : ''}
               </span>
             </div>
-            {res.checkedOutBy && res.status === 'checked_out' && (
-              <div className="text-[9px] text-zinc-500 mt-0.5 truncate max-w-[160px]" title={`Checked out by ${res.checkedOutBy}`}>
-                Staff: {res.checkedOutBy}
-              </div>
-            )}
+            
             <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
               <div className="flex items-center gap-1">
                 <Clock size={10} className="text-zinc-600" />
@@ -4143,6 +4230,53 @@ export function FrontDesk() {
                 return null;
               })()}
             </div>
+
+            {/* Audit & Staff Attribution Badges */}
+            <div className="mt-2 pt-1.5 border-t border-zinc-800/80 flex flex-col gap-1 text-[10px]">
+              {res.checkedInBy && (
+                <div className="flex items-center gap-1 text-emerald-400/90 font-medium">
+                  <UserCheck size={11} className="text-emerald-500 shrink-0" />
+                  <span className="text-zinc-500 text-[9px] uppercase font-bold">Checked In:</span>
+                  <span className="text-zinc-300 truncate max-w-[130px]" title={getStaffDisplay(res.checkedInBy, (res as any).checkedInByName)}>
+                    {getStaffDisplay(res.checkedInBy, (res as any).checkedInByName)}
+                  </span>
+                  {(res.checkInTime || res.actualCheckIn) && (
+                    <span className="text-zinc-500 text-[9px] font-mono">
+                      ({res.checkInTime || format(new Date(res.actualCheckIn), 'HH:mm')})
+                    </span>
+                  )}
+                </div>
+              )}
+              {res.checkedOutBy && (
+                <div className="flex items-center gap-1 text-blue-400/90 font-medium">
+                  <LogOut size={11} className="text-blue-500 shrink-0" />
+                  <span className="text-zinc-500 text-[9px] uppercase font-bold">Checked Out:</span>
+                  <span className="text-zinc-300 truncate max-w-[130px]" title={getStaffDisplay(res.checkedOutBy, (res as any).checkedOutByName)}>
+                    {getStaffDisplay(res.checkedOutBy, (res as any).checkedOutByName)}
+                  </span>
+                  {(res.checkOutTime || res.actualCheckOut) && (
+                    <span className="text-zinc-500 text-[9px] font-mono">
+                      ({res.checkOutTime || format(new Date(res.actualCheckOut), 'HH:mm')})
+                    </span>
+                  )}
+                </div>
+              )}
+              {res.bookedBy && (
+                <div className="flex items-center gap-1 text-zinc-400 font-medium">
+                  <span className="text-zinc-500 text-[9px] uppercase font-bold">Booked by:</span>
+                  <span className="text-zinc-400 truncate max-w-[130px]" title={getStaffDisplay(res.bookedBy, (res as any).bookedByName)}>
+                    {getStaffDisplay(res.bookedBy, (res as any).bookedByName)}
+                  </span>
+                  {res.createdAt && <span className="text-zinc-600 text-[9px]">({format(new Date(res.createdAt), 'MMM dd')})</span>}
+                </div>
+              )}
+              {resLedger.length > 0 && (
+                <div className="flex items-center gap-1 text-zinc-500 text-[9px]">
+                  <Receipt size={10} className="text-purple-400 shrink-0" />
+                  <span>{resLedger.length} bill {resLedger.length === 1 ? 'activity' : 'activities'} recorded</span>
+                </div>
+              )}
+            </div>
           </td>
                   <td className="px-6 py-4 text-sm">
                     <div className="flex flex-col">
@@ -4165,7 +4299,6 @@ export function FrontDesk() {
                     </div>
                     <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
-                        const bal = getReservationLiveBalance(res, hotel);
                         const totalPaid = billing.totalPayments;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
@@ -4243,6 +4376,15 @@ export function FrontDesk() {
                     <div className="flex justify-end gap-2">
                       {(activeTab === 'checkin_history' || activeTab === 'checkout_history') ? (
                         <>
+                          <button 
+                            type="button"
+                            onClick={() => setShowAuditModal(res)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 text-amber-300 hover:bg-zinc-700 hover:text-amber-200 border border-amber-500/20 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
+                            title="View Staff Audit Trail & Recorded Activities"
+                          >
+                            <History size={14} className="text-amber-400" />
+                            Audit Trail
+                          </button>
                           <button 
                             onClick={() => setShowFolioModal(res)}
                             className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
@@ -4325,6 +4467,14 @@ export function FrontDesk() {
                               </button>
                               <button 
                                 type="button"
+                                onClick={() => setShowAuditModal(res)}
+                                className="p-2 text-amber-400/80 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                title="Operational Audit Trail & Activity Log"
+                              >
+                                <History size={18} />
+                              </button>
+                              <button 
+                                type="button"
                                 onClick={() => setShowDigitalKeyModal(res)}
                                 className="p-2 text-purple-400 hover:bg-purple-500/10 rounded-lg transition-all active:scale-90"
                                 title="Room Digital SmartKey"
@@ -4364,6 +4514,14 @@ export function FrontDesk() {
                               >
                                 <FileText size={18} />
                               </button>
+                              <button 
+                                type="button"
+                                onClick={() => setShowAuditModal(res)}
+                                className="p-2 text-amber-400/80 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                title="Operational Audit Trail & Activity Log"
+                              >
+                                <History size={18} />
+                              </button>
                               {(res.ledgerBalance || 0) > 0.01 && (
                                 <button 
                                   type="button"
@@ -4384,6 +4542,14 @@ export function FrontDesk() {
                           
                           {res.status === 'pending' && (
                             <>
+                              <button 
+                                type="button"
+                                onClick={() => setShowAuditModal(res)}
+                                className="p-2 text-amber-400/80 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                title="Operational Audit Trail & Activity Log"
+                              >
+                                <History size={18} />
+                              </button>
                               {(hotel.settings?.reservations?.allowConfirmation ?? true) && (
                                 <button 
                                   onClick={() => updateReservationStatus(res, 'confirmed')}
@@ -4738,9 +4904,9 @@ export function FrontDesk() {
       )}
 
       {showReceipt && hotel && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-white print:backdrop-blur-none">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
           <div className={cn(
-            "relative w-full my-8 print:my-0 print:w-auto",
+            "relative w-full my-8 print:my-0 print:w-full print:static",
             showReceipt.type === 'restaurant' ? "max-w-[80mm]" : "max-w-[210mm]"
           )}>
             <div className="absolute -top-12 right-0 flex gap-4 print:hidden">
@@ -4759,7 +4925,7 @@ export function FrontDesk() {
                 Close
               </button>
             </div>
-            <div className="bg-white rounded-2xl overflow-hidden">
+            <div className="bg-white rounded-2xl overflow-hidden print:rounded-none print:shadow-none print:w-full">
               <ReceiptGenerator 
                 hotel={hotel} 
                 reservation={showReceipt.res} 
@@ -5155,6 +5321,244 @@ export function FrontDesk() {
             toast.success('Grace period extended successfully.');
           }}
         />
+      )}
+
+      {/* Comprehensive Reservation Audit & Staff Activity Modal */}
+      {showAuditModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
+                    Operational Audit & Activity Trail
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono uppercase bg-zinc-800 text-zinc-300 border border-zinc-700">
+                      Room {showAuditModal.roomNumber}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Guest: <span className="text-zinc-200 font-semibold">{showAuditModal.guestName}</span> • Res #{showAuditModal.id.slice(-6).toUpperCase()}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowAuditModal(null)}
+                className="p-2 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              {/* Lifecycle Milestones */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Reservation Booking */}
+                <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800/80 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">1. Reservation</span>
+                      <Calendar size={14} className="text-amber-500" />
+                    </div>
+                    <div className="text-sm font-bold text-zinc-200">
+                      {getStaffDisplay(showAuditModal.bookedBy, (showAuditModal as any).bookedByName)}
+                    </div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      Created: {showAuditModal.createdAt ? format(new Date(showAuditModal.createdAt), 'MMM dd, yyyy HH:mm') : 'Direct Booking'}
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-zinc-900 text-[10px] text-zinc-500">
+                    Source: {showAuditModal.bookingSource || showAuditModal.source || 'Front Desk / Walk-In'}
+                  </div>
+                </div>
+
+                {/* 2. Check-In Milestone */}
+                <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800/80 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">2. Check-In</span>
+                      <UserCheck size={14} className="text-emerald-500" />
+                    </div>
+                    <div className="text-sm font-bold text-zinc-200">
+                      {showAuditModal.checkedInBy 
+                        ? getStaffDisplay(showAuditModal.checkedInBy, (showAuditModal as any).checkedInByName)
+                        : (showAuditModal.status === 'checked_in' || showAuditModal.status === 'checked_out' ? 'Front Desk Staff' : 'Pending Check-In')}
+                    </div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      {showAuditModal.checkInDateTime || showAuditModal.actualCheckIn 
+                        ? format(new Date(showAuditModal.checkInDateTime || showAuditModal.actualCheckIn!), 'MMM dd, yyyy HH:mm')
+                        : `Scheduled: ${showAuditModal.checkIn} ${showAuditModal.checkInTime || ''}`}
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-zinc-900 text-[10px] text-zinc-500">
+                    Status: <span className="capitalize text-emerald-400">{showAuditModal.status.replace('_', ' ')}</span>
+                  </div>
+                </div>
+
+                {/* 3. Check-Out Milestone */}
+                <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800/80 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">3. Check-Out</span>
+                      <LogOut size={14} className="text-blue-500" />
+                    </div>
+                    <div className="text-sm font-bold text-zinc-200">
+                      {showAuditModal.checkedOutBy 
+                        ? getStaffDisplay(showAuditModal.checkedOutBy, (showAuditModal as any).checkedOutByName)
+                        : (showAuditModal.status === 'checked_out' ? 'Front Desk Staff' : 'Still In-House / Due')}
+                    </div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      {showAuditModal.checkOutDateTime || showAuditModal.actualCheckOut 
+                        ? format(new Date(showAuditModal.checkOutDateTime || showAuditModal.actualCheckOut!), 'MMM dd, yyyy HH:mm')
+                        : `Scheduled: ${showAuditModal.checkOut} ${showAuditModal.checkOutTime || ''}`}
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-zinc-900 text-[10px] text-zinc-500">
+                    {showAuditModal.status === 'checked_out' ? 'Completed Checkout' : 'Expected Departure'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Financial & Balances Summary */}
+              {(() => {
+                const resLedger = ledgerEntries.filter(e => e.reservationId === showAuditModal.id);
+                const billing = calculateBilling(showAuditModal, hotel, resLedger);
+                const bal = getReservationLiveBalance(showAuditModal, hotel, resLedger);
+                return (
+                  <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800">
+                    <div className="text-xs uppercase font-bold text-zinc-500 tracking-wider mb-3">
+                      Authoritative Financial Audit Summary
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div>
+                        <span className="text-[10px] text-zinc-500 block">Total Charges</span>
+                        <span className="text-base font-bold text-zinc-100">{formatCurrency(billing.totalCharges, currency, exchangeRate)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-zinc-500 block">Total Paid</span>
+                        <span className="text-base font-bold text-emerald-400">{formatCurrency(billing.totalPayments, currency, exchangeRate)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-zinc-500 block">Outstanding Owed</span>
+                        <span className={cn("text-base font-bold", bal > 0.01 ? "text-red-400" : "text-emerald-400")}>
+                          {formatCurrency(Math.max(0, bal), currency, exchangeRate)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-zinc-500 block">Account State</span>
+                        <span className={cn(
+                          "inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider mt-1 border",
+                          bal > 0.01 ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        )}>
+                          {bal > 0.01 ? (billing.totalPayments > 0 ? 'Partially Paid' : 'Outstanding Debt') : 'Settled / Zero Balance'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Complete Chronological Transactions & Bills Activity */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    <Receipt size={14} className="text-purple-400" />
+                    All Posted Bills, Charges & Payments Activity
+                  </h4>
+                  <span className="text-[11px] text-zinc-500">
+                    {ledgerEntries.filter(e => e.reservationId === showAuditModal.id).length} recorded ledger entries
+                  </span>
+                </div>
+
+                {ledgerEntries.filter(e => e.reservationId === showAuditModal.id).length === 0 ? (
+                  <div className="bg-zinc-950 p-6 rounded-xl border border-zinc-800 text-center">
+                    <Receipt size={24} className="mx-auto text-zinc-600 mb-2" />
+                    <p className="text-xs text-zinc-400 font-medium">No ledger transactions posted yet.</p>
+                    <p className="text-[11px] text-zinc-600 mt-0.5">Base room rate charge is accrued as per stay duration ({showAuditModal.nights || 1} nights @ {formatCurrency(showAuditModal.nightlyRate || 0, currency, exchangeRate)}/night).</p>
+                  </div>
+                ) : (
+                  <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-zinc-900 text-zinc-400 uppercase text-[9px] font-bold border-b border-zinc-800">
+                        <tr>
+                          <th className="px-4 py-2.5">Date & Time</th>
+                          <th className="px-4 py-2.5">Category</th>
+                          <th className="px-4 py-2.5">Description</th>
+                          <th className="px-4 py-2.5">Posted By (Audit)</th>
+                          <th className="px-4 py-2.5 text-right">Debit</th>
+                          <th className="px-4 py-2.5 text-right">Credit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-900">
+                        {ledgerEntries
+                          .filter(e => e.reservationId === showAuditModal.id)
+                          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                          .map((entry) => {
+                            const staffDisplay = (entry as any).postedByName || getStaffDisplay(entry.postedBy);
+                            return (
+                              <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
+                                <td className="px-4 py-2.5 text-zinc-400 font-mono text-[11px]">
+                                  {entry.timestamp ? format(new Date(entry.timestamp), 'MMM dd, HH:mm') : '-'}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-zinc-900 text-zinc-400 border border-zinc-800">
+                                    {entry.category}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2.5 text-zinc-200">
+                                  {entry.description}
+                                  {entry.referenceCode && (
+                                    <span className="block text-[9px] text-zinc-500 font-mono">Ref: {entry.referenceCode}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  <div className="flex items-center gap-1.5 text-zinc-300 font-medium">
+                                    <User size={11} className="text-zinc-500" />
+                                    <span>{staffDisplay}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-bold text-red-400">
+                                  {entry.type === 'debit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-bold text-emerald-400">
+                                  {entry.type === 'credit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-zinc-800 bg-zinc-950/60 flex items-center justify-between">
+              <button 
+                onClick={() => {
+                  const targetRes = showAuditModal;
+                  setShowAuditModal(null);
+                  setShowFolioModal(targetRes);
+                }}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-all flex items-center gap-2"
+              >
+                <Receipt size={14} />
+                Open Full Guest Folio
+              </button>
+              <button 
+                onClick={() => setShowAuditModal(null)}
+                className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-xl transition-all"
+              >
+                Close Audit View
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
