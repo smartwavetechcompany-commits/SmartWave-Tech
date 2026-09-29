@@ -690,7 +690,6 @@ export function Rooms() {
           const nights = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status).totalNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
-            totalSpent: increment(totalDebits),
             stayHistory: arrayUnion({
               reservationId: res.id,
               roomNumber: res.roomNumber,

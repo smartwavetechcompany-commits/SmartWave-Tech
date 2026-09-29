@@ -29,6 +29,7 @@ import { DSSGuestReport } from './DSSGuestReport';
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { printDocument } from '../utils/printUtils';
 import { isModuleEnabled } from '../utils/plans';
+import { hasPermission } from '../utils/permissions';
 import { calculateGuestFinancialPosition } from '../services/financialService';
 import { ConfirmModal } from './ConfirmModal';
 import { deleteDoc, doc, addDoc } from 'firebase/firestore';
@@ -740,6 +741,11 @@ export function Reports() {
   };
 
   const exportPDF = () => {
+    if (!hasPermission(profile, 'export_reports')) {
+      toast.error('Permission denied: You do not have permission to export reports.');
+      return;
+    }
+
     const doc = new jsPDF();
     const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
     const hotelName = hotel?.name || 'Hotel Property';
@@ -823,6 +829,11 @@ export function Reports() {
   };
 
   const exportExcel = () => {
+    if (!hasPermission(profile, 'export_reports')) {
+      toast.error('Permission denied: You do not have permission to export reports.');
+      return;
+    }
+
     const data = getReportData(activeReport);
     const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
     
@@ -945,22 +956,24 @@ export function Reports() {
           </div>
 
           <div className="flex gap-2">
-            <button 
-              onClick={() => {
-                const reportTitle = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
-                printDocument(document.getElementById('reports-analytics-print-container'), {
-                  title: `${hotel?.name || 'Hotel'}_${reportTitle}_${dateRange.start}_to_${dateRange.end}`,
-                  pageSize: 'A4 portrait',
-                  pageMargin: '8mm'
-                });
-              }}
-              className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
-              title="Print Report"
-            >
-              <Printer size={18} className="text-zinc-300" />
-              Print
-            </button>
-            {(hotel?.settings?.reporting?.allowExports ?? true) && (
+            {hasPermission(profile, 'print_reports') && (
+              <button 
+                onClick={() => {
+                  const reportTitle = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
+                  printDocument(document.getElementById('reports-analytics-print-container'), {
+                    title: `${hotel?.name || 'Hotel'}_${reportTitle}_${dateRange.start}_to_${dateRange.end}`,
+                    pageSize: 'A4 portrait',
+                    pageMargin: '8mm'
+                  });
+                }}
+                className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
+                title="Print Report"
+              >
+                <Printer size={18} className="text-zinc-300" />
+                Print
+              </button>
+            )}
+            {(hotel?.settings?.reporting?.allowExports ?? true) && hasPermission(profile, 'export_reports') && (
               <>
                 <button 
                   onClick={exportPDF}

@@ -90,7 +90,7 @@ export function calculateReservationAccount(
     // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown without unposted overstay projections
     const nightly = BillingEngine.getNightlyRate(res, hotel);
     const baseRoom = nightly * duration.totalNights;
-    totalCharges = baseRoom;
+    totalCharges = (res.totalAmount && res.totalAmount > 0) ? res.totalAmount : baseRoom;
     totalRoomCharges = baseRoom;
     totalOverstayCharges = 0;
     totalServiceCharges = 0;

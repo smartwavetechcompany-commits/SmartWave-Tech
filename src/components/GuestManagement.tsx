@@ -102,6 +102,19 @@ export function GuestManagement() {
     staleTime: 1000 * 60 * 5,
   });
 
+  // Load ledger entries with TanStack Query as single source of truth for financial statistics
+  const { data: allLedgerEntries = [] } = useQuery<LedgerEntry[]>({
+    queryKey: ['guest_ledger_entries', hotel?.id],
+    queryFn: async () => {
+      if (!hotel?.id) return [];
+      const q = query(collection(db, 'hotels', hotel.id, 'ledger'));
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+    },
+    enabled: !!hotel?.id && !!profile,
+    staleTime: 1000 * 60 * 2,
+  });
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
   const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);

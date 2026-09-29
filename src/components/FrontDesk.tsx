@@ -859,6 +859,11 @@ export function FrontDesk() {
 
   const handleBooking = async () => {
     if (!hotel?.id || !profile || loading) return;
+
+    if (!hasPermission(profile, 'create_reservations')) {
+      toast.error('Permission denied: You do not have permission to create reservations.');
+      return;
+    }
     
     const allStays = [
       {
@@ -1733,17 +1738,17 @@ export function FrontDesk() {
       }
     }
 
-    // Permission checks
-    if (status === 'checked_in' && !hasPermission(profile, 'check_in_guests') && !hasPermission(profile, 'manage_rooms') && !hasPermission(profile, 'access_front_desk')) {
-      toast.error('Permission denied: Check-in requires check-in permission');
+    // Permission checks (Rule 2)
+    if (status === 'checked_in' && !hasPermission(profile, 'check_in_guests')) {
+      toast.error('Permission denied: You do not have permission to check in guests.');
       return;
     }
-    if (status === 'checked_out' && !hasPermission(profile, 'check_out_guests') && !hasPermission(profile, 'manage_rooms') && !hasPermission(profile, 'access_front_desk')) {
-      toast.error('Permission denied: Check-out requires check-out permission');
+    if (status === 'checked_out' && !hasPermission(profile, 'check_out_guests')) {
+      toast.error('Permission denied: You do not have permission to check out guests.');
       return;
     }
-    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'cancel_reservations') && !hasPermission(profile, 'delete_reservation') && !hasPermission(profile, 'delete_reservations') && !hasPermission(profile, 'access_front_desk')) {
-      toast.error('Permission denied: Cancellation');
+    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'cancel_reservations') && !hasPermission(profile, 'delete_reservations')) {
+      toast.error('Permission denied: You do not have permission to cancel reservations.');
       return;
     }
 
@@ -2004,7 +2009,6 @@ export function FrontDesk() {
           const nights = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0).totalNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
-            totalSpent: increment(totalDebits),
             stayHistory: arrayUnion({
               reservationId: res.id,
               roomNumber: res.roomNumber,
@@ -2490,7 +2494,7 @@ export function FrontDesk() {
           >
             <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
           </button>
-          {(hotel?.settings?.reservations?.allowWalkIn ?? true) && (
+          {(hotel?.settings?.reservations?.allowWalkIn ?? true) && hasPermission(profile, 'create_reservations') && (
             <>
               <button 
                 onClick={() => {
@@ -4482,7 +4486,7 @@ export function FrontDesk() {
                               >
                                 <QrCode size={18} />
                               </button>
-                              {(() => {
+                              {hasPermission(profile, 'check_out_guests') && (() => {
                                 const policy = canCheckout(hotel, profile, res);
                                 const isBlocked = !policy.allowed;
                                 return (

@@ -13,6 +13,11 @@ export const canCheckout = (
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // Granular Action Permission Check (Rule 2)
+  if (!hasPermission(profile, 'check_out_guests')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to check out guests.' };
+  }
+
   // HARD REQUIREMENT: Financial Consistency Audit Gate
   if (reservation.guestId) {
     const validation = validateGuestAccount(reservation.guestId, {
@@ -95,6 +100,11 @@ export const canCheckIn = (
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
 
+  // Granular Action Permission Check (Rule 2)
+  if (!hasPermission(profile, 'check_in_guests')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to check in guests.' };
+  }
+
   // 1. HARD AVAILABILITY BLOCK: Prevent check-in if another guest is already checked into this room
   if (allReservations && allReservations.length > 0) {
     const activeCheckedInGuest = allReservations.find(r => 
@@ -173,14 +183,19 @@ export const canEditReservation = (
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // Granular Action Permission Check (Rule 2)
+  if (!hasPermission(profile, 'edit_reservations')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to edit reservations.' };
+  }
+
   const settings = hotel.settings?.reservations;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowEditing && !hasPermission(profile, 'edit_reservation')) {
+  if (!settings.allowEditing) {
     return { allowed: false, message: 'Reservation editing is currently disabled by administrator.' };
   }
 
-  if (settings.requireApprovalForEdits && !hasPermission(profile, 'edit_reservation')) {
+  if (settings.requireApprovalForEdits) {
     return { allowed: false, message: 'Manager approval required to edit reservations.' };
   }
 
@@ -194,10 +209,15 @@ export const canCancelReservation = (
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // Granular Action Permission Check (Rule 2)
+  if (!hasPermission(profile, 'cancel_reservations') && !hasPermission(profile, 'delete_reservations')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to cancel reservations.' };
+  }
+
   const settings = hotel.settings?.reservations;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowCancellation && !hasPermission(profile, 'delete_reservation')) {
+  if (!settings.allowCancellation) {
     return { allowed: false, message: 'Cancellations are currently disabled by administrator.' };
   }
 

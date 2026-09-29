@@ -458,65 +458,181 @@ export const BASE_ROLE_PERMISSIONS: Record<string, Permission[]> = {
 };
 
 /**
- * Maps permissions to legacy aliases to ensure zero regressions across existing screens
- * Strictly scoped so permissions never bleed across unrelated modules
+ * Maps permissions to exact naming synonyms ONLY.
+ * NEVER expands an action permission to an unrelated action or view permission.
+ * No automatic permission expansion. No privilege escalation.
  */
-const ALIAS_MAP: Record<string, Permission[]> = {
-  reset_passwords: ['reset_passwords', 'manage_staff', 'manage_users_admin'],
-  manage_staff: ['manage_staff', 'manage_users_admin', 'view_users', 'create_users', 'edit_users', 'assign_roles', 'reset_passwords', 'suspend_users', 'reactivate_users'],
-  manage_roles: ['manage_roles', 'manage_roles_admin', 'assign_roles', 'manage_permissions_admin'],
-  manage_rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms', 'unblock_rooms', 'delete_rooms', 'access_front_desk'],
-  view_rooms: ['view_rooms', 'manage_rooms', 'create_rooms', 'edit_rooms', 'block_rooms', 'unblock_rooms', 'access_front_desk'],
-  view_housekeeping: ['view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
-  access_front_desk: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay'],
-  view_reservations: ['view_reservations', 'access_front_desk', 'edit_reservations', 'create_reservations'],
-  create_reservations: ['create_reservations', 'access_front_desk', 'edit_reservations'],
-  edit_reservations: ['edit_reservations', 'edit_reservation', 'access_front_desk', 'create_reservations'],
-  edit_reservation: ['edit_reservations', 'edit_reservation', 'access_front_desk', 'create_reservations'],
-  cancel_reservations: ['cancel_reservations', 'delete_reservations', 'delete_reservation', 'access_front_desk', 'edit_reservations'],
-  delete_reservations: ['delete_reservations', 'delete_reservation', 'cancel_reservations', 'access_front_desk'],
-  delete_reservation: ['delete_reservations', 'delete_reservation', 'cancel_reservations', 'access_front_desk'],
-  check_in_guests: ['check_in_guests', 'access_front_desk', 'manage_rooms'],
-  check_out_guests: ['check_out_guests', 'access_front_desk', 'manage_rooms'],
-  extend_stay: ['extend_stay', 'edit_reservations', 'edit_reservation', 'access_front_desk'],
-  override_checkout: ['override_checkout', 'void_transaction', 'edit_settings', 'access_front_desk'],
-  edit_guest_profiles: ['edit_guest_profiles', 'view_guests', 'edit_guests', 'add_guests', 'delete_guests', 'export_guests'],
-  view_guests: ['view_guests', 'edit_guest_profiles', 'add_guests', 'edit_guests'],
-  add_guests: ['add_guests', 'edit_guest_profiles', 'edit_guests', 'access_front_desk'],
-  edit_guests: ['edit_guests', 'edit_guest_profiles', 'add_guests', 'access_front_desk'],
-  process_payments: ['process_payments', 'receive_payments', 'receive_payment', 'post_charges', 'view_financial_records'],
-  receive_payments: ['receive_payments', 'receive_payment', 'process_payments', 'view_financial_records', 'access_front_desk'],
-  receive_payment: ['receive_payment', 'receive_payments', 'process_payments', 'view_financial_records', 'access_front_desk'],
-  post_charges: ['post_charges', 'process_payments', 'view_financial_records', 'access_front_desk'],
-  view_ledger: ['view_ledger', 'view_financial_records', 'view_city_ledger'],
-  view_financial_records: ['view_financial_records', 'view_ledger', 'export_financial_data', 'view_city_ledger', 'post_charges', 'receive_payments', 'receive_payment', 'process_refunds', 'reverse_transactions', 'view_debt_ledger'],
-  view_debt_ledger: ['view_debt_ledger', 'view_financial_records', 'view_city_ledger', 'transfer_debt', 'adjust_debt', 'write_off_debt'],
-  view_reports: ['view_reports', 'export_reports', 'print_reports'],
-  export_reports: ['export_reports', 'view_reports'],
-  print_reports: ['print_reports', 'view_reports'],
-  view_settings: ['view_settings', 'edit_hotel_settings', 'edit_settings', 'manage_roles', 'manage_roles_admin'],
-  edit_hotel_settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_hotels'],
-  edit_settings: ['edit_settings', 'edit_hotel_settings', 'view_settings'],
-  manage_kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders', 'cancel_fb_orders', 'delete_fb_orders'],
-  view_fb_orders: ['view_fb_orders', 'manage_kitchen', 'create_fb_orders'],
-  create_fb_orders: ['create_fb_orders', 'manage_kitchen', 'view_fb_orders'],
-  manage_inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
-  view_inventory: ['view_inventory', 'manage_inventory', 'edit_inventory'],
-  edit_inventory: ['edit_inventory', 'manage_inventory'],
-  manage_maintenance: ['manage_maintenance', 'block_rooms', 'unblock_rooms'],
-  manage_corporate: ['manage_corporate', 'view_city_ledger'],
-  nightly_audit: ['nightly_audit', 'run_night_audit', 'approve_night_audit', 'reopen_audit'],
-  run_night_audit: ['run_night_audit', 'nightly_audit'],
-  approve_night_audit: ['approve_night_audit', 'nightly_audit'],
-  void_transaction: ['void_transaction', 'reverse_transactions', 'reverse_payment'],
-  process_refunds: ['process_refunds', 'approve_refund'],
-  view_activity_logs: ['view_activity_logs', 'manage_staff'],
-  view_dashboard: ['view_dashboard', 'export_dashboard']
+const SYNONYM_MAP: Record<string, Permission[]> = {
+  edit_reservations: ['edit_reservations', 'edit_reservation'],
+  edit_reservation: ['edit_reservations', 'edit_reservation'],
+  delete_reservations: ['delete_reservations', 'delete_reservation', 'cancel_reservations'],
+  delete_reservation: ['delete_reservations', 'delete_reservation', 'cancel_reservations'],
+  cancel_reservations: ['cancel_reservations', 'delete_reservations', 'delete_reservation'],
+  receive_payments: ['receive_payments', 'receive_payment', 'process_payments'],
+  receive_payment: ['receive_payment', 'receive_payments', 'process_payments'],
+  reverse_transactions: ['reverse_transactions', 'void_transaction'],
+  void_transaction: ['void_transaction', 'reverse_transactions'],
+  manage_roles: ['manage_roles', 'manage_roles_admin', 'manage_permissions_admin', 'assign_roles'],
+  manage_roles_admin: ['manage_roles_admin', 'manage_roles', 'manage_permissions_admin'],
+  manage_permissions_admin: ['manage_permissions_admin', 'manage_roles', 'manage_roles_admin'],
+  manage_staff: ['manage_staff', 'manage_users_admin'],
+  edit_settings: ['edit_settings', 'edit_hotel_settings'],
+  edit_hotel_settings: ['edit_hotel_settings', 'edit_settings']
 };
 
 /**
- * Checks if a user profile has a specific permission.
- * Fully database-driven: checks live customRoles, custom permissions, staffRole, and base role.
+ * Granular mapping from permission ID to Firestore structured object keys:
+ * e.g., { reservations: { view: true, create: false, checkIn: false } }
+ */
+const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: string[] }> = {
+  // Reservations
+  view_reservations: { modules: ['reservations', 'frontDesk'], actions: ['view', 'viewReservations', 'read'] },
+  access_front_desk: { modules: ['reservations', 'frontDesk'], actions: ['access', 'view', 'accessFrontDesk', 'frontDesk'] },
+  create_reservations: { modules: ['reservations', 'frontDesk'], actions: ['create', 'createReservations', 'add'] },
+  edit_reservations: { modules: ['reservations', 'frontDesk'], actions: ['edit', 'editReservations', 'update'] },
+  edit_reservation: { modules: ['reservations', 'frontDesk'], actions: ['edit', 'editReservations', 'update'] },
+  cancel_reservations: { modules: ['reservations', 'frontDesk'], actions: ['cancel', 'cancelReservations', 'delete', 'deleteReservations'] },
+  delete_reservations: { modules: ['reservations', 'frontDesk'], actions: ['delete', 'deleteReservations', 'cancel'] },
+  delete_reservation: { modules: ['reservations', 'frontDesk'], actions: ['delete', 'deleteReservations', 'cancel'] },
+  check_in_guests: { modules: ['reservations', 'frontDesk'], actions: ['checkIn', 'check_in', 'checkInGuests'] },
+  check_out_guests: { modules: ['reservations', 'frontDesk'], actions: ['checkOut', 'check_out', 'checkOutGuests'] },
+  extend_stay: { modules: ['reservations', 'frontDesk'], actions: ['extend', 'extendStay'] },
+  override_checkout: { modules: ['reservations', 'frontDesk'], actions: ['overrideCheckout', 'override_checkout'] },
+
+  // Rooms
+  view_rooms: { modules: ['rooms'], actions: ['view', 'viewRooms', 'read'] },
+  manage_rooms: { modules: ['rooms'], actions: ['manage', 'manageRooms', 'edit'] },
+  create_rooms: { modules: ['rooms'], actions: ['create', 'createRooms'] },
+  edit_rooms: { modules: ['rooms'], actions: ['edit', 'editRooms'] },
+  delete_rooms: { modules: ['rooms'], actions: ['delete', 'deleteRooms'] },
+  block_rooms: { modules: ['rooms'], actions: ['block', 'blockRooms'] },
+  unblock_rooms: { modules: ['rooms'], actions: ['unblock', 'unblockRooms'] },
+
+  // Guests
+  view_guests: { modules: ['guests'], actions: ['view', 'viewGuests', 'read'] },
+  add_guests: { modules: ['guests'], actions: ['create', 'add', 'addGuests'] },
+  edit_guests: { modules: ['guests'], actions: ['edit', 'editGuests'] },
+  edit_guest_profiles: { modules: ['guests'], actions: ['editProfiles', 'editGuestProfiles', 'edit', 'view'] },
+  delete_guests: { modules: ['guests'], actions: ['delete', 'deleteGuests'] },
+  export_guests: { modules: ['guests'], actions: ['export', 'exportGuests'] },
+
+  // Housekeeping
+  view_housekeeping: { modules: ['housekeeping'], actions: ['view', 'viewHousekeeping', 'read'] },
+  assign_housekeeping_tasks: { modules: ['housekeeping'], actions: ['assign', 'assignTasks'] },
+  edit_housekeeping_tasks: { modules: ['housekeeping'], actions: ['edit', 'editTasks'] },
+  close_housekeeping_tasks: { modules: ['housekeeping'], actions: ['close', 'closeTasks'] },
+
+  // Kitchen / F&B
+  view_fb_orders: { modules: ['kitchen', 'fandb'], actions: ['view', 'viewOrders', 'read'] },
+  create_fb_orders: { modules: ['kitchen', 'fandb'], actions: ['create', 'createOrders'] },
+  edit_fb_orders: { modules: ['kitchen', 'fandb'], actions: ['edit', 'editOrders'] },
+  cancel_fb_orders: { modules: ['kitchen', 'fandb'], actions: ['cancel', 'cancelOrders'] },
+  delete_fb_orders: { modules: ['kitchen', 'fandb'], actions: ['delete', 'deleteOrders'] },
+  manage_kitchen: { modules: ['kitchen', 'fandb'], actions: ['manage', 'manageKitchen'] },
+
+  // Inventory
+  view_inventory: { modules: ['inventory'], actions: ['view', 'viewInventory', 'read'] },
+  manage_inventory: { modules: ['inventory'], actions: ['manage', 'manageInventory'] },
+  edit_inventory: { modules: ['inventory'], actions: ['edit', 'editInventory'] },
+
+  // Maintenance
+  manage_maintenance: { modules: ['maintenance'], actions: ['manage', 'view'] },
+
+  // Corporate
+  manage_corporate: { modules: ['corporate'], actions: ['manage', 'view'] },
+
+  // Finance
+  view_financial_records: { modules: ['finance'], actions: ['view', 'viewRecords', 'read'] },
+  view_ledger: { modules: ['finance'], actions: ['viewLedger', 'ledger'] },
+  process_payments: { modules: ['finance'], actions: ['payments', 'processPayments', 'receivePayments'] },
+  receive_payment: { modules: ['finance'], actions: ['payments', 'receivePayment', 'receivePayments'] },
+  receive_payments: { modules: ['finance'], actions: ['payments', 'receivePayment', 'receivePayments'] },
+  post_charges: { modules: ['finance'], actions: ['postCharges', 'charges'] },
+  process_refunds: { modules: ['finance'], actions: ['refunds', 'processRefunds'] },
+  void_transaction: { modules: ['finance'], actions: ['void', 'voidTransaction'] },
+  export_financial_data: { modules: ['finance'], actions: ['export', 'exportFinancial'] },
+  view_debt_ledger: { modules: ['finance'], actions: ['viewDebtLedger', 'debtLedger'] },
+  view_city_ledger: { modules: ['finance'], actions: ['viewCityLedger', 'cityLedger'] },
+
+  // Audits
+  nightly_audit: { modules: ['audits'], actions: ['view', 'run', 'audit'] },
+  run_night_audit: { modules: ['audits'], actions: ['run', 'runNightAudit'] },
+  approve_night_audit: { modules: ['audits'], actions: ['approve', 'approveNightAudit'] },
+  reopen_audit: { modules: ['audits'], actions: ['reopen', 'reopenAudit'] },
+
+  // Reports
+  view_reports: { modules: ['reports'], actions: ['view', 'viewReports', 'read'] },
+  export_reports: { modules: ['reports'], actions: ['export', 'exportReports'] },
+  print_reports: { modules: ['reports'], actions: ['print', 'printReports'] },
+
+  // Staff
+  manage_staff: { modules: ['staff'], actions: ['manage', 'manageStaff'] },
+  view_users: { modules: ['staff'], actions: ['view', 'viewUsers', 'read'] },
+  create_users: { modules: ['staff'], actions: ['create', 'createUsers'] },
+  edit_users: { modules: ['staff'], actions: ['edit', 'editUsers'] },
+  delete_users: { modules: ['staff'], actions: ['delete', 'deleteUsers'] },
+  assign_roles: { modules: ['staff'], actions: ['assignRoles', 'roles'] },
+  suspend_users: { modules: ['staff'], actions: ['suspend', 'suspendUsers'] },
+  reactivate_users: { modules: ['staff'], actions: ['reactivate', 'reactivateUsers'] },
+  reset_passwords: { modules: ['staff'], actions: ['resetPasswords'] },
+  view_activity_logs: { modules: ['staff'], actions: ['viewActivityLogs', 'logs'] },
+
+  // Settings
+  view_settings: { modules: ['settings'], actions: ['view', 'viewSettings', 'read'] },
+  edit_settings: { modules: ['settings'], actions: ['edit', 'editSettings'] },
+  edit_hotel_settings: { modules: ['settings'], actions: ['editHotelSettings', 'edit'] },
+  manage_roles: { modules: ['settings'], actions: ['manageRoles', 'roles'] },
+
+  // Dashboard
+  view_dashboard: { modules: ['dashboard'], actions: ['view', 'viewDashboard', 'read'] },
+  export_dashboard: { modules: ['dashboard'], actions: ['export', 'exportDashboard'] }
+};
+
+/**
+ * Checks if a permissions collection (array or Firestore nested object) grants a specific permission.
+ */
+function evaluateExplicitPermissions(
+  permissions: any, 
+  permission: Permission,
+  synonyms: Permission[]
+): boolean {
+  if (!permissions) return false;
+
+  // Case 1: permissions is an array of strings e.g. ['view_reservations', 'check_in_guests']
+  if (Array.isArray(permissions)) {
+    return synonyms.some(s => permissions.includes(s));
+  }
+
+  // Case 2: permissions is a structured object e.g. { reservations: { view: true, create: false } }
+  if (typeof permissions === 'object') {
+    // Check flat keys first
+    for (const s of synonyms) {
+      if (permissions[s] === true) return true;
+    }
+
+    // Check mapped nested module/action paths
+    const mapping = PERMISSION_FIELD_PATH_MAP[permission];
+    if (mapping) {
+      for (const mod of mapping.modules) {
+        const modObj = permissions[mod];
+        if (typeof modObj === 'object' && modObj !== null) {
+          for (const act of mapping.actions) {
+            if (modObj[act] === true) return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Checks if a user profile has a specific action permission.
+ * Fully granular RBAC:
+ * - Module visibility does NOT automatically grant action permissions.
+ * - Every action checks its own permission.
+ * - No implicit permission inheritance or escalation.
  */
 export const hasPermission = (
   profile: any, 
@@ -534,129 +650,56 @@ export const hasPermission = (
     return false;
   }
 
-  // Hotel Admins automatically see and have full access to everything within their hotel except superAdmin portal
+  // Hotel Admins automatically have full administrative access within their property except superAdmin portal
   if (role === 'hotelAdmin' || role === 'admin') {
     return permission !== 'access_super_admin';
   }
 
-  const userPermissions: string[] | undefined = profile.permissions;
-  const assignedModules: string[] | undefined = profile.assignedModules;
-  const requiredAliases = ALIAS_MAP[permission] || [permission];
+  const synonyms = SYNONYM_MAP[permission] || [permission];
 
-  // 1. Authoritative check on explicit permissions array when set on user document
-  if (Array.isArray(userPermissions)) {
-    // If permission or an alias is in userPermissions, grant access
-    if (userPermissions.length > 0 && requiredAliases.some(alias => userPermissions.includes(alias))) {
-      return true;
-    }
-
-    // Also check assignedModules if present
-    if (Array.isArray(assignedModules) && assignedModules.length > 0) {
-      const modulePermMap: Record<string, string[]> = {
-        dashboard: ['view_dashboard', 'export_dashboard'],
-        reservations: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay', 'cancel_reservations', 'delete_reservations'],
-        frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay'],
-        guests: ['edit_guest_profiles', 'view_guests', 'add_guests', 'edit_guests', 'delete_guests', 'export_guests'],
-        rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms', 'unblock_rooms', 'delete_rooms'],
-        housekeeping: ['view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
-        kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders', 'cancel_fb_orders', 'delete_fb_orders'],
-        inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
-        maintenance: ['manage_maintenance'],
-        corporate: ['manage_corporate', 'view_city_ledger'],
-        finance: ['view_financial_records', 'process_payments', 'view_ledger', 'post_charges', 'receive_payments', 'receive_payment', 'export_financial_data', 'view_city_ledger', 'view_debt_ledger', 'process_refunds', 'reverse_transactions', 'void_transaction'],
-        audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit', 'reopen_audit'],
-        reports: ['view_reports', 'export_reports', 'print_reports'],
-        staff: ['manage_staff', 'view_users', 'view_activity_logs', 'reset_passwords', 'create_users', 'edit_users', 'delete_users', 'assign_roles', 'suspend_users', 'reactivate_users'],
-        settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
-      };
-
-      for (const modId of assignedModules) {
-        const allowed = modulePermMap[modId] || [];
-        if (requiredAliases.some(alias => allowed.includes(alias))) {
-          return true;
-        }
-      }
-    }
-
-    // Since permissions array is explicitly defined on this profile, do NOT fall back to staffRole!
-    // This ensures that when an admin unassigns a module, it immediately disappears.
-    return false;
+  // 1. Authoritative check on explicit permissions (array or structured object) on user document
+  if (profile.permissions !== undefined && profile.permissions !== null) {
+    const isGranted = evaluateExplicitPermissions(profile.permissions, permission, synonyms);
+    // Explicit permissions configured for this user: honor it directly.
+    return isGranted;
   }
 
-  // 2. Direct match on assigned modules if assignedModules is set without permissions array
-  if (Array.isArray(assignedModules)) {
-    const modulePermMap: Record<string, string[]> = {
-      dashboard: ['view_dashboard', 'export_dashboard'],
-      reservations: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay'],
-      frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations', 'edit_reservations', 'check_in_guests', 'check_out_guests', 'extend_stay'],
-      guests: ['edit_guest_profiles', 'view_guests', 'add_guests', 'edit_guests'],
-      rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms', 'block_rooms', 'unblock_rooms'],
-      housekeeping: ['view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
-      kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders', 'edit_fb_orders'],
-      inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
-      maintenance: ['manage_maintenance'],
-      corporate: ['manage_corporate', 'view_city_ledger'],
-      finance: ['view_financial_records', 'process_payments', 'view_ledger', 'post_charges', 'receive_payments', 'receive_payment', 'export_financial_data', 'view_city_ledger', 'view_debt_ledger'],
-      audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
-      reports: ['view_reports', 'export_reports', 'print_reports'],
-      staff: ['manage_staff', 'view_users', 'view_activity_logs'],
-      settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
-    };
-
-    for (const modId of assignedModules) {
-      const allowed = modulePermMap[modId] || [];
-      if (requiredAliases.some(alias => allowed.includes(alias))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  // 3. Custom Role assigned to this user
+  // 2. Custom Role assigned to this user
   if (profile.customRoleId && customRoles.length > 0) {
     const customRole = customRoles.find(r => r.id === profile.customRoleId);
     if (customRole && customRole.status !== 'disabled' && customRole.status !== 'archived') {
       const rolePerms = customRole.permissions || [];
-      if (requiredAliases.some(alias => rolePerms.includes(alias))) {
+      if (evaluateExplicitPermissions(rolePerms, permission, synonyms)) {
         return true;
       }
-      
-      // Inheritance from a template
-      if (customRole.inheritsFrom) {
-        const inherited = BASE_ROLE_PERMISSIONS[customRole.inheritsFrom] || 
-          SYSTEM_ROLE_TEMPLATES[customRole.inheritsFrom]?.permissions || [];
-        if (requiredAliases.some(alias => inherited.includes(alias))) {
-          return true;
-        }
-      }
+      return false;
     }
   }
 
-  // 4. Fallback ONLY for legacy profiles that have NO permissions and NO assignedModules fields
-  if (profile.permissions === undefined && profile.assignedModules === undefined) {
-    // Fallback to Staff Role
+  // 3. Fallback ONLY for legacy profiles that have NO permissions field defined at all
+  if (profile.permissions === undefined) {
+    // Check staffRole if assigned
     if (profile.staffRole) {
       const staffPerms = BASE_ROLE_PERMISSIONS[profile.staffRole] || 
         SYSTEM_ROLE_TEMPLATES[profile.staffRole]?.permissions || [];
-      if (requiredAliases.some(alias => staffPerms.includes(alias))) {
+      if (evaluateExplicitPermissions(staffPerms, permission, synonyms)) {
         return true;
       }
     }
 
-    // Fallback to roles array (e.g. ['frontDesk'])
+    // Check roles array
     if (Array.isArray(profile.roles) && profile.roles.length > 0) {
       for (const r of profile.roles) {
         const rPerms = BASE_ROLE_PERMISSIONS[r] || [];
-        if (requiredAliases.some(alias => rPerms.includes(alias))) {
+        if (evaluateExplicitPermissions(rPerms, permission, synonyms)) {
           return true;
         }
       }
     }
 
-    // Fallback to Base Role
+    // Base role fallback
     const basePerms = BASE_ROLE_PERMISSIONS[role] || [];
-    if (requiredAliases.some(alias => basePerms.includes(alias))) {
+    if (evaluateExplicitPermissions(basePerms, permission, synonyms)) {
       return true;
     }
   }
@@ -665,7 +708,125 @@ export const hasPermission = (
 };
 
 /**
- * Checks whether a given PMS module is assigned to a user profile
+ * Granular mapping of PMS modules to their member action permissions
+ * Used to determine Module Visibility:
+ * If a user has ANY permission in a module, that module is visible to them.
+ */
+const MODULE_ACTION_PERMISSIONS: Record<string, Permission[]> = {
+  dashboard: ['view_dashboard', 'export_dashboard'],
+  reservations: [
+    'view_reservations', 
+    'access_front_desk', 
+    'create_reservations', 
+    'edit_reservations', 
+    'check_in_guests', 
+    'check_out_guests', 
+    'extend_stay', 
+    'cancel_reservations', 
+    'delete_reservations',
+    'override_checkout'
+  ],
+  frontDesk: [
+    'view_reservations', 
+    'access_front_desk', 
+    'create_reservations', 
+    'edit_reservations', 
+    'check_in_guests', 
+    'check_out_guests', 
+    'extend_stay', 
+    'cancel_reservations'
+  ],
+  guests: [
+    'view_guests', 
+    'edit_guest_profiles', 
+    'add_guests', 
+    'edit_guests', 
+    'delete_guests', 
+    'export_guests'
+  ],
+  rooms: [
+    'view_rooms', 
+    'manage_rooms', 
+    'create_rooms', 
+    'edit_rooms', 
+    'block_rooms', 
+    'unblock_rooms', 
+    'delete_rooms'
+  ],
+  housekeeping: [
+    'view_housekeeping', 
+    'assign_housekeeping_tasks', 
+    'edit_housekeeping_tasks', 
+    'close_housekeeping_tasks'
+  ],
+  kitchen: [
+    'view_fb_orders', 
+    'create_fb_orders', 
+    'edit_fb_orders', 
+    'cancel_fb_orders', 
+    'delete_fb_orders', 
+    'manage_kitchen'
+  ],
+  inventory: [
+    'view_inventory', 
+    'manage_inventory', 
+    'edit_inventory'
+  ],
+  maintenance: [
+    'manage_maintenance'
+  ],
+  corporate: [
+    'manage_corporate', 
+    'view_city_ledger'
+  ],
+  finance: [
+    'view_financial_records', 
+    'view_ledger', 
+    'process_payments', 
+    'receive_payments', 
+    'post_charges', 
+    'view_debt_ledger', 
+    'view_city_ledger', 
+    'process_refunds', 
+    'void_transaction', 
+    'export_financial_data'
+  ],
+  audits: [
+    'nightly_audit', 
+    'run_night_audit', 
+    'approve_night_audit', 
+    'reopen_audit'
+  ],
+  reports: [
+    'view_reports', 
+    'export_reports', 
+    'print_reports'
+  ],
+  staff: [
+    'manage_staff', 
+    'view_users', 
+    'view_activity_logs', 
+    'create_users', 
+    'edit_users', 
+    'delete_users', 
+    'assign_roles', 
+    'suspend_users', 
+    'reactivate_users', 
+    'reset_passwords'
+  ],
+  settings: [
+    'view_settings', 
+    'edit_settings', 
+    'edit_hotel_settings', 
+    'manage_roles'
+  ]
+};
+
+/**
+ * Checks whether a given PMS module is visible to a user profile (Module Visibility).
+ * Rule 1:
+ * - If user has any permission within the module, the module is visible.
+ * - However, individual actions inside the module must still pass their own action permission check.
  */
 export const isPMSModuleAssigned = (
   profile: any,
@@ -683,26 +844,18 @@ export const isPMSModuleAssigned = (
     if (isDirectMatch) return true;
   }
 
-  // 2. Check if user has permissions belonging to this module
-  const modulePermMap: Record<string, Permission[]> = {
-    dashboard: ['view_dashboard', 'export_dashboard'],
-    reservations: ['access_front_desk', 'view_reservations', 'create_reservations', 'check_in_guests', 'check_out_guests'],
-    frontDesk: ['access_front_desk', 'view_reservations', 'create_reservations', 'check_in_guests', 'check_out_guests'],
-    guests: ['edit_guest_profiles', 'view_guests', 'add_guests', 'edit_guests'],
-    rooms: ['manage_rooms', 'view_rooms', 'create_rooms', 'edit_rooms'],
-    housekeeping: ['view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks', 'close_housekeeping_tasks'],
-    kitchen: ['manage_kitchen', 'view_fb_orders', 'create_fb_orders'],
-    inventory: ['manage_inventory', 'view_inventory', 'edit_inventory'],
-    maintenance: ['manage_maintenance'],
-    corporate: ['manage_corporate'],
-    finance: ['view_financial_records', 'view_ledger', 'process_payments', 'view_debt_ledger', 'receive_payment', 'receive_payments'],
-    audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
-    reports: ['view_reports', 'export_reports', 'print_reports'],
-    staff: ['manage_staff', 'view_users', 'view_activity_logs'],
-    settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
-  };
+  // 2. Structured object check (e.g. profile.permissions.reservations)
+  if (typeof profile.permissions === 'object' && profile.permissions !== null && !Array.isArray(profile.permissions)) {
+    const modObj = profile.permissions[moduleId] || (moduleId === 'frontDesk' ? profile.permissions.reservations : undefined);
+    if (typeof modObj === 'object' && modObj !== null) {
+      // If any action inside the module object is true, module is visible
+      const hasAnyTrue = Object.values(modObj).some(val => val === true);
+      if (hasAnyTrue) return true;
+    }
+  }
 
-  const perms = modulePermMap[moduleId];
+  // 3. Rule 1: Check if user has ANY granular permission belonging to this module
+  const perms = MODULE_ACTION_PERMISSIONS[moduleId];
   if (!perms) return false;
 
   return perms.some(p => hasPermission(profile, p, customRoles));
