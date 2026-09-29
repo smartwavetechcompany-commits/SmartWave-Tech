@@ -3,6 +3,7 @@ import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Guest, OperationType } from '../types';
+import { printDocument } from '../utils/printUtils';
 import { 
   FileText, 
   Search, 
@@ -269,7 +270,12 @@ export function DSSGuestReport() {
 
   // Print
   const handlePrint = () => {
-    window.print();
+    printDocument(document.getElementById('dss-guest-report-print-container'), {
+      title: `${hotel?.name || 'Hotel'}_DSS_Guest_Register_${activeInterval.label}`,
+      pageSize: 'A4 landscape',
+      pageMargin: '6mm',
+      landscape: true
+    });
   };
 
   const hotelDisplayName = hotel?.name || 'Hotel Property';
@@ -279,7 +285,7 @@ export function DSSGuestReport() {
       {/* =========================================================================
           PRINT-ONLY OFFICIAL STATUTORY GUEST REGISTER (Pure white, black text)
           ========================================================================= */}
-      <div className="hidden print:block text-black p-4 bg-white">
+      <div id="dss-guest-report-print-container" className="hidden print:block text-black p-4 bg-white">
         <div className="flex items-start justify-between border-b-2 border-black pb-4 mb-4">
           <div>
             <h1 className="text-2xl font-black uppercase tracking-tight text-black">{hotelDisplayName}</h1>

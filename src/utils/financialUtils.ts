@@ -16,6 +16,8 @@ export interface GuestAccountSummary {
   accountStatus: 'OUTSTANDING' | 'SETTLED' | 'OVERPAID' | 'ZERO_BALANCE';
   totalDays: number;
   totalNights: number;
+  totalSpent: number; // Actual money paid by the guest (Payments Received minus Refunds)
+  revenueGenerated: number; // All charges posted to the guest (Room + Services + Taxes + Overstay)
 }
 
 /**
@@ -133,7 +135,9 @@ export function calculateReservationAccount(
     creditBalance,
     accountStatus,
     totalDays,
-    totalNights
+    totalNights,
+    totalSpent: Number(netPayments.toFixed(2)),
+    revenueGenerated: Number(totalCharges.toFixed(2))
   };
 }
 
@@ -160,7 +164,9 @@ export function calculateGuestAccount(
       creditBalance: 0,
       accountStatus: 'ZERO_BALANCE',
       totalDays: 0,
-      totalNights: 0
+      totalNights: 0,
+      totalSpent: 0,
+      revenueGenerated: 0
     };
   }
 
@@ -233,7 +239,9 @@ export function calculateGuestAccount(
       creditBalance,
       accountStatus,
       totalDays,
-      totalNights
+      totalNights,
+      totalSpent: Number(Math.max(0, totalPayments - totalRefunds).toFixed(2)),
+      revenueGenerated: Number(totalCharges.toFixed(2))
     };
   }
 
@@ -287,7 +295,9 @@ export function calculateGuestAccount(
         creditBalance,
         accountStatus,
         totalDays: 0,
-        totalNights: 0
+        totalNights: 0,
+        totalSpent: Number(Math.max(0, credits - refunds).toFixed(2)),
+        revenueGenerated: Number(debits.toFixed(2))
       };
     }
   }
@@ -314,7 +324,9 @@ export function calculateGuestAccount(
     creditBalance,
     accountStatus,
     totalDays: 0,
-    totalNights: 0
+    totalNights: 0,
+    totalSpent: fallbackBal < 0 ? Math.abs(fallbackBal) : 0,
+    revenueGenerated: fallbackBal > 0 ? fallbackBal : 0
   };
 }
 

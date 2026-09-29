@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, RoomType, OperationType } from '../types';
 import { logActivity } from '../utils/activityLogger';
+import { printDocument } from '../utils/printUtils';
 import { 
   Coffee, 
   Search, 
@@ -457,7 +458,15 @@ export function BreakfastList() {
   // ==========================================
 
   const handlePrint = () => {
-    window.print();
+    const isHistorical = viewMode === 'historical';
+    const title = isHistorical 
+      ? `${hotel?.name || 'Hotel'}_Breakfast_Historical_${rangeStart}_to_${rangeEnd}`
+      : `${hotel?.name || 'Hotel'}_Breakfast_Manifest_${selectedDate}`;
+    printDocument(document.getElementById('breakfast-manifest-print-container'), {
+      title,
+      pageSize: 'A4 portrait',
+      pageMargin: '8mm'
+    });
   };
 
   // Export PDF (Single Day or Historical)
@@ -639,7 +648,7 @@ export function BreakfastList() {
       {/* =========================================================================
           PRINT-ONLY OFFICIAL HOTEL MANIFEST (Pure white, black text, official layout)
           ========================================================================= */}
-      <div className="hidden print:block text-black p-4 bg-white">
+      <div id="breakfast-manifest-print-container" className="hidden print:block text-black p-4 bg-white">
         <div className="flex items-start justify-between border-b-2 border-black pb-4 mb-4">
           <div>
             <h1 className="text-2xl font-black uppercase tracking-tight text-black">{hotelDisplayName}</h1>

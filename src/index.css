@@ -144,7 +144,8 @@
   }
 
   body.is-printing-active #print-root button,
-  body.is-printing-active #print-root .print\\:hidden,
+  body.is-printing-active #print-root .print\:hidden,
+  body.is-printing-active #print-root [class*="print:hidden"],
   body.is-printing-active #print-root .no-print,
   body.is-printing-active #print-root [data-sonner-toaster] {
     display: none !important;

@@ -27,7 +27,9 @@ import {
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
 import { cn, formatCurrency, safeStringify } from '../utils';
+import { printDocument } from '../utils/printUtils';
 import { isModuleEnabled } from '../utils/plans';
+import { calculateGuestFinancialPosition } from '../services/financialService';
 import { ConfirmModal } from './ConfirmModal';
 import { deleteDoc, doc, addDoc } from 'firebase/firestore';
 import { handleFirestoreError } from '../firebase';
@@ -520,10 +522,10 @@ export function Reports() {
           const noshowStays = guestRes.filter(r => r.status === 'no_show').length;
           const totalVisits = completedStays + activeStays;
           
-          const calculatedSpent = guestRes
-            .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-            .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-          const totalSpent = Math.max(guest.totalSpent || 0, calculatedSpent);
+          const pos = calculateGuestFinancialPosition(guest, guestRes, hotel);
+          const totalSpent = Math.max(0, pos.totalPayments - pos.totalRefunds);
+          const revenueGenerated = pos.totalCharges;
+          const outstandingDebt = pos.netAmountDue;
 
           return {
             'Guest Name': guest.name,
@@ -534,7 +536,9 @@ export function Reports() {
             'Active Stays': activeStays,
             'Cancelled Stays': cancelledStays,
             'No-Show Stays': noshowStays,
-            'Total Spent': totalSpent
+            'Total Spent (Paid)': totalSpent,
+            'Revenue Generated': revenueGenerated,
+            'Outstanding Debt': outstandingDebt
           };
         });
       }
@@ -712,7 +716,8 @@ export function Reports() {
           const c = g.nationality || (g as any).country || 'Domestic / Local';
           if (!countryMap[c]) countryMap[c] = { count: 0, completed: 0, active: 0, spent: 0 };
           countryMap[c].count += 1;
-          countryMap[c].spent += (g.totalSpent || 0);
+          const pos = calculateGuestFinancialPosition(g, reservations, hotel);
+          countryMap[c].spent += Math.max(0, pos.totalPayments - pos.totalRefunds);
         });
         reservations.forEach(r => {
           const g = guests.find(guest => guest.id === r.guestId);
@@ -892,7 +897,7 @@ export function Reports() {
   });
 
   return (
-    <div className="p-8 space-y-8 print:p-2 print:space-y-4 print:bg-white print:text-black">
+    <div id="reports-analytics-print-container" className="p-8 space-y-8 print:p-2 print:space-y-4 print:bg-white print:text-black">
       {/* Print-Only Official Report Header */}
       <div className="hidden print:block text-black p-4 mb-4 border-b-2 border-black bg-white">
         <div className="flex justify-between items-start">
@@ -941,7 +946,14 @@ export function Reports() {
 
           <div className="flex gap-2">
             <button 
-              onClick={() => window.print()}
+              onClick={() => {
+                const reportTitle = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
+                printDocument(document.getElementById('reports-analytics-print-container'), {
+                  title: `${hotel?.name || 'Hotel'}_${reportTitle}_${dateRange.start}_to_${dateRange.end}`,
+                  pageSize: 'A4 portrait',
+                  pageMargin: '8mm'
+                });
+              }}
               className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
               title="Print Report"
             >

@@ -48,6 +48,7 @@ import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/bi
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate, getGracePeriodInfo } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
+import { printDocument } from '../utils/printUtils';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -1009,12 +1010,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         {showReceipt && hotel && (
           <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[90] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
             <div className="relative w-full max-w-5xl my-8 print:my-0 print:w-full print:static">
-              <button 
-                onClick={() => setShowReceipt(false)}
-                className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all print:hidden"
-              >
-                <XCircle size={32} />
-              </button>
+              <div className="absolute -top-12 right-0 flex items-center gap-3 print:hidden">
+                <button 
+                  onClick={() => {
+                    printDocument(document.getElementById('active-hotel-receipt') || document.querySelector('.receipt-container'), {
+                      title: `${hotel.name || 'Hotel'} - Official Receipt - ${currentReservation.guestName}`,
+                      pageSize: 'A4 portrait',
+                      pageMargin: '8mm'
+                    });
+                  }}
+                  className="px-3.5 py-1.5 bg-emerald-500 text-black rounded-xl text-xs font-bold hover:bg-emerald-400 transition-all flex items-center gap-1.5 shadow-md active:scale-95"
+                >
+                  <Printer size={14} />
+                  <span>Print Receipt</span>
+                </button>
+                <button 
+                  onClick={() => setShowReceipt(false)}
+                  className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-white/10 rounded-full transition-all"
+                  title="Close"
+                >
+                  <XCircle size={28} />
+                </button>
+              </div>
               <ReceiptGenerator 
                 hotel={hotel} 
                 reservation={currentReservation} 

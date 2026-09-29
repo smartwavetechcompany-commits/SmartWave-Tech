@@ -1319,7 +1319,13 @@ export function CorporateManagement() {
                     Close
                   </button>
                   <button
-                    onClick={() => window.print()}
+                    onClick={() => {
+                      printDocument(document.getElementById('bulk-settle-invoice'), {
+                        title: `Corporate-Settlement-Invoice-${bulkSettleReceipt.invoiceNumber}`,
+                        pageSize: 'A4 portrait',
+                        pageMargin: '8mm'
+                      });
+                    }}
                     className="px-6 py-2.5 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 flex items-center gap-2"
                   >
                     <Printer size={18} />

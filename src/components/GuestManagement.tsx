@@ -195,7 +195,13 @@ export function GuestManagement() {
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
   const guestStatsMap = useMemo(() => {
-    const statsMap: Record<string, { visitsCount: number; calculatedDays: number; totalSpentVal: number }> = {};
+    const statsMap: Record<string, { 
+      visitsCount: number; 
+      calculatedDays: number; 
+      totalSpentVal: number; 
+      totalRevenueVal: number; 
+      outstandingDebtVal: number; 
+    }> = {};
     if (!guests.length) return statsMap;
 
     // Group reservations by guestId and email for fast access
@@ -234,12 +240,18 @@ export function GuestManagement() {
 
       const position = calculateGuestFinancialPosition(g, guestRes, hotel);
       const calculatedNights = position.totalNights;
-      const totalSpentVal = position.totalCharges;
+      // Total Spent = Sum of successful payments only (never room charges)
+      const totalSpentVal = Math.max(0, position.totalPayments - position.totalRefunds);
+      // Revenue Generated = All posted charges (Room charges + Service charges + Taxes + Overstay)
+      const totalRevenueVal = position.totalCharges;
+      const outstandingDebtVal = position.netAmountDue;
 
       statsMap[g.id] = {
         visitsCount,
         calculatedDays: calculatedNights,
-        totalSpentVal
+        totalSpentVal,
+        totalRevenueVal,
+        outstandingDebtVal
       };
     });
 
@@ -530,19 +542,21 @@ export function GuestManagement() {
         return matchesType && matchesDate;
       })
       .map(g => {
-        const stats = guestStatsMap[g.id] || { visitsCount: g.totalStays || 0, totalSpentVal: g.totalSpent || 0 };
+        const stats = guestStatsMap[g.id] || { visitsCount: g.totalStays || 0, calculatedDays: 0, totalSpentVal: 0, totalRevenueVal: 0, outstandingDebtVal: 0 };
 
         return {
           Name: g.name,
-          Email: g.email,
-          Phone: g.phone,
+          Email: g.email || '-',
+          Phone: g.phone || '-',
           'Guest Type': g.corporateId ? 'Corporate' : 'Individual',
-          'ID Type': g.idType,
-          'ID Number': g.idNumber,
-          Address: g.address,
-          'Total Stays': stats.visitsCount || g.totalStays || 0,
-          'Total Spent': stats.totalSpentVal,
-          'Balance': getGuestLiveBalance(g),
+          'ID Type': g.idType || 'N/A',
+          'ID Number': g.idNumber || '-',
+          Address: g.address || '-',
+          'Total Stays': stats.visitsCount,
+          'Total Nights': stats.calculatedDays,
+          'Total Spent (Paid)': stats.totalSpentVal,
+          'Revenue Generated': stats.totalRevenueVal,
+          'Outstanding Debt': stats.outstandingDebtVal,
           'Tags': (g.tags || []).join(', '),
           'Preferences': (g.preferences || []).join(', '),
           'Created At': safeDateFormat(g.createdAt, 'yyyy-MM-dd')
@@ -758,15 +772,15 @@ export function GuestManagement() {
             <div className="p-1 sm:p-1.5 bg-blue-500/10 rounded-lg text-blue-500">
               <DollarSign size={14} />
             </div>
+            <div className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest">
+              Collected
+            </div>
           </div>
           <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Lifetime Revenue</div>
           <div className="text-lg sm:text-xl font-bold text-blue-500 font-mono tracking-tight truncate">
             {formatCurrency(guests.reduce((acc, g) => {
-              const resList = allReservations.filter(r => r.guestId === g.id || (g.email && r.guestEmail === g.email));
-              const calculatedSpent = resList
-                .filter(r => r.status === 'checked_out' || r.status === 'checked_in')
-                .reduce((sum, r) => sum + (r.paidAmount || 0), 0);
-              return acc + Math.max(g.totalSpent || 0, calculatedSpent);
+              const stats = guestStatsMap[g.id];
+              return acc + (stats?.totalSpentVal ?? 0);
             }, 0), currency, exchangeRate)}
           </div>
         </div>
@@ -974,7 +988,7 @@ export function GuestManagement() {
             </div>
           ) : (
             paginatedGuests.map((guest) => {
-              const stats = guestStatsMap[guest.id] || { visitsCount: 0, calculatedDays: 0, totalSpentVal: 0 };
+              const stats = guestStatsMap[guest.id] || { visitsCount: 0, calculatedDays: 0, totalSpentVal: 0, totalRevenueVal: 0, outstandingDebtVal: 0 };
               const visitsCount = stats.visitsCount;
               const calculatedDays = stats.calculatedDays;
               const totalSpentVal = stats.totalSpentVal;
@@ -1142,6 +1156,11 @@ export function GuestManagement() {
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
                         <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
+                        {stats.totalRevenueVal !== undefined && (
+                          <div className="text-[7px] text-zinc-500 font-medium truncate mt-0.5" title="Total Revenue Generated (All Charges)">
+                            Rev: {formatCurrency(stats.totalRevenueVal, currency, exchangeRate)}
+                          </div>
+                        )}
                       </div>
                       <div className={cn(
                         "p-2 rounded-lg border flex flex-col justify-center transition-all",
@@ -1252,11 +1271,12 @@ export function GuestManagement() {
                 const visitsCount = completedCount + activeCount;
                 
                 const pos = calculateGuestFinancialPosition(viewingHistory, guestRes, hotel);
-                const totalSpentVal = pos.totalCharges;
+                const totalSpentVal = Math.max(0, pos.totalPayments - pos.totalRefunds);
+                const totalRevenueVal = pos.totalCharges;
 
                 return (
                   <>
-                    <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Visits</div>
                         <div className="text-lg font-bold text-zinc-50 leading-tight">
@@ -1264,17 +1284,23 @@ export function GuestManagement() {
                         </div>
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
-                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Spent</div>
-                        <div className="text-lg font-bold text-emerald-500 leading-tight">
+                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Total Spent (Paid)</div>
+                        <div className="text-lg font-bold text-blue-500 leading-tight">
                           {formatCurrency(totalSpentVal, currency, exchangeRate)}
+                        </div>
+                      </div>
+                      <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                        <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Revenue Generated</div>
+                        <div className="text-lg font-bold text-emerald-500 leading-tight">
+                          {formatCurrency(totalRevenueVal, currency, exchangeRate)}
                         </div>
                       </div>
                       <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
                         <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">
                           {getGuestLiveBalance(viewingHistory) > 0.01 
-                            ? "Account Balance (Owed)" 
+                            ? "Outstanding Debt" 
                             : getGuestLiveBalance(viewingHistory) < -0.01 
-                              ? "Account Balance (Credit)" 
+                              ? "Credit Balance" 
                               : "Account Balance"}
                         </div>
                         <div className={cn(

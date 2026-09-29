@@ -18,6 +18,8 @@ export interface GuestAccountSummary {
   accountStatus: 'OUTSTANDING' | 'SETTLED' | 'OVERPAID' | 'ZERO_BALANCE';
   totalDays: number;
   totalNights: number;
+  totalSpent: number; // Actual money paid by the guest (Payments Received minus Refunds)
+  revenueGenerated: number; // All charges posted to the guest (Room + Services + Taxes + Overstay)
 }
 
 export interface AccountValidationResult {
@@ -108,7 +110,9 @@ export function calculateGuestFinancialPosition(
       creditBalance: 0,
       accountStatus: 'ZERO_BALANCE',
       totalDays: 0,
-      totalNights: 0
+      totalNights: 0,
+      totalSpent: 0,
+      revenueGenerated: 0
     };
   }
 
@@ -258,7 +262,9 @@ export function calculateGuestFinancialPosition(
     creditBalance,
     accountStatus,
     totalDays,
-    totalNights
+    totalNights,
+    totalSpent: Number(netPayments.toFixed(2)),
+    revenueGenerated: Number(totalCharges.toFixed(2))
   };
 }
 

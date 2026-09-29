@@ -38,6 +38,7 @@ import {
 import { hasPermission } from '../utils/permissions';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
+import { printDocument } from '../utils/printUtils';
 
 interface OutstandingGuestLedgerProps {
   hotel: any;
@@ -275,7 +276,12 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
 
   // Print Statement
   const handlePrint = () => {
-    window.print();
+    printDocument(document.getElementById('ar-outstanding-guest-ledger-container'), {
+      title: `${hotelDisplayName}_Accounts_Receivable_Ledger`,
+      pageSize: 'A4 landscape',
+      pageMargin: '6mm',
+      landscape: true
+    });
   };
 
   // Open Payment Modal
@@ -450,7 +456,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
   };
 
   return (
-    <div className="space-y-6 outstanding-ledger-document printable-document">
+    <div id="ar-outstanding-guest-ledger-container" className="space-y-6 outstanding-ledger-document printable-document">
       {/* =========================================================================
           PRINT-ONLY OFFICIAL ACCOUNTS RECEIVABLE MANIFEST
           ========================================================================= */}
