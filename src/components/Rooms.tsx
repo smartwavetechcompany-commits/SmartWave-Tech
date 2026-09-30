@@ -50,6 +50,7 @@ import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
 import { roomService } from '../services/roomService';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
+import { hasPermission } from '../utils/permissions';
 
 export function Rooms() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
@@ -265,6 +266,10 @@ export function Rooms() {
   const addRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
+    if (!hasPermission(profile, 'create_rooms')) {
+      toast.error('Access denied: You do not have permission to create rooms.');
+      return;
+    }
     try {
       const selectedType = roomTypes.find(t => t.name === newRoom.type);
       await database.safeAdd(collection(db, 'hotels', hotel.id, 'rooms'), {
@@ -291,6 +296,10 @@ export function Rooms() {
   const addRoomType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
+    if (!hasPermission(profile, 'manage_rooms')) {
+      toast.error('Access denied: You do not have permission to manage room types.');
+      return;
+    }
     try {
       if (editingRoomType) {
         await database.safeSet(doc(db, 'hotels', hotel.id, 'room_types', editingRoomType.id), {
@@ -333,6 +342,10 @@ export function Rooms() {
   const updateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !editingRoom) return;
+    if (!hasPermission(profile, 'edit_rooms')) {
+      toast.error('Access denied: You do not have permission to edit rooms.');
+      return;
+    }
     try {
       await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', editingRoom.id), {
         ...editingRoom,
@@ -355,8 +368,8 @@ export function Rooms() {
 
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
-    if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
-      toast.error('Only administrators can delete room types');
+    if (!hasPermission(profile, 'manage_rooms') && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Only authorized administrators can delete room types');
       return;
     }
     const type = roomTypes.find(t => t.id === id);
@@ -375,8 +388,8 @@ export function Rooms() {
 
   const deleteRoom = async (id: string) => {
     if (!hotel?.id) return;
-    if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
-      toast.error('Only administrators can delete rooms');
+    if (!hasPermission(profile, 'delete_rooms') && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Access denied: You do not have permission to delete rooms.');
       return;
     }
     const room = rooms.find(r => r.id === id);
@@ -1003,41 +1016,47 @@ export function Rooms() {
             <span className="hidden sm:inline">Export Report</span>
             <span className="sm:hidden">Export</span>
           </button>
-          <button 
-            onClick={() => setIsAddingRoom(true)}
-            className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-          >
-            <Plus size={18} />
-            Add Room
-          </button>
-          <button 
-            onClick={() => setIsManagingTypes(true)}
-            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-          >
-            <Settings2 size={18} />
-            Types
-          </button>
-          <button 
-            onClick={() => setIsManagingBlockings(true)}
-            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-          >
-            <XCircle size={18} />
-            Blockings
-          </button>
-          <button 
-            onClick={() => setIsManagingRates(true)}
-            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-          >
-            <TrendingUp size={18} />
-            Rates
-          </button>
-          <button 
-            onClick={() => setIsManagingConsumptionRules(true)}
-            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-          >
-            <Package size={18} />
-            Inv Sync
-          </button>
+          {hasPermission(profile, 'create_rooms') && (
+            <button 
+              onClick={() => setIsAddingRoom(true)}
+              className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
+            >
+              <Plus size={18} />
+              Add Room
+            </button>
+          )}
+          {hasPermission(profile, 'manage_rooms') && (
+            <>
+              <button 
+                onClick={() => setIsManagingTypes(true)}
+                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+              >
+                <Settings2 size={18} />
+                Types
+              </button>
+              <button 
+                onClick={() => setIsManagingBlockings(true)}
+                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+              >
+                <XCircle size={18} />
+                Blockings
+              </button>
+              <button 
+                onClick={() => setIsManagingRates(true)}
+                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+              >
+                <TrendingUp size={18} />
+                Rates
+              </button>
+              <button 
+                onClick={() => setIsManagingConsumptionRules(true)}
+                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
+              >
+                <Package size={18} />
+                Inv Sync
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -2229,24 +2248,28 @@ export function Rooms() {
                     </div>
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
                         <div className="flex gap-1">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
-                            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/5"
-                            title="Edit Room Details"
-                          >
-                            <Edit2 size={12} />
-                          </button>
-                          <button 
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              setSelectedRoomForBlocking(room.id);
-                              setIsManagingBlockings(true);
-                            }} 
-                            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400 border border-white/5"
-                            title="Block Room / Maintenance"
-                          >
-                            <Wrench size={12} />
-                          </button>
+                          {hasPermission(profile, 'edit_rooms') && (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
+                              className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/5"
+                              title="Edit Room Details"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                          )}
+                          {hasPermission(profile, 'block_rooms') && (
+                            <button 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                setSelectedRoomForBlocking(room.id);
+                                setIsManagingBlockings(true);
+                              }} 
+                              className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400 border border-white/5"
+                              title="Block Room / Maintenance"
+                            >
+                              <Wrench size={12} />
+                            </button>
+                          )}
                         </div>
                         
                         <div className="flex flex-wrap gap-1 mt-1 justify-end">
@@ -2408,18 +2431,22 @@ export function Rooms() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => setEditingRoom(room)} className="p-1 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded" title="Edit Room"><Edit2 size={16} /></button>
-                      <button 
-                        onClick={() => {
-                          setSelectedRoomForBlocking(room.id);
-                          setIsManagingBlockings(true);
-                        }} 
-                        className="p-1 text-amber-500 hover:bg-amber-500/10 rounded" 
-                        title="Block Room"
-                      >
-                        <XCircle size={16} />
-                      </button>
-                      {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                      {hasPermission(profile, 'edit_rooms') && (
+                        <button onClick={() => setEditingRoom(room)} className="p-1 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded" title="Edit Room"><Edit2 size={16} /></button>
+                      )}
+                      {hasPermission(profile, 'block_rooms') && (
+                        <button 
+                          onClick={() => {
+                            setSelectedRoomForBlocking(room.id);
+                            setIsManagingBlockings(true);
+                          }} 
+                          className="p-1 text-amber-500 hover:bg-amber-500/10 rounded" 
+                          title="Block Room"
+                        >
+                          <XCircle size={16} />
+                        </button>
+                      )}
+                      {(hasPermission(profile, 'delete_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                         <button onClick={() => setShowConfirmDeleteRoom(room.id)} className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded" title="Delete Room"><Trash2 size={16} /></button>
                       )}
                     </div>

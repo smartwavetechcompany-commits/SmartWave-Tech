@@ -278,7 +278,7 @@ function AppContent() {
           <Routes location={location} key={location.pathname}>
             <Route path="/" element={<DashboardRoute />} />
             <Route path="/rooms" element={
-              <PermissionGuard permission="manage_rooms" showError>
+              <PermissionGuard moduleId="rooms" showError>
                 <Rooms />
               </PermissionGuard>
             } />
