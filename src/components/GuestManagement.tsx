@@ -195,16 +195,16 @@ export function GuestManagement() {
     if (!guests.length) return balanceMap;
 
     guests.forEach(guest => {
-      const position = calculateGuestFinancialPosition(guest, allReservations, hotel);
+      const position = calculateGuestFinancialPosition(guest, allReservations, hotel, allLedgerEntries);
       balanceMap[guest.id] = position.outstandingBalance;
     });
 
     return balanceMap;
-  }, [guests, allReservations, hotel]);
+  }, [guests, allReservations, hotel, allLedgerEntries]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
-    return guestLiveBalances[guest.id] ?? calculateGuestFinancialPosition(guest, allReservations, hotel).outstandingBalance;
-  }, [guestLiveBalances, allReservations, hotel]);
+    return guestLiveBalances[guest.id] ?? calculateGuestFinancialPosition(guest, allReservations, hotel, allLedgerEntries).outstandingBalance;
+  }, [guestLiveBalances, allReservations, hotel, allLedgerEntries]);
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
   const guestStatsMap = useMemo(() => {
@@ -251,7 +251,7 @@ export function GuestManagement() {
       const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
       const visitsCount = completedCount + activeCount;
 
-      const position = calculateGuestFinancialPosition(g, guestRes, hotel);
+      const position = calculateGuestFinancialPosition(g, guestRes, hotel, allLedgerEntries);
       const calculatedNights = position.totalNights;
       // Total Spent = Sum of successful payments only (never room charges)
       const totalSpentVal = Math.max(0, position.totalPayments - position.totalRefunds);
@@ -269,7 +269,7 @@ export function GuestManagement() {
     });
 
     return statsMap;
-  }, [guests, allReservations, hotel]);
+  }, [guests, allReservations, hotel, allLedgerEntries]);
 
   // Reset pagination on filter changes
   useEffect(() => {
@@ -789,11 +789,17 @@ export function GuestManagement() {
               Collected
             </div>
           </div>
-          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Lifetime Revenue</div>
+          <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Lifetime Revenue Collected</div>
           <div className="text-lg sm:text-xl font-bold text-blue-500 font-mono tracking-tight truncate">
             {formatCurrency(guests.reduce((acc, g) => {
               const stats = guestStatsMap[g.id];
               return acc + (stats?.totalSpentVal ?? 0);
+            }, 0), currency, exchangeRate)}
+          </div>
+          <div className="text-[7px] text-zinc-500 font-medium truncate mt-0.5" title="Total Revenue Generated (All Charges)">
+            Generated: {formatCurrency(guests.reduce((acc, g) => {
+              const stats = guestStatsMap[g.id];
+              return acc + (stats?.totalRevenueVal ?? 0);
             }, 0), currency, exchangeRate)}
           </div>
         </div>
@@ -1283,7 +1289,7 @@ export function GuestManagement() {
                 const noshowCount = guestRes.filter(r => r.status === 'no_show').length;
                 const visitsCount = completedCount + activeCount;
                 
-                const pos = calculateGuestFinancialPosition(viewingHistory, guestRes, hotel);
+                const pos = calculateGuestFinancialPosition(viewingHistory, guestRes, hotel, guestLedger.length > 0 ? guestLedger : allLedgerEntries);
                 const totalSpentVal = Math.max(0, pos.totalPayments - pos.totalRefunds);
                 const totalRevenueVal = pos.totalCharges;
 

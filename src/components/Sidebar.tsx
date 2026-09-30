@@ -82,17 +82,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     // SuperAdmin portal is never shown to regular staff
     if (item.capability === 'access_super_admin') return false;
 
-    // 3. Regular staff: MUST ONLY see the modules assigned to them!
-    // Check if the PMS module is assigned to this staff user
+    // 3. Regular staff: Module Visibility (Rule 1)
+    // If user has any permission in this module (or module is assigned), the module is visible in the navigation!
     if (item.pmsModuleId) {
       const isAssigned = canAccessPMSModule(item.pmsModuleId);
       if (!isAssigned) {
         return false;
       }
-    }
-
-    // If an item specifies a specific capability requirement, verify it
-    if (item.capability && !canAccessModule(item.capability as any)) {
+    } else if (item.capability && !canAccessModule(item.capability as any)) {
       return false;
     }
 

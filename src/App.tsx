@@ -74,9 +74,9 @@ function DashboardRoute() {
     settings: '/settings'
   };
 
-  const assigned = Array.isArray(profile.assignedModules) ? profile.assignedModules : [];
-  for (const mod of assigned) {
-    if (moduleRoutes[mod]) {
+  const moduleCheckOrder = ['reservations', 'frontDesk', 'rooms', 'housekeeping', 'kitchen', 'inventory', 'maintenance', 'guests', 'corporate', 'finance', 'reports', 'staff', 'settings'];
+  for (const mod of moduleCheckOrder) {
+    if (canAccessPMSModule(mod) && moduleRoutes[mod]) {
       return <Navigate to={moduleRoutes[mod]} replace />;
     }
   }
@@ -283,67 +283,67 @@ function AppContent() {
               </PermissionGuard>
             } />
             <Route path="/room-status" element={
-              <PermissionGuard permission="manage_rooms" showError>
+              <PermissionGuard moduleId="rooms" showError>
                 <RoomStatusDashboard />
               </PermissionGuard>
             } />
             <Route path="/breakfast-list" element={
-              <PermissionGuard permission="manage_kitchen" showError>
+              <PermissionGuard moduleId="kitchen" showError>
                 <BreakfastList />
               </PermissionGuard>
             } />
             <Route path="/dss-report" element={
-              <PermissionGuard permission="view_reports" showError>
+              <PermissionGuard moduleId="reports" showError>
                 <DSSGuestReport />
               </PermissionGuard>
             } />
             <Route path="/front-desk" element={
-              <PermissionGuard permission="access_front_desk" showError>
+              <PermissionGuard moduleId="reservations" showError>
                 <FrontDesk />
               </PermissionGuard>
             } />
             <Route path="/housekeeping" element={
-              <PermissionGuard permission="view_housekeeping" showError>
+              <PermissionGuard moduleId="housekeeping" showError>
                 <Housekeeping />
               </PermissionGuard>
             } />
             <Route path="/f-and-b" element={
-              <PermissionGuard permission="manage_kitchen" showError>
+              <PermissionGuard moduleId="kitchen" showError>
                 <FandB />
               </PermissionGuard>
             } />
             <Route path="/inventory" element={
-              <PermissionGuard permission="manage_inventory" showError>
+              <PermissionGuard moduleId="inventory" showError>
                 <Inventory />
               </PermissionGuard>
             } />
             <Route path="/maintenance" element={
-              <PermissionGuard permission="manage_maintenance" showError>
+              <PermissionGuard moduleId="maintenance" showError>
                 <Maintenance />
               </PermissionGuard>
             } />
             <Route path="/guests" element={
-              <PermissionGuard permission="edit_guest_profiles" showError>
+              <PermissionGuard moduleId="guests" showError>
                 <GuestManagement />
               </PermissionGuard>
             } />
             <Route path="/corporate" element={
-              <PermissionGuard permission="manage_corporate" showError>
+              <PermissionGuard moduleId="corporate" showError>
                 <CorporateManagement />
               </PermissionGuard>
             } />
             <Route path="/operations" element={
-              <PermissionGuard permission="access_front_desk" showError>
+              <PermissionGuard moduleId="reservations" showError>
                 <OperationsDashboard />
               </PermissionGuard>
             } />
             <Route path="/finance" element={
-              <PermissionGuard permission="view_financial_records" showError>
+              <PermissionGuard moduleId="finance" showError>
                 <Finance />
               </PermissionGuard>
             } />
             <Route path="/debt-ledger" element={
-              <PermissionGuard permission="view_debt_ledger" showError>
+              <PermissionGuard moduleId="finance" showError>
                 <div className="p-4 sm:p-8 h-full">
                   <OutstandingGuestLedger 
                     hotel={hotel} 
@@ -355,7 +355,7 @@ function AppContent() {
               </PermissionGuard>
             } />
             <Route path="/reports" element={
-              <PermissionGuard permission="view_reports" showError>
+              <PermissionGuard moduleId="reports" showError>
                 <Reports />
               </PermissionGuard>
             } />
@@ -367,17 +367,17 @@ function AppContent() {
               </PermissionGuard>
             } />
             <Route path="/staff" element={
-              <PermissionGuard permission="manage_staff" showError>
+              <PermissionGuard moduleId="staff" showError>
                 <StaffManagement />
               </PermissionGuard>
             } />
             <Route path="/admin-settings" element={
-              <PermissionGuard permission="edit_hotel_settings" showError>
+              <PermissionGuard moduleId="settings" showError>
                 <AdminSettings />
               </PermissionGuard>
             } />
             <Route path="/activity-logs" element={
-              <PermissionGuard permission="view_activity_logs" showError>
+              <PermissionGuard moduleId="staff" showError>
                 <div className="p-4 sm:p-8 h-full">
                   <AuditLogs />
                 </div>

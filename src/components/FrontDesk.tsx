@@ -58,7 +58,7 @@ import { roomService } from '../services/roomService';
 import { hasPermission } from '../utils/permissions';
 import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canApplyDiscount } from '../utils/policyUtils';
 import { logActivity } from '../utils/activityLogger';
-import { getRoomDisplayStatus, isRoomAvailable } from '../utils/roomUtils';
+import { getRoomDisplayStatus, isRoomAvailable, checkStayExtensionConflict } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
@@ -915,13 +915,14 @@ export function FrontDesk() {
         return;
       }
 
-      // Hard check: if this stay is for today and room currently has an active in-house guest
+      // Hard check: if this stay overlaps with today and the room currently has an active in-house guest
       const activeRes = reservations.find(r => r.roomId === stay.roomId && r.status === 'checked_in');
       if (activeRes) {
         const todayStr = format(new Date(), 'yyyy-MM-dd');
-        if (stay.checkIn <= todayStr && stay.checkOut >= todayStr) {
+        // Only block if new booking starts today or dates encompass today while someone is actively occupying it
+        if (stay.checkIn <= todayStr && stay.checkOut > todayStr) {
           const room = rooms.find(r => r.id === stay.roomId);
-          toast.error(`Check-in Blocked: Room ${room?.roomNumber || stay.roomId} is currently occupied by "${activeRes.guestName}". The current guest must check out first.`);
+          toast.error(`Check-in Blocked: Room ${room?.roomNumber || stay.roomId} is currently occupied by "${activeRes.guestName}". The current guest must check out first before new check-in.`);
           return;
         }
       }
@@ -1450,6 +1451,21 @@ export function FrontDesk() {
       }
 
       const room = rooms.find(r => r.id === res.roomId);
+
+      // Check conflict with future reservations or maintenance blocks during the extension period
+      const extensionConflict = checkStayExtensionConflict(
+        res.roomId,
+        res.checkOut,
+        newCheckOutDate,
+        reservations,
+        roomBlockings,
+        res.id
+      );
+      if (extensionConflict.hasConflict) {
+        toast.error(extensionConflict.reason || `Cannot extend stay. Room ${room?.roomNumber || res.roomNumber} has a conflict during the extension dates.`);
+        return;
+      }
+
       const nightlyRate = room?.price || 0;
       const baseExtraAmount = extraNights * nightlyRate;
 
@@ -4992,18 +5008,43 @@ export function FrontDesk() {
                 </div>
               </div>
               
-              {newCheckOutDate && (
-                <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
-                  <div className="flex justify-between text-xs font-bold text-blue-500 uppercase mb-1">
-                    <span>Extra Nights</span>
-                    <span>{Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24))}</span>
+              {newCheckOutDate && (() => {
+                const conflictCheck = checkStayExtensionConflict(
+                  showPostponeModal.roomId,
+                  showPostponeModal.checkOut,
+                  newCheckOutDate,
+                  reservations,
+                  roomBlockings,
+                  showPostponeModal.id
+                );
+
+                if (conflictCheck.hasConflict) {
+                  return (
+                    <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl space-y-1">
+                      <div className="flex items-center gap-2 text-xs font-bold text-red-400 uppercase tracking-wide">
+                        <AlertTriangle size={14} />
+                        <span>Extension Blocked</span>
+                      </div>
+                      <p className="text-xs text-red-200">
+                        {conflictCheck.reason || 'This extension overlaps with an existing reservation.'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+                    <div className="flex justify-between text-xs font-bold text-blue-500 uppercase mb-1">
+                      <span>Extra Nights</span>
+                      <span>{Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-bold text-zinc-50">
+                      <span>Estimated Extra Charge</span>
+                      <span>{formatCurrency(Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24)) * (rooms.find(r => r.id === showPostponeModal.roomId)?.price || 0), currency, exchangeRate)}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-sm font-bold text-zinc-50">
-                    <span>Estimated Extra Charge</span>
-                    <span>{formatCurrency(Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24)) * (rooms.find(r => r.id === showPostponeModal.roomId)?.price || 0), currency, exchangeRate)}</span>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             <div className="flex gap-3 mt-8">

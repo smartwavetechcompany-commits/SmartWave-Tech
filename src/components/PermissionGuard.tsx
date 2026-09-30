@@ -4,7 +4,8 @@ import { Permission, hasPermission, isPMSModuleAssigned } from '../utils/permiss
 import { ShieldCheck } from 'lucide-react';
 
 interface PermissionGuardProps {
-  permission: Permission;
+  permission?: Permission | Permission[];
+  moduleId?: string;
   children: React.ReactNode;
   fallback?: React.ReactNode;
   showError?: boolean;
@@ -13,17 +14,34 @@ interface PermissionGuardProps {
 /**
  * PRODUCTION-GRADE PERMISSION GUARD
  * Protects components or entire modules based on database-driven capabilities.
- * Synchronizes instantly across sessions when custom roles or permissions change.
+ * Distinguishes Module Visibility from granular Action Permissions.
  */
 export const PermissionGuard: React.FC<PermissionGuardProps> = ({ 
   permission, 
+  moduleId,
   children, 
   fallback = null,
   showError = false
 }) => {
   const { profile, customRoles } = useAuth();
   
-  const hasAccess = hasPermission(profile, permission, customRoles);
+  let hasAccess = false;
+
+  // 1. Module-level visibility gate (Rule 1)
+  if (moduleId) {
+    hasAccess = isPMSModuleAssigned(profile, moduleId, customRoles);
+  }
+
+  // 2. Action permission check
+  if (permission) {
+    if (Array.isArray(permission)) {
+      const permGranted = permission.some(p => hasPermission(profile, p, customRoles));
+      hasAccess = moduleId ? (hasAccess || permGranted) : permGranted;
+    } else {
+      const permGranted = hasPermission(profile, permission, customRoles);
+      hasAccess = moduleId ? (hasAccess || permGranted) : permGranted;
+    }
+  }
 
   if (!hasAccess) {
     if (showError) {
@@ -34,7 +52,9 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
           </div>
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-zinc-50">Access Restricted</h2>
-            <p className="text-sm text-zinc-400">You do not have permission to access this module ({permission}).</p>
+            <p className="text-sm text-zinc-400">
+              You do not have permission to access this module {permission ? `(${Array.isArray(permission) ? permission.join(', ') : permission})` : ''}.
+            </p>
           </div>
         </div>
       );

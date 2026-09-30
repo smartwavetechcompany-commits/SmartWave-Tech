@@ -117,7 +117,7 @@ export function RoomStatusDashboard() {
   // Map active checked-in or upcoming reservations to rooms
   const activeReservationMap = useMemo(() => {
     const today = startOfDay(new Date());
-    const map = new Map<string, { active?: Reservation; upcoming?: Reservation }>();
+    const map = new Map<string, { active?: Reservation; todayReserved?: Reservation; upcoming?: Reservation }>();
 
     for (const res of reservations) {
       if (res.status === 'cancelled' || res.status === 'no_show') continue;
@@ -133,6 +133,13 @@ export function RoomStatusDashboard() {
       if (res.status === 'checked_in') {
         current.active = res;
       } else if (res.status === 'confirmed' || res.status === 'pending') {
+        // Today's arrival / reservation (isWithinInterval or checkIn === today)
+        const isTodayArrival = today >= checkIn && today < checkOut;
+        if (isTodayArrival) {
+          current.todayReserved = res;
+        }
+
+        // Track upcoming future reservation
         if (today <= checkIn) {
           if (!current.upcoming || parseISO(res.checkIn) < parseISO(current.upcoming.checkIn)) {
             current.upcoming = res;
@@ -166,8 +173,9 @@ export function RoomStatusDashboard() {
       return 'occupied';
     }
 
-    // Reserved upcoming
-    if (hasUpcomingReservation || room.status === 'reserved') {
+    // Reserved for today (upcoming reservations in the future do not block room today)
+    const isReservedToday = !!reservationInfo?.todayReserved;
+    if (isReservedToday || room.status === 'reserved') {
       return 'reserved';
     }
 
@@ -679,11 +687,28 @@ export function RoomStatusDashboard() {
             const status = getOperationalStatus(room);
             const visuals = getStatusVisuals(status);
             const resInfo = activeReservationMap.get(room.id) || activeReservationMap.get(room.roomNumber);
-            const activeRes = resInfo?.active || resInfo?.upcoming;
+            const currentRes = resInfo?.active || resInfo?.todayReserved;
+            const upcomingRes = resInfo?.upcoming;
+            const activeRes = currentRes || upcomingRes;
 
-            const guestName = activeRes?.guestName || (status === 'vacant' ? 'No Guest' : 'Available');
+            const guestName = currentRes?.guestName 
+              ? currentRes.guestName 
+              : upcomingRes?.guestName 
+                ? `Reserved: ${upcomingRes.guestName}` 
+                : 'Available';
             const roomType = room.type || 'Standard';
-            const checkOutDate = activeRes?.checkOut ? format(parseISO(activeRes.checkOut), 'dd MMM') : '-';
+            const dateLabel = status === 'occupied' 
+              ? 'Check-Out:' 
+              : status === 'reserved' 
+                ? 'Check-In:' 
+                : upcomingRes 
+                  ? 'Booked From:' 
+                  : 'Status:';
+            const dateValue = currentRes?.checkOut 
+              ? format(parseISO(currentRes.checkOut), 'dd MMM') 
+              : upcomingRes?.checkIn 
+                ? format(parseISO(upcomingRes.checkIn), 'dd MMM') 
+                : 'Available';
 
             return (
               <div
@@ -731,8 +756,8 @@ export function RoomStatusDashboard() {
                   </div>
 
                   <div className="flex items-center justify-between text-zinc-400">
-                    <span>{status === 'occupied' ? 'Check-Out:' : 'Next Available:'}</span>
-                    <span className="font-mono text-zinc-300 font-medium">{checkOutDate}</span>
+                    <span>{dateLabel}</span>
+                    <span className="font-mono text-zinc-300 font-medium">{dateValue}</span>
                   </div>
                 </div>
 
