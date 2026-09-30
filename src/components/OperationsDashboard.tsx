@@ -1124,8 +1124,8 @@ export function OperationsDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <div className="lg:col-span-3 h-[280px] w-full min-w-0 bg-zinc-955/40 border border-zinc-855/60 rounded-xl p-4 relative">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+          <div className="lg:col-span-3 h-[280px] w-full min-w-0 bg-zinc-955/40 border border-zinc-855/60 rounded-xl p-4 relative" style={{ minHeight: 280, width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={200} debounce={50}>
               <AreaChart data={getMLForecastingData()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorProjected" x1="0" y1="0" x2="0" y2="1">

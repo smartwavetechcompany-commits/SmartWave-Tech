@@ -305,8 +305,8 @@ export function Dashboard() {
                   {Math.abs(Math.round(revenueGrowth))}%
                 </div>
               </div>
-              <div className="h-[200px] sm:h-[240px] w-full min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+              <div className="h-[200px] sm:h-[240px] w-full min-w-0 relative" style={{ minHeight: 200, width: '100%' }}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={200} debounce={50}>
                   <AreaChart data={revenueChartData}>
                     <defs>
                       <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">

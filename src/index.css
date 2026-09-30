@@ -243,3 +243,10 @@
     scrollbar-width: none;
   }
 }
+
+/* Ensure recharts ResponsiveContainer calculates dimensions accurately on initial mount */
+.recharts-responsive-container {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 200px !important;
+}
