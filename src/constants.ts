@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     requireReasonForBlock: true,
     preventBookingBlocked: true,
     autoExpireTempBlocks: true,
+    maxBlockDuration: 30,
   },
   financial: {
     allowRefunds: true,

@@ -34,9 +34,12 @@ service cloud.firestore {
         isSuperAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hotelAdmin" ||
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin") ||
           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "manager") ||
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions != null && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions.hasAny(['edit_settings', 'edit_hotel_settings', 'manage_settings'])) ||
           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles != null && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(['manager', 'corporate']))))
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(['manager', 'corporate', 'admin']))))
       );
     }
 

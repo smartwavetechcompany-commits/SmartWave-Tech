@@ -1432,8 +1432,8 @@ export function FrontDesk() {
 
   const handlePostponeStay = async () => {
     if (!showPostponeModal || !hotel?.id || !newCheckOutDate || !profile) return;
-    if (!hasPermission(profile, 'edit_reservation')) {
-      toast.error('You do not have permission to edit reservations');
+    if (!hasPermission(profile, 'edit_reservation') && !hasPermission(profile, 'extend_stay')) {
+      toast.error('You do not have permission to extend stays or edit reservations');
       return;
     }
     
@@ -4451,17 +4451,19 @@ export function FrontDesk() {
                               >
                                 <RefreshCw size={18} />
                               </button>
-                              <button 
-                                type="button"
-                                onClick={() => {
-                                  setNewCheckOutDate(res.checkOut);
-                                  setShowPostponeModal(res);
-                                }}
-                                className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
-                                title="Postpone Stay / Extend"
-                              >
-                                <Calendar size={18} />
-                              </button>
+                              {(hasPermission(profile, 'edit_reservation') || hasPermission(profile, 'extend_stay')) && (
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    setNewCheckOutDate(res.checkOut);
+                                    setShowPostponeModal(res);
+                                  }}
+                                  className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
+                                  title="Postpone Stay / Extend"
+                                >
+                                  <Calendar size={18} />
+                                </button>
+                              )}
                               <button 
                                 type="button"
                                 onClick={() => setShowDiscountModal(res)}

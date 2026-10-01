@@ -157,18 +157,34 @@ export function AdminSettings() {
     );
   };
 
-  const renderInput = (group: keyof HotelSettings, key: string, label: string, type: string = 'number', description?: string) => {
+  const renderInput = (
+    group: keyof HotelSettings, 
+    key: string, 
+    label: string, 
+    typeOrDesc: string = 'number', 
+    description?: string
+  ) => {
+    let actualType = 'number';
+    let actualDesc = description;
+
+    if (typeOrDesc === 'number' || typeOrDesc === 'text') {
+      actualType = typeOrDesc;
+    } else if (!description) {
+      actualDesc = typeOrDesc;
+      actualType = 'number';
+    }
+
     const rawVal = (localSettings?.[group] as any)?.[key] ?? (DEFAULT_SETTINGS_LOCAL?.[group] as any)?.[key];
     return (
       <div className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl">
         <div className="space-y-1">
           <p className="text-sm font-semibold text-zinc-50">{label}</p>
-          {description && <p className="text-xs text-zinc-500">{description}</p>}
+          {actualDesc && <p className="text-xs text-zinc-500 max-w-md">{actualDesc}</p>}
         </div>
         <input
-          type={type}
+          type={actualType}
           value={rawVal !== undefined && rawVal !== null ? rawVal : ''}
-          onChange={(e) => handleInputChange(group, key, type === 'number' ? parseFloat(e.target.value) : e.target.value)}
+          onChange={(e) => handleInputChange(group, key, actualType === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value)}
           onBlur={() => handleInputBlur(group, key)}
           className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-50 outline-none focus:border-emerald-500 w-24 text-right"
         />
@@ -240,6 +256,7 @@ export function AdminSettings() {
                 {renderToggle('checkout', 'enableUnpaidWarningPopup', 'Unpaid Balance Alerts', 'Show a warning notification if checkout is attempted with a pending balance.')}
                 {renderToggle('checkout', 'autoGenerateOutstandingInvoice', 'Auto-generate Outstanding Invoice', 'Automatically create and email an invoice for remaining debt.')}
                 {renderInput('checkout', 'gracePeriod', 'Late Checkout Grace Period (Minutes)', 'number', 'The cushion period in minutes after standard checkout time before late fees apply (e.g. 15-30 minutes).')}
+                {renderToggle('financial', 'lockInvoicesAfterCheckout', 'Lock Invoices After Checkout', 'Invoices are locked for checked-out reservations. Manager override required to modify or void charges on departed folios.')}
               </div>
             )}
 
@@ -287,6 +304,7 @@ export function AdminSettings() {
                 {renderToggle('roomBlocking', 'requireReasonForBlock', 'Mandatory Block Reason', 'Require staff to select a category or provide a note before blocking.')}
                 {renderToggle('roomBlocking', 'preventBookingBlocked', 'Hard-lock Blocked Rooms', 'Remove blocked rooms entirely from the availability search results.')}
                 {renderToggle('roomBlocking', 'autoExpireTempBlocks', 'Auto-expire Temporary Blocks', 'Blocks with end dates automatically lift at the set time.')}
+                {renderInput('roomBlocking', 'maxBlockDuration', 'Maximum Block Duration (Days)', 'number', 'Maximum number of consecutive days a room can be placed in maintenance or out-of-order block (default: 30 days).')}
               </div>
             )}
 
@@ -331,8 +349,8 @@ export function AdminSettings() {
                 {renderToggle('financial', 'allowExpenseManagement', 'Staff Expense Access', 'Allow roles with finance access to create petty cash or expense entries.')}
                 {renderToggle('financial', 'allowFinancialReportViewing', 'Finance Report Access', 'Toggle visibility of the "Finance" module for relevant staff.')}
                 {renderToggle('financial', 'allowExportingReports', 'Enable CSV/PDF Exports', 'Allow downloading financial data for external processing.')}
-                {renderToggle('financial', 'allowInvoiceEditingAfterPayment', 'Post-Payment Invoice Edits', 'Allow changing descriptions on invoices after they are marked as paid.')}
-                {renderToggle('financial', 'lockInvoicesAfterCheckout', 'Seal Folios on Exit', 'Prevent any further changes to a folio once the guest has checked out.')}
+                {renderToggle('financial', 'allowInvoiceEditingAfterPayment', 'Allow Invoice Editing After Payment', 'Allow staff to modify invoices that have been fully paid. When disabled, modifying settled invoices requires manager override.')}
+                {renderToggle('financial', 'lockInvoicesAfterCheckout', 'Lock Invoices After Checkout', 'Invoices are locked for checked-out reservations. Manager override required to modify or void items on departed folios.')}
               </div>
             )}
 

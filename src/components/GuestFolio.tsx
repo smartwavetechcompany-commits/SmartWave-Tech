@@ -467,7 +467,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       // Policy check: allowManualLedgerAdjustments
       const allowManual = hotel?.settings?.financial?.allowManualLedgerAdjustments;
-      if (allowManual === false && !hasPermission(profile?.role, 'void_transaction')) {
+      if (allowManual === false && !hasPermission(profile, 'void_transaction')) {
         toast.error("Manual ledger adjustments are disabled by hotel configuration.");
         setIsSaving(false);
         return;
@@ -2549,7 +2549,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                   <Tag size={13} />
                                 </button>
                               )}
-                              {hasPermission(profile?.role, 'void_transaction') && !entry.isVirtual && (
+                              {hasPermission(profile, 'void_transaction') && !entry.isVirtual && (
                                 <button
                                   onClick={() => setConfirmDelete(entry)}
                                   className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
@@ -2580,7 +2580,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <td className="px-6 py-4 text-right text-sm font-black text-zinc-500">
                       —
                     </td>
-                    {hasPermission(profile?.role, 'void_transaction') && (
+                    {hasPermission(profile, 'void_transaction') && (
                       <td className="px-6 py-4"></td>
                     )}
                   </tr>
@@ -2593,7 +2593,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       {formatCurrency(Math.abs(balance), currency, exchangeRate)}
                       {balance > 0 ? " (Owing)" : balance < 0 ? " (Credit)" : " (Settled)"}
                     </td>
-                    {hasPermission(profile?.role, 'void_transaction') && (
+                    {hasPermission(profile, 'void_transaction') && (
                       <td className="px-6 py-2"></td>
                     )}
                   </tr>

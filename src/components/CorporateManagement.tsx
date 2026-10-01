@@ -42,7 +42,7 @@ import { CorporateFolio } from './CorporateFolio';
 import { ConfirmModal } from './ConfirmModal';
 
 export function CorporateManagement() {
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, hasPermission: authHasPermission } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
@@ -163,8 +163,7 @@ export function CorporateManagement() {
   const hasPermission = () => {
     if (!profile) return false;
     if (profile.role === 'hotelAdmin' || profile.role === 'superAdmin') return true;
-    const roles = (profile.roles || profile.permissions || []) as string[];
-    return roles.includes('manager') || roles.includes('corporate');
+    return authHasPermission('manage_corporate') || authHasPermission('view_city_ledger') || authHasPermission('create_ledger_entries');
   };
 
   useEffect(() => {

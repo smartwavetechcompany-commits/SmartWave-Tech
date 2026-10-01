@@ -1,4 +1,4 @@
-import { doc, onSnapshot, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { HotelSettings, Tax } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
@@ -80,6 +80,28 @@ class CentralSettingsManager {
   }
 
   /**
+   * Automatically heals missing settings in Firestore so documents and fields always exist.
+   */
+  private async autoHealMissingSettings(hotelId: string, remoteSettings: any, mergedSettings: HotelSettings) {
+    try {
+      const updatePayload: any = {};
+      Object.keys(DEFAULT_SETTINGS).forEach(group => {
+        if (!remoteSettings || !remoteSettings[group]) {
+          updatePayload[`settings.${group}`] = mergedSettings[group as keyof HotelSettings];
+        }
+      });
+
+      if (Object.keys(updatePayload).length > 0) {
+        const hotelRef = doc(db, 'hotels', hotelId);
+        await updateDoc(hotelRef, updatePayload);
+      }
+    } catch (err) {
+      // Non-blocking self-healing attempt
+      console.warn("Auto-healing settings document in Firestore:", err);
+    }
+  }
+
+  /**
    * Starts listening to Firestore for real-time hotel configuration, taxes, and pricing adjustments.
    */
   initialize(hotelId: string) {
@@ -104,16 +126,26 @@ class CentralSettingsManager {
         
         // Assemble and merge settings safely with defaults to prevent broken / old properties
         const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as HotelSettings;
+        let hasMissingGroup = false;
         if (data && data.settings) {
-          Object.keys(data.settings).forEach(group => {
+          Object.keys(DEFAULT_SETTINGS).forEach(group => {
             const groupKey = group as keyof HotelSettings;
-            if (settings[groupKey]) {
+            if (data.settings[groupKey]) {
               settings[groupKey] = {
-                ...(settings[groupKey] as any),
+                ...(DEFAULT_SETTINGS[groupKey] as any),
                 ...(data.settings[groupKey] as any)
               };
+            } else {
+              hasMissingGroup = true;
             }
           });
+        } else {
+          hasMissingGroup = true;
+        }
+
+        // Auto-heal missing settings structure in Firestore
+        if (hasMissingGroup && !snap.metadata.hasPendingWrites && !this.clientInitiatedUpdate) {
+          this.autoHealMissingSettings(hotelId, data?.settings, settings);
         }
         
         this.currentSettings = settings;

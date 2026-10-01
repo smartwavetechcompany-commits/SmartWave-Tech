@@ -970,7 +970,7 @@ export function Finance() {
                     Income vs Expense
                   </h3>
                   <div className="h-[250px] w-full min-w-0 relative" style={{ minHeight: 250, width: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={200} debounce={50}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={200} debounce={50} initialDimension={{ width: 500, height: 250 }}>
                       <BarChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                         <XAxis dataKey="name" stroke="#71717a" fontSize={10} axisLine={false} tickLine={false} />

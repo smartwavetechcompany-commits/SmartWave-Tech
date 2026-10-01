@@ -468,14 +468,17 @@ const SYNONYM_MAP: Record<string, Permission[]> = {
   delete_reservations: ['delete_reservations', 'delete_reservation', 'cancel_reservations'],
   delete_reservation: ['delete_reservations', 'delete_reservation', 'cancel_reservations'],
   cancel_reservations: ['cancel_reservations', 'delete_reservations', 'delete_reservation'],
+  extend_stay: ['extend_stay', 'edit_reservations', 'edit_reservation'],
   receive_payments: ['receive_payments', 'receive_payment', 'process_payments'],
   receive_payment: ['receive_payment', 'receive_payments', 'process_payments'],
+  process_payments: ['process_payments', 'receive_payments', 'receive_payment'],
   reverse_transactions: ['reverse_transactions', 'void_transaction'],
   void_transaction: ['void_transaction', 'reverse_transactions'],
   manage_roles: ['manage_roles', 'manage_roles_admin', 'manage_permissions_admin', 'assign_roles'],
   manage_roles_admin: ['manage_roles_admin', 'manage_roles', 'manage_permissions_admin'],
   manage_permissions_admin: ['manage_permissions_admin', 'manage_roles', 'manage_roles_admin'],
   manage_staff: ['manage_staff', 'manage_users_admin'],
+  manage_users_admin: ['manage_users_admin', 'manage_staff'],
   edit_settings: ['edit_settings', 'edit_hotel_settings'],
   edit_hotel_settings: ['edit_hotel_settings', 'edit_settings']
 };
@@ -657,11 +660,11 @@ export const hasPermission = (
 
   const synonyms = SYNONYM_MAP[permission] || [permission];
 
-  // 1. Authoritative check on explicit permissions (array or structured object) on user document
+  // 1. Check explicit permissions (array or structured object) on user document
   if (profile.permissions !== undefined && profile.permissions !== null) {
-    const isGranted = evaluateExplicitPermissions(profile.permissions, permission, synonyms);
-    // Explicit permissions configured for this user: honor it directly.
-    return isGranted;
+    if (evaluateExplicitPermissions(profile.permissions, permission, synonyms)) {
+      return true;
+    }
   }
 
   // 2. Custom Role assigned to this user
@@ -672,36 +675,32 @@ export const hasPermission = (
       if (evaluateExplicitPermissions(rolePerms, permission, synonyms)) {
         return true;
       }
-      return false;
     }
   }
 
-  // 3. Fallback ONLY for legacy profiles that have NO permissions field defined at all
-  if (profile.permissions === undefined) {
-    // Check staffRole if assigned
-    if (profile.staffRole) {
-      const staffPerms = BASE_ROLE_PERMISSIONS[profile.staffRole] || 
-        SYSTEM_ROLE_TEMPLATES[profile.staffRole]?.permissions || [];
-      if (evaluateExplicitPermissions(staffPerms, permission, synonyms)) {
+  // 3. Staff role templates fallback (e.g. frontDeskAgent, receptionist, accountant)
+  if (profile.staffRole) {
+    const staffPerms = BASE_ROLE_PERMISSIONS[profile.staffRole] || 
+      SYSTEM_ROLE_TEMPLATES[profile.staffRole]?.permissions || [];
+    if (evaluateExplicitPermissions(staffPerms, permission, synonyms)) {
+      return true;
+    }
+  }
+
+  // 4. Roles array fallback (multi-role support)
+  if (Array.isArray(profile.roles) && profile.roles.length > 0) {
+    for (const r of profile.roles) {
+      const rPerms = BASE_ROLE_PERMISSIONS[r] || [];
+      if (evaluateExplicitPermissions(rPerms, permission, synonyms)) {
         return true;
       }
     }
+  }
 
-    // Check roles array
-    if (Array.isArray(profile.roles) && profile.roles.length > 0) {
-      for (const r of profile.roles) {
-        const rPerms = BASE_ROLE_PERMISSIONS[r] || [];
-        if (evaluateExplicitPermissions(rPerms, permission, synonyms)) {
-          return true;
-        }
-      }
-    }
-
-    // Base role fallback
-    const basePerms = BASE_ROLE_PERMISSIONS[role] || [];
-    if (evaluateExplicitPermissions(basePerms, permission, synonyms)) {
-      return true;
-    }
+  // 5. Base role fallback
+  const basePerms = BASE_ROLE_PERMISSIONS[role] || [];
+  if (evaluateExplicitPermissions(basePerms, permission, synonyms)) {
+    return true;
   }
 
   return false;

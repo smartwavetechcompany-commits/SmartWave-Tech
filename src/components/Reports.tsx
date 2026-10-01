@@ -1062,7 +1062,7 @@ export function Reports() {
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
                   <h3 className="font-bold text-zinc-50 mb-6">Revenue Trend</h3>
                   <div className="h-[300px] w-full min-w-0 relative" style={{ minHeight: 300, width: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50} initialDimension={{ width: 500, height: 300 }}>
                       <AreaChart data={revenueData}>
                         <defs>
                           <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -1087,7 +1087,7 @@ export function Reports() {
                 <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
                   <h3 className="font-bold text-zinc-50 mb-6">Revenue Mix</h3>
                   <div className="h-[300px] w-full min-w-0 relative" style={{ minHeight: 300, width: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50} initialDimension={{ width: 500, height: 300 }}>
                       <PieChart>
                         <Pie
                           data={corporateData}

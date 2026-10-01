@@ -331,11 +331,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = snap.data() as Hotel;
         const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as HotelSettings;
         if (data.settings) {
-          Object.keys(data.settings).forEach(group => {
+          Object.keys(DEFAULT_SETTINGS).forEach(group => {
             const groupKey = group as keyof HotelSettings;
-            if (settings[groupKey]) {
+            if (data.settings![groupKey]) {
               settings[groupKey] = {
-                ...(settings[groupKey] as any),
+                ...(DEFAULT_SETTINGS[groupKey] as any),
                 ...(data.settings![groupKey] as any)
               };
             }
