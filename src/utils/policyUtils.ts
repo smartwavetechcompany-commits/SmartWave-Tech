@@ -412,14 +412,19 @@ export const canEditInvoice = (
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
-  const settings = hotel.settings?.financial;
-  if (!settings) return { allowed: true };
+  const financialSettings = hotel.settings?.financial;
+  const checkoutSettings = hotel.settings?.checkout;
 
-  if (reservation.status === 'checked_out' && settings.lockInvoicesAfterCheckout && !hasPermission(profile, 'void_transaction')) {
+  // Policy: Lock Invoices After Checkout
+  // Check both financial and checkout settings (defaults to true if not explicitly disabled)
+  const isInvoiceLocked = financialSettings?.lockInvoicesAfterCheckout ?? checkoutSettings?.lockInvoicesAfterCheckout ?? true;
+
+  if (reservation.status === 'checked_out' && isInvoiceLocked && !hasPermission(profile, 'void_transaction')) {
     return { allowed: false, message: 'Invoices are locked for checked-out reservations. Manager override required.' };
   }
 
-  if (reservation.ledgerBalance === 0 && !settings.allowInvoiceEditingAfterPayment && !hasPermission(profile, 'void_transaction')) {
+  const allowInvoiceEditingAfterPayment = financialSettings?.allowInvoiceEditingAfterPayment ?? false;
+  if (reservation.ledgerBalance === 0 && !allowInvoiceEditingAfterPayment && !hasPermission(profile, 'void_transaction')) {
      return { allowed: false, message: 'Editing is disabled for fully paid invoices. Manager override required.' };
   }
 

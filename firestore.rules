@@ -69,12 +69,14 @@ service cloud.firestore {
     }
 
     function sameHotel(hotelId) {
-      return getHotelId() == hotelId;
+      return getHotelId() == hotelId ||
+             (isAuthenticated() && exists(/databases/$(database)/documents/hotels/$(hotelId)/staff/$(request.auth.uid)));
     }
 
     function isStaffOf(hotelId) {
       let data = getUserData();
-      return data != null && data.hotelId == hotelId && data.role != "guest" && data.role != "corporate";
+      return (data != null && data.hotelId == hotelId && data.role != "guest" && data.role != "corporate") ||
+             (isAuthenticated() && exists(/databases/$(database)/documents/hotels/$(hotelId)/staff/$(request.auth.uid)));
     }
 
     function subscriptionActive(hotelId) {
@@ -226,9 +228,12 @@ service cloud.firestore {
 
       // Ledger entries are immutable and append-only audit logs.
       match /ledger/{entryId} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow read: if isSuperAdmin() || 
+                       isStaffOf(hotelId) || 
+                       sameHotel(hotelId) || 
+                       (resource != null && resource.data.hotelId == hotelId);
         allow create: if isSuperAdmin() || (
-          (isStaffOf(hotelId) || sameHotel(hotelId)) &&
+          (isStaffOf(hotelId) || sameHotel(hotelId) || (isAuthenticated() && request.resource.data.hotelId == hotelId)) &&
           request.resource.data.amount != null &&
           request.resource.data.amount >= 0 &&
           request.resource.data.type in ['debit', 'credit'] &&

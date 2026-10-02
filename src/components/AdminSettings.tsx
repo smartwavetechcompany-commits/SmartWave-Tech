@@ -3,8 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
-import { HotelSettings } from '../types';
-import { DEFAULT_SETTINGS } from '../constants';
+import { HotelSettings, BookingSource } from '../types';
+import { DEFAULT_SETTINGS, DEFAULT_BOOKING_SOURCES } from '../constants';
 import { 
   ShieldCheck, 
   CreditCard, 
@@ -26,12 +26,21 @@ import {
   Lock,
   Smartphone,
   Eye,
-  Trash2
+  Trash2,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  Edit2,
+  Check,
+  X,
+  Star,
+  Globe
 } from 'lucide-react';
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
 import { useSettings } from '../hooks/useSettings';
+import { settingsManager } from '../services/settingsManager';
 
 const DEFAULT_SETTINGS_LOCAL = DEFAULT_SETTINGS;
 
@@ -42,6 +51,10 @@ export function AdminSettings() {
   const [localSettings, setLocalSettings] = useState<HotelSettings>(settings);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+
+  const [newSourceName, setNewSourceName] = useState('');
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [editingSourceName, setEditingSourceName] = useState('');
 
   // Sync with remote settings from real-time hook when no pending local edits
   useEffect(() => {
@@ -87,15 +100,140 @@ export function AdminSettings() {
   };
 
   const handleToggle = (group: keyof HotelSettings, key: string) => {
+    const isSpecialLock = key === 'lockInvoicesAfterCheckout';
+    const nextVal = !(localSettings[group] as any)[key];
     const updated = {
       ...localSettings,
       [group]: {
         ...(localSettings[group] as any),
-        [key]: !(localSettings[group] as any)[key]
+        [key]: nextVal
+      }
+    };
+
+    if (isSpecialLock) {
+      if (!updated.checkout) (updated as any).checkout = {};
+      if (!updated.financial) (updated as any).financial = {};
+      updated.checkout.lockInvoicesAfterCheckout = nextVal;
+      updated.financial.lockInvoicesAfterCheckout = nextVal;
+    }
+
+    setLocalSettings(updated);
+    if (isSpecialLock) {
+      saveSettings(updated);
+    } else {
+      saveSettings(updated, group, key);
+    }
+  };
+
+  const currentSources: BookingSource[] = (
+    localSettings.reservations?.bookingSources && localSettings.reservations.bookingSources.length > 0
+      ? localSettings.reservations.bookingSources
+      : DEFAULT_BOOKING_SOURCES
+  );
+
+  const saveBookingSources = async (sources: BookingSource[]) => {
+    const updated = {
+      ...localSettings,
+      reservations: {
+        ...localSettings.reservations,
+        bookingSources: sources
       }
     };
     setLocalSettings(updated);
-    saveSettings(updated, group, key);
+    settingsManager.setBookingSources(sources);
+    await saveSettings(updated, 'reservations', 'bookingSources');
+  };
+
+  const handleAddBookingSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newSourceName.trim();
+    if (!trimmed) return;
+    const exists = currentSources.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
+    if (exists) {
+      toast.error(`A booking source named "${trimmed}" already exists.`);
+      return;
+    }
+    const newSource: BookingSource = {
+      id: `source-${Date.now()}`,
+      name: trimmed,
+      isActive: true,
+      isDefault: false,
+      order: currentSources.length,
+      createdAt: new Date().toISOString()
+    };
+    const updated = [...currentSources, newSource];
+    await saveBookingSources(updated);
+    setNewSourceName('');
+    toast.success(`Booking source "${trimmed}" added.`);
+  };
+
+  const handleToggleSourceActive = async (id: string) => {
+    const updated = currentSources.map(s => {
+      if (s.id === id) {
+        return { ...s, isActive: !s.isActive };
+      }
+      return s;
+    });
+    await saveBookingSources(updated);
+  };
+
+  const handleSetDefaultSource = async (id: string) => {
+    const updated = currentSources.map(s => ({
+      ...s,
+      isDefault: s.id === id,
+      isActive: s.id === id ? true : s.isActive
+    }));
+    const updatedSettings = {
+      ...localSettings,
+      reservations: {
+        ...localSettings.reservations,
+        bookingSources: updated,
+        defaultBookingSourceId: id
+      }
+    };
+    setLocalSettings(updatedSettings);
+    settingsManager.setBookingSources(updated);
+    await saveSettings(updatedSettings);
+    toast.success('Default booking source updated');
+  };
+
+  const handleReorderSource = async (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= currentSources.length) return;
+    const copy = [...currentSources];
+    const temp = copy[index];
+    copy[index] = copy[targetIndex];
+    copy[targetIndex] = temp;
+    const updated = copy.map((s, idx) => ({ ...s, order: idx }));
+    await saveBookingSources(updated);
+  };
+
+  const handleSaveRenameSource = async (id: string) => {
+    const trimmed = editingSourceName.trim();
+    if (!trimmed) {
+      setEditingSourceId(null);
+      return;
+    }
+    const updated = currentSources.map(s => s.id === id ? { ...s, name: trimmed, updatedAt: new Date().toISOString() } : s);
+    await saveBookingSources(updated);
+    setEditingSourceId(null);
+    setEditingSourceName('');
+    toast.success('Booking source renamed');
+  };
+
+  const handleDeleteBookingSource = async (id: string, name: string) => {
+    if (currentSources.length <= 1) {
+      toast.error('At least one booking source must remain.');
+      return;
+    }
+    const target = currentSources.find(s => s.id === id);
+    if (target?.isDefault) {
+      toast.error('Cannot delete the default booking source. Set another source as default first.');
+      return;
+    }
+    const updated = currentSources.filter(s => s.id !== id).map((s, idx) => ({ ...s, order: idx }));
+    await saveBookingSources(updated);
+    toast.success(`Booking source "${name}" deleted.`);
   };
 
   const handleInputChange = (group: keyof HotelSettings, key: string, value: any) => {
@@ -256,7 +394,7 @@ export function AdminSettings() {
                 {renderToggle('checkout', 'enableUnpaidWarningPopup', 'Unpaid Balance Alerts', 'Show a warning notification if checkout is attempted with a pending balance.')}
                 {renderToggle('checkout', 'autoGenerateOutstandingInvoice', 'Auto-generate Outstanding Invoice', 'Automatically create and email an invoice for remaining debt.')}
                 {renderInput('checkout', 'gracePeriod', 'Late Checkout Grace Period (Minutes)', 'number', 'The cushion period in minutes after standard checkout time before late fees apply (e.g. 15-30 minutes).')}
-                {renderToggle('financial', 'lockInvoicesAfterCheckout', 'Lock Invoices After Checkout', 'Invoices are locked for checked-out reservations. Manager override required to modify or void charges on departed folios.')}
+                {renderToggle('checkout', 'lockInvoicesAfterCheckout', 'Lock Invoices After Checkout', 'Invoices are locked for checked-out reservations. Manager override required to modify or void charges on departed folios.')}
               </div>
             )}
 
@@ -281,6 +419,200 @@ export function AdminSettings() {
                 {renderToggle('reservations', 'autoReleaseNoShow', 'Auto-release No-shows', 'Automatically free up blocked inventory for missed arrivals.')}
                 {renderInput('reservations', 'autoCancelUnpaidTimeMinutes', 'Unpaid Auto-cancel Buffer (Mins)', 'Time after which an unpaid reservation is automatically cancelled.')}
                 {renderToggle('reservations', 'allowWalkIn', 'Allow Walk-in Bookings', 'Enable instant same-day bookings via the front desk.')}
+
+                {/* Dedicated Booking Sources Configuration */}
+                <div className="pt-6 border-t border-zinc-800 space-y-4">
+                  <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+                        <Globe size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold text-zinc-100">Reservations → Booking Sources</h4>
+                        <p className="text-xs text-zinc-500">
+                          Configure dynamic acquisition channels for Front Desk and Check-in (Add, Edit, Disable, Reorder, Set Default)
+                        </p>
+                      </div>
+                    </div>
+                  </header>
+
+                  {/* Add New Booking Source Form */}
+                  <form onSubmit={handleAddBookingSource} className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Add custom booking source (e.g. Corporate Partner, Booking.com, Airbnb)..."
+                      value={newSourceName}
+                      onChange={(e) => setNewSourceName(e.target.value)}
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newSourceName.trim() || isSaving}
+                      className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Plus size={16} />
+                      Add Source
+                    </button>
+                  </form>
+
+                  {/* Booking Sources List */}
+                  <div className="space-y-2">
+                    {currentSources.map((source, index) => {
+                      const isDefault = !!source.isDefault || (!currentSources.some(s => s.isDefault) && index === 0);
+                      const isEditing = editingSourceId === source.id;
+
+                      return (
+                        <div
+                          key={source.id}
+                          className={cn(
+                            "flex items-center justify-between p-3.5 rounded-xl border transition-all",
+                            source.isActive !== false
+                              ? "bg-zinc-950 border-zinc-800 hover:border-zinc-700"
+                              : "bg-zinc-950/40 border-zinc-900 opacity-60"
+                          )}
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0 pr-4">
+                            {/* Reorder Buttons */}
+                            <div className="flex flex-col gap-0.5 shrink-0">
+                              <button
+                                type="button"
+                                disabled={index === 0 || isSaving}
+                                onClick={() => handleReorderSource(index, 'up')}
+                                className="text-zinc-500 hover:text-zinc-200 disabled:opacity-20 p-0.5"
+                                title="Move Up"
+                              >
+                                <ArrowUp size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={index === currentSources.length - 1 || isSaving}
+                                onClick={() => handleReorderSource(index, 'down')}
+                                className="text-zinc-500 hover:text-zinc-200 disabled:opacity-20 p-0.5"
+                                title="Move Down"
+                              >
+                                <ArrowDown size={12} />
+                              </button>
+                            </div>
+
+                            {/* Source Name / Inline Edit */}
+                            {isEditing ? (
+                              <div className="flex items-center gap-2 flex-1 max-w-sm">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={editingSourceName}
+                                  onChange={(e) => setEditingSourceName(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleSaveRenameSource(source.id);
+                                    } else if (e.key === 'Escape') {
+                                      setEditingSourceId(null);
+                                    }
+                                  }}
+                                  className="w-full bg-zinc-900 border border-blue-500 rounded px-2.5 py-1 text-sm text-zinc-100 outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveRenameSource(source.id)}
+                                  className="p-1.5 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded"
+                                  title="Save Name"
+                                >
+                                  <Check size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSourceId(null)}
+                                  className="p-1.5 bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded"
+                                  title="Cancel"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2.5 truncate">
+                                <span className={cn(
+                                  "font-medium text-sm truncate",
+                                  source.isActive !== false ? "text-zinc-200" : "text-zinc-500 line-through"
+                                )}>
+                                  {source.name}
+                                </span>
+                                {isDefault && (
+                                  <span className="shrink-0 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                                    <Star size={10} className="fill-amber-400 text-amber-400" /> Default
+                                  </span>
+                                )}
+                                {!source.isActive && (
+                                  <span className="shrink-0 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                    Disabled
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Action Controls */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!isEditing && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSourceId(source.id);
+                                  setEditingSourceName(source.name);
+                                }}
+                                className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 rounded-lg transition-colors"
+                                title="Rename Source"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                            )}
+
+                            {!isDefault && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDefaultSource(source.id)}
+                                className="text-xs px-2.5 py-1 text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors border border-transparent hover:border-amber-500/20"
+                                title="Set as default selection for Front Desk"
+                              >
+                                Set Default
+                              </button>
+                            )}
+
+                            {/* Active/Inactive Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSourceActive(source.id)}
+                              className={cn(
+                                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none",
+                                source.isActive !== false ? "bg-emerald-500" : "bg-zinc-800"
+                              )}
+                              title={source.isActive !== false ? "Click to disable source" : "Click to reactivate source"}
+                            >
+                              <span
+                                className={cn(
+                                  "inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform",
+                                  source.isActive !== false ? "translate-x-4" : "translate-x-0.5"
+                                )}
+                              />
+                            </button>
+
+                            {/* Delete Source */}
+                            {!isDefault && currentSources.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBookingSource(source.id, source.name)}
+                                className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                title="Delete booking source"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 

@@ -402,15 +402,7 @@ function AppContent() {
 );
 }
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes cache
-      refetchOnWindowFocus: false,
-    },
-  },
-});
-
+import { queryClient } from './queryClient';
 import { RequestManagerProvider } from './contexts/RequestManagerContext';
 
 export default function App() {

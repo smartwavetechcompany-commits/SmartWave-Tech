@@ -71,10 +71,12 @@ import { QrCode, Key as LucideKey } from 'lucide-react';
 import { transferToCityLedger } from '../services/ledgerService';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
+import { useBookingSources } from '../hooks/useSettings';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const queryClient = useQueryClient();
+  const { activeBookingSources } = useBookingSources();
 
   // Load guests with TanStack Query (caching and optimized state)
   const { data: guests = [], isLoading: isGuestsLoading } = useQuery<Guest[]>({
@@ -107,12 +109,17 @@ export function GuestManagement() {
     queryKey: ['guest_ledger_entries', hotel?.id],
     queryFn: async () => {
       if (!hotel?.id) return [];
-      const q = query(collection(db, 'hotels', hotel.id, 'ledger'));
-      const snap = await getDocs(q);
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      try {
+        const q = query(collection(db, 'hotels', hotel.id, 'ledger'));
+        const snap = await getDocs(q);
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      } catch (err: any) {
+        console.error("Failed to query ledger entries in GuestManagement:", err);
+        return [];
+      }
     },
     enabled: !!hotel?.id && !!profile,
-    staleTime: 1000 * 60 * 2,
+    staleTime: 0,
   });
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -167,7 +174,8 @@ export function GuestManagement() {
     ledgerBalance: 0,
     corporateId: '',
     totalStays: 0,
-    totalSpent: 0
+    totalSpent: 0,
+    bookingSource: 'Walk-in'
   });
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -319,6 +327,22 @@ export function GuestManagement() {
     });
 
     return () => unsubReservations();
+  }, [hotel?.id, profile?.uid, queryClient]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    
+    const qLedger = query(collection(db, 'hotels', hotel.id, 'ledger'));
+    const unsubLedger = onSnapshot(qLedger, (snap) => {
+      const updatedEntries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      queryClient.setQueryData(['guest_ledger_entries', hotel.id], updatedEntries);
+    }, (error: any) => {
+      console.error("Failed to fetch all ledger entries in GuestManagement:", error);
+      handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/ledger`);
+      if (error.code === 'permission-denied') setHasPermissionError(true);
+    });
+
+    return () => unsubLedger();
   }, [hotel?.id, profile?.uid, queryClient]);
 
   useEffect(() => {
@@ -482,7 +506,8 @@ export function GuestManagement() {
         ledgerBalance: 0,
         corporateId: '',
         totalStays: 0,
-        totalSpent: 0
+        totalSpent: 0,
+        bookingSource: 'Walk-in'
       });
       toast.success(editingGuest ? 'Guest profile updated' : 'Guest profile created');
     } catch (err) {
@@ -743,7 +768,8 @@ export function GuestManagement() {
               ledgerBalance: 0,
               corporateId: '',
               totalStays: 0,
-              totalSpent: 0
+              totalSpent: 0,
+              bookingSource: 'Walk-in'
             });
             setShowAddModal(true);
           }}
@@ -1091,7 +1117,8 @@ export function GuestManagement() {
                               ledgerBalance: guest.ledgerBalance || 0,
                               corporateId: guest.corporateId || '',
                               totalStays: guest.totalStays || 0,
-                              totalSpent: guest.totalSpent || 0
+                              totalSpent: guest.totalSpent || 0,
+                              bookingSource: guest.bookingSource || (guest as any).preferredBookingSource || 'Walk-in'
                             });
                             setShowAddModal(true);
                           }}
@@ -1744,6 +1771,25 @@ export function GuestManagement() {
                     {corporateAccounts.map(acc => (
                       <option key={acc.id} value={acc.id}>{acc.name}</option>
                     ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Acquisition / Booking Source</label>
+                  <select
+                    value={newGuest.bookingSource || 'Walk-in'}
+                    onChange={(e) => setNewGuest({ ...newGuest, bookingSource: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    {activeBookingSources.map(src => (
+                      <option key={src.id} value={src.name}>
+                        {src.name}{src.isDefault ? ' (Default)' : ''}
+                      </option>
+                    ))}
+                    {newGuest.bookingSource && !activeBookingSources.some(s => s.name === newGuest.bookingSource) && (
+                      <option value={newGuest.bookingSource}>
+                        {newGuest.bookingSource} (Inactive)
+                      </option>
+                    )}
                   </select>
                 </div>
                 {hotel?.settings?.guests?.allowLoyaltyEditing && (

@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from '../constants';
 import { settingsManager } from '../services/settingsManager';
 import { Permission, hasPermission as checkUserPermission } from '../utils/permissions';
 import { toast } from 'sonner';
+import { queryClient } from '../queryClient';
 
 const SUPER_ADMIN_EMAILS = ['admin@tyyltech.com', 'smartwavetechcompany@gmail.com'];
 
@@ -123,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.removeItem('pms_session_id');
       }
+      queryClient.clear();
       await fbSignOut(auth);
     } catch (err) {
       console.error('Sign out error:', err);
@@ -143,6 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setLoading(true);
+      queryClient.clear();
       
       if (firebaseUser) {
         setProfile(null);

@@ -153,6 +153,16 @@ export interface HotelBranding {
   };
 }
 
+export interface BookingSource {
+  id: string;
+  name: string;
+  isActive: boolean;
+  isDefault?: boolean;
+  order?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface HotelSettings {
   checkout: {
     allowBalanceOutstanding: boolean;
@@ -165,6 +175,7 @@ export interface HotelSettings {
     enableUnpaidWarningPopup: boolean;
     autoGenerateOutstandingInvoice: boolean;
     gracePeriod?: number;
+    lockInvoicesAfterCheckout?: boolean;
   };
   reservations: {
     allowEditing: boolean;
@@ -177,6 +188,8 @@ export interface HotelSettings {
     autoReleaseNoShow: boolean;
     autoCancelUnpaidTimeMinutes: number;
     allowWalkIn: boolean;
+    bookingSources?: BookingSource[];
+    defaultBookingSourceId?: string;
   };
   roomBlocking: {
     allowBlocking: boolean;
@@ -875,6 +888,8 @@ export interface Guest {
   totalSpent: number;
   lastStay?: string;
   stayHistory?: string[]; // Reservation IDs
+  bookingSource?: string;
+  preferredBookingSource?: string;
   createdAt?: string;
 }
 

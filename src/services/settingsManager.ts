@@ -1,7 +1,7 @@
 import { doc, onSnapshot, collection, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { HotelSettings, Tax } from '../types';
-import { DEFAULT_SETTINGS } from '../constants';
+import { HotelSettings, Tax, BookingSource } from '../types';
+import { DEFAULT_SETTINGS, DEFAULT_BOOKING_SOURCES } from '../constants';
 import { safeStringify } from '../utils';
 
 type SettingsSubscriber = (settings: HotelSettings) => void;
@@ -10,6 +10,7 @@ type EventCallback = (data: any) => void;
 class CentralSettingsManager {
   private currentSettings: HotelSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
   private currentTaxes: Tax[] = [];
+  private currentBookingSources: BookingSource[] = JSON.parse(JSON.stringify(DEFAULT_BOOKING_SOURCES));
   private currentRateConfigs: any[] = [];
   private currentHotelDetails: any = null;
   private currentHotelId: string | null = null;
@@ -86,10 +87,35 @@ class CentralSettingsManager {
     try {
       const updatePayload: any = {};
       Object.keys(DEFAULT_SETTINGS).forEach(group => {
-        if (!remoteSettings || !remoteSettings[group]) {
-          updatePayload[`settings.${group}`] = mergedSettings[group as keyof HotelSettings];
+        const groupKey = group as keyof HotelSettings;
+        if (!remoteSettings || !remoteSettings[groupKey]) {
+          updatePayload[`settings.${groupKey}`] = mergedSettings[groupKey];
+        } else {
+          // Check for individual missing fields inside the existing group
+          const defaultGroup = DEFAULT_SETTINGS[groupKey] as any;
+          const remoteGroup = remoteSettings[groupKey] || {};
+          Object.keys(defaultGroup).forEach(fieldKey => {
+            if (remoteGroup[fieldKey] === undefined) {
+              updatePayload[`settings.${groupKey}.${fieldKey}`] = (mergedSettings[groupKey] as any)[fieldKey];
+            }
+          });
         }
       });
+
+      // Specifically check booking sources
+      const remoteSources = remoteSettings?.reservations?.bookingSources;
+      if (!Array.isArray(remoteSources) || remoteSources.length === 0) {
+        updatePayload['settings.reservations.bookingSources'] = DEFAULT_BOOKING_SOURCES;
+        updatePayload['settings.reservations.defaultBookingSourceId'] = 'walk-in';
+      }
+
+      // Specifically ensure lockInvoicesAfterCheckout exists in checkout and financial
+      if (remoteSettings?.checkout?.lockInvoicesAfterCheckout === undefined) {
+        updatePayload['settings.checkout.lockInvoicesAfterCheckout'] = true;
+      }
+      if (remoteSettings?.financial?.lockInvoicesAfterCheckout === undefined) {
+        updatePayload['settings.financial.lockInvoicesAfterCheckout'] = true;
+      }
 
       if (Object.keys(updatePayload).length > 0) {
         const hotelRef = doc(db, 'hotels', hotelId);
@@ -141,6 +167,18 @@ class CentralSettingsManager {
           });
         } else {
           hasMissingGroup = true;
+        }
+
+        // Parse booking sources safely
+        const rawSources = data?.settings?.reservations?.bookingSources;
+        if (Array.isArray(rawSources) && rawSources.length > 0) {
+          this.currentBookingSources = rawSources;
+        } else {
+          this.currentBookingSources = JSON.parse(JSON.stringify(DEFAULT_BOOKING_SOURCES));
+          hasMissingGroup = true;
+        }
+        if (settings.reservations) {
+          settings.reservations.bookingSources = this.currentBookingSources;
         }
 
         // Auto-heal missing settings structure in Firestore
@@ -253,6 +291,8 @@ class CentralSettingsManager {
         // Broadcast specialized topics
         this.publish('taxes', taxes);
         this.publish('service_charge', this.getServiceChargeSettings());
+        this.publish('booking_sources', this.currentBookingSources);
+        this.publish('reservations.bookingSources', this.currentBookingSources);
       }
     }, (error) => {
       console.error("CentralSettingsManager Hotel document listener error:", error);
@@ -374,6 +414,30 @@ class CentralSettingsManager {
     this.publish('taxes', taxes);
   }
 
+  getBookingSources(): BookingSource[] {
+    return this.currentBookingSources && this.currentBookingSources.length > 0 
+      ? this.currentBookingSources 
+      : DEFAULT_BOOKING_SOURCES;
+  }
+
+  getActiveBookingSources(): BookingSource[] {
+    const list = this.getBookingSources().filter(s => s.isActive !== false);
+    return list.length > 0 
+      ? list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      : [DEFAULT_BOOKING_SOURCES[0]];
+  }
+
+  setBookingSources(sources: BookingSource[]) {
+    this.clientInitiatedUpdate = true;
+    this.currentBookingSources = [...sources];
+    if (this.currentSettings.reservations) {
+      this.currentSettings.reservations.bookingSources = [...sources];
+    }
+    this.publish('booking_sources', sources);
+    this.publish('reservations.bookingSources', sources);
+    this.broadcast();
+  }
+
   getRateConfigurations(): any[] {
     return this.currentRateConfigs;
   }
@@ -430,6 +494,7 @@ class CentralSettingsManager {
 
   private getCurrentValueForTopic(topic: string): any {
     if (topic === 'taxes') return this.currentTaxes;
+    if (topic === 'booking_sources' || topic === 'reservations.bookingSources') return this.getBookingSources();
     if (topic === 'room_pricing' || topic === 'rate_configurations') return this.currentRateConfigs;
     if (topic === 'service_charge') return this.getServiceChargeSettings();
     

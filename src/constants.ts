@@ -1,4 +1,19 @@
-import { HotelSettings } from './types';
+import { HotelSettings, BookingSource } from './types';
+
+export const DEFAULT_BOOKING_SOURCES: BookingSource[] = [
+  { id: 'walk-in', name: 'Walk-in', isActive: true, isDefault: true, order: 0 },
+  { id: 'hotel-website', name: 'Hotel Website', isActive: true, isDefault: false, order: 1 },
+  { id: 'direct-call', name: 'Direct Call', isActive: true, isDefault: false, order: 2 },
+  { id: 'email', name: 'Email', isActive: true, isDefault: false, order: 3 },
+  { id: 'corporate', name: 'Corporate', isActive: true, isDefault: false, order: 4 },
+  { id: 'travel-agent', name: 'Travel Agent', isActive: true, isDefault: false, order: 5 },
+  { id: 'booking-com', name: 'Booking.com', isActive: true, isDefault: false, order: 6 },
+  { id: 'agoda', name: 'Agoda', isActive: true, isDefault: false, order: 7 },
+  { id: 'expedia', name: 'Expedia', isActive: true, isDefault: false, order: 8 },
+  { id: 'airbnb', name: 'Airbnb', isActive: true, isDefault: false, order: 9 },
+  { id: 'trip-com', name: 'Trip.com', isActive: true, isDefault: false, order: 10 },
+  { id: 'trivago', name: 'Trivago', isActive: true, isDefault: false, order: 11 },
+];
 
 export const DEFAULT_SETTINGS: HotelSettings = {
   checkout: {
@@ -12,6 +27,7 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     enableUnpaidWarningPopup: true,
     autoGenerateOutstandingInvoice: true,
     gracePeriod: 15,
+    lockInvoicesAfterCheckout: true,
   },
   reservations: {
     allowEditing: true,
@@ -24,6 +40,8 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     autoReleaseNoShow: true,
     autoCancelUnpaidTimeMinutes: 60,
     allowWalkIn: true,
+    bookingSources: DEFAULT_BOOKING_SOURCES,
+    defaultBookingSourceId: 'walk-in',
   },
   roomBlocking: {
     allowBlocking: true,

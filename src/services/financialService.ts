@@ -119,23 +119,26 @@ export function calculateGuestFinancialPosition(
   const guestId = typeof guestOrId === 'string' ? guestOrId : guestOrId.id;
   const guestEmail = typeof guestOrId === 'object' && guestOrId !== null ? guestOrId.email : undefined;
 
-  // Filter valid real ledger entries for this guest (excluding virtual/projection entries)
-  let validEntries: LedgerEntry[] = [];
-  if (ledgerEntries) {
-    validEntries = ledgerEntries.filter(e => {
-      const isGuestMatch = (guestId && e.guestId === guestId) || 
-                           (guestOrId && typeof guestOrId === 'object' && e.guestId === (guestOrId as Guest).id);
-      const validator = validateLedgerTransaction(e);
-      return isGuestMatch && validator.isValid;
-    });
-  }
-
   const matchingRes = reservations.filter(r => {
     if (r.status === 'cancelled') return false;
     if (guestId && r.guestId === guestId) return true;
     if (guestEmail && r.guestEmail && r.guestEmail.toLowerCase().trim() === guestEmail.toLowerCase().trim()) return true;
     return false;
   });
+
+  const matchingResIds = new Set(matchingRes.map(r => r.id));
+
+  // Filter valid real ledger entries for this guest (excluding virtual/projection entries)
+  let validEntries: LedgerEntry[] = [];
+  if (ledgerEntries) {
+    validEntries = ledgerEntries.filter(e => {
+      const isGuestMatch = (guestId && e.guestId === guestId) || 
+                           (guestOrId && typeof guestOrId === 'object' && e.guestId === (guestOrId as Guest).id) ||
+                           (Boolean(e.reservationId) && matchingResIds.has(e.reservationId!));
+      const validator = validateLedgerTransaction(e);
+      return isGuestMatch && validator.isValid;
+    });
+  }
 
   let totalCharges = 0;
   let totalRoomCharges = 0;

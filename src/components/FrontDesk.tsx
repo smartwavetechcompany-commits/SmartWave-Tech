@@ -66,10 +66,12 @@ import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, Billin
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGracePeriodInfo } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
+import { useBookingSources } from '../hooks/useSettings';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate } = useAuth();
   const { executeRequest, isPending } = useRequestManager();
+  const { activeBookingSources, defaultBookingSource } = useBookingSources();
   const [searchParams, setSearchParams] = useSearchParams();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -164,6 +166,7 @@ export function FrontDesk() {
     mealPlan: 'Bed & Breakfast',
     breakfastEntitlement: 'Standard Breakfast Included',
     isPrincipalRoom: false,
+    bookingSource: '',
     additionalStays: [] as any[]
   });
 
@@ -202,7 +205,8 @@ export function FrontDesk() {
     checkIn: '',
     checkOut: '',
     totalAmount: 0,
-    notes: ''
+    notes: '',
+    bookingSource: ''
   });
   const [isNegotiatedRate, setIsNegotiatedRate] = useState(false);
   const [selectedRateType, setSelectedRateType] = useState<'auto' | 'base' | 'weekend' | 'weekday' | 'custom'>('auto');
@@ -1070,12 +1074,14 @@ export function FrontDesk() {
             totalStays: 0,
             totalNights: 0,
             totalSpent: 0,
+            preferredBookingSource: newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in',
             createdAt: new Date().toISOString()
           });
           guestId = guestRef.id;
         }
 
         const resRef = doc(collection(db, 'hotels', hotel.id, 'reservations'));
+        const resolvedSource = newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in';
         const resData: any = {
           guestName: stay.guestName,
           guestEmail: stay.guestEmail,
@@ -1108,6 +1114,8 @@ export function FrontDesk() {
           mealPlan: stay.mealPlan || newBooking.mealPlan || 'Bed & Breakfast',
           breakfastEntitlement: stay.breakfastEntitlement || newBooking.breakfastEntitlement || 'Standard Breakfast Included',
           isPrincipalRoom: newBooking.isPrincipalRoom || false,
+          bookingSource: resolvedSource,
+          source: resolvedSource,
           bookedBy: profile.uid,
           bookedByName: profile.displayName || profile.name || profile.email || 'Front Desk Staff',
           createdAt: new Date().toISOString(),
@@ -1241,6 +1249,7 @@ export function FrontDesk() {
         mealPlan: 'Bed & Breakfast',
         breakfastEntitlement: 'Standard Breakfast Included',
         isPrincipalRoom: false,
+        bookingSource: defaultBookingSource?.name || 'Walk-in',
         additionalStays: [] as any[]
       });
     } catch (err: any) {
@@ -1331,12 +1340,16 @@ export function FrontDesk() {
       setLoading(true);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', editingReservation.id);
       
-      const newValues = {
+      const newValues: any = {
         checkIn: editForm.checkIn,
         checkOut: editForm.checkOut,
         totalAmount: editForm.totalAmount,
         notes: editForm.notes
       };
+      if (editForm.bookingSource) {
+        newValues.bookingSource = editForm.bookingSource;
+        newValues.source = editForm.bookingSource;
+      }
 
       await database.safeUpdate(resRef, newValues, {
         hotelId: hotel.id,
@@ -2547,6 +2560,7 @@ export function FrontDesk() {
                     mealPlan: 'Bed & Breakfast',
                     breakfastEntitlement: 'Standard Breakfast Included',
                     isPrincipalRoom: false,
+                    bookingSource: activeBookingSources.some(s => s.name.toLowerCase() === 'corporate') ? 'Corporate' : (defaultBookingSource?.name || 'Walk-in'),
                     additionalStays: [] as any[],
                   });
                   setIsBooking(true);
@@ -2591,6 +2605,7 @@ export function FrontDesk() {
                     mealPlan: 'Bed & Breakfast',
                     breakfastEntitlement: 'Standard Breakfast Included',
                     isPrincipalRoom: false,
+                    bookingSource: defaultBookingSource?.name || 'Walk-in',
                     additionalStays: [] as any[]
                   });
                   setIsBooking(true);
@@ -2747,54 +2762,81 @@ export function FrontDesk() {
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Booking Type</label>
-                  <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-1">
-                    <button 
-                      onClick={() => setNewBooking({ ...newBooking, guestType: 'individual', corporateId: '' })}
-                      className={cn(
-                        "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-bold transition-all",
-                        newBooking.guestType === 'individual' ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-zinc-300"
-                      )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Booking Type</label>
+                    <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-1">
+                      <button 
+                        type="button"
+                        onClick={() => setNewBooking({ ...newBooking, guestType: 'individual', corporateId: '' })}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-bold transition-all",
+                          newBooking.guestType === 'individual' ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        <User size={14} /> Individual
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setNewBooking({ ...newBooking, guestType: 'corporate' })}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-bold transition-all",
+                          newBooking.guestType === 'corporate' ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        <Building2 size={14} /> Corporate
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Booking Source</label>
+                    <select
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none text-xs sm:text-sm h-10"
+                      value={newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in'}
+                      onChange={(e) => setNewBooking({ ...newBooking, bookingSource: e.target.value })}
                     >
-                      <User size={14} /> Individual
-                    </button>
-                    <button 
-                      onClick={() => setNewBooking({ ...newBooking, guestType: 'corporate' })}
-                      className={cn(
-                        "flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-bold transition-all",
-                        newBooking.guestType === 'corporate' ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-zinc-300"
+                      {activeBookingSources.map(src => (
+                        <option key={src.id} value={src.name}>
+                          {src.name}{src.isDefault ? ' (Default)' : ''}
+                        </option>
+                      ))}
+                      {newBooking.bookingSource && !activeBookingSources.some(s => s.name === newBooking.bookingSource) && (
+                        <option value={newBooking.bookingSource}>
+                          {newBooking.bookingSource} (Inactive)
+                        </option>
                       )}
-                    >
-                      <Building2 size={14} /> Corporate
-                    </button>
+                    </select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">
-                    {newBooking.guestType === 'corporate' ? 'Corporate Account (Required)' : 'Corporate Account (Optional)'}
-                  </label>
-                  {corporateAccounts.length > 0 ? (
-                    <select 
-                      className={cn(
-                        "w-full bg-zinc-950 border rounded-lg px-4 py-2 text-zinc-50 outline-none transition-all",
-                        newBooking.guestType === 'corporate' && !newBooking.corporateId ? "border-amber-500/50" : "border-zinc-800 focus:border-emerald-500"
-                      )}
-                      value={newBooking.corporateId}
-                      onChange={(e) => setNewBooking({ ...newBooking, corporateId: e.target.value })}
-                    >
-                      <option value="">{newBooking.guestType === 'corporate' ? 'Select Account' : 'None / Individual'}</option>
-                      {corporateAccounts.map(acc => (
-                        <option key={acc.id} value={acc.id}>{acc.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="text-[10px] text-amber-500 bg-amber-500/10 p-2 rounded border border-amber-500/20 flex items-center gap-2">
-                      <AlertCircle size={12} />
-                      No corporate accounts found
-                    </div>
-                  )}
-                </div>
+
+                {newBooking.guestType === 'corporate' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">
+                      Corporate Account (Required)
+                    </label>
+                    {corporateAccounts.length > 0 ? (
+                      <select 
+                        className={cn(
+                          "w-full bg-zinc-950 border rounded-lg px-4 py-2 text-zinc-50 outline-none transition-all",
+                          !newBooking.corporateId ? "border-amber-500/50" : "border-zinc-800 focus:border-emerald-500"
+                        )}
+                        value={newBooking.corporateId}
+                        onChange={(e) => setNewBooking({ ...newBooking, corporateId: e.target.value })}
+                      >
+                        <option value="">Select Account</option>
+                        {corporateAccounts.map(acc => (
+                          <option key={acc.id} value={acc.id}>{acc.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-[10px] text-amber-500 bg-amber-500/10 p-2 rounded border border-amber-500/20 flex items-center gap-2">
+                        <AlertCircle size={12} />
+                        No corporate accounts found
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {newBooking.guestType === 'corporate' && (
@@ -4651,7 +4693,8 @@ export function FrontDesk() {
                                   checkIn: res.checkIn,
                                   checkOut: res.checkOut,
                                   totalAmount: res.totalAmount,
-                                  notes: res.notes || ''
+                                  notes: res.notes || '',
+                                  bookingSource: res.bookingSource || res.source || defaultBookingSource?.name || 'Walk-in'
                                 });
                               }}
                               className={cn(
@@ -4769,6 +4812,25 @@ export function FrontDesk() {
                   value={editForm.totalAmount}
                   onChange={(e) => setEditForm({ ...editForm, totalAmount: Number(e.target.value) })}
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Booking Source</label>
+                <select
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none text-sm"
+                  value={editForm.bookingSource || 'Walk-in'}
+                  onChange={(e) => setEditForm({ ...editForm, bookingSource: e.target.value })}
+                >
+                  {activeBookingSources.map(src => (
+                    <option key={src.id} value={src.name}>
+                      {src.name}{src.isDefault ? ' (Default)' : ''}
+                    </option>
+                  ))}
+                  {editForm.bookingSource && !activeBookingSources.some(s => s.name === editForm.bookingSource) && (
+                    <option value={editForm.bookingSource}>
+                      {editForm.bookingSource} (Inactive)
+                    </option>
+                  )}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Notes</label>
