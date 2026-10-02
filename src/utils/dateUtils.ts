@@ -4,9 +4,12 @@ import { startOfDay, parseISO, differenceInDays, format } from 'date-fns';
 export interface StayDuration {
   bookedDays: number;
   bookedNights: number;
+  bookingNights: number;
   overstayNights: number;
   actualDays: number;
   actualNights: number;
+  actualStayedNights: number;
+  chargeableNights: number;
   totalDays: number;
   totalNights: number;
 }
@@ -237,9 +240,8 @@ export function calculateStayDuration(
 
   const cin = startOfDay(parseDate(checkInDate));
   const cout = startOfDay(parseDate(checkoutDate));
-  // Total Nights = DateDiff(CheckOutDate, CheckInDate). A stay from Sep 20 to Sep 21 is strictly 1 night.
-  const bookedNights = Math.max(1, differenceInDays(cout, cin));
-  const bookedDays = bookedNights; // In standard hotel PMS, stays are measured by nights
+  // Total Days between arrival and departure dates
+  const calendarNights = Math.max(1, differenceInDays(cout, cin));
 
   // Extract options if provided
   let options: StayDurationOptions = {};
@@ -282,17 +284,30 @@ export function calculateStayDuration(
     overstayNights = overstayNightsInput;
   }
 
-  const actualNights = bookedNights + overstayNights;
-  const actualDays = bookedDays + overstayNights;
+  // Authoritative separation of Booking Nights, Overstay Nights, Actual Stayed Nights, and Chargeable Nights
+  // Prevent double-counting: at checkout, checkoutDate is updated to departure date,
+  // so calendarNights already reflects the extended departure.
+  let bookingNights = calendarNights;
+  if (options.res?.nights && typeof options.res.nights === 'number' && options.res.nights > 0) {
+    bookingNights = options.res.nights;
+  } else if (status === 'checked_out' && overstayNights > 0 && calendarNights > overstayNights) {
+    bookingNights = Math.max(1, calendarNights - overstayNights);
+  }
+
+  const actualStayedNights = Math.max(bookingNights + overstayNights, calendarNights);
+  const chargeableNights = bookingNights + overstayNights;
 
   return {
-    bookedDays,
-    bookedNights,
+    bookedDays: bookingNights,
+    bookedNights: bookingNights,
+    bookingNights,
     overstayNights,
-    actualDays,
-    actualNights,
-    totalDays: actualDays,
-    totalNights: actualNights
+    actualDays: actualStayedNights,
+    actualNights: actualStayedNights,
+    actualStayedNights,
+    chargeableNights,
+    totalDays: chargeableNights,
+    totalNights: chargeableNights
   };
 }
 
@@ -339,7 +354,7 @@ export function StayDurationDisplay({
         'div',
         { className: 'flex justify-between items-center text-zinc-400 font-medium' },
         React.createElement('span', { className: 'text-zinc-500 text-[10px] uppercase font-bold tracking-wider' }, 'Original Booking:'),
-        React.createElement('span', { className: 'font-semibold text-zinc-200' }, `${duration.bookedNights} Night${duration.bookedNights === 1 ? '' : 's'}`)
+        React.createElement('span', { className: 'font-semibold text-zinc-200' }, `${duration.bookingNights} Night${duration.bookingNights === 1 ? '' : 's'}`)
       ),
       duration.overstayNights > 0 && React.createElement(
         'div',
@@ -349,16 +364,22 @@ export function StayDurationDisplay({
       ),
       React.createElement(
         'div',
+        { className: 'flex justify-between items-center text-zinc-300 font-medium' },
+        React.createElement('span', { className: 'text-zinc-500 text-[10px] uppercase font-bold tracking-wider' }, 'Actual Stayed:'),
+        React.createElement('span', { className: 'font-semibold text-zinc-200' }, `${duration.actualStayedNights} Night${duration.actualStayedNights === 1 ? '' : 's'}`)
+      ),
+      React.createElement(
+        'div',
         { className: 'flex justify-between items-center pt-1.5 border-t border-zinc-800 text-amber-400 font-bold' },
         React.createElement('span', { className: 'uppercase tracking-wider text-[10px]' }, 'Total Chargeable:'),
-        React.createElement('span', { className: 'text-sm font-black' }, `${duration.actualNights} Night${duration.actualNights === 1 ? '' : 's'}`)
+        React.createElement('span', { className: 'text-sm font-black' }, `${duration.chargeableNights} Night${duration.chargeableNights === 1 ? '' : 's'}`)
       )
     );
   }
 
   const text = duration.overstayNights > 0
-    ? `${duration.bookedNights} Night${duration.bookedNights === 1 ? '' : 's'} (+${duration.overstayNights} Overstay)`
-    : `${duration.bookedNights} Night${duration.bookedNights === 1 ? '' : 's'}`;
+    ? `${duration.bookingNights} Night${duration.bookingNights === 1 ? '' : 's'} (+${duration.overstayNights} Overstay)`
+    : `${duration.bookingNights} Night${duration.bookingNights === 1 ? '' : 's'}`;
 
   return React.createElement(
     'div',

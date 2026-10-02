@@ -16,6 +16,10 @@ export interface GuestAccountSummary {
   accountStatus: 'OUTSTANDING' | 'SETTLED' | 'OVERPAID' | 'ZERO_BALANCE';
   totalDays: number;
   totalNights: number;
+  bookingNights: number;
+  overstayNights: number;
+  actualStayedNights: number;
+  chargeableNights: number;
   totalSpent: number; // Actual money paid by the guest (Payments Received minus Refunds)
   revenueGenerated: number; // All charges posted to the guest (Room + Services + Taxes + Overstay)
 }
@@ -135,7 +139,11 @@ export function calculateReservationAccount(
     creditBalance,
     accountStatus,
     totalDays,
-    totalNights,
+    totalNights: duration.chargeableNights || totalNights,
+    bookingNights: duration.bookingNights,
+    overstayNights: duration.overstayNights,
+    actualStayedNights: duration.actualStayedNights,
+    chargeableNights: duration.chargeableNights,
     totalSpent: Number(netPayments.toFixed(2)),
     revenueGenerated: Number(totalCharges.toFixed(2))
   };
@@ -190,6 +198,10 @@ export function calculateGuestAccount(
     let totalTransfers = 0;
     let totalDays = 0;
     let totalNights = 0;
+    let totalBookingNights = 0;
+    let totalOverstayNights = 0;
+    let totalActualStayedNights = 0;
+    let totalChargeableNights = 0;
 
     matchingRes.forEach(res => {
       const acc = calculateReservationAccount(res, hotel, ledgerEntries);
@@ -202,6 +214,10 @@ export function calculateGuestAccount(
       totalTransfers += acc.totalTransfers;
       totalDays += acc.totalDays;
       totalNights += acc.totalNights;
+      totalBookingNights += acc.bookingNights || 0;
+      totalOverstayNights += acc.overstayNights || 0;
+      totalActualStayedNights += acc.actualStayedNights || 0;
+      totalChargeableNights += acc.chargeableNights || 0;
     });
 
     totalCharges = Number(totalCharges.toFixed(2));
@@ -239,7 +255,11 @@ export function calculateGuestAccount(
       creditBalance,
       accountStatus,
       totalDays,
-      totalNights,
+      totalNights: totalChargeableNights || totalNights,
+      bookingNights: totalBookingNights,
+      overstayNights: totalOverstayNights,
+      actualStayedNights: totalActualStayedNights,
+      chargeableNights: totalChargeableNights,
       totalSpent: Number(Math.max(0, totalPayments - totalRefunds).toFixed(2)),
       revenueGenerated: Number(totalCharges.toFixed(2))
     };

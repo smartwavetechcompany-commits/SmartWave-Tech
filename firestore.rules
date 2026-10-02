@@ -69,13 +69,14 @@ service cloud.firestore {
     }
 
     function sameHotel(hotelId) {
-      return getHotelId() == hotelId ||
+      let data = getUserData();
+      return (data != null && (data.hotelId == hotelId || data.hotel_id == hotelId || (data.hotelIds != null && data.hotelIds.hasAny([hotelId])))) ||
              (isAuthenticated() && exists(/databases/$(database)/documents/hotels/$(hotelId)/staff/$(request.auth.uid)));
     }
 
     function isStaffOf(hotelId) {
       let data = getUserData();
-      return (data != null && data.hotelId == hotelId && data.role != "guest" && data.role != "corporate") ||
+      return (data != null && (data.hotelId == hotelId || data.hotel_id == hotelId || (data.hotelIds != null && data.hotelIds.hasAny([hotelId]))) && data.role != "guest" && data.role != "corporate") ||
              (isAuthenticated() && exists(/databases/$(database)/documents/hotels/$(hotelId)/staff/$(request.auth.uid)));
     }
 
@@ -231,6 +232,7 @@ service cloud.firestore {
         allow read: if isSuperAdmin() || 
                        isStaffOf(hotelId) || 
                        sameHotel(hotelId) || 
+                       isAuthenticated() ||
                        (resource != null && resource.data.hotelId == hotelId);
         allow create: if isSuperAdmin() || (
           (isStaffOf(hotelId) || sameHotel(hotelId) || (isAuthenticated() && request.resource.data.hotelId == hotelId)) &&
@@ -242,6 +244,20 @@ service cloud.firestore {
         );
         allow update: if isSuperAdmin();
         allow delete: if isSuperAdmin();
+      }
+
+      // Outstanding Debt Ledger (AR) and guest balances
+      match /outstanding_debt_ledger/{debtId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
+        allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+      }
+
+      // Financial transaction records & summaries
+      match /finance/{docId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
+        allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }
 
       // Staff account activation and password reset tokens for this property
