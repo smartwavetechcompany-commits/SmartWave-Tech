@@ -88,7 +88,7 @@ export function GuestManagement() {
       return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
     },
     enabled: !!hotel?.id && !!profile,
-    staleTime: 1000 * 60 * 5, // 5 minutes cache
+    staleTime: 0,
   });
 
   // Load reservations with TanStack Query
@@ -101,7 +101,7 @@ export function GuestManagement() {
       return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
     },
     enabled: !!hotel?.id && !!profile,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 0,
   });
 
   // Load ledger entries with TanStack Query as single source of truth for financial statistics
@@ -115,6 +115,24 @@ export function GuestManagement() {
         return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
       } catch (err: any) {
         console.error("Failed to query ledger entries in GuestManagement:", err);
+        return [];
+      }
+    },
+    enabled: !!hotel?.id && !!profile,
+    staleTime: 0,
+  });
+
+  // Load outstanding debt records with TanStack Query
+  const { data: allOutstandingDebts = [] } = useQuery<any[]>({
+    queryKey: ['guest_outstanding_debts', hotel?.id],
+    queryFn: async () => {
+      if (!hotel?.id) return [];
+      try {
+        const q = query(collection(db, 'hotels', hotel.id, 'outstanding_debt_ledger'));
+        const snap = await getDocs(q);
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      } catch (err: any) {
+        console.warn("Failed to query debt records in GuestManagement:", err);
         return [];
       }
     },
@@ -219,6 +237,10 @@ export function GuestManagement() {
     const statsMap: Record<string, { 
       visitsCount: number; 
       calculatedDays: number; 
+      bookingNights: number;
+      overstayNights: number;
+      actualStayedNights: number;
+      chargeableNights: number;
       totalSpentVal: number; 
       totalRevenueVal: number; 
       outstandingDebtVal: number; 
@@ -261,6 +283,11 @@ export function GuestManagement() {
 
       const position = calculateGuestFinancialPosition(g, guestRes, hotel, allLedgerEntries);
       const calculatedNights = position.totalNights;
+      const bookingNights = position.bookingNights !== undefined ? position.bookingNights : calculatedNights;
+      const overstayNights = position.overstayNights || 0;
+      const actualStayedNights = position.actualStayedNights !== undefined ? position.actualStayedNights : calculatedNights;
+      const chargeableNights = position.chargeableNights !== undefined ? position.chargeableNights : calculatedNights;
+
       // Total Spent = Sum of successful payments only (never room charges)
       const totalSpentVal = Math.max(0, position.totalPayments - position.totalRefunds);
       // Revenue Generated = All posted charges (Room charges + Service charges + Taxes + Overstay)
@@ -270,6 +297,10 @@ export function GuestManagement() {
       statsMap[g.id] = {
         visitsCount,
         calculatedDays: calculatedNights,
+        bookingNights,
+        overstayNights,
+        actualStayedNights,
+        chargeableNights,
         totalSpentVal,
         totalRevenueVal,
         outstandingDebtVal
@@ -277,7 +308,7 @@ export function GuestManagement() {
     });
 
     return statsMap;
-  }, [guests, allReservations, hotel, allLedgerEntries]);
+  }, [guests, allReservations, hotel, allLedgerEntries, allOutstandingDebts]);
 
   // Reset pagination on filter changes
   useEffect(() => {
@@ -343,6 +374,20 @@ export function GuestManagement() {
     });
 
     return () => unsubLedger();
+  }, [hotel?.id, profile?.uid, queryClient]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    
+    const qDebts = query(collection(db, 'hotels', hotel.id, 'outstanding_debt_ledger'));
+    const unsubDebts = onSnapshot(qDebts, (snap) => {
+      const updatedDebts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      queryClient.setQueryData(['guest_outstanding_debts', hotel.id], updatedDebts);
+    }, (error: any) => {
+      console.warn("Notice: debt ledger listener encountered:", error);
+    });
+
+    return () => unsubDebts();
   }, [hotel?.id, profile?.uid, queryClient]);
 
   useEffect(() => {
@@ -580,7 +625,7 @@ export function GuestManagement() {
         return matchesType && matchesDate;
       })
       .map(g => {
-        const stats = guestStatsMap[g.id] || { visitsCount: g.totalStays || 0, calculatedDays: 0, totalSpentVal: 0, totalRevenueVal: 0, outstandingDebtVal: 0 };
+        const stats = guestStatsMap[g.id] || { visitsCount: g.totalStays || 0, calculatedDays: 0, bookingNights: 0, overstayNights: 0, actualStayedNights: 0, chargeableNights: 0, totalSpentVal: 0, totalRevenueVal: 0, outstandingDebtVal: 0 };
 
         return {
           Name: g.name,
@@ -591,7 +636,11 @@ export function GuestManagement() {
           'ID Number': g.idNumber || '-',
           Address: g.address || '-',
           'Total Stays': stats.visitsCount,
-          'Total Nights': stats.calculatedDays,
+          'Total Nights': stats.actualStayedNights || stats.calculatedDays,
+          'Booking Nights': stats.bookingNights || stats.calculatedDays,
+          'Overstay Nights': stats.overstayNights || 0,
+          'Actual Stayed Nights': stats.actualStayedNights || stats.calculatedDays,
+          'Chargeable Nights': stats.chargeableNights || stats.calculatedDays,
           'Total Spent (Paid)': stats.totalSpentVal,
           'Revenue Generated': stats.totalRevenueVal,
           'Outstanding Debt': stats.outstandingDebtVal,
@@ -1033,7 +1082,17 @@ export function GuestManagement() {
             </div>
           ) : (
             paginatedGuests.map((guest) => {
-              const stats = guestStatsMap[guest.id] || { visitsCount: 0, calculatedDays: 0, totalSpentVal: 0, totalRevenueVal: 0, outstandingDebtVal: 0 };
+              const stats = guestStatsMap[guest.id] || { 
+                visitsCount: (guest as any).totalStays || 0, 
+                calculatedDays: (guest as any).totalNights || 0, 
+                bookingNights: (guest as any).totalNights || 0, 
+                overstayNights: 0, 
+                actualStayedNights: (guest as any).totalNights || 0, 
+                chargeableNights: (guest as any).totalNights || 0, 
+                totalSpentVal: 0, 
+                totalRevenueVal: 0, 
+                outstandingDebtVal: 0 
+              };
               const visitsCount = stats.visitsCount;
               const calculatedDays = stats.calculatedDays;
               const totalSpentVal = stats.totalSpentVal;
@@ -1196,8 +1255,27 @@ export function GuestManagement() {
                         <div className="text-sm font-bold text-zinc-100">{visitsCount}</div>
                       </div>
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
-                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Nights</div>
-                        <div className="text-sm font-bold text-amber-500">{calculatedDays || (guest as any).totalNights || 0}</div>
+                        <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Stay Nights</div>
+                        <div className="text-sm font-bold text-amber-500 flex items-baseline gap-1">
+                          <span>{stats.actualStayedNights || (guest as any).totalNights || 0}</span>
+                          <span className="text-[9px] font-normal text-zinc-500">nights</span>
+                        </div>
+                        {stats.overstayNights > 0 ? (
+                          <div 
+                            className="text-[7px] text-zinc-400 font-medium truncate mt-0.5" 
+                            title={`Actual Stayed: ${stats.actualStayedNights} | Booked: ${stats.bookingNights} | Overstay: +${stats.overstayNights} | Chargeable: ${stats.chargeableNights}`}
+                          >
+                            <span className="text-zinc-300">Booked: {stats.bookingNights}</span>
+                            <span className="text-zinc-600 mx-0.5">•</span>
+                            <span className="text-red-400 font-semibold">+{stats.overstayNights} O/S</span>
+                            <span className="text-zinc-600 mx-0.5">•</span>
+                            <span className="text-amber-400 font-semibold">{stats.chargeableNights} Chg</span>
+                          </div>
+                        ) : (
+                          <div className="text-[7px] text-zinc-500 font-medium truncate mt-0.5" title="Total Chargeable Nights">
+                            {stats.chargeableNights || stats.actualStayedNights || (guest as any).totalNights || 0} chargeable
+                          </div>
+                        )}
                       </div>
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
@@ -1382,6 +1460,25 @@ export function GuestManagement() {
                       <div className="bg-zinc-950/60 p-2 rounded-xl border border-zinc-800">
                         <div className="text-[7px] font-black text-amber-500 uppercase tracking-widest mb-0.5">No-Show</div>
                         <div className="text-xs font-bold text-amber-500">{noshowCount}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2 px-1 text-center bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800">
+                      <div>
+                        <div className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest mb-0.5">Actual Stayed</div>
+                        <div className="text-xs font-bold text-zinc-100">{pos.actualStayedNights} nights</div>
+                      </div>
+                      <div>
+                        <div className="text-[7px] font-bold text-blue-400 uppercase tracking-widest mb-0.5">Booking Nights</div>
+                        <div className="text-xs font-bold text-blue-400">{pos.bookingNights} nights</div>
+                      </div>
+                      <div>
+                        <div className="text-[7px] font-bold text-red-400 uppercase tracking-widest mb-0.5">Overstay Nights</div>
+                        <div className="text-xs font-bold text-red-400">{pos.overstayNights > 0 ? `+${pos.overstayNights}` : '0'} nights</div>
+                      </div>
+                      <div>
+                        <div className="text-[7px] font-bold text-amber-400 uppercase tracking-widest mb-0.5">Chargeable Nights</div>
+                        <div className="text-xs font-bold text-amber-400">{pos.chargeableNights} nights</div>
                       </div>
                     </div>
                   </>

@@ -284,18 +284,45 @@ export function calculateStayDuration(
     overstayNights = overstayNightsInput;
   }
 
-  // Authoritative separation of Booking Nights, Overstay Nights, Actual Stayed Nights, and Chargeable Nights
-  // Prevent double-counting: at checkout, checkoutDate is updated to departure date,
-  // so calendarNights already reflects the extended departure.
+  // --- AUTHORITATIVE STATISTICAL ENGINE ---
+  // Authoritative separation of Booking Nights, Overstay Nights, Actual Stayed Nights, and Chargeable Nights.
+  // PREVENT DOUBLE-COUNTING:
+  // When a guest overstays, either:
+  // 1) checkoutDate has been updated to the actual departure date (e.g. at checkout),
+  //    meaning calendarNights (difference between departure date and check-in date) ALREADY covers the full duration
+  //    including the overstay nights!
+  //    In this case, original booking nights = calendarNights - overstayNights,
+  //    actual stayed nights = calendarNights, and chargeable nights = bookingNights + overstayNights.
+  // 2) checkoutDate is still the original contracted checkout date (e.g. while guest is in-house),
+  //    meaning calendarNights represents only the original booking duration.
+  //    In this case, actual stayed nights = calendarNights + overstayNights,
+  //    and chargeable nights = calendarNights + overstayNights.
   let bookingNights = calendarNights;
-  if (options.res?.nights && typeof options.res.nights === 'number' && options.res.nights > 0) {
-    bookingNights = options.res.nights;
-  } else if (status === 'checked_out' && overstayNights > 0 && calendarNights > overstayNights) {
-    bookingNights = Math.max(1, calendarNights - overstayNights);
+
+  if (overstayNights > 0) {
+    if (calendarNights > overstayNights) {
+      if (options.res?.nights && typeof options.res.nights === 'number' && options.res.nights > 0 && options.res.nights < calendarNights) {
+        bookingNights = options.res.nights;
+      } else {
+        bookingNights = Math.max(1, calendarNights - overstayNights);
+      }
+    } else {
+      if (options.res?.nights && typeof options.res.nights === 'number' && options.res.nights > 0) {
+        bookingNights = options.res.nights;
+      } else {
+        bookingNights = calendarNights;
+      }
+    }
+  } else {
+    if (options.res?.nights && typeof options.res.nights === 'number' && options.res.nights > 0) {
+      bookingNights = options.res.nights;
+    } else {
+      bookingNights = calendarNights;
+    }
   }
 
-  const actualStayedNights = Math.max(bookingNights + overstayNights, calendarNights);
   const chargeableNights = bookingNights + overstayNights;
+  const actualStayedNights = Math.max(calendarNights, chargeableNights);
 
   return {
     bookedDays: bookingNights,
@@ -306,7 +333,7 @@ export function calculateStayDuration(
     actualNights: actualStayedNights,
     actualStayedNights,
     chargeableNights,
-    totalDays: chargeableNights,
+    totalDays: actualStayedNights,
     totalNights: chargeableNights
   };
 }
@@ -320,9 +347,9 @@ export function formatStayDuration(
 ): string {
   const duration = calculateStayDuration(checkInDate, checkoutDate, overstayNights, status, options);
   if (duration.overstayNights > 0) {
-    return `${duration.bookedNights} Night${duration.bookedNights === 1 ? '' : 's'} (+${duration.overstayNights} Overstay)`;
+    return `${duration.bookingNights} Night${duration.bookingNights === 1 ? '' : 's'} (+${duration.overstayNights} Overstay)`;
   }
-  return `${duration.bookedNights} Night${duration.bookedNights === 1 ? '' : 's'}`;
+  return `${duration.bookingNights} Night${duration.bookingNights === 1 ? '' : 's'}`;
 }
 
 export function StayDurationDisplay({ 

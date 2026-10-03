@@ -2035,7 +2035,8 @@ export function FrontDesk() {
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const nights = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0).totalNights;
+          const duration = calculateStayDuration(res.checkIn, format(now, 'yyyy-MM-dd'), res.overstayNights || 0, 'checked_out', { res, hotel });
+          const nights = duration.actualStayedNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
             stayHistory: arrayUnion({

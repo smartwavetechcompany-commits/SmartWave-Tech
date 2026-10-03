@@ -173,6 +173,18 @@ export function calculateGuestFinancialPosition(
     totalChargeableNights += duration.chargeableNights;
   });
 
+  // Fallback for legacy guest object with stored totalNights if no matching reservations exist
+  if (matchingRes.length === 0 && typeof guestOrId === 'object' && guestOrId !== null) {
+    const storedNights = (guestOrId as any).totalNights || 0;
+    if (storedNights > 0) {
+      totalActualStayedNights = storedNights;
+      totalChargeableNights = storedNights;
+      totalBookingNights = storedNights;
+      totalNights = storedNights;
+      totalDays = storedNights;
+    }
+  }
+
   if (matchingRes.length > 0) {
     // 1. Authoritative calculation across reservations using unified reservation account engine
     matchingRes.forEach(res => {
@@ -281,7 +293,7 @@ export function calculateGuestFinancialPosition(
     creditBalance,
     accountStatus,
     totalDays,
-    totalNights: totalChargeableNights || totalNights,
+    totalNights: totalActualStayedNights || totalChargeableNights || totalNights,
     bookingNights: totalBookingNights,
     overstayNights: totalOverstayNights,
     actualStayedNights: totalActualStayedNights,

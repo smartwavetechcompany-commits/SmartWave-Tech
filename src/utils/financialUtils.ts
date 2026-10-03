@@ -139,7 +139,7 @@ export function calculateReservationAccount(
     creditBalance,
     accountStatus,
     totalDays,
-    totalNights: duration.chargeableNights || totalNights,
+    totalNights: duration.actualStayedNights || duration.chargeableNights || totalNights,
     bookingNights: duration.bookingNights,
     overstayNights: duration.overstayNights,
     actualStayedNights: duration.actualStayedNights,
@@ -173,6 +173,10 @@ export function calculateGuestAccount(
       accountStatus: 'ZERO_BALANCE',
       totalDays: 0,
       totalNights: 0,
+      bookingNights: 0,
+      overstayNights: 0,
+      actualStayedNights: 0,
+      chargeableNights: 0,
       totalSpent: 0,
       revenueGenerated: 0
     };
@@ -255,7 +259,7 @@ export function calculateGuestAccount(
       creditBalance,
       accountStatus,
       totalDays,
-      totalNights: totalChargeableNights || totalNights,
+      totalNights: totalActualStayedNights || totalChargeableNights || totalNights,
       bookingNights: totalBookingNights,
       overstayNights: totalOverstayNights,
       actualStayedNights: totalActualStayedNights,
@@ -316,6 +320,10 @@ export function calculateGuestAccount(
         accountStatus,
         totalDays: 0,
         totalNights: 0,
+        bookingNights: 0,
+        overstayNights: 0,
+        actualStayedNights: 0,
+        chargeableNights: 0,
         totalSpent: Number(Math.max(0, credits - refunds).toFixed(2)),
         revenueGenerated: Number(debits.toFixed(2))
       };
@@ -345,6 +353,10 @@ export function calculateGuestAccount(
     accountStatus,
     totalDays: 0,
     totalNights: 0,
+    bookingNights: 0,
+    overstayNights: 0,
+    actualStayedNights: 0,
+    chargeableNights: 0,
     totalSpent: fallbackBal < 0 ? Math.abs(fallbackBal) : 0,
     revenueGenerated: fallbackBal > 0 ? fallbackBal : 0
   };
