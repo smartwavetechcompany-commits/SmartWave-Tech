@@ -1186,8 +1186,8 @@ export function Rooms() {
       )}
 
       {isAddingRoom && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto shadow-2xl">
             <h3 className="text-xl font-bold text-zinc-50 mb-6">Add New Room</h3>
             <form onSubmit={addRoom} className="space-y-4">
               <div>

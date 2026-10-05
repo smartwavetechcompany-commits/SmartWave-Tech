@@ -40,7 +40,8 @@ import {
   ArrowLeftRight,
   Percent,
   Trash2,
-  PlusCircle
+  PlusCircle,
+  XCircle
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
@@ -2450,17 +2451,24 @@ export function Finance() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
-            <div className="p-6 border-b border-zinc-800">
+            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
               <h2 className="text-xl font-bold text-zinc-50">Add Financial Record</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <XCircle size={22} />
+              </button>
             </div>
-            <form onSubmit={handleAddRecord}>
-              <div className="p-6 space-y-4">
+            <form onSubmit={handleAddRecord} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
                 <div className="flex p-1 bg-zinc-950 rounded-xl border border-zinc-800">
                   <button
                     type="button"
@@ -2541,7 +2549,7 @@ export function Finance() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -2562,26 +2570,35 @@ export function Finance() {
         </div>
       )}
       {showSettleModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
             {(() => {
               const balance = 'ledgerBalance' in showSettleModal ? showSettleModal.ledgerBalance : showSettleModal.currentBalance;
               return (
                 <>
-                  <div className="p-6 border-b border-zinc-800">
-                    <h2 className="text-xl font-bold text-zinc-50">
-                      {settleType === 'payment' ? 'Settle Outstanding Debt' : 'Process Refund / Overpayment'}
-                    </h2>
-                    <p className="text-sm text-zinc-500 mt-1">
-                      {'ledgerBalance' in showSettleModal ? 'Guest' : 'Corporate'}: {showSettleModal.name}
-                    </p>
+                  <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
+                    <div>
+                      <h2 className="text-xl font-bold text-zinc-50">
+                        {settleType === 'payment' ? 'Settle Outstanding Debt' : 'Process Refund / Overpayment'}
+                      </h2>
+                      <p className="text-sm text-zinc-500 mt-1">
+                        {'ledgerBalance' in showSettleModal ? 'Guest' : 'Corporate'}: {showSettleModal.name}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSettleModal(null)}
+                      className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <XCircle size={22} />
+                    </button>
                   </div>
-                  <form onSubmit={handleSettleBalance}>
-                    <div className="p-6 space-y-4">
+                  <form onSubmit={handleSettleBalance} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                    <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
                       {/* Balance Banner */}
                       <div className={cn(
                         "p-4 rounded-2xl border flex items-center gap-4",
@@ -2731,7 +2748,7 @@ export function Finance() {
                         />
                       </div>
                     </div>
-                    <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                    <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                       <button
                         type="button"
                         onClick={() => setShowSettleModal(null)}
@@ -2759,18 +2776,27 @@ export function Finance() {
       )}
 
       {showPaySupplierModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-zinc-50">Pay Supplier</h2>
-              <p className="text-sm text-zinc-500 mt-1">Supplier: {showPaySupplierModal.name}</p>
+            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-50">Pay Supplier</h2>
+                <p className="text-sm text-zinc-500 mt-1">Supplier: {showPaySupplierModal.name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPaySupplierModal(null)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <XCircle size={22} />
+              </button>
             </div>
-            <form onSubmit={handlePaySupplier}>
-              <div className="p-6 space-y-4">
+            <form onSubmit={handlePaySupplier} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
                 <div className="p-4 rounded-2xl bg-red-500/5 border border-red-500/20 flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center">
                     <AlertCircle size={20} />
@@ -2824,7 +2850,7 @@ export function Finance() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowPaySupplierModal(null)}
@@ -2846,17 +2872,24 @@ export function Finance() {
       )}
 
       {showAddSupplierModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
-            <div className="p-6 border-b border-zinc-800">
+            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
               <h2 className="text-xl font-bold text-zinc-50">Add New Supplier</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddSupplierModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <XCircle size={22} />
+              </button>
             </div>
-            <form onSubmit={handleAddSupplier}>
-              <div className="p-6 space-y-4">
+            <form onSubmit={handleAddSupplier} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Supplier Name</label>
                   <input
@@ -2900,7 +2933,7 @@ export function Finance() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddSupplierModal(false)}
@@ -2922,17 +2955,24 @@ export function Finance() {
       )}
 
       {showAddAccountModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
-            <div className="p-6 border-b border-zinc-800">
+            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
               <h2 className="text-xl font-bold text-zinc-50">Create New Account</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddAccountModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <XCircle size={22} />
+              </button>
             </div>
-            <form onSubmit={handleCreateAccount}>
-              <div className="p-6 space-y-4">
+            <form onSubmit={handleCreateAccount} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Code</label>
@@ -2981,7 +3021,7 @@ export function Finance() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddAccountModal(false)}
@@ -3003,17 +3043,24 @@ export function Finance() {
       )}
 
       {showAddPOModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
-            <div className="p-6 border-b border-zinc-800">
+            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
               <h2 className="text-xl font-bold text-zinc-50">Create Purchase Order</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddPOModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <XCircle size={22} />
+              </button>
             </div>
-            <form onSubmit={handleCreatePO}>
-              <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+            <form onSubmit={handleCreatePO} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-6 flex-1 overflow-y-auto overscroll-contain">
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Supplier</label>
@@ -3139,7 +3186,7 @@ export function Finance() {
                   </div>
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between shrink-0">
                 <div>
                   <p className="text-xs text-zinc-500 uppercase font-bold">Total Amount</p>
                   <p className="text-2xl font-bold text-emerald-500">{formatCurrency(newPO.totalAmount, currency, exchangeRate)}</p>

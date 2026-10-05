@@ -1365,13 +1365,19 @@ export function GuestManagement() {
 
       {/* History Modal */}
       {viewingHistory && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]"
-          >
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setViewingHistory(null);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[90vh] shadow-2xl min-h-0 relative my-auto"
+            >
+              <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
               <div>
                 <h2 className="text-xl font-bold text-zinc-50">Stay History</h2>
                 <div className="flex items-center gap-2">
@@ -1733,15 +1739,16 @@ export function GuestManagement() {
               )}
             </div>
             
-            <div className="p-6 bg-zinc-950 border-t border-zinc-800">
+            <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 shrink-0 sticky bottom-0 z-10">
               <button
                 onClick={() => setViewingHistory(null)}
-                className="w-full py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                className="w-full py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all text-sm"
               >
                 Close History
               </button>
             </div>
           </motion.div>
+          </div>
         </div>
       )}
 
@@ -1785,17 +1792,28 @@ export function GuestManagement() {
 
       {/* Add/Edit Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-zinc-50">{editingGuest ? 'Edit Guest Profile' : 'Add New Guest'}</h2>
+            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-50">{editingGuest ? 'Edit Guest Profile' : 'Add New Guest'}</h2>
+                <p className="text-xs text-zinc-400 mt-0.5">{editingGuest ? 'Update guest contact details and preferences' : 'Register a new guest in the PMS directory'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                title="Close"
+              >
+                <XCircle size={22} />
+              </button>
             </div>
-            <form onSubmit={handleSaveGuest}>
-              <div className="p-6 space-y-4">
+            <form onSubmit={handleSaveGuest} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Full Name</label>
                   <input
@@ -2032,18 +2050,18 @@ export function GuestManagement() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
+                  className="flex-1 px-4 py-2.5 bg-zinc-800 text-zinc-300 rounded-xl font-bold hover:bg-zinc-700 transition-colors text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingGuest}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2.5 bg-emerald-500 text-zinc-50 rounded-xl font-bold hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-500/20"
                 >
                   {isSavingGuest ? (
                     <>

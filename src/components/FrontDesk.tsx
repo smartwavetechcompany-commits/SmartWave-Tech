@@ -2727,11 +2727,11 @@ export function FrontDesk() {
 
       {/* Night Audit Modal */}
       {showNightAuditModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md text-center"
+            className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-md text-center max-h-[90vh] overflow-y-auto my-auto shadow-2xl"
           >
             <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
               <RefreshCw size={32} className={cn("text-emerald-500", isAuditing && "animate-spin")} />
@@ -2768,9 +2768,9 @@ export function FrontDesk() {
       )}
 
       {isBooking && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden my-auto">
+            <div className="p-6 border-b border-zinc-800 shrink-0">
               <h3 className="text-xl font-bold text-zinc-50">New Reservation</h3>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
@@ -4794,11 +4794,11 @@ export function FrontDesk() {
 
       {/* Edit Reservation Modal */}
       {editingReservation && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+            className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto shadow-2xl"
           >
             <h3 className="text-xl font-bold text-zinc-50 mb-6">Edit Reservation</h3>
             <form onSubmit={handleEditReservation} className="space-y-4">
@@ -4888,8 +4888,8 @@ export function FrontDesk() {
       )}
 
       {showTransferModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto shadow-2xl">
             <h3 className="text-xl font-bold text-zinc-50 mb-6">Transfer Room</h3>
             <p className="text-zinc-400 text-sm mb-4">
               Transferring <strong>{showTransferModal.guestName}</strong> from Room <strong>{showTransferModal.roomNumber}</strong>
@@ -4931,8 +4931,8 @@ export function FrontDesk() {
       )}
 
       {showChargeModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto shadow-2xl">
             <h3 className="text-xl font-bold text-zinc-50 mb-6">Post Charge to Room</h3>
             <p className="text-zinc-400 text-sm mb-4">
               Posting charge for <strong>{showChargeModal.guestName}</strong> (Room {showChargeModal.roomNumber})
@@ -5068,11 +5068,11 @@ export function FrontDesk() {
       )}
 
       {showPostponeModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+            className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto my-auto shadow-2xl"
           >
             <h3 className="text-xl font-bold text-zinc-50 mb-2">Postpone Stay</h3>
             <p className="text-zinc-400 text-sm mb-6">Extend the stay for {showPostponeModal.guestName} in Room {showPostponeModal.roomNumber}.</p>
