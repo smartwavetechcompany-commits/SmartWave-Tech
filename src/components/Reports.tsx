@@ -1145,22 +1145,24 @@ export function Reports() {
             <h3 className="font-bold text-zinc-50 text-sm">{reportTypes.find(r => r.id === activeReport)?.label}</h3>
             <p className="text-[10px] text-zinc-500 font-medium">Detailed report: {dateRange.start} – {dateRange.end}</p>
           </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={exportExcel}
-              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
-            >
-              <FileSpreadsheet size={12} />
-              Excel
-            </button>
-            <button 
-              onClick={exportPDF}
-              className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black rounded-lg transition-all text-[10px] font-black uppercase tracking-widest active:scale-95"
-            >
-              <FileText size={12} />
-              PDF
-            </button>
-          </div>
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (hasPermission(profile, 'export_reports') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <div className="flex gap-2">
+              <button 
+                onClick={exportExcel}
+                className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
+              >
+                <FileSpreadsheet size={12} />
+                Excel
+              </button>
+              <button 
+                onClick={exportPDF}
+                className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black rounded-lg transition-all text-[10px] font-black uppercase tracking-widest active:scale-95"
+              >
+                <FileText size={12} />
+                PDF
+              </button>
+            </div>
+          )}
         </div>
               
               <div className="overflow-x-auto">

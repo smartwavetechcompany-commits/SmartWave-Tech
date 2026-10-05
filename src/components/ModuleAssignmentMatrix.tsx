@@ -444,13 +444,8 @@ export function ModuleAssignmentMatrix({
     }
     const role = customRoles.find(r => r.id === roleId);
     if (role && role.permissions) {
-      let rolePerms = [...role.permissions];
-      if (role.inheritsFrom) {
-        const base = BASE_ROLE_PERMISSIONS[role.inheritsFrom] || 
-          SYSTEM_ROLE_TEMPLATES[role.inheritsFrom]?.permissions || [];
-        rolePerms = Array.from(new Set([...rolePerms, ...base]));
-      }
-      onChange(rolePerms as string[]);
+      // Use exact permissions assigned to the custom role without forced base template expansion
+      onChange(role.permissions as string[]);
     }
   };
 

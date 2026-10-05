@@ -210,7 +210,7 @@ export const canCancelReservation = (
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
-  if (!hasPermission(profile, 'cancel_reservations') && !hasPermission(profile, 'delete_reservations')) {
+  if (!hasPermission(profile, 'cancel_reservations')) {
     return { allowed: false, message: 'Access denied: You do not have permission to cancel reservations.' };
   }
 
@@ -257,6 +257,11 @@ export const canProcessRefund = (
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // Granular Action Permission Check (Rule 2)
+  if (!hasPermission(profile, 'process_refunds') && !hasPermission(profile, 'approve_refund') && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+    return { allowed: false, message: 'Access denied: You do not have permission to process refunds.' };
+  }
+
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
@@ -264,7 +269,7 @@ export const canProcessRefund = (
     return { allowed: false, message: 'Refund processing is currently disabled by administrator.' };
   }
 
-  if (settings.requireApprovalForRefunds && !hasPermission(profile, 'void_transaction')) {
+  if (settings.requireApprovalForRefunds && !hasPermission(profile, 'void_transaction') && !hasPermission(profile, 'approve_refund')) {
     return { allowed: false, message: 'Manager approval is required to process refunds.' };
   }
 
@@ -299,18 +304,32 @@ export const canApplyDiscount = (
 export const canManageGuest = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  action: 'edit' | 'delete' | 'blacklist'
+  action: 'create' | 'edit' | 'delete' | 'blacklist' | 'export'
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // Strict Granular Permission Check (Rule 2)
+  if (action === 'create' && !hasPermission(profile, 'add_guests')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to add guests.' };
+  }
+  if (action === 'edit' && !hasPermission(profile, 'edit_guests')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to edit guests.' };
+  }
+  if (action === 'delete' && !hasPermission(profile, 'delete_guests')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to delete guests.' };
+  }
+  if (action === 'export' && !hasPermission(profile, 'export_guests')) {
+    return { allowed: false, message: 'Access denied: You do not have permission to export guests.' };
+  }
+
   const settings = hotel.settings?.guests;
   if (!settings) return { allowed: true };
 
-  if (action === 'edit' && !settings.allowProfileEditing && !hasPermission(profile, 'edit_guest_profiles')) {
+  if (action === 'edit' && !settings.allowProfileEditing && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
     return { allowed: false, message: 'Guest profile editing is currently disabled by administrator.' };
   }
 
-  if (action === 'delete' && !settings.allowDeletion && !hasPermission(profile, 'edit_guest_profiles')) {
+  if (action === 'delete' && !settings.allowDeletion && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
     return { allowed: false, message: 'Guest record deletion is currently restricted.' };
   }
 

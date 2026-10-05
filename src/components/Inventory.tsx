@@ -20,6 +20,8 @@ import { db, handleFirestoreError } from '../firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import { hasPermission } from '../utils/permissions';
+import { toast } from 'sonner';
 
 // Sub-modules
 import { InventoryDashboard } from './inventory/InventoryDashboard';
@@ -33,7 +35,7 @@ type InventoryTab = 'dashboard' | 'items' | 'procurement' | 'movements' | 'audit
 
 export function Inventory() {
   const navigate = useNavigate();
-  const { hotel, currency, exchangeRate, profile } = useAuth();
+  const { hotel, currency, exchangeRate, profile, customRoles } = useAuth();
   const [activeTab, setActiveTab] = useState<InventoryTab>('dashboard');
   
   // Data State
@@ -49,6 +51,46 @@ export function Inventory() {
   const [filterCategory, setFilterCategory] = useState('All');
   const [shouldOpenAddModal, setShouldOpenAddModal] = useState(false);
   const [shouldOpenCategoryModal, setShouldOpenCategoryModal] = useState(false);
+
+  const canManage = hasPermission(profile, 'manage_inventory', customRoles) || 
+                    hasPermission(profile, 'edit_inventory', customRoles) || 
+                    profile?.role === 'hotelAdmin' || 
+                    profile?.role === 'superAdmin';
+
+  const canExport = (hotel?.settings?.reporting?.allowExports ?? true) && 
+                    (hasPermission(profile, 'export_reports', customRoles) || 
+                     profile?.role === 'hotelAdmin' || 
+                     profile?.role === 'superAdmin');
+
+  const handleExportReport = () => {
+    if (!canExport) {
+      toast.error('Permission denied: Exporting reports requires export_reports permission.');
+      return;
+    }
+    if (items.length === 0) {
+      toast.info('No inventory items to export.');
+      return;
+    }
+    const headers = ['Item Name', 'Category', 'Quantity', 'Min Threshold', 'Unit Price', 'Status', 'Last Updated'];
+    const rows = items.map(item => [
+      `"${(item.name || '').replace(/"/g, '""')}"`,
+      `"${(item.category || '').replace(/"/g, '""')}"`,
+      item.quantity || 0,
+      item.minThreshold || 0,
+      (item as any).costPrice || (item as any).price || 0,
+      item.quantity <= item.minThreshold ? 'Low Stock' : 'In Stock',
+      item.lastUpdated ? new Date(item.lastUpdated).toISOString() : ''
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `inventory_report_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Inventory report exported');
+  };
 
   useEffect(() => {
     if (!hotel?.id) {
@@ -163,32 +205,39 @@ export function Inventory() {
           <select className="bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400 outline-none">
             <option>All Categories</option>
           </select>
-          <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all">
-            <Download size={16} />
-            Export Report
-          </button>
-          <button 
-            onClick={() => {
-              setActiveTab('items');
-              setShouldOpenAddModal(true);
-            }}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-lg text-sm font-bold transition-all"
-          >
-            <Plus size={16} />
-            Add Item
-          </button>
-          <button 
-            onClick={() => {
-              setActiveTab('items');
-              // We need a way to open the category modal in ItemMaster
-              // I'll add a prop to ItemMaster for this
-              setShouldOpenCategoryModal(true);
-            }}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all"
-          >
-            <Layers size={16} />
-            Categories
-          </button>
+          {canExport && (
+            <button 
+              onClick={handleExportReport}
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95"
+            >
+              <Download size={16} />
+              Export Report
+            </button>
+          )}
+          {canManage && (
+            <>
+              <button 
+                onClick={() => {
+                  setActiveTab('items');
+                  setShouldOpenAddModal(true);
+                }}
+                className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-lg text-sm font-bold transition-all active:scale-95"
+              >
+                <Plus size={16} />
+                Add Item
+              </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('items');
+                  setShouldOpenCategoryModal(true);
+                }}
+                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95"
+              >
+                <Layers size={16} />
+                Categories
+              </button>
+            </>
+          )}
         </div>
       </div>
 

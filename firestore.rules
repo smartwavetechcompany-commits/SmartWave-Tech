@@ -30,16 +30,18 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      let data = getUserData();
       return isAuthenticated() && (
         isSuperAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "hotelAdmin" ||
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin") ||
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "manager") ||
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions != null && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions.hasAny(['edit_settings', 'edit_hotel_settings', 'manage_settings'])) ||
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles != null && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles.hasAny(['manager', 'corporate', 'admin']))))
+        (data != null && (
+          data.role == "hotelAdmin" ||
+          data.role == "admin" ||
+          data.role == "manager" ||
+          (data.permissions != null && data.permissions is list && 
+           data.permissions.hasAny(['edit_settings', 'edit_hotel_settings', 'manage_settings'])) ||
+          (data.roles != null && data.roles is list && 
+           data.roles.hasAny(['manager', 'corporate', 'admin']))
+        ))
       );
     }
 
@@ -53,8 +55,8 @@ service cloud.firestore {
       return data != null && (
         isSuperAdmin() ||
         data.role == "hotelAdmin" ||
-        (data.permissions != null && data.permissions.hasAny(['manage_staff', 'manage_roles'])) ||
-        (data.roles != null && data.roles.hasAny(['manager', 'admin']))
+        (data.permissions != null && data.permissions is list && data.permissions.hasAny(['manage_staff', 'manage_roles'])) ||
+        (data.roles != null && data.roles is list && data.roles.hasAny(['manager', 'admin']))
       );
     }
 
@@ -70,13 +72,13 @@ service cloud.firestore {
 
     function sameHotel(hotelId) {
       let data = getUserData();
-      return (data != null && (data.hotelId == hotelId || data.hotel_id == hotelId || (data.hotelIds != null && data.hotelIds.hasAny([hotelId])))) ||
+      return (data != null && (data.hotelId == hotelId || data.hotel_id == hotelId || (data.hotelIds != null && data.hotelIds is list && data.hotelIds.hasAny([hotelId])))) ||
              (isAuthenticated() && exists(/databases/$(database)/documents/hotels/$(hotelId)/staff/$(request.auth.uid)));
     }
 
     function isStaffOf(hotelId) {
       let data = getUserData();
-      return (data != null && (data.hotelId == hotelId || data.hotel_id == hotelId || (data.hotelIds != null && data.hotelIds.hasAny([hotelId]))) && data.role != "guest" && data.role != "corporate") ||
+      return (data != null && (data.hotelId == hotelId || data.hotel_id == hotelId || (data.hotelIds != null && data.hotelIds is list && data.hotelIds.hasAny([hotelId]))) && data.role != "guest" && data.role != "corporate") ||
              (isAuthenticated() && exists(/databases/$(database)/documents/hotels/$(hotelId)/staff/$(request.auth.uid)));
     }
 
@@ -276,6 +278,8 @@ service cloud.firestore {
                        (resource != null && resource.data.hotelId == hotelId);
         allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                                  (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
       }

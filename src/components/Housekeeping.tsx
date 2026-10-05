@@ -99,6 +99,25 @@ export function Housekeeping() {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
 
+    if (assignedTo !== undefined && assignedTo !== room.assignedTo) {
+      if (!hasPermission(profile, 'assign_housekeeping_tasks') && !hasPermission(profile, 'manage_rooms') && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+        toast.error('Access denied: You do not have permission to assign housekeeping tasks.');
+        return;
+      }
+    }
+
+    if (status !== room.status) {
+      const hasStatusPerm = hasPermission(profile, 'edit_housekeeping_tasks') || 
+                            hasPermission(profile, 'close_housekeeping_tasks') || 
+                            hasPermission(profile, 'manage_rooms') || 
+                            profile.role === 'hotelAdmin' || 
+                            profile.role === 'superAdmin';
+      if (!hasStatusPerm) {
+        toast.error('Access denied: You do not have permission to change room housekeeping status.');
+        return;
+      }
+    }
+
     // Check generic status update permission from settings
     const canUpdate = hotel.settings?.housekeeping?.allowStatusUpdates ?? true;
     if (!canUpdate && !hasPermission(profile, 'manage_rooms')) {
@@ -488,137 +507,149 @@ export function Housekeeping() {
             <div className="col-span-full py-12 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
               <p>No rooms found matching your filters</p>
             </div>
-          ) : (
-            sortedRooms.map(room => {
-          const statusColor = hotel?.branding?.statusColors?.[room.status] || 
-            (room.status === 'clean' ? '#10b981' : 
-             room.status === 'dirty' ? '#ef4444' : 
-             room.status === 'occupied' ? '#3b82f6' : 
-             room.status === 'cleaning' ? '#8b5cf6' : 
-             room.status === 'maintenance' ? '#f59e0b' : '#71717a');
+          ) : (() => {
+            const canEditTasks = hasPermission(profile, 'edit_housekeeping_tasks') || hasPermission(profile, 'close_housekeeping_tasks') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+            const canAssignTasks = hasPermission(profile, 'assign_housekeeping_tasks') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
 
-          const isSelected = selectedRoomIds.includes(room.id);
-          const activeReservation = reservations.find(res => res.roomId === room.id);
+            return sortedRooms.map(room => {
+              const statusColor = hotel?.branding?.statusColors?.[room.status] || 
+                (room.status === 'clean' ? '#10b981' : 
+                 room.status === 'dirty' ? '#ef4444' : 
+                 room.status === 'occupied' ? '#3b82f6' : 
+                 room.status === 'cleaning' ? '#8b5cf6' : 
+                 room.status === 'maintenance' ? '#f59e0b' : '#71717a');
 
-          return (
-            <div 
-              key={room.id} 
-              className={cn(
-                "bg-zinc-900 border rounded-xl p-4 space-y-3 flex flex-col transition-all relative group shadow-lg shadow-black/20",
-                isSelected ? "border-emerald-500 ring-1 ring-emerald-500/10" : "border-zinc-800"
-              )}
-            >
-              <button 
-                onClick={() => toggleRoomSelection(room.id)}
-                className="absolute top-3 right-3 text-zinc-700 hover:text-emerald-500 transition-colors"
-              >
-                {isSelected ? <CheckSquare size={18} className="text-emerald-500" /> : <Square size={18} />}
-              </button>
+              const isSelected = selectedRoomIds.includes(room.id);
+              const activeReservation = reservations.find(res => res.roomId === room.id);
 
-          <div className="flex items-center justify-between pr-6">
-            <span className="text-xl font-bold text-zinc-50">Room {room.roomNumber}</span>
-            <div className="flex flex-col items-end gap-1">
-              <span 
-                style={{ 
-                  backgroundColor: `${statusColor}1a`,
-                  color: statusColor
-                }}
-                className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-[currentColor]/10"
-              >
-                {room.status.replace(/_/g, ' ')}
-              </span>
-              {room.assignedTo && (
-                <div className="flex items-center gap-1 text-[8px] text-emerald-500 font-bold uppercase tracking-tighter">
-                  <UserIcon size={10} />
-                  {staff.find(s => s.uid === room.assignedTo)?.displayName?.split(' ')[0] || 'Assigned'}
+              return (
+                <div 
+                  key={room.id} 
+                  className={cn(
+                    "bg-zinc-900 border rounded-xl p-4 space-y-3 flex flex-col transition-all relative group shadow-lg shadow-black/20",
+                    isSelected ? "border-emerald-500 ring-1 ring-emerald-500/10" : "border-zinc-800"
+                  )}
+                >
+                  <button 
+                    onClick={() => toggleRoomSelection(room.id)}
+                    className="absolute top-3 right-3 text-zinc-700 hover:text-emerald-500 transition-colors"
+                  >
+                    {isSelected ? <CheckSquare size={18} className="text-emerald-500" /> : <Square size={18} />}
+                  </button>
+
+              <div className="flex items-center justify-between pr-6">
+                <span className="text-xl font-bold text-zinc-50">Room {room.roomNumber}</span>
+                <div className="flex flex-col items-end gap-1">
+                  <span 
+                    style={{ 
+                      backgroundColor: `${statusColor}1a`,
+                      color: statusColor
+                    }}
+                    className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-[currentColor]/10"
+                  >
+                    {room.status.replace(/_/g, ' ')}
+                  </span>
+                  {room.assignedTo && (
+                    <div className="flex items-center gap-1 text-[8px] text-emerald-500 font-bold uppercase tracking-tighter">
+                      <UserIcon size={10} />
+                      {staff.find(s => s.uid === room.assignedTo)?.displayName?.split(' ')[0] || 'Assigned'}
+                    </div>
+                  )}
+                </div>
+              </div>
+                  
+              <div className="text-[9px] text-zinc-500 uppercase font-black tracking-widest bg-zinc-950 px-2 py-0.5 rounded-md self-start">
+                {room.type} • Floor {room.floor}
+              </div>
+
+              {activeReservation && (
+                <div className="bg-blue-500/5 border border-blue-500/10 rounded-lg p-2.5 space-y-0.5">
+                  <div className="flex items-center gap-2 text-[8px] text-blue-500 font-black uppercase tracking-widest">
+                    <UserIcon size={10} />
+                    Current Guest
+                  </div>
+                  <p className="text-xs font-bold text-zinc-100">{activeReservation.guestName}</p>
+                  <p className="text-[9px] text-zinc-600 font-medium">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
                 </div>
               )}
-            </div>
-          </div>
-              
-          <div className="text-[9px] text-zinc-500 uppercase font-black tracking-widest bg-zinc-950 px-2 py-0.5 rounded-md self-start">
-            {room.type} • Floor {room.floor}
-          </div>
 
-          {activeReservation && (
-            <div className="bg-blue-500/5 border border-blue-500/10 rounded-lg p-2.5 space-y-0.5">
-              <div className="flex items-center gap-2 text-[8px] text-blue-500 font-black uppercase tracking-widest">
-                <UserIcon size={10} />
-                Current Guest
+              <div className="space-y-1.5">
+                <label className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Assignment</label>
+                <select
+                  disabled={!canAssignTasks}
+                  className={cn(
+                    "w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[11px] text-zinc-400 focus:border-emerald-500 outline-none transition-all",
+                    !canAssignTasks && "opacity-50 cursor-not-allowed"
+                  )}
+                  value={room.assignedTo || ''}
+                  onChange={(e) => updateRoomStatus(room.id, room.status, e.target.value)}
+                >
+                  <option value="">Unassigned</option>
+                  {staff.map(s => (
+                    <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                  ))}
+                </select>
               </div>
-              <p className="text-xs font-bold text-zinc-100">{activeReservation.guestName}</p>
-              <p className="text-[9px] text-zinc-600 font-medium">Stay: {format(new Date(activeReservation.checkIn), 'MMM d')} - {format(new Date(activeReservation.checkOut), 'MMM d')}</p>
+
+              <div className="flex-1 space-y-1.5">
+                <label className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Notes</label>
+                <textarea
+                  readOnly={!canEditTasks}
+                  className={cn(
+                    "w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-[11px] text-zinc-400 focus:border-emerald-500 outline-none resize-none h-16 transition-all",
+                    !canEditTasks && "opacity-50 cursor-not-allowed"
+                  )}
+                  placeholder={canEditTasks ? "Maintenance items..." : "No notes"}
+                  value={roomNotes[room.id] ?? room.notes ?? ''}
+                  onChange={(e) => setRoomNotes(prev => ({ ...prev, [room.id]: e.target.value }))}
+                  onBlur={() => {
+                    if (!canEditTasks) return;
+                    const notes = roomNotes[room.id];
+                    if (notes !== undefined && notes !== room.notes) {
+                      updateRoomStatus(room.id, room.status);
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="pt-3 border-t border-zinc-800 grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => updateRoomStatus(room.id, 'clean')}
+                  disabled={!canEditTasks || room.status === 'clean'}
+                  className="flex items-center justify-center gap-1.5 bg-emerald-500/5 text-emerald-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-emerald-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale disabled:cursor-not-allowed"
+                >
+                  <CheckCircle2 size={12} />
+                  Clean
+                </button>
+                <button 
+                  onClick={() => updateRoomStatus(room.id, 'cleaning')}
+                  disabled={!canEditTasks || room.status === 'cleaning'}
+                  className="flex items-center justify-center gap-1.5 bg-purple-500/5 text-purple-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale disabled:cursor-not-allowed"
+                >
+                  <Clock size={12} />
+                  Loading
+                </button>
+                <button 
+                  onClick={() => updateRoomStatus(room.id, 'dirty')}
+                  disabled={!canEditTasks || room.status === 'dirty'}
+                  className="flex items-center justify-center gap-1.5 bg-red-500/5 text-red-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale disabled:cursor-not-allowed"
+                >
+                  <AlertCircle size={12} />
+                  Dirty
+                </button>
+                <button 
+                  onClick={() => updateRoomStatus(room.id, 'maintenance')}
+                  disabled={!canEditTasks || room.status === 'maintenance'}
+                  className="flex items-center justify-center gap-1.5 bg-amber-500/5 text-amber-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-amber-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={12} />
+                  Repair
+                </button>
+              </div>
             </div>
-          )}
-
-          <div className="space-y-1.5">
-            <label className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Assignment</label>
-            <select
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-[11px] text-zinc-400 focus:border-emerald-500 outline-none transition-all"
-              value={room.assignedTo || ''}
-              onChange={(e) => updateRoomStatus(room.id, room.status, e.target.value)}
-            >
-              <option value="">Unassigned</option>
-              {staff.map(s => (
-                <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex-1 space-y-1.5">
-            <label className="text-[8px] text-zinc-500 font-black uppercase tracking-widest">Notes</label>
-            <textarea
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-[11px] text-zinc-400 focus:border-emerald-500 outline-none resize-none h-16 transition-all"
-              placeholder="Maintenance items..."
-              value={roomNotes[room.id] ?? room.notes ?? ''}
-              onChange={(e) => setRoomNotes(prev => ({ ...prev, [room.id]: e.target.value }))}
-              onBlur={() => {
-                const notes = roomNotes[room.id];
-                if (notes !== undefined && notes !== room.notes) {
-                  updateRoomStatus(room.id, room.status);
-                }
-              }}
-            />
-          </div>
-
-          <div className="pt-3 border-t border-zinc-800 grid grid-cols-2 gap-2">
-            <button 
-              onClick={() => updateRoomStatus(room.id, 'clean')}
-              disabled={room.status === 'clean'}
-              className="flex items-center justify-center gap-1.5 bg-emerald-500/5 text-emerald-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-emerald-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
-            >
-              <CheckCircle2 size={12} />
-              Clean
-            </button>
-            <button 
-              onClick={() => updateRoomStatus(room.id, 'cleaning')}
-              disabled={room.status === 'cleaning'}
-              className="flex items-center justify-center gap-1.5 bg-purple-500/5 text-purple-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-purple-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
-            >
-              <Clock size={12} />
-              Loading
-            </button>
-            <button 
-              onClick={() => updateRoomStatus(room.id, 'dirty')}
-              disabled={room.status === 'dirty'}
-              className="flex items-center justify-center gap-1.5 bg-red-500/5 text-red-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
-            >
-              <AlertCircle size={12} />
-              Dirty
-            </button>
-            <button 
-              onClick={() => updateRoomStatus(room.id, 'maintenance')}
-              disabled={room.status === 'maintenance'}
-              className="flex items-center justify-center gap-1.5 bg-amber-500/5 text-amber-500 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-amber-500/10 transition-all active:scale-95 disabled:opacity-20 disabled:grayscale"
-            >
-              <RefreshCw size={12} />
-              Repair
-            </button>
-          </div>
-        </div>
-          );
-            })
-          )}
+              );
+            });
+          })()}
         </AnimatePresence>
       </div>
 

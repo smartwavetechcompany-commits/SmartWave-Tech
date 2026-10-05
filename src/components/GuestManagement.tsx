@@ -40,6 +40,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { canManageGuest } from '../utils/policyUtils';
+import { hasPermission } from '../utils/permissions';
 import Fuse from 'fuse.js';
 import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenceInDays, parseISO, isValid } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -74,7 +75,7 @@ import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFi
 import { useBookingSources } from '../hooks/useSettings';
 
 export function GuestManagement() {
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
   const queryClient = useQueryClient();
   const { activeBookingSources } = useBookingSources();
 
@@ -447,6 +448,12 @@ export function GuestManagement() {
         toast.error(policy.message || 'Editing denied by hotel policy');
         return;
       }
+    } else {
+      const policy = canManageGuest(hotel, profile, 'create');
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Access denied: You do not have permission to add guests.');
+        return;
+      }
     }
 
     if (hotel?.settings?.guests?.requirePhoneVerification) {
@@ -566,14 +573,14 @@ export function GuestManagement() {
   const deleteGuest = async (guestId: string) => {
     if (!hotel?.id || !profile) return;
     
-    const policy = canManageGuest(hotel, profile, 'delete');
-    if (!policy.allowed) {
-      toast.error(policy.message || 'Deletion denied by hotel policy');
+    if (!hasPermission(profile, 'delete_guests', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+      toast.error('You do not have permission to delete guest profiles');
       return;
     }
 
-    if (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
-      toast.error('Only administrators can delete guest profiles');
+    const policy = canManageGuest(hotel, profile, 'delete');
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Deletion denied by hotel policy');
       return;
     }
     
@@ -611,6 +618,10 @@ export function GuestManagement() {
   };
 
   const exportGuests = () => {
+    if (!hasPermission(profile, 'export_guests', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+      toast.error('You do not have permission to export guest profiles');
+      return;
+    }
     const data = guests
       .filter(guest => {
         const matchesType = reportFilter.type === 'all' || 
@@ -791,7 +802,7 @@ export function GuestManagement() {
               <option value="corporate">Corporate</option>
             </select>
           </div>
-          {(hotel?.settings?.reporting?.allowExports ?? true) && (
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (hasPermission(profile, 'export_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <button
               onClick={exportGuests}
               className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-100 px-3 py-2 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700"
@@ -801,32 +812,34 @@ export function GuestManagement() {
               <span className="sm:hidden">Export</span>
             </button>
           )}
-          <button
-            onClick={() => {
-              setEditingGuest(null);
-            setNewGuest({ 
-              name: '', 
-              email: '', 
-              phone: '', 
-              idType: 'Passport', 
-              idNumber: '', 
-              address: '', 
-              notes: '',
-              tags: [],
-              preferences: [],
-              ledgerBalance: 0,
-              corporateId: '',
-              totalStays: 0,
-              totalSpent: 0,
-              bookingSource: 'Walk-in'
-            });
-            setShowAddModal(true);
-          }}
-          className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
-        >
-          <Plus size={14} />
-          Add Guest
-        </button>
+          {(hasPermission(profile, 'add_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <button
+              onClick={() => {
+                setEditingGuest(null);
+                setNewGuest({ 
+                  name: '', 
+                  email: '', 
+                  phone: '', 
+                  idType: 'Passport', 
+                  idNumber: '', 
+                  address: '', 
+                  notes: '',
+                  tags: [],
+                  preferences: [],
+                  ledgerBalance: 0,
+                  corporateId: '',
+                  totalStays: 0,
+                  totalSpent: 0,
+                  bookingSource: 'Walk-in'
+                });
+                setShowAddModal(true);
+              }}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+            >
+              <Plus size={14} />
+              Add Guest
+            </button>
+          )}
       </div>
     </div>
 
@@ -1159,50 +1172,45 @@ export function GuestManagement() {
                         >
                           <History size={14} />
                         </button>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            setEditingGuest(guest);
-                            setNewGuest({
-                              name: guest.name,
-                              email: guest.email,
-                              phone: guest.phone,
-                              idType: guest.idType || 'Passport',
-                              idNumber: guest.idNumber || '',
-                              address: guest.address || '',
-                              notes: guest.notes || '',
-                              tags: guest.tags || [],
-                              preferences: guest.preferences || [],
-                              ledgerBalance: guest.ledgerBalance || 0,
-                              corporateId: guest.corporateId || '',
-                              totalStays: guest.totalStays || 0,
-                              totalSpent: guest.totalSpent || 0,
-                              bookingSource: guest.bookingSource || (guest as any).preferredBookingSource || 'Walk-in'
-                            });
-                            setShowAddModal(true);
-                          }}
-                          className="p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            if (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
-                              toast.error('Only administrators can delete guest profiles');
-                              return;
-                            }
-                            setConfirmDelete(guest.id);
-                          }}
-                          className={cn(
-                            "p-1.5 rounded-lg transition-all",
-                            (profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') 
-                              ? "text-zinc-500 hover:text-red-500" 
-                              : "text-zinc-800 cursor-not-allowed"
-                          )}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {(hasPermission(profile, 'edit_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              setEditingGuest(guest);
+                              setNewGuest({
+                                name: guest.name,
+                                email: guest.email,
+                                phone: guest.phone,
+                                idType: guest.idType || 'Passport',
+                                idNumber: guest.idNumber || '',
+                                address: guest.address || '',
+                                notes: guest.notes || '',
+                                tags: guest.tags || [],
+                                preferences: guest.preferences || [],
+                                ledgerBalance: guest.ledgerBalance || 0,
+                                corporateId: guest.corporateId || '',
+                                totalStays: guest.totalStays || 0,
+                                totalSpent: guest.totalSpent || 0,
+                                bookingSource: guest.bookingSource || (guest as any).preferredBookingSource || 'Walk-in'
+                              });
+                              setShowAddModal(true);
+                            }}
+                            className="p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all"
+                            title="Edit Guest Profile"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                        )}
+                        {(hasPermission(profile, 'delete_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          <button 
+                            type="button"
+                            onClick={() => setConfirmDelete(guest.id)}
+                            className="p-1.5 text-zinc-500 hover:text-red-500 rounded-lg transition-all"
+                            title="Delete Guest Profile"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
 

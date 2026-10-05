@@ -41,16 +41,22 @@ import { toast } from 'sonner';
 
 import { useSettings } from '../hooks/useSettings';
 import { settingsManager } from '../services/settingsManager';
+import { hasPermission } from '../utils/permissions';
 
 const DEFAULT_SETTINGS_LOCAL = DEFAULT_SETTINGS;
 
 export function AdminSettings() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, customRoles = [] } = useAuth();
   const [activeTab, setActiveTab ] = useState<keyof HotelSettings>('checkout');
   const { settings, setSettings } = useSettings();
   const [localSettings, setLocalSettings] = useState<HotelSettings>(settings);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+
+  const canEdit = hasPermission(profile, 'edit_settings', customRoles) || 
+                  hasPermission(profile, 'edit_hotel_settings', customRoles) || 
+                  profile?.role === 'hotelAdmin' || 
+                  profile?.role === 'superAdmin';
 
   const [newSourceName, setNewSourceName] = useState('');
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
@@ -65,6 +71,10 @@ export function AdminSettings() {
 
   const saveSettings = async (updatedSettings: HotelSettings, group?: keyof HotelSettings, key? : string) => {
     if (!hotel?.id) return;
+    if (!canEdit) {
+      toast.error('Permission denied: Modifying hotel settings requires edit_settings permission.');
+      return;
+    }
     setIsSaving(true);
     try {
       // Use Firestore dot notation to update nesting safely without overwriting other groups
@@ -100,6 +110,10 @@ export function AdminSettings() {
   };
 
   const handleToggle = (group: keyof HotelSettings, key: string) => {
+    if (!canEdit) {
+      toast.error('Permission denied: Modifying operational controls requires edit_settings permission.');
+      return;
+    }
     const isSpecialLock = key === 'lockInvoicesAfterCheckout';
     const nextVal = !(localSettings[group] as any)[key];
     const updated = {
@@ -132,6 +146,10 @@ export function AdminSettings() {
   );
 
   const saveBookingSources = async (sources: BookingSource[]) => {
+    if (!canEdit) {
+      toast.error('Permission denied: Modifying booking sources requires edit_settings permission.');
+      return;
+    }
     const updated = {
       ...localSettings,
       reservations: {
@@ -146,6 +164,10 @@ export function AdminSettings() {
 
   const handleAddBookingSource = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) {
+      toast.error('Permission denied: Adding booking sources requires edit_settings permission.');
+      return;
+    }
     const trimmed = newSourceName.trim();
     if (!trimmed) return;
     const exists = currentSources.some(s => s.name.toLowerCase() === trimmed.toLowerCase());
@@ -168,6 +190,7 @@ export function AdminSettings() {
   };
 
   const handleToggleSourceActive = async (id: string) => {
+    if (!canEdit) return;
     const updated = currentSources.map(s => {
       if (s.id === id) {
         return { ...s, isActive: !s.isActive };
@@ -178,6 +201,7 @@ export function AdminSettings() {
   };
 
   const handleSetDefaultSource = async (id: string) => {
+    if (!canEdit) return;
     const updated = currentSources.map(s => ({
       ...s,
       isDefault: s.id === id,
@@ -198,6 +222,7 @@ export function AdminSettings() {
   };
 
   const handleReorderSource = async (index: number, direction: 'up' | 'down') => {
+    if (!canEdit) return;
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= currentSources.length) return;
     const copy = [...currentSources];
@@ -209,6 +234,7 @@ export function AdminSettings() {
   };
 
   const handleSaveRenameSource = async (id: string) => {
+    if (!canEdit) return;
     const trimmed = editingSourceName.trim();
     if (!trimmed) {
       setEditingSourceId(null);
@@ -222,6 +248,7 @@ export function AdminSettings() {
   };
 
   const handleDeleteBookingSource = async (id: string, name: string) => {
+    if (!canEdit) return;
     if (currentSources.length <= 1) {
       toast.error('At least one booking source must remain.');
       return;
@@ -237,6 +264,7 @@ export function AdminSettings() {
   };
 
   const handleInputChange = (group: keyof HotelSettings, key: string, value: any) => {
+    if (!canEdit) return;
     setLocalSettings((prev) => ({
       ...prev,
       [group]: {
@@ -248,6 +276,7 @@ export function AdminSettings() {
   };
 
   const handleInputBlur = (group: keyof HotelSettings, key: string) => {
+    if (!canEdit) return;
     if (hasChanges) {
       saveSettings(localSettings, group, key);
     }
@@ -279,9 +308,11 @@ export function AdminSettings() {
         </div>
         <button
           onClick={() => handleToggle(group, key)}
+          disabled={!canEdit}
           className={cn(
             "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none",
-            isEnabled ? "bg-emerald-500" : "bg-zinc-800"
+            isEnabled ? "bg-emerald-500" : "bg-zinc-800",
+            !canEdit && "opacity-40 cursor-not-allowed"
           )}
         >
           <span
@@ -321,10 +352,14 @@ export function AdminSettings() {
         </div>
         <input
           type={actualType}
+          disabled={!canEdit}
           value={rawVal !== undefined && rawVal !== null ? rawVal : ''}
           onChange={(e) => handleInputChange(group, key, actualType === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value)}
           onBlur={() => handleInputBlur(group, key)}
-          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-50 outline-none focus:border-emerald-500 w-24 text-right"
+          className={cn(
+            "bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-50 outline-none focus:border-emerald-500 w-24 text-right",
+            !canEdit && "opacity-40 cursor-not-allowed"
+          )}
         />
       </div>
     );
@@ -334,19 +369,26 @@ export function AdminSettings() {
     <div className="p-8 max-w-5xl mx-auto space-y-8">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight flex items-center gap-3">
-            <ShieldCheck className="text-emerald-500" />
-            Admin Controls
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold text-zinc-50 tracking-tight flex items-center gap-3">
+              <ShieldCheck className="text-emerald-500" />
+              Admin Controls
+            </h1>
+            {!canEdit && (
+              <span className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px] font-bold rounded-lg flex items-center gap-1.5 uppercase tracking-wider">
+                <Lock size={12} /> Read-Only
+              </span>
+            )}
+          </div>
           <p className="text-zinc-400">Configure operational rules and system-wide policies</p>
         </div>
         <button
           onClick={() => saveSettings(localSettings)}
-          disabled={isSaving}
-          className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-6 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
+          disabled={isSaving || !canEdit}
+          className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-6 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-emerald-500/20 transition-all active:scale-95 disabled:opacity-40 disabled:scale-100 disabled:cursor-not-allowed"
         >
-          <div className={cn("w-2 h-2 rounded-full", isSaving ? "bg-amber-500 animate-pulse" : "bg-emerald-500")} />
-          {isSaving ? 'Syncing...' : 'Settings Auto-Saved'}
+          <div className={cn("w-2 h-2 rounded-full", isSaving ? "bg-amber-500 animate-pulse" : canEdit ? "bg-emerald-500" : "bg-zinc-500")} />
+          {isSaving ? 'Syncing...' : canEdit ? 'Settings Auto-Saved' : 'Read-Only'}
         </button>
       </header>
 

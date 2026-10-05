@@ -163,7 +163,7 @@ export function CorporateManagement() {
   const hasPermission = () => {
     if (!profile) return false;
     if (profile.role === 'hotelAdmin' || profile.role === 'superAdmin') return true;
-    return authHasPermission('manage_corporate') || authHasPermission('view_city_ledger') || authHasPermission('create_ledger_entries');
+    return authHasPermission('manage_corporate');
   };
 
   useEffect(() => {

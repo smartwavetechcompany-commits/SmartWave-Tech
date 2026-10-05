@@ -42,9 +42,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
+import { hasPermission } from '../utils/permissions';
 
 export function FandB() {
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -219,6 +220,11 @@ export function FandB() {
   const handleAddOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile || isSaving) return;
+
+    if (!hasPermission(profile, 'create_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to create orders.');
+      return;
+    }
 
     // Check if room number is specified but not checked in
     const isRoomOrder = newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in';
@@ -420,7 +426,12 @@ export function FandB() {
   };
 
   const handleDeleteOrder = async (orderId: string, roomNumber: string) => {
-    if (!hotel?.id || !profile || (profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin')) return;
+    if (!hotel?.id || !profile) return;
+
+    if (!hasPermission(profile, 'delete_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to delete orders.');
+      return;
+    }
 
     if (!window.confirm(`Are you sure you want to delete order for Room ${roomNumber}? This action cannot be undone.`)) {
       return;
@@ -459,7 +470,12 @@ export function FandB() {
   };
 
   const updateOrderStatus = async (orderId: string, status: KitchenOrder['status']) => {
-    if (!hotel?.id) return;
+    if (!hotel?.id || !profile) return;
+
+    if (!hasPermission(profile, 'edit_fb_orders', customRoles) && !hasPermission(profile, 'manage_kitchen', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to update orders.');
+      return;
+    }
     
     const updates: any = { status };
     if (status === 'preparing') updates.preparedAt = new Date().toISOString();
@@ -600,6 +616,10 @@ export function FandB() {
   };
 
   const handleExport = () => {
+    if (!hasPermission(profile, 'export_reports', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to export reports.');
+      return;
+    }
     const start = startOfDay(new Date(reportFilter.startDate));
     const end = endOfDay(new Date(reportFilter.endDate));
 
@@ -672,21 +692,25 @@ export function FandB() {
               />
             </div>
           </div>
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
-          >
-            <Download size={18} />
-            <span className="hidden sm:inline">Export Report</span>
-            <span className="sm:hidden">Export</span>
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
-          >
-            <Plus size={18} />
-            New Order
-          </button>
+          {(hasPermission(profile, 'export_reports', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <button 
+              onClick={handleExport}
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            >
+              <Download size={18} />
+              <span className="hidden sm:inline">Export Report</span>
+              <span className="sm:hidden">Export</span>
+            </button>
+          )}
+          {(hasPermission(profile, 'create_fb_orders', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            >
+              <Plus size={18} />
+              New Order
+            </button>
+          )}
         </div>
       </div>
       
@@ -835,7 +859,7 @@ export function FandB() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          {(hasPermission(profile, 'delete_fb_orders', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                             <button
                               onClick={() => handleDeleteOrder(order.id, order.roomNumber)}
                               className="p-1.5 hover:bg-red-500/10 text-zinc-600 hover:text-red-500 rounded-lg transition-colors"
@@ -980,32 +1004,36 @@ export function FandB() {
 
                     {order.status !== 'delivered' && (
                       <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
-                        {order.status === 'pending' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'preparing')}
-                            className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
-                          >
-                            <ChefHat size={14} />
-                            Start Preparing
-                          </button>
-                        )}
-                        {order.status === 'preparing' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'ready')}
-                            className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
-                          >
-                            <Bell size={14} />
-                            Mark as Ready
-                          </button>
-                        )}
-                        {order.status === 'ready' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'delivered')}
-                            className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
-                          >
-                            <CheckCircle2 size={14} />
-                            Confirm Delivery
-                          </button>
+                        {(hasPermission(profile, 'edit_fb_orders', customRoles) || hasPermission(profile, 'manage_kitchen', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                          <>
+                            {order.status === 'pending' && (
+                              <button
+                                onClick={() => updateOrderStatus(order.id, 'preparing')}
+                                className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                              >
+                                <ChefHat size={14} />
+                                Start Preparing
+                              </button>
+                            )}
+                            {order.status === 'preparing' && (
+                              <button
+                                onClick={() => updateOrderStatus(order.id, 'ready')}
+                                className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                              >
+                                <Bell size={14} />
+                                Mark as Ready
+                              </button>
+                            )}
+                            {order.status === 'ready' && (
+                              <button
+                                onClick={() => updateOrderStatus(order.id, 'delivered')}
+                                className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                              >
+                                <CheckCircle2 size={14} />
+                                Confirm Delivery
+                              </button>
+                            )}
+                          </>
                         )}
                         <button
                           onClick={() => setPrintingOrder(order)}

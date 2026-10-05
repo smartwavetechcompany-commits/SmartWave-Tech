@@ -465,18 +465,24 @@ export const BASE_ROLE_PERMISSIONS: Record<string, Permission[]> = {
 const SYNONYM_MAP: Record<string, Permission[]> = {
   edit_reservations: ['edit_reservations', 'edit_reservation'],
   edit_reservation: ['edit_reservations', 'edit_reservation'],
-  delete_reservations: ['delete_reservations', 'delete_reservation', 'cancel_reservations'],
-  delete_reservation: ['delete_reservations', 'delete_reservation', 'cancel_reservations'],
-  cancel_reservations: ['cancel_reservations', 'delete_reservations', 'delete_reservation'],
-  extend_stay: ['extend_stay', 'edit_reservations', 'edit_reservation'],
-  receive_payments: ['receive_payments', 'receive_payment', 'process_payments'],
-  receive_payment: ['receive_payment', 'receive_payments', 'process_payments'],
-  process_payments: ['process_payments', 'receive_payments', 'receive_payment'],
+  delete_reservations: ['delete_reservations', 'delete_reservation'],
+  delete_reservation: ['delete_reservations', 'delete_reservation'],
+  cancel_reservations: ['cancel_reservations'],
+  extend_stay: ['extend_stay'],
+  add_guests: ['add_guests'],
+  edit_guests: ['edit_guests', 'edit_guest_profiles'],
+  edit_guest_profiles: ['edit_guest_profiles', 'edit_guests'],
+  delete_guests: ['delete_guests'],
+  export_guests: ['export_guests'],
+  receive_payments: ['receive_payments', 'receive_payment'],
+  receive_payment: ['receive_payment', 'receive_payments'],
+  process_payments: ['process_payments'],
   reverse_transactions: ['reverse_transactions', 'void_transaction'],
   void_transaction: ['void_transaction', 'reverse_transactions'],
-  manage_roles: ['manage_roles', 'manage_roles_admin', 'manage_permissions_admin', 'assign_roles'],
+  manage_roles: ['manage_roles', 'manage_roles_admin', 'manage_permissions_admin'],
   manage_roles_admin: ['manage_roles_admin', 'manage_roles', 'manage_permissions_admin'],
   manage_permissions_admin: ['manage_permissions_admin', 'manage_roles', 'manage_roles_admin'],
+  assign_roles: ['assign_roles'],
   manage_staff: ['manage_staff', 'manage_users_admin'],
   manage_users_admin: ['manage_users_admin', 'manage_staff'],
   edit_settings: ['edit_settings', 'edit_hotel_settings'],
@@ -494,9 +500,9 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   create_reservations: { modules: ['reservations', 'frontDesk'], actions: ['create', 'createReservations', 'add'] },
   edit_reservations: { modules: ['reservations', 'frontDesk'], actions: ['edit', 'editReservations', 'update'] },
   edit_reservation: { modules: ['reservations', 'frontDesk'], actions: ['edit', 'editReservations', 'update'] },
-  cancel_reservations: { modules: ['reservations', 'frontDesk'], actions: ['cancel', 'cancelReservations', 'delete', 'deleteReservations'] },
-  delete_reservations: { modules: ['reservations', 'frontDesk'], actions: ['delete', 'deleteReservations', 'cancel'] },
-  delete_reservation: { modules: ['reservations', 'frontDesk'], actions: ['delete', 'deleteReservations', 'cancel'] },
+  cancel_reservations: { modules: ['reservations', 'frontDesk'], actions: ['cancel', 'cancelReservations'] },
+  delete_reservations: { modules: ['reservations', 'frontDesk'], actions: ['delete', 'deleteReservations'] },
+  delete_reservation: { modules: ['reservations', 'frontDesk'], actions: ['delete', 'deleteReservations'] },
   check_in_guests: { modules: ['reservations', 'frontDesk'], actions: ['checkIn', 'check_in', 'checkInGuests'] },
   check_out_guests: { modules: ['reservations', 'frontDesk'], actions: ['checkOut', 'check_out', 'checkOutGuests'] },
   extend_stay: { modules: ['reservations', 'frontDesk'], actions: ['extend', 'extendStay'] },
@@ -515,7 +521,7 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   view_guests: { modules: ['guests'], actions: ['view', 'viewGuests', 'read'] },
   add_guests: { modules: ['guests'], actions: ['create', 'add', 'addGuests'] },
   edit_guests: { modules: ['guests'], actions: ['edit', 'editGuests'] },
-  edit_guest_profiles: { modules: ['guests'], actions: ['editProfiles', 'editGuestProfiles', 'edit', 'view'] },
+  edit_guest_profiles: { modules: ['guests'], actions: ['editProfiles', 'editGuestProfiles', 'edit'] },
   delete_guests: { modules: ['guests'], actions: ['delete', 'deleteGuests'] },
   export_guests: { modules: ['guests'], actions: ['export', 'exportGuests'] },
 
@@ -542,12 +548,12 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   manage_maintenance: { modules: ['maintenance'], actions: ['manage', 'view'] },
 
   // Corporate
-  manage_corporate: { modules: ['corporate'], actions: ['manage', 'view'] },
+  manage_corporate: { modules: ['corporate'], actions: ['manage'] },
 
   // Finance
   view_financial_records: { modules: ['finance'], actions: ['view', 'viewRecords', 'read'] },
   view_ledger: { modules: ['finance'], actions: ['viewLedger', 'ledger'] },
-  process_payments: { modules: ['finance'], actions: ['payments', 'processPayments', 'receivePayments'] },
+  process_payments: { modules: ['finance'], actions: ['payments', 'processPayments'] },
   receive_payment: { modules: ['finance'], actions: ['payments', 'receivePayment', 'receivePayments'] },
   receive_payments: { modules: ['finance'], actions: ['payments', 'receivePayment', 'receivePayments'] },
   post_charges: { modules: ['finance'], actions: ['postCharges', 'charges'] },
@@ -603,6 +609,7 @@ function evaluateExplicitPermissions(
 
   // Case 1: permissions is an array of strings e.g. ['view_reservations', 'check_in_guests']
   if (Array.isArray(permissions)) {
+    if (permissions.includes('all')) return true;
     return synonyms.some(s => permissions.includes(s));
   }
 
@@ -660,25 +667,29 @@ export const hasPermission = (
 
   const synonyms = SYNONYM_MAP[permission] || [permission];
 
-  // 1. Check explicit permissions (array or structured object) on user document
+  // 1. Check explicit permissions on user document if configured
+  // When an admin assigns explicit permissions (array or structured object), that explicit set is authoritative.
+  // We do NOT fall through to base role templates, because that would grant the entire module!
   if (profile.permissions !== undefined && profile.permissions !== null) {
-    if (evaluateExplicitPermissions(profile.permissions, permission, synonyms)) {
-      return true;
-    }
+    return evaluateExplicitPermissions(profile.permissions, permission, synonyms);
   }
 
   // 2. Custom Role assigned to this user
-  if (profile.customRoleId && customRoles.length > 0) {
-    const customRole = customRoles.find(r => r.id === profile.customRoleId);
-    if (customRole && customRole.status !== 'disabled' && customRole.status !== 'archived') {
-      const rolePerms = customRole.permissions || [];
-      if (evaluateExplicitPermissions(rolePerms, permission, synonyms)) {
-        return true;
+  if (profile.customRoleId) {
+    if (customRoles.length > 0) {
+      const customRole = customRoles.find(r => r.id === profile.customRoleId);
+      if (customRole && customRole.status !== 'disabled' && customRole.status !== 'archived') {
+        const rolePerms = customRole.permissions || [];
+        return evaluateExplicitPermissions(rolePerms, permission, synonyms);
       }
     }
+    // When a custom role is designated, permissions are strictly bound to that role.
+    // Do NOT fall through to base role templates as that would grant full module access.
+    return false;
   }
 
-  // 3. Staff role templates fallback (e.g. frontDeskAgent, receptionist, accountant)
+  // 3. Fallback for unconfigured/legacy users ONLY:
+  // If the user has neither profile.permissions nor customRoleId, evaluate the default role template
   if (profile.staffRole) {
     const staffPerms = BASE_ROLE_PERMISSIONS[profile.staffRole] || 
       SYSTEM_ROLE_TEMPLATES[profile.staffRole]?.permissions || [];

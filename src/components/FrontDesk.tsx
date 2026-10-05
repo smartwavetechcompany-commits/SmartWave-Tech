@@ -69,7 +69,7 @@ import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
 
 export function FrontDesk() {
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
   const { executeRequest, isPending } = useRequestManager();
   const { activeBookingSources, defaultBookingSource } = useBookingSources();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -98,9 +98,11 @@ export function FrontDesk() {
     const checkAndRunAudit = async () => {
       const today = format(new Date(), 'yyyy-MM-dd');
       if (hotel.lastAuditDate !== today) {
-        // Only run if user has permission
+        // Only run if user has explicit night audit permission
         const canRunAudit = profile.role === 'hotelAdmin' || 
-                          (profile.role === 'staff' && (profile.permissions || []).includes('frontDesk'));
+                            profile.role === 'superAdmin' ||
+                            hasPermission(profile, 'run_night_audit', customRoles) ||
+                            hasPermission(profile, 'nightly_audit', customRoles);
         
         if (canRunAudit) {
           console.log("Running automatic nightly audit for", today);
@@ -1768,15 +1770,19 @@ export function FrontDesk() {
     }
 
     // Permission checks (Rule 2)
-    if (status === 'checked_in' && !hasPermission(profile, 'check_in_guests')) {
+    if (status === 'confirmed' && !hasPermission(profile, 'edit_reservations', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to edit or confirm reservations.');
+      return;
+    }
+    if (status === 'checked_in' && !hasPermission(profile, 'check_in_guests', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
       toast.error('Permission denied: You do not have permission to check in guests.');
       return;
     }
-    if (status === 'checked_out' && !hasPermission(profile, 'check_out_guests')) {
+    if (status === 'checked_out' && !hasPermission(profile, 'check_out_guests', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
       toast.error('Permission denied: You do not have permission to check out guests.');
       return;
     }
-    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'cancel_reservations') && !hasPermission(profile, 'delete_reservations')) {
+    if ((status === 'cancelled' || status === 'no_show') && !hasPermission(profile, 'cancel_reservations', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
       toast.error('Permission denied: You do not have permission to cancel reservations.');
       return;
     }
@@ -2385,6 +2391,10 @@ export function FrontDesk() {
   };
 
   const handleExport = (type: 'rooms' | 'arrivals' | 'checkins' | 'checkouts' | 'inhouse') => {
+    if (!hasPermission(profile, 'export_reports', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to export reports.');
+      return;
+    }
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     let dataToExport: any[] = [];
     let filename = '';
@@ -2501,7 +2511,7 @@ export function FrontDesk() {
           <p className="text-xs sm:text-sm text-zinc-500">Manage bookings and guest check-ins</p>
         </div>
         <div className="flex items-center gap-3">
-          {(hotel?.settings?.reporting?.allowExports ?? true) && (
+          {(hotel?.settings?.reporting?.allowExports ?? true) && (hasPermission(profile, 'export_reports', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <div className="relative group">
               <button className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95">
                 <Download size={18} />
@@ -2516,14 +2526,16 @@ export function FrontDesk() {
               </div>
             </div>
           )}
-          <button 
-            onClick={() => setShowNightAuditModal(true)}
-            disabled={isAuditing}
-            className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
-            title="Run Nightly Audit"
-          >
-            <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
-          </button>
+          {(hasPermission(profile, 'run_night_audit') || hasPermission(profile, 'nightly_audit') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <button 
+              onClick={() => setShowNightAuditModal(true)}
+              disabled={isAuditing}
+              className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+              title="Run Nightly Audit"
+            >
+              <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
+            </button>
+          )}
           {(hotel?.settings?.reservations?.allowWalkIn ?? true) && hasPermission(profile, 'create_reservations') && (
             <>
               <button 
@@ -4465,7 +4477,7 @@ export function FrontDesk() {
                             <FileText size={14} />
                             Receipt
                           </button>
-                          {res.status === 'checked_out' && (res.ledgerBalance || 0) > 0.01 && (
+                          {res.status === 'checked_out' && (res.ledgerBalance || 0) > 0.01 && (hasPermission(profile, 'process_payments', customRoles) || hasPermission(profile, 'receive_payments', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                             <button 
                               type="button"
                               onClick={() => {
@@ -4486,15 +4498,17 @@ export function FrontDesk() {
                         <>
                           {res.status === 'checked_in' && (
                             <>
-                              <button 
-                                type="button"
-                                onClick={() => setShowTransferModal(res)}
-                                className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
-                                title="Transfer Room"
-                              >
-                                <RefreshCw size={18} />
-                              </button>
-                              {(hasPermission(profile, 'edit_reservation') || hasPermission(profile, 'extend_stay')) && (
+                              {(hasPermission(profile, 'edit_reservations') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  type="button"
+                                  onClick={() => setShowTransferModal(res)}
+                                  className="p-2 text-zinc-400 hover:bg-zinc-800 rounded-lg transition-all active:scale-90"
+                                  title="Transfer Room"
+                                >
+                                  <RefreshCw size={18} />
+                                </button>
+                              )}
+                              {(hasPermission(profile, 'extend_stay') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
                                   onClick={() => {
@@ -4507,22 +4521,26 @@ export function FrontDesk() {
                                   <Calendar size={18} />
                                 </button>
                               )}
-                              <button 
-                                type="button"
-                                onClick={() => setShowDiscountModal(res)}
-                                className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                                title="Apply Discount"
-                              >
-                                <Tag size={18} />
-                              </button>
-                              <button 
-                                type="button"
-                                onClick={() => setShowChargeModal(res)}
-                                className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
-                                title="Post Charge to Room"
-                              >
-                                <Plus size={18} />
-                              </button>
+                              {(hasPermission(profile, 'edit_reservations') || hasPermission(profile, 'post_charges') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  type="button"
+                                  onClick={() => setShowDiscountModal(res)}
+                                  className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                  title="Apply Discount"
+                                >
+                                  <Tag size={18} />
+                                </button>
+                              )}
+                              {(hasPermission(profile, 'post_charges') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  type="button"
+                                  onClick={() => setShowChargeModal(res)}
+                                  className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90"
+                                  title="Post Charge to Room"
+                                >
+                                  <Plus size={18} />
+                                </button>
+                              )}
                               <button 
                                 type="button"
                                 onClick={() => setShowFolioModal(res)}
@@ -4588,7 +4606,7 @@ export function FrontDesk() {
                               >
                                 <History size={18} />
                               </button>
-                              {(res.ledgerBalance || 0) > 0.01 && (
+                              {(res.ledgerBalance || 0) > 0.01 && (hasPermission(profile, 'process_payments', customRoles) || hasPermission(profile, 'receive_payments', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
                                   onClick={() => {
@@ -4616,7 +4634,7 @@ export function FrontDesk() {
                               >
                                 <History size={18} />
                               </button>
-                              {(hotel.settings?.reservations?.allowConfirmation ?? true) && (
+                              {(hotel.settings?.reservations?.allowConfirmation ?? true) && (hasPermission(profile, 'edit_reservations', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   onClick={() => updateReservationStatus(res, 'confirmed')}
                                   className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all active:scale-90"
@@ -4625,63 +4643,71 @@ export function FrontDesk() {
                                   <CheckCircle2 size={18} />
                                 </button>
                               )}
-                              <button 
-                                onClick={() => {
-                                  const amount = prompt("Enter payment amount:");
-                                  if (amount && !isNaN(Number(amount))) {
-                                    updatePayment(res, Number(amount));
-                                  }
-                                }}
-                                className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
-                                title="Take Prepayment / Deposit"
-                              >
-                                 <DollarSign size={18} />
-                              </button>
-                               <button 
-                                onClick={() => updateReservationStatus(res, 'checked_in')}
-                                className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                                title={(() => {
-                                  const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
-                                  if (activeStay) return `Room ${res.roomNumber} is currently occupied by "${activeStay.guestName}". They must check out first.`;
-                                  const room = rooms.find(r => r.id === res.roomId);
-                                  const guest = guests.find(g => g.id === res.guestId);
-                                  const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
-                                  return policy.allowed ? "Check In" : policy.message;
-                                })()}
-                                disabled={loading || (() => {
-                                  const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
-                                  if (activeStay) return true;
-                                  return !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId), reservations).allowed;
-                                })()}
-                              >
-                                <CheckCircle2 size={18} />
-                              </button>
-                              <button 
-                                onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
-                                className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                                title={(() => {
-                                  const policy = canCancelReservation(hotel, profile, res); // No-show uses same cancel policy
-                                  return policy.allowed ? "Mark No-Show" : policy.message;
-                                })()}
-                                disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
-                              >
-                                <UserX size={18} />
-                              </button>
-                              <button 
-                                onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
-                                className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
-                                title={(() => {
-                                  const policy = canCancelReservation(hotel, profile, res);
-                                  return policy.allowed ? "Cancel" : policy.message;
-                                })()}
-                                disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
-                              >
-                                <XCircle size={18} />
-                              </button>
+                              {(hasPermission(profile, 'receive_payments') || hasPermission(profile, 'process_payments') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  onClick={() => {
+                                    const amount = prompt("Enter payment amount:");
+                                    if (amount && !isNaN(Number(amount))) {
+                                      updatePayment(res, Number(amount));
+                                    }
+                                  }}
+                                  className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
+                                  title="Take Prepayment / Deposit"
+                                >
+                                  <DollarSign size={18} />
+                                </button>
+                              )}
+                              {(hasPermission(profile, 'check_in_guests') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  onClick={() => updateReservationStatus(res, 'checked_in')}
+                                  className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                  title={(() => {
+                                    const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
+                                    if (activeStay) return `Room ${res.roomNumber} is currently occupied by "${activeStay.guestName}". They must check out first.`;
+                                    const room = rooms.find(r => r.id === res.roomId);
+                                    const guest = guests.find(g => g.id === res.guestId);
+                                    const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
+                                    return policy.allowed ? "Check In" : policy.message;
+                                  })()}
+                                  disabled={loading || (() => {
+                                    const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
+                                    if (activeStay) return true;
+                                    return !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId), reservations).allowed;
+                                  })()}
+                                >
+                                  <CheckCircle2 size={18} />
+                                </button>
+                              )}
+                              {(hasPermission(profile, 'cancel_reservations') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
+                                  className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                  title={(() => {
+                                    const policy = canCancelReservation(hotel, profile, res); // No-show uses same cancel policy
+                                    return policy.allowed ? "Mark No-Show" : policy.message;
+                                  })()}
+                                  disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
+                                >
+                                  <UserX size={18} />
+                                </button>
+                              )}
+                              {(hasPermission(profile, 'cancel_reservations') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
+                                  className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                                  title={(() => {
+                                    const policy = canCancelReservation(hotel, profile, res);
+                                    return policy.allowed ? "Cancel" : policy.message;
+                                  })()}
+                                  disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
+                                >
+                                  <XCircle size={18} />
+                                </button>
+                              )}
                             </>
                           )}
 
-                          {(profile && hasPermission(profile, 'edit_reservation')) && (
+                          {(profile && (hasPermission(profile, 'edit_reservations') || profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
                             <button 
                               onClick={() => {
                                 const policy = canEditReservation(hotel, profile, res);
@@ -4722,7 +4748,7 @@ export function FrontDesk() {
                             View Folio
                           </button>
 
-                          {res.status === 'checked_in' && (
+                          {res.status === 'checked_in' && (hasPermission(profile, 'extend_stay', customRoles) || hasPermission(profile, 'edit_reservations', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                             <button 
                               type="button"
                               onClick={() => setSelectedResForGraceModal(res)}
@@ -4744,7 +4770,7 @@ export function FrontDesk() {
                             SmartKey
                           </button>
 
-                          {(profile && (profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
+                          {(profile && (hasPermission(profile, 'delete_reservations') || profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
                             <button 
                               onClick={() => setShowConfirmAction({ res, action: 'delete' })}
                               className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"

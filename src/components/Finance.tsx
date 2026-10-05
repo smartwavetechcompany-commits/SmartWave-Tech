@@ -52,9 +52,10 @@ import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } fr
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
+import { hasPermission } from '../utils/permissions';
 
 export function Finance() {
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
   const { executeRequest, isPending } = useRequestManager();
   const [records, setRecords] = useState<FinanceRecord[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -468,6 +469,11 @@ export function Finance() {
   const handlePaySupplier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile || !showPaySupplierModal) return;
+
+    if (!hasPermission(profile, 'process_payments', customRoles) && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Permission denied: You do not have permission to process payments.');
+      return;
+    }
     setIsSaving(true);
     try {
       const supplier = showPaySupplierModal;
@@ -766,6 +772,11 @@ export function Finance() {
     e.preventDefault();
     if (!hotel?.id) return;
 
+    if (!hasPermission(profile, 'post_charges', customRoles) && !hasPermission(profile, 'process_payments', customRoles) && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Permission denied: You do not have permission to post charges or add finance records.');
+      return;
+    }
+
     if (newRecord.type === 'expense' && hotel.settings?.financial?.allowExpenseManagement === false) {
       toast.error("Expense management is disabled by hotel configuration.");
       return;
@@ -860,6 +871,10 @@ export function Finance() {
   }, [filteredLedger, ledgerPage, ledgerPageSize]);
 
   const handleExport = () => {
+    if (!hasPermission(profile, 'export_financial_data', customRoles) && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Permission denied: You do not have permission to export financial data.');
+      return;
+    }
     if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
       toast.error('Exporting financial reports is disabled by hotel configuration.');
       return;
@@ -910,20 +925,24 @@ export function Finance() {
             <RefreshCw size={14} className={cn(isSyncing && "animate-spin")} />
             Sync
           </button>
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
-          >
-            <Download size={14} />
-            Export
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black rounded-lg transition-all text-[10px] font-black uppercase tracking-widest active:scale-95"
-          >
-            <Plus size={14} />
-            Add Record
-          </button>
+          {(hasPermission(profile, 'export_financial_data', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <button 
+              onClick={handleExport}
+              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
+            >
+              <Download size={14} />
+              Export
+            </button>
+          )}
+          {(hasPermission(profile, 'post_charges', customRoles) || hasPermission(profile, 'process_payments', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black rounded-lg transition-all text-[10px] font-black uppercase tracking-widest active:scale-95"
+            >
+              <Plus size={14} />
+              Add Record
+            </button>
+          )}
         </div>
       </div>
 

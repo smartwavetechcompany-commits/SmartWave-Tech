@@ -27,20 +27,23 @@ export const PermissionGuard: React.FC<PermissionGuardProps> = ({
   
   let hasAccess = false;
 
-  // 1. Module-level visibility gate (Rule 1)
-  if (moduleId) {
+  // 1. Both module and specific permission specified: BOTH must be granted
+  if (moduleId && permission) {
+    const isModuleAllowed = isPMSModuleAssigned(profile, moduleId, customRoles);
+    const isActionAllowed = Array.isArray(permission)
+      ? permission.some(p => hasPermission(profile, p, customRoles))
+      : hasPermission(profile, permission, customRoles);
+    hasAccess = isModuleAllowed && isActionAllowed;
+  } else if (permission) {
+    // 2. Action permission check only
+    hasAccess = Array.isArray(permission)
+      ? permission.some(p => hasPermission(profile, p, customRoles))
+      : hasPermission(profile, permission, customRoles);
+  } else if (moduleId) {
+    // 3. Module-level visibility gate only
     hasAccess = isPMSModuleAssigned(profile, moduleId, customRoles);
-  }
-
-  // 2. Action permission check
-  if (permission) {
-    if (Array.isArray(permission)) {
-      const permGranted = permission.some(p => hasPermission(profile, p, customRoles));
-      hasAccess = moduleId ? (hasAccess || permGranted) : permGranted;
-    } else {
-      const permGranted = hasPermission(profile, permission, customRoles);
-      hasAccess = moduleId ? (hasAccess || permGranted) : permGranted;
-    }
+  } else {
+    hasAccess = true;
   }
 
   if (!hasAccess) {
