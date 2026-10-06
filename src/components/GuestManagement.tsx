@@ -1792,13 +1792,19 @@ export function GuestManagement() {
 
       {/* Add/Edit Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
-          >
-            <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAddModal(false);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-lg max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
+            >
+              <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
               <div>
                 <h2 className="text-xl font-bold text-zinc-50">{editingGuest ? 'Edit Guest Profile' : 'Add New Guest'}</h2>
                 <p className="text-xs text-zinc-400 mt-0.5">{editingGuest ? 'Update guest contact details and preferences' : 'Register a new guest in the PMS directory'}</p>
@@ -2050,7 +2056,7 @@ export function GuestManagement() {
                   />
                 </div>
               </div>
-              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
+              <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0 sticky bottom-0 z-10">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -2075,6 +2081,7 @@ export function GuestManagement() {
               </div>
             </form>
           </motion.div>
+          </div>
         </div>
       )}
 

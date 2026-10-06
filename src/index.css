@@ -250,3 +250,41 @@
   min-width: 0 !important;
   min-height: 200px !important;
 }
+
+/* ================================================================ */
+/* MODAL & DIALOG VIEWPORT RESPONSIVENESS (ANTI-CLIPPING ENGINE)   */
+/* Solves UI covering and hidden application buttons at 100% zoom, */
+/* 67% zoom, or high-DPI scaling across all desktop & mobile sizes. */
+/* ================================================================ */
+
+/* Ensure all full-screen fixed overlays allow natural vertical scrolling and don't trap views */
+.fixed.inset-0:not(#print-root) {
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Guard against negative flex centering that pushes modal tops/bottoms off screen on short viewports or high zoom */
+@media (max-height: 850px) {
+  .fixed.inset-0:not(#print-root).flex.items-center,
+  .fixed.inset-0:not(#print-root) > .flex.items-center {
+    align-items: flex-start !important;
+    padding-top: max(0.75rem, env(safe-area-inset-top)) !important;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* Ensure modal dialog cards never exceed viewport height so buttons are always accessible */
+.fixed.inset-0:not(#print-root) > div:not(.print-container):not([class*="fixed"]),
+.fixed.inset-0:not(#print-root) > [class*="motion"]:not(.print-container),
+.fixed.inset-0:not(#print-root) .min-h-full > div:not(.print-container) {
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  box-sizing: border-box;
+}
+
+/* Ensure modal footers containing action buttons (Save, Cancel, Submit, etc.) are never clipped */
+.fixed.inset-0:not(#print-root) [class*="border-t"]:last-child {
+  flex-shrink: 0;
+}
+

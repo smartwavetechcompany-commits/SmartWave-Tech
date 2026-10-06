@@ -1098,18 +1098,24 @@ export function CorporateManagement() {
 
       {/* Adjustment Modal */}
       {showAdjustmentModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-white">Manual Adjustment</h2>
-              <p className="text-sm text-zinc-500">{showAdjustmentModal.name}</p>
-            </div>
-            <form onSubmit={handleManualAdjustment}>
-              <div className="p-6 space-y-4">
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAdjustmentModal(null);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
+            >
+              <div className="p-6 border-b border-zinc-800 shrink-0 bg-zinc-900 sticky top-0 z-10">
+                <h2 className="text-xl font-bold text-white">Manual Adjustment</h2>
+                <p className="text-sm text-zinc-500">{showAdjustmentModal.name}</p>
+              </div>
+              <form onSubmit={handleManualAdjustment} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="p-6 space-y-4 flex-1 overflow-y-auto min-h-0 overscroll-contain">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Adjustment Type</label>
@@ -1159,7 +1165,7 @@ export function CorporateManagement() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0 sticky bottom-0 z-10">
                 <button
                   type="button"
                   onClick={() => setShowAdjustmentModal(null)}
@@ -1176,6 +1182,7 @@ export function CorporateManagement() {
               </div>
             </form>
           </motion.div>
+          </div>
         </div>
       )}
 
@@ -1481,20 +1488,26 @@ export function CorporateManagement() {
 
       {/* Add/Edit Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-2xl overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">{editingAccount ? 'Edit Account' : 'Add Corporate Account'}</h2>
-              <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white">
-                <Trash2 size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleSaveAccount}>
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 max-h-[60vh] overflow-y-auto">
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAddModal(false);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
+                <h2 className="text-xl font-bold text-white">{editingAccount ? 'Edit Account' : 'Add Corporate Account'}</h2>
+                <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleSaveAccount} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 overflow-y-auto min-h-0 overscroll-contain">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500 uppercase">Company Name</label>
                   <input
@@ -1576,7 +1589,7 @@ export function CorporateManagement() {
                   />
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0 sticky bottom-0 z-10">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -1593,28 +1606,35 @@ export function CorporateManagement() {
               </div>
             </form>
           </motion.div>
+          </div>
         </div>
       )}
 
       {/* Rates Modal */}
       {showRatesModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-4xl overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-white">Negotiated Rates</h2>
-                <p className="text-sm text-zinc-500">{showRatesModal.name}</p>
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowRatesModal(null);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-4xl max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
+                <div>
+                  <h2 className="text-xl font-bold text-white">Negotiated Rates</h2>
+                  <p className="text-sm text-zinc-500">{showRatesModal.name}</p>
+                </div>
+                <button onClick={() => setShowRatesModal(null)} className="text-zinc-500 hover:text-white">
+                  <X size={24} />
+                </button>
               </div>
-              <button onClick={() => setShowRatesModal(null)} className="text-zinc-500 hover:text-white">
-                <X size={24} />
-              </button>
-            </div>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-3">
+              
+              <div className="grid grid-cols-1 lg:grid-cols-3 flex-1 overflow-y-auto min-h-0 overscroll-contain">
               {/* Add Rate Form */}
               {hasPermission() ? (
                 <div className="p-6 border-r border-zinc-800 bg-zinc-950/50">
@@ -1894,6 +1914,7 @@ export function CorporateManagement() {
               </div>
             </div>
           </motion.div>
+          </div>
         </div>
       )}
 

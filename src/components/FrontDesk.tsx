@@ -2768,11 +2768,20 @@ export function FrontDesk() {
       )}
 
       {isBooking && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl flex flex-col max-h-[90vh] shadow-2xl overflow-hidden my-auto">
-            <div className="p-6 border-b border-zinc-800 shrink-0">
-              <h3 className="text-xl font-bold text-zinc-50">New Reservation</h3>
-            </div>
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsBooking(false);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl flex flex-col max-h-[85vh] sm:max-h-[90vh] shadow-2xl overflow-hidden min-h-0 relative my-auto">
+              <div className="p-6 border-b border-zinc-800 shrink-0 bg-zinc-900 sticky top-0 z-10 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-zinc-50">New Reservation</h3>
+                <button onClick={() => setIsBooking(false)} className="text-zinc-500 hover:text-zinc-50">
+                  <XCircle size={22} />
+                </button>
+              </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3855,7 +3864,7 @@ export function FrontDesk() {
                 </div>
               )}
             </div>
-            <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-4 mt-auto">
+            <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-4 shrink-0 sticky bottom-0 z-10">
               <button 
                 onClick={() => setIsBooking(false)}
                 className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95 font-bold"
@@ -3870,6 +3879,7 @@ export function FrontDesk() {
                 {loading ? 'Processing...' : 'Confirm Booking'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}

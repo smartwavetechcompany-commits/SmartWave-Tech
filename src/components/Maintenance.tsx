@@ -20,7 +20,8 @@ import {
   Download,
   UserPlus,
   Trash2,
-  Bell
+  Bell,
+  XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, exportToCSV } from '../utils';
@@ -587,17 +588,26 @@ export function Maintenance() {
 
       {/* Add Request Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
-          >
-            <div className="p-6 border-b border-zinc-800">
-              <h2 className="text-xl font-bold text-zinc-50">New Maintenance Request</h2>
-            </div>
-            <form onSubmit={handleAddRequest}>
-              <div className="p-6 space-y-4">
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 overflow-y-auto p-2 sm:p-4 overscroll-contain"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAddModal(false);
+          }}
+        >
+          <div className="min-h-full flex items-center justify-center py-2 sm:py-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
+                <h2 className="text-xl font-bold text-zinc-50">New Maintenance Request</h2>
+                <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-zinc-50">
+                  <XCircle size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleAddRequest} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="p-6 space-y-4 flex-1 overflow-y-auto min-h-0 overscroll-contain">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Room Number</label>
@@ -709,7 +719,7 @@ export function Maintenance() {
                   </div>
                 </div>
               </div>
-              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+              <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0 sticky bottom-0 z-10">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -726,6 +736,7 @@ export function Maintenance() {
               </div>
             </form>
           </motion.div>
+          </div>
         </div>
       )}
 
