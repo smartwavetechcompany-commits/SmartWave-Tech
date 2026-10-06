@@ -288,3 +288,47 @@
   flex-shrink: 0;
 }
 
+/* ================================================================ */
+/* UNIVERSAL CLICKABLE CURSOR POINTER ENGINE                       */
+/* Enforces hand pointer on all interactive buttons, links & controls */
+/* ================================================================ */
+button:not(:disabled),
+button:not([disabled]) *,
+a:not([disabled]),
+a:not([disabled]) *,
+[role="button"]:not([aria-disabled="true"]),
+[role="button"]:not([aria-disabled="true"]) *,
+[type="button"]:not(:disabled),
+[type="submit"]:not(:disabled),
+[type="reset"]:not(:disabled),
+select:not(:disabled),
+summary,
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
+label[for],
+label:has(input:not(:disabled)),
+label:has(select:not(:disabled)),
+.cursor-pointer,
+.cursor-pointer * {
+  cursor: pointer !important;
+}
+
+button:disabled,
+button:disabled *,
+button[disabled],
+button[disabled] *,
+[role="button"][aria-disabled="true"],
+[role="button"][aria-disabled="true"] *,
+[type="button"]:disabled,
+[type="submit"]:disabled,
+[type="reset"]:disabled,
+select:disabled,
+input:disabled,
+.cursor-not-allowed,
+.cursor-not-allowed *,
+[disabled],
+[disabled] * {
+  cursor: not-allowed !important;
+}
+
+
