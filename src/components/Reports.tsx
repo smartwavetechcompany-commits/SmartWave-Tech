@@ -55,6 +55,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { exportTableToPDF } from '../utils/pdfExport';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
@@ -264,6 +265,7 @@ export function Reports() {
         case 'balance_sheet': return ['Code', 'Account', 'Type', 'Balance'];
         case 'inventory_value': return ['Item', 'Category', 'Quantity', 'Unit', 'Price', 'Total Value'];
         case 'net_income': return ['Period', 'Total Income', 'Total Expense', 'Net Income'];
+        case 'overview': return ['Performance Metric', 'Current Value', 'Metric Description'];
         default: return ['Date', 'Description', 'Category', 'Amount'];
       }
     })();
@@ -736,6 +738,17 @@ export function Reports() {
           'Total Spent': d.spent
         }));
       }
+      case 'overview': {
+        return [
+          { 'Performance Metric': 'Occupancy Rate', 'Current Value': `${stats.occupancy}%`, 'Metric Description': 'Occupied rooms vs total rooms in selected period' },
+          { 'Performance Metric': 'RevPAR', 'Current Value': formatForExport(stats.revPar), 'Metric Description': 'Revenue Per Available Room' },
+          { 'Performance Metric': 'ADR', 'Current Value': formatForExport(stats.adr), 'Metric Description': 'Average Daily Rate per occupied room' },
+          { 'Performance Metric': 'Total Guests', 'Current Value': `${stats.totalGuests}`, 'Metric Description': 'Total unique guests with recorded reservations' },
+          { 'Performance Metric': 'Total Operating Revenue', 'Current Value': formatForExport(stats.totalRevenue), 'Metric Description': 'Combined gross billing and posted charges' },
+          { 'Performance Metric': 'Corporate Revenue', 'Current Value': formatForExport(stats.corporateRevenue), 'Metric Description': 'Revenue billed under corporate accounts' },
+          { 'Performance Metric': 'Individual Revenue', 'Current Value': formatForExport(stats.individualRevenue), 'Metric Description': 'Revenue billed under individual guests' }
+        ];
+      }
       default: return [];
     }
   };
@@ -746,43 +759,42 @@ export function Reports() {
       return;
     }
 
-    const doc = new jsPDF();
     const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
     const hotelName = hotel?.name || 'Hotel Property';
     const cleanHotel = hotelName.replace(/[^a-zA-Z0-9]/g, '_');
     
-    // Add header
-    doc.setFontSize(18);
-    doc.text(`${hotelName} - ${reportLabel}`, 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Period: ${dateRange.start} to ${dateRange.end}`, 14, 28);
-    doc.text(`Generated on: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`, 14, 34);
-
-    if (hotel?.branding?.address) {
-      doc.setFontSize(9);
-      doc.text(`${hotel.branding.address} ${hotel?.branding?.phone ? `| Tel: ${hotel.branding.phone}` : ''}`, 14, 40);
-    }
-
-    // Add table
-    const headers = getReportHeaders(activeReport);
+    // Add table (exclude 'Actions' column which contains action buttons)
+    const headers = getReportHeaders(activeReport).filter(h => h !== 'Actions');
     const data = getReportData(activeReport);
     
-    const tableData = data.map(row => Object.values(row).map((val: any, j) => {
-      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays'].some(k => Object.keys(row)[j].includes(k))) {
+    if (data.length === 0) {
+      toast.info('No data records available to export for this period.');
+      return;
+    }
+
+    const tableData = data.map(row => headers.map(header => {
+      const val = row[header];
+      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays', 'Pax'].some(k => header.includes(k))) {
         return formatForExport(val);
       }
-      return val;
+      return val !== null && val !== undefined ? String(val) : '';
     }));
 
-    (doc as any).autoTable({
-      startY: hotel?.branding?.address ? 46 : 40,
-      head: [headers],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [16, 185, 129] }
+    exportTableToPDF({
+      title: `${reportLabel}`,
+      subtitle: `Official Hotel Performance & Operational Record`,
+      hotelName,
+      hotelAddress: hotel?.branding?.address,
+      hotelPhone: hotel?.branding?.phone,
+      hotelEmail: hotel?.branding?.email,
+      dateRange: { start: dateRange.start, end: dateRange.end },
+      generatedBy: profile?.displayName || profile?.name || profile?.email || 'Authorized Administrator',
+      currency: currency,
+      filename: `${cleanHotel}_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.pdf`,
+      headers,
+      rows: tableData
     });
 
-    doc.save(`${cleanHotel}_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.pdf`);
     toast.success("PDF exported successfully");
   };
 
@@ -834,17 +846,19 @@ export function Reports() {
       return;
     }
 
+    const headers = getReportHeaders(activeReport).filter(h => h !== 'Actions');
     const data = getReportData(activeReport);
     const reportLabel = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
     
+    if (data.length === 0) {
+      toast.info('No data records available to export for this period.');
+      return;
+    }
+
     const worksheet = XLSX.utils.json_to_sheet(data.map(row => {
       const formattedRow: any = {};
-      Object.entries(row).forEach(([key, val], j) => {
-        if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays'].some(k => key.includes(k))) {
-          formattedRow[key] = val; // Keep as number for Excel
-        } else {
-          formattedRow[key] = val;
-        }
+      headers.forEach(header => {
+        formattedRow[header] = row[header] !== undefined ? row[header] : '';
       });
       return formattedRow;
     }));

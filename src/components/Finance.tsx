@@ -44,6 +44,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
+import { exportTableToPDF } from '../utils/pdfExport';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay, differenceInDays, isAfter, parseISO } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -680,13 +681,15 @@ export function Finance() {
     }
   };
 
-  const handleDownloadReport = (reportTitle: string) => {
+  const handleDownloadReport = (reportTitle: string, formatType: 'csv' | 'pdf' = 'csv') => {
     if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
       toast.error('Exporting financial reports is disabled by hotel configuration.');
       return;
     }
     let data: any[] = [];
-    let filename = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${reportFilter.startDate}_to_${reportFilter.endDate}.csv`;
+    let headers: string[] = [];
+    let pdfRows: (string | number)[][] = [];
+    let filenameBase = `${reportTitle.toLowerCase().replace(/\s+/g, '_')}_${reportFilter.startDate}_to_${reportFilter.endDate}`;
 
     const start = startOfDay(new Date(reportFilter.startDate));
     const end = endOfDay(new Date(reportFilter.endDate));
@@ -697,15 +700,18 @@ export function Finance() {
     });
 
     switch (reportTitle) {
-      case 'Expense Type Report':
+      case 'Expense Type Report': {
         const expenseRecords = filterByDate(records.filter(r => r.type === 'expense'));
         const byCategory = categories.expense.map(cat => ({
           Category: cat,
           Total: expenseRecords.filter(r => r.category === cat).reduce((acc, r) => acc + r.amount, 0)
         }));
         data = byCategory;
+        headers = ['Expense Category', 'Total Amount'];
+        pdfRows = byCategory.map(c => [c.Category, formatCurrency(c.Total, currency, exchangeRate)]);
         break;
-      case 'Net Income Report':
+      }
+      case 'Net Income Report': {
         const periodRecords = filterByDate(records);
         const pIncome = periodRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
         const pExpense = periodRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
@@ -714,8 +720,15 @@ export function Finance() {
           { Item: 'Total Expense', Amount: pExpense },
           { Item: 'Net Income', Amount: pIncome - pExpense }
         ];
+        headers = ['Financial Item', 'Total Amount'];
+        pdfRows = [
+          ['Total Operating Income', formatCurrency(pIncome, currency, exchangeRate)],
+          ['Total Operating Expense', formatCurrency(pExpense, currency, exchangeRate)],
+          ['Net Operating Income (P&L)', formatCurrency(pIncome - pExpense, currency, exchangeRate)]
+        ];
         break;
-      case 'Transaction Report':
+      }
+      case 'Transaction Report': {
         data = filterByDate(records)
           .filter(r => reportFilter.category === 'all' || r.category === reportFilter.category)
           .map(r => ({
@@ -726,16 +739,34 @@ export function Finance() {
             Amount: r.amount,
             Method: r.paymentMethod
           }));
+        headers = ['Date', 'Description', 'Category', 'Type', 'Amount', 'Payment Method'];
+        pdfRows = data.map(r => [
+          r.Date,
+          r.Description,
+          r.Category,
+          (r.Type || '').toUpperCase(),
+          formatCurrency(r.Amount, currency, exchangeRate),
+          (r.Method || '').toUpperCase()
+        ]);
         break;
-      case 'Balance Sheet':
+      }
+      case 'Balance Sheet': {
         data = accounts.map(a => ({
           Code: a.code,
           Account: a.name,
           Type: a.type,
           Balance: a.balance
         }));
+        headers = ['Account Code', 'Account Name', 'Account Type', 'Current Balance'];
+        pdfRows = accounts.map(a => [
+          a.code,
+          a.name,
+          (a.type || '').toUpperCase(),
+          formatCurrency(a.balance || 0, currency, exchangeRate)
+        ]);
         break;
-      case 'Inventory Value':
+      }
+      case 'Inventory Value': {
         data = inventoryItems.map(i => ({
           Item: i.name,
           Category: i.category,
@@ -744,8 +775,18 @@ export function Finance() {
           UnitPrice: i.price || 0,
           EstimatedValue: i.quantity * (i.price || 0)
         }));
+        headers = ['Item Name', 'Category', 'Quantity', 'Unit', 'Unit Price', 'Estimated Value'];
+        pdfRows = inventoryItems.map(i => [
+          i.name,
+          i.category,
+          i.quantity,
+          i.unit,
+          formatCurrency(i.price || 0, currency, exchangeRate),
+          formatCurrency(i.quantity * (i.price || 0), currency, exchangeRate)
+        ]);
         break;
-      case 'Store Balance':
+      }
+      case 'Store Balance': {
         const periodStoreRecords = filterByDate(records);
         const methods = ['cash', 'card', 'transfer'];
         data = methods.map(method => ({
@@ -755,17 +796,46 @@ export function Finance() {
           Balance: periodStoreRecords.filter(r => r.type === 'income' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0) - 
                    periodStoreRecords.filter(r => r.type === 'expense' && r.paymentMethod === method).reduce((acc, r) => acc + r.amount, 0)
         }));
+        headers = ['Store Point / Terminal', 'Income', 'Expense', 'Balance'];
+        pdfRows = data.map(d => [
+          d['Store Point'],
+          formatCurrency(d.Income, currency, exchangeRate),
+          formatCurrency(d.Expense, currency, exchangeRate),
+          formatCurrency(d.Balance, currency, exchangeRate)
+        ]);
         break;
+      }
       default:
         toast.info('This report is currently being generated. Please check back soon.');
         return;
     }
 
-    if (data.length > 0) {
-      exportToCSV(data, filename);
-      toast.success(`${reportTitle} downloaded successfully`);
+    if (data.length === 0) {
+      toast.info('No data available for this report in the selected period');
+      return;
+    }
+
+    if (formatType === 'pdf') {
+      const hotelName = hotel?.name || 'Hotel Property';
+      const cleanHotel = hotelName.replace(/[^a-zA-Z0-9]/g, '_');
+      exportTableToPDF({
+        title: reportTitle,
+        subtitle: `Financial Management Record (${reportFilter.startDate} to ${reportFilter.endDate})`,
+        hotelName,
+        hotelAddress: hotel?.branding?.address,
+        hotelPhone: hotel?.branding?.phone,
+        hotelEmail: hotel?.branding?.email,
+        dateRange: { start: reportFilter.startDate, end: reportFilter.endDate },
+        generatedBy: profile?.displayName || profile?.name || profile?.email || 'Finance Administrator',
+        currency,
+        filename: `${cleanHotel}_${filenameBase}.pdf`,
+        headers,
+        rows: pdfRows
+      });
+      toast.success(`${reportTitle} PDF exported successfully`);
     } else {
-      toast.info('No data available for this report');
+      exportToCSV(data, `${filenameBase}.csv`);
+      toast.success(`${reportTitle} CSV downloaded successfully`);
     }
   };
 
@@ -907,7 +977,167 @@ export function Finance() {
     });
 
     exportToCSV(formattedData, filename);
-    toast.success('Exported successfully');
+    toast.success('CSV exported successfully');
+  };
+
+  const handleExportPDF = () => {
+    if (!hasPermission(profile, 'export_financial_data', customRoles) && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Permission denied: You do not have permission to export financial data.');
+      return;
+    }
+    if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+      toast.error('Exporting financial reports is disabled by hotel configuration.');
+      return;
+    }
+
+    const hotelName = hotel?.name || 'Hotel Property';
+    const cleanHotel = hotelName.replace(/[^a-zA-Z0-9]/g, '_');
+    const dateStamp = format(new Date(), 'yyyy-MM-dd');
+
+    let title = 'Financial Report';
+    let filename = `finance_${activeTab}_${dateStamp}.pdf`;
+    let headers: string[] = [];
+    let rows: (string | number)[][] = [];
+
+    if (activeTab === 'transactions') {
+      title = 'Transactions & Cash Movements';
+      filename = `transactions_${dateStamp}.pdf`;
+      headers = ['Date', 'Description', 'Type', 'Category', 'Amount', 'Payment Method'];
+      rows = filteredRecords.map(r => [
+        format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
+        r.description || 'N/A',
+        (r.type || '').toUpperCase(),
+        r.category || 'General',
+        formatCurrency(r.amount, currency, exchangeRate),
+        (r.paymentMethod || 'cash').toUpperCase()
+      ]);
+    } else if (activeTab === 'ledger') {
+      title = 'Guest Ledger & Accounts';
+      filename = `guest_ledger_${dateStamp}.pdf`;
+      headers = ['Guest Name', 'Email', 'Phone', 'Balance', 'Status'];
+      rows = filteredLedger.map(g => [
+        g.name,
+        g.email || 'N/A',
+        g.phone || 'N/A',
+        formatCurrency(g.ledgerBalance || 0, currency, exchangeRate),
+        (g.ledgerBalance || 0) > 0 ? 'DEBT' : (g.ledgerBalance || 0) < 0 ? 'CREDIT' : 'BALANCED'
+      ]);
+    } else if (activeTab === 'city_ledger') {
+      title = 'Corporate Accounts & City Ledger';
+      filename = `city_ledger_${dateStamp}.pdf`;
+      headers = ['Company / Account', 'Contact Person', 'Email', 'Phone', 'Credit Limit', 'Current Balance', 'Status'];
+      rows = corporateAccounts.map(c => [
+        c.name,
+        c.contactPerson || 'N/A',
+        c.email || 'N/A',
+        c.phone || 'N/A',
+        formatCurrency(c.creditLimit || 0, currency, exchangeRate),
+        formatCurrency(c.currentBalance || 0, currency, exchangeRate),
+        (c.currentBalance || 0) > (c.creditLimit || 0) ? 'OVER LIMIT' : 'ACTIVE'
+      ]);
+    } else if (activeTab === 'debtors') {
+      title = 'Outstanding Guest Debtors Archive';
+      filename = `guest_debtors_${dateStamp}.pdf`;
+      headers = ['Guest Name', 'Room', 'Check-In', 'Check-Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'];
+      const debtorsList = reservations.filter(r => {
+        const opStatus = r.operationalStatus || r.status;
+        const bal = getReservationLiveBalance(r, hotel);
+        const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
+        return opStatus === 'checked_out' && finStatus !== 'SETTLED' && bal > 0.01;
+      });
+      rows = debtorsList.map(d => {
+        const bal = getReservationLiveBalance(d, hotel);
+        return [
+          d.guestName,
+          d.roomNumber,
+          d.checkIn,
+          d.checkOut,
+          formatCurrency(d.totalAmount, currency, exchangeRate),
+          formatCurrency(d.paidAmount || 0, currency, exchangeRate),
+          formatCurrency(bal, currency, exchangeRate),
+          'OVERDUE DEBT'
+        ];
+      });
+    } else if (activeTab === 'suppliers') {
+      title = 'Suppliers & Accounts Payable';
+      filename = `suppliers_${dateStamp}.pdf`;
+      headers = ['Supplier Name', 'Category', 'Contact / Phone', 'Email', 'Payable Balance'];
+      rows = suppliers.map(s => [
+        s.name,
+        s.category || 'Supplies',
+        s.phone || 'N/A',
+        s.email || 'N/A',
+        formatCurrency(s.balance || 0, currency, exchangeRate)
+      ]);
+    } else if (activeTab === 'accounts') {
+      title = 'Chart of Accounts';
+      filename = `chart_of_accounts_${dateStamp}.pdf`;
+      headers = ['Code', 'Account Name', 'Type', 'Current Balance'];
+      rows = accounts.map(a => [
+        a.code,
+        a.name,
+        (a.type || '').toUpperCase(),
+        formatCurrency(a.balance || 0, currency, exchangeRate)
+      ]);
+    } else if (activeTab === 'pos') {
+      title = 'Point of Sale (POS) Terminals & Revenue';
+      filename = `pos_terminals_${dateStamp}.pdf`;
+      headers = ['Terminal / Outlet', 'Category', 'Total Revenue'];
+      rows = [
+        ['Main Restaurant', 'Food & Beverage', formatCurrency(records.filter(r => r.category === 'Restaurant').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)],
+        ['Lounge & Bar', 'Beverage', formatCurrency(records.filter(r => r.category === 'Bar').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)],
+        ['Laundry Point', 'Services', formatCurrency(records.filter(r => r.category === 'Laundry').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)]
+      ];
+    } else if (activeTab === 'commissions') {
+      title = 'Travel Agents & Broker Commissions';
+      filename = `commissions_${dateStamp}.pdf`;
+      headers = ['Agent / Broker Name', 'Reservation ID', 'Percentage', 'Commission Amount', 'Status'];
+      rows = commissions.map(c => [
+        c.agentName,
+        c.reservationId || 'N/A',
+        `${c.percentage || 0}%`,
+        formatCurrency(c.amount || 0, currency, exchangeRate),
+        (c.status || 'pending').toUpperCase()
+      ]);
+    } else {
+      title = 'Executive Financial Summary & Performance';
+      filename = `financial_executive_summary_${dateStamp}.pdf`;
+      const totIncome = records.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+      const totExpense = records.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+      const totReceivables = guests.reduce((acc, g) => acc + Math.max(0, g.ledgerBalance || 0), 0) +
+        corporateAccounts.reduce((acc, c) => acc + Math.max(0, c.currentBalance || 0), 0);
+      const totPayables = suppliers.reduce((acc, s) => acc + Math.max(0, s.balance || 0), 0);
+
+      headers = ['Financial Metric / KPI', 'Value', 'Classification'];
+      rows = [
+        ['Total Operating Income', formatCurrency(totIncome, currency, exchangeRate), 'Revenue'],
+        ['Total Operating Expense', formatCurrency(totExpense, currency, exchangeRate), 'Cost & Overhead'],
+        ['Net Operating Cash Flow / Profit', formatCurrency(totIncome - totExpense, currency, exchangeRate), totIncome >= totExpense ? 'Positive' : 'Deficit'],
+        ['Accounts Receivable (Guest & City Ledger)', formatCurrency(totReceivables, currency, exchangeRate), 'Outstanding Inflow'],
+        ['Accounts Payable (Suppliers & Vendors)', formatCurrency(totPayables, currency, exchangeRate), 'Short-term Outflow']
+      ];
+    }
+
+    if (rows.length === 0) {
+      toast.info('No financial records found in this view to export.');
+      return;
+    }
+
+    exportTableToPDF({
+      title,
+      subtitle: `Official Financial Management & Audit Record`,
+      hotelName,
+      hotelAddress: hotel?.branding?.address,
+      hotelPhone: hotel?.branding?.phone,
+      hotelEmail: hotel?.branding?.email,
+      generatedBy: profile?.displayName || profile?.name || profile?.email || 'Finance Administrator',
+      currency,
+      filename: `${cleanHotel}_${filename}`,
+      headers,
+      rows
+    });
+
+    toast.success('Financial PDF exported successfully');
   };
 
   return (
@@ -927,13 +1157,24 @@ export function Finance() {
             Sync
           </button>
           {(hasPermission(profile, 'export_financial_data', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
-            <button 
-              onClick={handleExport}
-              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-lg hover:text-zinc-50 transition-colors text-[10px] font-black uppercase tracking-widest"
-            >
-              <Download size={14} />
-              Export
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button 
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-lg hover:text-zinc-50 hover:bg-zinc-800 transition-colors text-[10px] font-black uppercase tracking-widest"
+                title="Export current tab as CSV spreadsheet"
+              >
+                <Download size={13} />
+                CSV
+              </button>
+              <button 
+                onClick={handleExportPDF}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-50 rounded-lg hover:bg-zinc-800 transition-colors text-[10px] font-black uppercase tracking-widest"
+                title="Export current tab as professional PDF document"
+              >
+                <FileText size={13} className="text-red-400" />
+                Export PDF
+              </button>
+            </div>
           )}
           {(hasPermission(profile, 'post_charges', customRoles) || hasPermission(profile, 'process_payments', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <button
@@ -1515,29 +1756,75 @@ export function Finance() {
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
                 <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                   <h3 className="font-bold text-zinc-50">Aging Report (Accounts Receivable)</h3>
-                  <button 
-                    onClick={() => {
-                      if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
-                        toast.error('Exporting financial reports is disabled by hotel configuration.');
-                        return;
-                      }
-                      exportToCSV(
-                        [...guests, ...corporateAccounts]
-                          .filter(a => ('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0)
-                          .map(a => ({
-                            Name: a.name,
-                            Type: 'currentBalance' in a ? 'Corporate' : 'Individual',
-                            Balance: 'currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest),
-                            CreditLimit: a.creditLimit || 0,
-                            Terms: 'paymentTerms' in a ? a.paymentTerms : 'N/A'
-                          })),
-                        'aging_report'
-                      );
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
-                  >
-                    <Download size={14} /> Export Aging
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+                          toast.error('Exporting financial reports is disabled by hotel configuration.');
+                          return;
+                        }
+                        exportToCSV(
+                          [...guests, ...corporateAccounts]
+                            .filter(a => ('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0)
+                            .map(a => ({
+                              Name: a.name,
+                              Type: 'currentBalance' in a ? 'Corporate' : 'Individual',
+                              Balance: 'currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest),
+                              CreditLimit: a.creditLimit || 0,
+                              Terms: 'paymentTerms' in a ? a.paymentTerms : 'N/A'
+                            })),
+                          'aging_report'
+                        );
+                        toast.success('Aging report CSV exported');
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                      title="Export Aging Report as CSV"
+                    >
+                      <Download size={13} /> CSV
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (hotel?.settings?.financial?.allowExportingReports === false && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '')) {
+                          toast.error('Exporting financial reports is disabled by hotel configuration.');
+                          return;
+                        }
+                        const agingList = [...guests, ...corporateAccounts]
+                          .filter(a => ('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0);
+                        
+                        if (agingList.length === 0) {
+                          toast.info('No outstanding accounts receivable found.');
+                          return;
+                        }
+
+                        const hotelName = hotel?.name || 'Hotel Property';
+                        const cleanHotel = hotelName.replace(/[^a-zA-Z0-9]/g, '_');
+                        exportTableToPDF({
+                          title: 'Aging Report (Accounts Receivable)',
+                          subtitle: 'Outstanding Customer & Corporate Account Balances',
+                          hotelName,
+                          hotelAddress: hotel?.branding?.address,
+                          hotelPhone: hotel?.branding?.phone,
+                          hotelEmail: hotel?.branding?.email,
+                          generatedBy: profile?.displayName || profile?.name || profile?.email || 'Finance Administrator',
+                          currency,
+                          filename: `${cleanHotel}_aging_report_${format(new Date(), 'yyyy-MM-dd')}.pdf`,
+                          headers: ['Debtor Name', 'Account Type', 'Outstanding Balance', 'Credit Limit', 'Payment Terms'],
+                          rows: agingList.map(a => [
+                            a.name,
+                            'currentBalance' in a ? 'Corporate' : 'Individual',
+                            formatCurrency('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest), currency, exchangeRate),
+                            formatCurrency(a.creditLimit || 0, currency, exchangeRate),
+                            'paymentTerms' in a ? a.paymentTerms : 'Immediate'
+                          ])
+                        });
+                        toast.success('Aging report PDF exported successfully');
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-xs font-bold transition-all"
+                      title="Export Aging Report as professional PDF"
+                    >
+                      <FileText size={13} /> PDF
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
@@ -1680,31 +1967,75 @@ export function Finance() {
                               className="pl-9 pr-4 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
                             />
                           </div>
-                          <button
-                            onClick={() => {
-                              exportToCSV(
-                                debtors.map(d => {
-                                  const bal = getReservationLiveBalance(d, hotel);
-                                  return {
-                                    Guest: d.guestName,
-                                    Room: d.roomNumber,
-                                    'Check In': d.checkIn,
-                                    'Check Out': d.checkOut,
-                                    Duration: formatStayDuration(d.checkIn, d.checkOut),
-                                    OperationalStatus: 'CHECKED_OUT',
-                                    FinancialStatus: 'DEBTOR',
-                                    TotalAmount: d.totalAmount,
-                                    PaidAmount: d.paidAmount || 0,
-                                    OutstandingBalance: bal
-                                  };
-                                }),
-                                `debtors_report_${format(new Date(), 'yyyy-MM-dd')}`
-                              );
-                            }}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
-                          >
-                            <Download size={14} /> Export
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                exportToCSV(
+                                  debtors.map(d => {
+                                    const bal = getReservationLiveBalance(d, hotel);
+                                    return {
+                                      Guest: d.guestName,
+                                      Room: d.roomNumber,
+                                      'Check In': d.checkIn,
+                                      'Check Out': d.checkOut,
+                                      Duration: formatStayDuration(d.checkIn, d.checkOut),
+                                      OperationalStatus: 'CHECKED_OUT',
+                                      FinancialStatus: 'DEBTOR',
+                                      TotalAmount: d.totalAmount,
+                                      PaidAmount: d.paidAmount || 0,
+                                      OutstandingBalance: bal
+                                    };
+                                  }),
+                                  `debtors_report_${format(new Date(), 'yyyy-MM-dd')}`
+                                );
+                                toast.success('Debtors report CSV exported');
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                              title="Export debtors as CSV"
+                            >
+                              <Download size={13} /> CSV
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (debtors.length === 0) {
+                                  toast.info('No debtors records to export.');
+                                  return;
+                                }
+                                const hotelName = hotel?.name || 'Hotel Property';
+                                const cleanHotel = hotelName.replace(/[^a-zA-Z0-9]/g, '_');
+                                exportTableToPDF({
+                                  title: 'Outstanding Guest Debtors Archive',
+                                  subtitle: 'Checked-Out Folios with Active Debts Requiring Settlement',
+                                  hotelName,
+                                  hotelAddress: hotel?.branding?.address,
+                                  hotelPhone: hotel?.branding?.phone,
+                                  hotelEmail: hotel?.branding?.email,
+                                  generatedBy: profile?.displayName || profile?.name || profile?.email || 'Finance Administrator',
+                                  currency,
+                                  filename: `${cleanHotel}_debtors_report_${format(new Date(), 'yyyy-MM-dd')}.pdf`,
+                                  headers: ['Guest Name', 'Room', 'Check In', 'Check Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'],
+                                  rows: debtors.map(d => {
+                                    const bal = getReservationLiveBalance(d, hotel);
+                                    return [
+                                      d.guestName,
+                                      d.roomNumber,
+                                      d.checkIn,
+                                      d.checkOut,
+                                      formatCurrency(d.totalAmount, currency, exchangeRate),
+                                      formatCurrency(d.paidAmount || 0, currency, exchangeRate),
+                                      formatCurrency(bal, currency, exchangeRate),
+                                      'DEBTOR'
+                                    ];
+                                  })
+                                });
+                                toast.success('Debtors report PDF exported successfully');
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-xs font-bold transition-all"
+                              title="Export debtors as professional PDF"
+                            >
+                              <FileText size={13} /> PDF
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -2084,20 +2415,38 @@ export function Finance() {
                   { title: 'Inventory Value', icon: LayoutDashboard, desc: 'Current value of stock on hand' },
                   { title: 'Store Balance', icon: Receipt, desc: 'Financial status of different store points' },
                 ].map((report) => (
-                  <button 
+                  <div 
                     key={report.title} 
-                    onClick={() => handleDownloadReport(report.title)}
-                    className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl text-left hover:border-emerald-500/50 transition-all group"
+                    className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl flex flex-col justify-between hover:border-zinc-700 transition-all group"
                   >
-                    <div className="p-3 rounded-xl bg-zinc-950 w-fit mb-4 group-hover:bg-emerald-500/10 transition-colors">
-                      <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
-                    </div>
-                    <div className="flex items-center justify-between">
+                    <div>
+                      <div className="p-3 rounded-xl bg-zinc-950 w-fit mb-4 group-hover:bg-emerald-500/10 transition-colors">
+                        <report.icon className="text-zinc-400 group-hover:text-emerald-500" size={24} />
+                      </div>
                       <h4 className="font-bold text-zinc-50 mb-1">{report.title}</h4>
-                      <Download size={14} className="text-zinc-600 group-hover:text-emerald-500" />
+                      <p className="text-xs text-zinc-500 mb-4">{report.desc}</p>
                     </div>
-                    <p className="text-xs text-zinc-500">{report.desc}</p>
-                  </button>
+                    <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/80">
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadReport(report.title, 'csv')}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-zinc-950 border border-zinc-800 text-zinc-300 rounded-xl hover:text-white hover:bg-zinc-800 text-xs font-bold transition-colors"
+                        title="Export report as CSV spreadsheet"
+                      >
+                        <Download size={13} />
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadReport(report.title, 'pdf')}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl hover:bg-emerald-500/20 text-xs font-bold transition-colors"
+                        title="Export report as professional PDF"
+                      >
+                        <FileText size={13} />
+                        PDF
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
