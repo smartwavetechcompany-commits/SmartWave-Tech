@@ -7,7 +7,7 @@ import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType, HotelSettings } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { DEFAULT_SETTINGS } from '../constants';
-import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert } from 'lucide-react';
+import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert, Building2 } from 'lucide-react';
 import { cn } from '../utils';
 
 interface AuthPageProps {
@@ -601,10 +601,23 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
       >
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-black mx-auto mb-4 font-black text-xl">
-            TT
+          <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-black mx-auto mb-4 shadow-md font-bold text-lg">
+            {formData.hotelName?.trim() ? (
+              <span>
+                {formData.hotelName
+                  .trim()
+                  .split(/\s+/)
+                  .slice(0, 2)
+                  .map(w => w[0]?.toUpperCase())
+                  .join('') || <Building2 size={24} strokeWidth={2.2} />}
+              </span>
+            ) : (
+              <Building2 size={24} strokeWidth={2.2} />
+            )}
           </div>
-          <h2 className="text-2xl font-bold text-white">Tyyl Tech PMS</h2>
+          <h2 className="text-2xl font-bold text-white tracking-tight">
+            {formData.hotelName?.trim() || 'Hotel Management System'}
+          </h2>
           <p className="text-zinc-400 text-sm mt-2">
             {isResetting
               ? 'Security Policy Notice'
