@@ -67,16 +67,32 @@
     --zinc-50: #fafafa;
   }
 
-  /* Compact interface scaling engine: Solves oversized interface, ensuring sleek density and full viewport visibility */
+  /* Universal Responsive & Device Optimization Engine */
   html {
     font-size: 82%;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    scroll-behavior: smooth;
   }
 
+  /* Tablets (iPad Mini, iPad Air, 641px - 1024px) */
+  @media (min-width: 641px) and (max-width: 1024px) {
+    html {
+      font-size: 83%;
+    }
+  }
+
+  /* Mobile Devices (Smartphones 320px - 640px) */
   @media (max-width: 640px) {
     html {
       font-size: 84%;
+    }
+  }
+
+  /* High-DPI & Ultrawide (> 1920px) */
+  @media (min-width: 1921px) {
+    html {
+      font-size: 87.5%;
     }
   }
 
@@ -89,7 +105,28 @@
   body {
     background-color: var(--bg-color);
     color: var(--text-color);
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: hidden;
     @apply antialiased transition-colors duration-300;
+  }
+
+  /* Prevent iOS Safari unnatural auto-zoom on form inputs */
+  @media (max-width: 768px) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Remove tap highlight & enable fast touch manipulation on mobile */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button, a, input, select, textarea {
+    touch-action: manipulation;
   }
 
   /* Custom Scrollbar */

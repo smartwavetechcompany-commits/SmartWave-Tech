@@ -168,7 +168,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               key={item.path}
               to={isDisabled ? item.path : item.path}
               onClick={(e) => {
-                if (isDisabled) e.preventDefault();
+                if (isDisabled) {
+                  e.preventDefault();
+                } else if (onClose) {
+                  onClose();
+                }
               }}
               target="_self"
               className={cn(

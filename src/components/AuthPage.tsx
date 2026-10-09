@@ -583,22 +583,22 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 relative">
+    <div className="min-h-screen min-h-[100dvh] bg-zinc-950 flex items-center justify-center p-3 sm:p-6 py-6 sm:py-10 relative overflow-y-auto">
       {/* Notification Toast */}
       {notification && (
         <div className={cn(
-          "fixed top-4 right-4 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
+          "fixed top-4 left-4 right-4 sm:left-auto sm:right-4 max-w-md z-[100] px-4 sm:px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300",
           notification.type === 'success' ? "bg-emerald-500 text-black" : "bg-red-500 text-white"
         )}>
           {notification.type === 'success' ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
-          <span className="font-bold">{notification.message}</span>
+          <span className="font-bold text-xs sm:text-sm">{notification.message}</span>
         </div>
       )}
 
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
+        className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-8 shadow-2xl my-auto"
       >
         <div className="text-center mb-8">
           <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-black mx-auto mb-4 shadow-md font-bold text-lg">

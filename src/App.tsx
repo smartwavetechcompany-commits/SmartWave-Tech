@@ -227,7 +227,7 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen bg-zinc-950 overflow-hidden relative">
+    <div className="flex h-screen h-[100dvh] bg-zinc-950 overflow-hidden relative">
       <Toaster position="top-right" theme="dark" richColors />
       
       {isOffline && (
