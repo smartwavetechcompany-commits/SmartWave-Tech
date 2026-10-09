@@ -120,11 +120,6 @@ export function Rooms() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [capacityFilter, setCapacityFilter] = useState<string>('all');
-  const [reportFilter, setReportFilter] = useState({
-    status: 'all',
-    type: 'all',
-    capacity: 'all'
-  });
   const [view, setView] = useState<'grid' | 'list' | 'calendar'>('grid');
   const [sortBy, setSortBy] = useState<'roomNumber' | 'type' | 'status' | 'price' | 'floor'>('roomNumber');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -542,9 +537,9 @@ export function Rooms() {
   const handleExport = () => {
     const dataToExport = rooms
       .filter(room => {
-        const matchesStatus = reportFilter.status === 'all' || room.status === reportFilter.status;
-        const matchesType = reportFilter.type === 'all' || room.type === reportFilter.type;
-        const matchesCapacity = reportFilter.capacity === 'all' || room.capacity === Number(reportFilter.capacity);
+        const matchesStatus = statusFilter === 'all' || room.status === statusFilter;
+        const matchesType = typeFilter === 'all' || room.type === typeFilter;
+        const matchesCapacity = capacityFilter === 'all' || room.capacity === Number(capacityFilter);
         return matchesStatus && matchesType && matchesCapacity;
       })
       .map(r => {
@@ -870,126 +865,128 @@ export function Rooms() {
   };
 
   return (
-    <div className="p-8 space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="p-4 sm:p-5 space-y-3">
+      {/* Top Header & Primary Action Toolbar */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-1">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Rooms</h1>
-          <p className="text-zinc-400">Manage room inventory and status</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Rooms</h1>
+          <p className="text-xs text-zinc-400">Manage room inventory, pricing, and live operational status</p>
         </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
-            <select
-              value={reportFilter.status}
-              onChange={(e) => setReportFilter({ ...reportFilter, status: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            >
-              <option value="all">All Statuses</option>
-              <option value="clean">Clean</option>
-              <option value="dirty">Dirty</option>
-              <option value="occupied">Occupied</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="vacant">Vacant</option>
-              <option value="out_of_service">Out of Service</option>
-            </select>
-            <div className="w-px h-4 bg-zinc-800" />
-            <select
-              value={reportFilter.type}
-              onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            >
-              <option value="all">All Types</option>
-              {roomTypes.map(type => (
-                <option key={type.id} value={type.name}>{type.name}</option>
-              ))}
-            </select>
-            <div className="w-px h-4 bg-zinc-800" />
-            <select
-              value={reportFilter.capacity}
-              onChange={(e) => setReportFilter({ ...reportFilter, capacity: e.target.value })}
-              className="bg-transparent text-[10px] text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            >
-              <option value="all">All Cap.</option>
-              <option value="1">1 Pax</option>
-              <option value="2">2 Pax</option>
-              <option value="3">3 Pax</option>
-              <option value="4">4 Pax</option>
-              <option value="5">5+ Pax</option>
-            </select>
-          </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="relative flex-1 sm:min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-              <input 
-                type="text"
-                placeholder="Search number, type..."
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-10 pr-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all text-sm"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <select 
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm outline-none focus:border-emerald-500"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All Statuses</option>
-              <option value="clean">Clean</option>
-              <option value="dirty">Dirty</option>
-              <option value="occupied">Occupied</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="vacant">Vacant</option>
-              <option value="out_of_service">Out of Service</option>
-            </select>
-            <select 
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm outline-none focus:border-emerald-500"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-            >
-              <option value="all">All Types</option>
-              {roomTypes.map(type => (
-                <option key={type.id} value={type.name}>{type.name}</option>
-              ))}
-            </select>
-            <select 
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 text-sm outline-none focus:border-emerald-500"
-              value={capacityFilter}
-              onChange={(e) => setCapacityFilter(e.target.value)}
-            >
-              <option value="all">All Capacities</option>
-              <option value="1">1 Person</option>
-              <option value="2">2 Persons</option>
-              <option value="3">3 Persons</option>
-              <option value="4">4 Persons</option>
-              <option value="5">5+ Persons</option>
-            </select>
-          </div>
-          <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg p-1 justify-center">
+        
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {hasPermission(profile, 'create_rooms') && (
             <button 
-              onClick={() => setView('grid')}
-              className={cn("flex-1 sm:flex-none p-1.5 rounded-md transition-all active:scale-90", view === 'grid' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-50")}
-              title="Grid View"
+              onClick={() => setIsAddingRoom(true)}
+              className="bg-emerald-500 text-black px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-400 transition-all active:scale-95 shadow-sm shadow-emerald-500/20"
             >
-              <LayoutGrid size={18} className="mx-auto" />
+              <Plus size={15} />
+              Add Room
             </button>
-            <button 
-              onClick={() => setView('list')}
-              className={cn("flex-1 sm:flex-none p-1.5 rounded-md transition-all active:scale-90", view === 'list' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-50")}
-              title="List View"
-            >
-              <List size={18} className="mx-auto" />
-            </button>
-            <button 
-              onClick={() => setView('calendar')}
-              className={cn("flex-1 sm:flex-none p-1.5 rounded-md transition-all active:scale-90", view === 'calendar' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-50")}
-              title="Availability Calendar"
-            >
-              <Calendar size={18} className="mx-auto" />
-            </button>
+          )}
+          <button 
+            onClick={handleExport}
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+            title="Export filtered rooms report"
+          >
+            <Download size={15} />
+            <span>Export Report</span>
+          </button>
+          {hasPermission(profile, 'manage_rooms') && (
+            <>
+              <button 
+                onClick={() => setIsManagingTypes(true)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <Settings2 size={15} />
+                Types
+              </button>
+              <button 
+                onClick={() => setIsManagingBlockings(true)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <XCircle size={15} />
+                Blockings
+              </button>
+              <button 
+                onClick={() => setIsManagingRates(true)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <TrendingUp size={15} />
+                Rates
+              </button>
+              <button 
+                onClick={() => setIsManagingConsumptionRules(true)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+              >
+                <Package size={15} />
+                Inv Sync
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* Unified Search & Filters Toolbar */}
+      <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[160px] sm:max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
+            <input 
+              type="text"
+              placeholder="Search number, type..."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-zinc-50 focus:border-emerald-500 outline-none text-xs transition-colors"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
 
+          {/* Status Filter */}
+          <select 
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-300 text-xs outline-none focus:border-emerald-500 cursor-pointer"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="clean">Clean</option>
+            <option value="dirty">Dirty</option>
+            <option value="occupied">Occupied</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="vacant">Vacant</option>
+            <option value="out_of_service">Out of Service</option>
+          </select>
+
+          {/* Type Filter */}
+          <select 
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-300 text-xs outline-none focus:border-emerald-500 cursor-pointer"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+          >
+            <option value="all">All Types</option>
+            {roomTypes.map(type => (
+              <option key={type.id} value={type.name}>{type.name}</option>
+            ))}
+          </select>
+
+          {/* Capacity Filter */}
+          <select 
+            className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-300 text-xs outline-none focus:border-emerald-500 cursor-pointer"
+            value={capacityFilter}
+            onChange={(e) => setCapacityFilter(e.target.value)}
+          >
+            <option value="all">All Capacities</option>
+            <option value="1">1 Person</option>
+            <option value="2">2 Persons</option>
+            <option value="3">3 Persons</option>
+            <option value="4">4 Persons</option>
+            <option value="5">5+ Persons</option>
+          </select>
+
+          {/* Sort Control */}
           {view !== 'calendar' && (
-            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase whitespace-nowrap">Sort:</span>
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-400">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">Sort:</span>
               <select 
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
@@ -1003,134 +1000,122 @@ export function Rooms() {
               </select>
               <button 
                 onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                className="p-1 text-zinc-500 hover:text-emerald-500 transition-colors"
+                className="p-0.5 text-zinc-500 hover:text-emerald-500 transition-colors"
+                title={`Sort ${sortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
               >
-                <TrendingUp size={14} className={cn("transition-transform", sortOrder === 'desc' && "rotate-180")} />
+                <TrendingUp size={13} className={cn("transition-transform", sortOrder === 'desc' && "rotate-180")} />
               </button>
             </div>
-          )}
-          <button 
-            onClick={handleExport}
-            className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-          >
-            <Download size={18} />
-            <span className="hidden sm:inline">Export Report</span>
-            <span className="sm:hidden">Export</span>
-          </button>
-          {hasPermission(profile, 'create_rooms') && (
-            <button 
-              onClick={() => setIsAddingRoom(true)}
-              className="w-full sm:w-auto bg-emerald-500 text-black px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95"
-            >
-              <Plus size={18} />
-              Add Room
-            </button>
-          )}
-          {hasPermission(profile, 'manage_rooms') && (
-            <>
-              <button 
-                onClick={() => setIsManagingTypes(true)}
-                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-              >
-                <Settings2 size={18} />
-                Types
-              </button>
-              <button 
-                onClick={() => setIsManagingBlockings(true)}
-                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-              >
-                <XCircle size={18} />
-                Blockings
-              </button>
-              <button 
-                onClick={() => setIsManagingRates(true)}
-                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-              >
-                <TrendingUp size={18} />
-                Rates
-              </button>
-              <button 
-                onClick={() => setIsManagingConsumptionRules(true)}
-                className="w-full sm:w-auto bg-zinc-800 text-zinc-50 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-zinc-700 transition-all active:scale-95"
-              >
-                <Package size={18} />
-                Inv Sync
-              </button>
-            </>
           )}
         </div>
-      </header>
 
-      {/* Configuration Summary - New Feature */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        {/* View Switcher: Grid / List / Calendar */}
+        <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-0.5 items-center">
+          <button 
+            onClick={() => setView('grid')}
+            className={cn("p-1.5 rounded-md transition-all", view === 'grid' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-200")}
+            title="Grid View"
+          >
+            <LayoutGrid size={15} />
+          </button>
+          <button 
+            onClick={() => setView('list')}
+            className={cn("p-1.5 rounded-md transition-all", view === 'list' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-200")}
+            title="List View"
+          >
+            <List size={15} />
+          </button>
+          <button 
+            onClick={() => setView('calendar')}
+            className={cn("p-1.5 rounded-md transition-all", view === 'calendar' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-200")}
+            title="Availability Calendar"
+          >
+            <Calendar size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* Compact Configuration Summary Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
         <div 
           onClick={() => setIsManagingBlockings(true)}
-          className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl hover:bg-zinc-800 transition-all cursor-pointer group"
+          className="bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition-all cursor-pointer group flex items-center justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 bg-amber-500/10 rounded-xl text-amber-500 group-hover:scale-110 transition-transform">
-              <XCircle size={20} />
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-500 group-hover:scale-105 transition-transform">
+              <XCircle size={15} />
             </div>
-            <span className="text-2xl font-black text-zinc-50">{blockings.length}</span>
+            <div>
+              <h4 className="text-xs font-bold text-zinc-300">Active Blockings</h4>
+              <p className="text-[10px] text-zinc-500">Out of service or maintenance</p>
+            </div>
           </div>
-          <h4 className="text-sm font-bold text-zinc-400">Active Blockings</h4>
-          <p className="text-[10px] text-zinc-500 mt-1">Rooms temporarily out of service for maintenance or VIPs</p>
+          <span className="text-base font-black text-zinc-100 px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800">{blockings.length}</span>
         </div>
 
         <div 
           onClick={() => setIsManagingRates(true)}
-          className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl hover:bg-zinc-800 transition-all cursor-pointer group"
+          className="bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition-all cursor-pointer group flex items-center justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 bg-blue-500/10 rounded-xl text-blue-500 group-hover:scale-110 transition-transform">
-              <TrendingUp size={20} />
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-blue-500/10 rounded-lg text-blue-500 group-hover:scale-105 transition-transform">
+              <TrendingUp size={15} />
             </div>
-            <span className="text-2xl font-black text-zinc-50">{rateConfigs.length}</span>
+            <div>
+              <h4 className="text-xs font-bold text-zinc-300">Rate Configurations</h4>
+              <p className="text-[10px] text-zinc-500">Dynamic pricing rules</p>
+            </div>
           </div>
-          <h4 className="text-sm font-bold text-zinc-400">Rate Configurations</h4>
-          <p className="text-[10px] text-zinc-500 mt-1">Dynamic pricing rules and seasonal rate adjustments</p>
+          <span className="text-base font-black text-zinc-100 px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800">{rateConfigs.length}</span>
         </div>
 
         <div 
           onClick={() => setIsManagingConsumptionRules(true)}
-          className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl hover:bg-zinc-800 transition-all cursor-pointer group"
+          className="bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 px-3 py-2 rounded-xl hover:bg-zinc-800/60 transition-all cursor-pointer group flex items-center justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-500 group-hover:scale-110 transition-transform">
-              <Package size={20} />
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-500 group-hover:scale-105 transition-transform">
+              <Package size={15} />
             </div>
-            <span className="text-2xl font-black text-zinc-50">{consumptionRules.length}</span>
+            <div>
+              <h4 className="text-xs font-bold text-zinc-300">Inventory Sync Rules</h4>
+              <p className="text-[10px] text-zinc-500">Automatic stock deduction</p>
+            </div>
           </div>
-          <h4 className="text-sm font-bold text-zinc-400">Inventory Sync Rules</h4>
-          <p className="text-[10px] text-zinc-500 mt-1">Automatic stock deduction rules for room operations</p>
+          <span className="text-base font-black text-zinc-100 px-2 py-0.5 rounded-md bg-zinc-950 border border-zinc-800">{consumptionRules.length}</span>
         </div>
       </div>
 
-      {/* Room Status Legend */}
-      <div className="flex flex-wrap items-center gap-6 px-6 py-4 bg-zinc-900/30 border border-zinc-800/50 rounded-2xl">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Clean / Vacant</span>
+      {/* Compact Room Status Legend */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-zinc-900/30 border border-zinc-800/50 rounded-xl text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>Clean / Vacant</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-blue-500" />
+            <span>Occupied</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-amber-500" />
+            <span>Maintenance</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <span>Dirty</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-zinc-500" />
+            <span>Vacant (Unready)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-zinc-800" />
+            <span>Out of Service</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Occupied</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maintenance</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Dirty</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.3)]" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vacant (Unready)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-zinc-800" />
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Out of Service</span>
+        <div className="text-zinc-500 lowercase font-medium tracking-normal">
+          {filteredRooms.length} {filteredRooms.length === 1 ? 'room' : 'rooms'} shown
         </div>
       </div>
 

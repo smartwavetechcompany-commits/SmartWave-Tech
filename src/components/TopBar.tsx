@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { CurrencyToggle } from './CurrencyToggle';
 import { Notifications } from './Notifications';
+import { UIScaleControl } from './UIScaleControl';
 import { User, Building2, WifiOff, XCircle, LogOut, Search, Bed, Users, Calendar, ArrowRight, Loader2, ShieldAlert, CheckCircle2, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, or } from 'firebase/firestore';
@@ -473,6 +474,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
       <div className="flex items-center gap-2 sm:gap-6">
         <div className="flex items-center gap-2 sm:gap-4 border-r border-zinc-800 pr-2 sm:pr-6">
+          <UIScaleControl />
           <CurrencyToggle />
           <Notifications />
         </div>

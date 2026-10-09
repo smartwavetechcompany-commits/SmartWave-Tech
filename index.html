@@ -7,6 +7,16 @@
     <meta name="description" content="Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls." />
     <meta property="og:title" content="Tyyl Tech PMS" />
     <meta property="og:description" content="Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls." />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('pms_ui_scale');
+          if (saved) {
+            document.documentElement.style.fontSize = saved + '%';
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

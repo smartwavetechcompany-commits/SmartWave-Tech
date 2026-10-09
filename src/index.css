@@ -67,6 +67,25 @@
     --zinc-50: #fafafa;
   }
 
+  /* Compact interface scaling engine: Solves oversized interface, ensuring sleek density and full viewport visibility */
+  html {
+    font-size: 82%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  @media (max-width: 640px) {
+    html {
+      font-size: 84%;
+    }
+  }
+
+  @media print {
+    html {
+      font-size: 12px !important;
+    }
+  }
+
   body {
     background-color: var(--bg-color);
     color: var(--text-color);
