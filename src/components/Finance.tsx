@@ -1190,7 +1190,7 @@ export function Finance() {
 
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Sidebar Navigation */}
-        <div className="w-full lg:w-48 flex-shrink-0 flex lg:flex-col overflow-x-auto lg:overflow-visible gap-1 no-scrollbar bg-zinc-900/30 p-1 rounded-xl border border-zinc-800/50">
+        <div className="w-full lg:w-48 flex-shrink-0 flex lg:flex-col overflow-x-auto lg:overflow-visible gap-1 pb-1.5 lg:pb-1 custom-scrollbar bg-zinc-900/30 p-1 rounded-xl border border-zinc-800/50">
           {navItems.map((item) => (
             <button
               key={item.id}

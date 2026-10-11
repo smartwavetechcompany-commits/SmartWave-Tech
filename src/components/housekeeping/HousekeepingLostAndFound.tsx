@@ -290,7 +290,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
 
       {/* Filter and Search Bar */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 custom-scrollbar">
           {[
             { id: 'all', label: 'All Items' },
             { id: 'stored', label: 'Stored in Safe', count: storedCount },

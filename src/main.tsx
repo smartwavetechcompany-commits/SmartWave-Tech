@@ -79,6 +79,37 @@ console.warn = function (...args: any[]) {
   originalConsoleWarn.apply(console, safeArgs);
 };
 
+// Smart horizontal scroll wheel support for non-touch & desktop mouse users
+if (typeof window !== 'undefined') {
+  window.addEventListener('wheel', (e: WheelEvent) => {
+    // If native horizontal scroll is already occurring or delta is zero, do nothing
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.deltaY === 0) return;
+
+    let target = e.target as HTMLElement | null;
+    while (target && target !== document.body && target !== document.documentElement) {
+      const style = window.getComputedStyle(target);
+      const isHorizontalScroll = (style.overflowX === 'auto' || style.overflowX === 'scroll');
+      const isVerticalScroll = (style.overflowY === 'auto' || style.overflowY === 'scroll');
+
+      const canScrollHorizontally = target.scrollWidth > target.clientWidth + 2;
+      const canScrollVertically = target.scrollHeight > target.clientHeight + 2;
+
+      // If this element is a dedicated horizontal scrolling container (like tab bar, chip row, or table)
+      // and cannot scroll vertically, translate vertical wheel turn to horizontal scroll
+      if (isHorizontalScroll && canScrollHorizontally && (!isVerticalScroll || !canScrollVertically)) {
+        const atStart = target.scrollLeft <= 0 && e.deltaY < 0;
+        const atEnd = target.scrollLeft + target.clientWidth >= target.scrollWidth - 1 && e.deltaY > 0;
+        if (!atStart && !atEnd) {
+          target.scrollLeft += e.deltaY;
+          e.preventDefault();
+          return;
+        }
+      }
+      target = target.parentElement;
+    }
+  }, { passive: false });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

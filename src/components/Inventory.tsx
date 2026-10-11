@@ -242,7 +242,7 @@ export function Inventory() {
       </div>
 
       {/* Stats Grid */}
-      <div className="flex overflow-x-auto pb-4 lg:grid lg:grid-cols-4 gap-4 no-scrollbar">
+      <div className="flex overflow-x-auto pb-4 lg:grid lg:grid-cols-4 gap-4 custom-scrollbar">
         {stats.map((stat, i) => (
           <div key={i} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl min-w-[200px] lg:min-w-0">
             <div className="text-zinc-500 text-xs font-bold uppercase mb-2">{stat.label}</div>
@@ -334,7 +334,7 @@ export function Inventory() {
       <div className="pt-12 border-t border-zinc-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
           <h2 className="text-xl font-bold text-white">Advanced Inventory Modules</h2>
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl overflow-x-auto max-w-full no-scrollbar">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1.5 rounded-xl overflow-x-auto max-w-full custom-scrollbar">
             {['dashboard', 'items', 'procurement', 'movements', 'auditing', 'reports'].map(tab => (
               <button
                 key={tab}

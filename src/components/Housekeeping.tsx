@@ -44,6 +44,7 @@ import {
   Check,
   Megaphone,
   CheckCheck,
+  ChevronLeft,
   ChevronRight,
   Briefcase,
   Shirt,
@@ -135,6 +136,16 @@ export function Housekeeping() {
   // Navigation Tab State
   const [activeTab, setActiveTab] = useState<HousekeepingTab>('overview');
   const [activeProfileRoom, setActiveProfileRoom] = useState<Room | null>(null);
+  const tabsContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (tabsContainerRef.current) {
+      tabsContainerRef.current.scrollBy({
+        left: direction === 'left' ? -260 : 260,
+        behavior: 'smooth'
+      });
+    }
+  };
 
   // Core Data Collections
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -1168,7 +1179,21 @@ export function Housekeeping() {
       </div>
 
       {/* 3. Navigation Tabs (Complete Blueprint Genesis to Revelation) */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar border-b border-zinc-800/80 pb-2">
+      <div className="relative flex items-center gap-1.5 group">
+        <button
+          type="button"
+          onClick={() => scrollTabs('left')}
+          className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-700/80 text-zinc-300 hover:text-white hover:bg-zinc-800 shadow-sm shrink-0 transition-all cursor-pointer"
+          title="Scroll tabs left"
+          aria-label="Scroll tabs left"
+        >
+          <ChevronLeft size={15} />
+        </button>
+
+        <div 
+          ref={tabsContainerRef}
+          className="flex-1 flex items-center gap-1.5 overflow-x-auto border-b border-zinc-800/80 pb-2.5 custom-scrollbar"
+        >
         <button
           onClick={() => setActiveTab('overview')}
           className={cn(
@@ -1352,6 +1377,17 @@ export function Housekeeping() {
           <FileText size={14} />
           <span>Performance & Reports</span>
         </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => scrollTabs('right')}
+          className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-700/80 text-zinc-300 hover:text-white hover:bg-zinc-800 shadow-sm shrink-0 transition-all cursor-pointer"
+          title="Scroll tabs right"
+          aria-label="Scroll tabs right"
+        >
+          <ChevronRight size={15} />
+        </button>
       </div>
 
       {/* 4. TAB CONTENT: Overview (The Main Room Turnaround Board) */}
@@ -1361,7 +1397,7 @@ export function Housekeeping() {
           <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
               {/* Quick Status Segmented Pills */}
-              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar w-full sm:w-auto">
+              <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto pb-2 custom-scrollbar">
                 {[
                   { id: 'all', label: 'All' },
                   { id: 'my_rooms', label: 'My Rooms' },

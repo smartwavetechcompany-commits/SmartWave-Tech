@@ -129,18 +129,63 @@
     touch-action: manipulation;
   }
 
-  /* Custom Scrollbar */
+  /* ================================================================ */
+  /* ACCESSIBLE UNIVERSAL SCROLLBAR ENGINE                            */
+  /* High visibility, comfortable grab area (8-10px), visible tracks,  */
+  /* and theme contrast for non-touch & desktop mouse users.          */
+  /* ================================================================ */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(113, 113, 122, 0.7) rgba(24, 24, 27, 0.6);
+  }
+
+  .dark * {
+    scrollbar-color: rgba(161, 161, 170, 0.6) rgba(24, 24, 27, 0.6);
+  }
+
+  :root:not(.dark) * {
+    scrollbar-color: rgba(113, 113, 122, 0.65) rgba(228, 228, 231, 0.85);
+  }
+
+  /* Universal WebKit scrollbars (Vertical & Horizontal) */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 9px;
+    height: 9px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: rgba(24, 24, 27, 0.55);
+    border-radius: 9999px;
+  }
+
+  :root:not(.dark) ::-webkit-scrollbar-track {
+    background: rgba(228, 228, 231, 0.85);
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-zinc-800 rounded-full hover:bg-zinc-700 transition-colors;
+    background: rgba(113, 113, 122, 0.7);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.95);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    background: var(--primary-color, #10b981);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: rgba(24, 24, 27, 0.55);
+  }
+
+  :root:not(.dark) ::-webkit-scrollbar-corner {
+    background: rgba(228, 228, 231, 0.85);
   }
 }
 
@@ -291,12 +336,109 @@
 }
 
 @layer utilities {
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
+  /* High-visibility custom scrollbar utility classes */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(161, 161, 170, 0.65) rgba(24, 24, 27, 0.6);
   }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(24, 24, 27, 0.6);
+    border-radius: 9999px;
+  }
+  :root:not(.dark) .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(228, 228, 231, 0.85);
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(113, 113, 122, 0.7);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.95);
+    background-clip: padding-box;
+  }
+
+  /* Accessible fallback for legacy no-scrollbar: provide a thin visible scrollbar so mouse users are never stranded */
   .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(113, 113, 122, 0.5) rgba(24, 24, 27, 0.3);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+  .no-scrollbar::-webkit-scrollbar-track {
+    background: rgba(24, 24, 27, 0.35);
+    border-radius: 9999px;
+  }
+  :root:not(.dark) .no-scrollbar::-webkit-scrollbar-track {
+    background: rgba(228, 228, 231, 0.6);
+  }
+  .no-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(113, 113, 122, 0.6);
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+  }
+  .no-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.85);
+    background-clip: padding-box;
+  }
+
+  /* Table and horizontal scrolling container classes */
+  .overflow-x-auto {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(161, 161, 170, 0.65) rgba(24, 24, 27, 0.5);
+  }
+  .overflow-x-auto::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .overflow-x-auto::-webkit-scrollbar-track {
+    background: rgba(24, 24, 27, 0.5);
+    border-radius: 9999px;
+  }
+  :root:not(.dark) .overflow-x-auto::-webkit-scrollbar-track {
+    background: rgba(228, 228, 231, 0.85);
+  }
+  .overflow-x-auto::-webkit-scrollbar-thumb {
+    background: rgba(113, 113, 122, 0.65);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .overflow-x-auto::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.9);
+  }
+
+  /* Vertical scroll lanes */
+  .overflow-y-auto {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(161, 161, 170, 0.65) rgba(24, 24, 27, 0.5);
+  }
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 8px;
+  }
+  .overflow-y-auto::-webkit-scrollbar-track {
+    background: rgba(24, 24, 27, 0.5);
+    border-radius: 9999px;
+  }
+  :root:not(.dark) .overflow-y-auto::-webkit-scrollbar-track {
+    background: rgba(228, 228, 231, 0.85);
+  }
+  .overflow-y-auto::-webkit-scrollbar-thumb {
+    background: rgba(113, 113, 122, 0.65);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.9);
   }
 }
 
