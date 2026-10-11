@@ -444,6 +444,12 @@ export interface Room {
   lastCleanedAt?: string;
   lastFlaggedAt?: string;
   assignedTo?: string; // Staff UID
+  housekeepingStatus?: 'dirty' | 'cleaning' | 'awaiting_inspection' | 'inspected' | 'ready' | 'failed' | 'do_not_disturb';
+  cleaningPriority?: 'low' | 'normal' | 'high' | 'urgent';
+  lastInspectedAt?: string;
+  lastInspectorId?: string;
+  lastInspectionResult?: 'passed' | 'failed';
+  cleaningStartedAt?: string;
   conditionHistory?: {
     date: string;
     issue: string;
@@ -1057,3 +1063,61 @@ export interface OutstandingDebt {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface HousekeepingInspectionRecord {
+  id: string;
+  roomId: string;
+  roomNumber: string;
+  inspectorId: string;
+  inspectorName: string;
+  housekeeperId?: string;
+  housekeeperName?: string;
+  timestamp: string;
+  score: number;
+  result: 'passed' | 'failed';
+  checklist: Record<string, boolean>;
+  remarks?: string;
+  correctionsNeeded?: string;
+}
+
+export interface HousekeepingBriefing {
+  id: string;
+  date: string;
+  shift: 'morning' | 'afternoon' | 'evening' | 'night';
+  supervisorId: string;
+  supervisorName: string;
+  topic: string;
+  attendance: string[];
+  announcements?: string;
+  safetyReminders?: string;
+  timestamp: string;
+}
+
+export interface HousekeepingIncident {
+  id: string;
+  date: string;
+  roomNumber?: string;
+  staffId?: string;
+  staffName?: string;
+  description: string;
+  actionTaken: string;
+  supervisorId: string;
+  supervisorName: string;
+  timestamp: string;
+}
+
+export interface HousekeepingGuestRequest {
+  id: string;
+  roomId: string;
+  roomNumber: string;
+  item: string;
+  quantity?: number;
+  notes?: string;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  status: 'received' | 'in_progress' | 'completed';
+  assignedTo?: string;
+  assignedStaffName?: string;
+  requestedAt: string;
+  completedAt?: string;
+}
+
