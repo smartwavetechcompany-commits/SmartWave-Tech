@@ -15,7 +15,8 @@ import {
   Eye,
   Edit3,
   Check,
-  Send
+  Send,
+  XCircle
 } from 'lucide-react';
 import { cn } from '../../utils';
 import { format, parseISO } from 'date-fns';
@@ -308,17 +309,32 @@ export function RoomProfileModal({
               Quick Turnaround Actions
             </span>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onStartCleaning(room);
-                }}
-                className="p-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/10"
-              >
-                <Sparkles size={14} />
-                <span>Start Cleaning</span>
-              </button>
+              {room.status === 'cleaning' || room.housekeepingStatus === 'cleaning' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUpdateStatus(room.id, 'dirty', { housekeepingStatus: 'dirty' });
+                    onClose();
+                  }}
+                  className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                  title="Cancel cleaning in progress and revert room to Dirty"
+                >
+                  <XCircle size={14} />
+                  <span>Cancel Cleaning</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onStartCleaning(room);
+                  }}
+                  className="p-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/10"
+                >
+                  <Sparkles size={14} />
+                  <span>Start Cleaning</span>
+                </button>
+              )}
 
               <button
                 type="button"

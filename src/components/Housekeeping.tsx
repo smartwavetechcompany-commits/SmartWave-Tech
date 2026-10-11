@@ -51,7 +51,8 @@ import {
   FlaskConical,
   Layers,
   SlidersHorizontal,
-  Info
+  Info,
+  XCircle
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
 import { hasPermission } from '../utils/permissions';
@@ -536,6 +537,49 @@ export function Housekeeping() {
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${roomId}`);
       toast.error('Failed to submit cleaning checklist');
+    }
+  };
+
+  const handleCancelCleaning = async (room: Room, reason?: string) => {
+    if (!hotel?.id || !profile) return;
+    const now = new Date().toISOString();
+    try {
+      await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', room.id), {
+        status: 'dirty',
+        housekeepingStatus: 'dirty',
+        cleaningStartedAt: null,
+        updatedAt: now,
+        notes: reason ? `${room.notes ? room.notes + ' | ' : ''}Cleaning cancelled: ${reason}` : (room.notes || '')
+      }, {
+        hotelId: hotel.id,
+        module: 'Housekeeping',
+        action: 'CLEANING_CANCELLED',
+        details: `Room ${room.roomNumber} cleaning in progress cancelled, returned to Dirty status${reason ? ` (${reason})` : ''}`
+      });
+
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: now,
+        userId: profile.uid,
+        userEmail: profile.email || 'system',
+        userRole: profile.role || 'staff',
+        action: 'HOUSEKEEPING_CLEANING_CANCELLED',
+        resource: `Room ${room.roomNumber}: CLEANING_CANCELLED -> DIRTY`,
+        hotelId: hotel.id,
+        module: 'Housekeeping'
+      }, {
+        hotelId: hotel.id,
+        module: 'Housekeeping',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: `Cleaning in progress cancelled for Room ${room.roomNumber}`
+      });
+
+      toast.info(`Room ${room.roomNumber} cleaning cancelled. Room returned to Dirty status.`);
+      if (activeCleaningRoom?.id === room.id) {
+        setActiveCleaningRoom(null);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/rooms/${room.id}`);
+      toast.error('Failed to cancel cleaning');
     }
   };
 
@@ -1656,14 +1700,29 @@ export function Housekeeping() {
                         )}
 
                         {isCleaning && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveCleaningRoom(room)}
-                            className="col-span-2 py-2 bg-purple-500 hover:bg-purple-400 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <ClipboardList size={14} />
-                            Cleaning Checklist
-                          </button>
+                          <div className="col-span-2 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveCleaningRoom(room)}
+                              className="py-2 bg-purple-500 hover:bg-purple-400 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                            >
+                              <ClipboardList size={13} />
+                              Checklist
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Cancel cleaning in progress for Room ${room.roomNumber}? It will be returned to Dirty status.`)) {
+                                  handleCancelCleaning(room);
+                                }
+                              }}
+                              className="py-2 bg-zinc-950 hover:bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:border-rose-500/60 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              title="Cancel cleaning and revert room to Dirty status"
+                            >
+                              <XCircle size={13} />
+                              Cancel Clean
+                            </button>
+                          </div>
                         )}
 
                         {isAwaitingInspection && (
@@ -1768,13 +1827,40 @@ export function Housekeeping() {
                     <span className="font-bold">{cleaner?.displayName || 'Unassigned'}</span>
                   </div>
 
-                  <button
-                    onClick={() => handleStartCleaning(room)}
-                    className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
-                  >
-                    <ClipboardList size={14} />
-                    Open Cleaning Checklist
-                  </button>
+                  {room.status === 'cleaning' ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleStartCleaning(room)}
+                        className="py-2.5 bg-purple-500 hover:bg-purple-400 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <ClipboardList size={14} />
+                        Checklist
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Cancel cleaning in progress for Room ${room.roomNumber}? The room will be returned to Dirty status.`)) {
+                            handleCancelCleaning(room);
+                          }
+                        }}
+                        className="py-2.5 bg-zinc-950 hover:bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:border-rose-500/60 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        title="Cancel cleaning and revert room to Dirty status"
+                      >
+                        <XCircle size={14} />
+                        Cancel Clean
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleStartCleaning(room)}
+                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-md shadow-emerald-500/10"
+                    >
+                      <Sparkles size={14} />
+                      Start Cleaning
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -1863,12 +1949,28 @@ export function Housekeeping() {
                         </select>
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={() => handleStartCleaning(room)}
-                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-bold transition-all"
-                        >
-                          Clean
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleStartCleaning(room)}
+                            className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-bold transition-all"
+                          >
+                            Clean
+                          </button>
+                          {room.status === 'cleaning' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Cancel cleaning in progress for Room ${room.roomNumber}? It will be returned to Dirty status.`)) {
+                                  handleCancelCleaning(room);
+                                }
+                              }}
+                              className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                              title="Cancel cleaning and return room to Dirty"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -2276,12 +2378,28 @@ export function Housekeeping() {
                 <h3 className="text-xl font-black text-white">Room {activeCleaningRoom.roomNumber} Cleaning Checklist</h3>
                 <p className="text-xs text-zinc-400">Complete items thoroughly before submitting for supervisor inspection</p>
               </div>
-              <button
-                onClick={() => setActiveCleaningRoom(null)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`Cancel cleaning in progress for Room ${activeCleaningRoom.roomNumber}? The room will be returned to Dirty status.`)) {
+                      handleCancelCleaning(activeCleaningRoom);
+                    }
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Cancel cleaning and return room to Dirty status"
+                >
+                  <XCircle size={14} />
+                  <span>Cancel Clean</span>
+                </button>
+                <button
+                  onClick={() => setActiveCleaningRoom(null)}
+                  className="p-1 text-zinc-500 hover:text-white rounded-lg cursor-pointer"
+                  title="Close checklist (cleaning remains active)"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
@@ -2374,18 +2492,32 @@ export function Housekeeping() {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-zinc-800 flex items-center gap-3">
+            <div className="pt-3 border-t border-zinc-800 flex flex-wrap items-center gap-2 sm:gap-3">
               <button
                 type="button"
                 onClick={() => setActiveCleaningRoom(null)}
-                className="flex-1 py-2.5 bg-zinc-800 text-zinc-300 rounded-xl text-xs font-bold hover:bg-zinc-700"
+                className="px-4 py-2.5 bg-zinc-800 text-zinc-300 rounded-xl text-xs font-bold hover:bg-zinc-700 cursor-pointer"
+                title="Close checklist (cleaning remains active)"
               >
                 Close
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  if (window.confirm(`Stop cleaning Room ${activeCleaningRoom.roomNumber}? The room will be returned to Dirty status.`)) {
+                    handleCancelCleaning(activeCleaningRoom);
+                  }
+                }}
+                className="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                title="Cancel cleaning and revert room to Dirty status"
+              >
+                <XCircle size={14} />
+                <span>Cancel Cleaning</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleCompleteCleaning}
-                className="flex-[2] py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 whitespace-nowrap min-w-[200px] cursor-pointer"
               >
                 <Send size={14} />
                 Cleaning Completed → Send for Inspection
