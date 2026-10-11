@@ -9,6 +9,15 @@
     <meta property="og:description" content="Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls." />
     <script>
       (function() {
+        // Suppress benign Vite HMR websocket disconnection unhandled rejections
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && event.reason) {
+            var msg = event.reason.message || String(event.reason) || '';
+            if (msg.includes('WebSocket') || msg.includes('websocket')) {
+              event.preventDefault();
+            }
+          }
+        });
         try {
           var saved = localStorage.getItem('pms_ui_scale');
           if (saved) {

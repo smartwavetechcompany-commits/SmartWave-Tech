@@ -1121,3 +1121,100 @@ export interface HousekeepingGuestRequest {
   completedAt?: string;
 }
 
+export interface HousekeepingInventoryItem {
+  id: string;
+  name: string;
+  category?: string;
+  openingStock: number;
+  received: number;
+  issued: number;
+  used: number;
+  damaged: number;
+  balance: number;
+  minStockLevel: number;
+  unit: string;
+  lastUpdated: string;
+}
+
+export interface HousekeepingStockIssue {
+  id: string;
+  staffName: string;
+  staffId?: string;
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  date: string;
+  issuedBy: string;
+  purpose: string;
+  timestamp: string;
+}
+
+export interface HousekeepingStockReceipt {
+  id: string;
+  supplier: string;
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  date: string;
+  receivedBy: string;
+  invoiceRef?: string;
+  remarks?: string;
+  timestamp: string;
+}
+
+export interface HousekeepingLostAndFoundItem {
+  id: string;
+  item: string;
+  roomLocation: string;
+  dateFound: string;
+  timeFound: string;
+  foundBy: string;
+  description: string;
+  guestName?: string;
+  storageLocation: string;
+  status: 'stored' | 'claimed' | 'returned' | 'unclaimed';
+  dateReturned?: string;
+  receivedBy?: string;
+  timestamp: string;
+}
+
+export interface HousekeepingLinenItem {
+  id: string;
+  name: string;
+  cleanStock: number;
+  issued: number;
+  used: number;
+  inLaundry: number;
+  damagedMissing: number;
+  totalPar: number;
+  lastUpdated: string;
+}
+
+export interface HousekeepingChemicalItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  dateReceived: string;
+  expiryDate: string;
+  storageLocation: string;
+  minimumLevel: number;
+  usage: string;
+  safetyNotes: string;
+  timestamp: string;
+}
+
+export interface HousekeepingDailyLog {
+  id: string;
+  date: string;
+  roomsCleaned: number;
+  roomsInspected: number;
+  maintenanceReported: number;
+  stockUsedSummary: string;
+  staffAttendanceCount: number;
+  staffPresentNames: string[];
+  pendingIssues: string;
+  notes?: string;
+  supervisorName: string;
+  timestamp: string;
+}

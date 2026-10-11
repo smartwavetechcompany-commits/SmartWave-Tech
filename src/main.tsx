@@ -66,6 +66,10 @@ function sanitizeArg(arg: any): any {
 }
 
 console.error = function (...args: any[]) {
+  const first = typeof args[0] === 'string' ? args[0] : '';
+  if (first.includes('[vite] failed to connect to websocket')) {
+    return;
+  }
   const safeArgs = args.map(sanitizeArg);
   originalConsoleError.apply(console, safeArgs);
 };

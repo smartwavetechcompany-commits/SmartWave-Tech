@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -11,6 +12,15 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Security Headers Middleware (OWASP recommended defense-in-depth)
+  app.use((req, res, next) => {
+    res.header("X-Content-Type-Options", "nosniff");
+    res.header("X-Frame-Options", "SAMEORIGIN");
+    res.header("X-XSS-Protection", "1; mode=block");
+    res.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+
   // CORS and Preflight Handling for all environments (prevents 405 Method Not Allowed)
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
@@ -22,7 +32,36 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: "2mb" }));
+
+  // In-memory rate limiting map for API routes
+  const apiRateLimitMap = new Map<string, { count: number; firstSeen: number }>();
+  app.use("/api/", (req, res, next) => {
+    // Exempt health check
+    if (req.path === "/health") return next();
+
+    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown_ip";
+    const ipKey = `${String(clientIp)}:${req.path}`;
+    const now = Date.now();
+    const windowMs = 60000; // 1 minute window
+    const maxRequests = 120; // 120 requests per minute per endpoint
+
+    const record = apiRateLimitMap.get(ipKey);
+    if (!record || now - record.firstSeen > windowMs) {
+      apiRateLimitMap.set(ipKey, { count: 1, firstSeen: now });
+      return next();
+    }
+
+    if (record.count >= maxRequests) {
+      return res.status(429).json({
+        error: "Too many requests. Please slow down.",
+        retryAfterMs: windowMs - (now - record.firstSeen)
+      });
+    }
+
+    record.count++;
+    next();
+  });
 
   // Initialize Firebase for server validation and Admin SDK
   let db: any = null;
@@ -776,6 +815,15 @@ async function startServer() {
 
     if (!hotelId || !email || !fullName) {
       return res.status(400).json({ error: "Missing required fields: hotelId, email, and fullName are mandatory." });
+    }
+
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+    if (!emailRegex.test(String(email).trim())) {
+      return res.status(400).json({ error: "Invalid email address format." });
+    }
+
+    if (!/^[a-zA-Z0-9_\-\.]+$/.test(String(hotelId).trim())) {
+      return res.status(400).json({ error: "Invalid hotelId identifier." });
     }
 
     if (!db) {
@@ -2814,10 +2862,16 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  const httpServer = http.createServer(app);
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const isHmrDisabled = process.env.DISABLE_HMR === "true";
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: isHmrDisabled ? false : { server: httpServer },
+      },
       appType: "spa",
     });
     
@@ -2834,7 +2888,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

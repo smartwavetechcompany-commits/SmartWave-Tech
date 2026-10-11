@@ -44,7 +44,13 @@ import {
   Check,
   Megaphone,
   CheckCheck,
-  ChevronRight
+  ChevronRight,
+  Briefcase,
+  Shirt,
+  FlaskConical,
+  Layers,
+  SlidersHorizontal,
+  Info
 } from 'lucide-react';
 import { cn, exportToCSV } from '../utils';
 import { hasPermission } from '../utils/permissions';
@@ -53,6 +59,14 @@ import { format, isWithinInterval, parseISO, isToday } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+
+import { RoomProfileModal } from './housekeeping/RoomProfileModal';
+import { HousekeepingInventory } from './housekeeping/HousekeepingInventory';
+import { HousekeepingLostAndFound } from './housekeeping/HousekeepingLostAndFound';
+import { HousekeepingLinen } from './housekeeping/HousekeepingLinen';
+import { HousekeepingChemicals } from './housekeeping/HousekeepingChemicals';
+import { HousekeepingDailyLogView } from './housekeeping/HousekeepingDailyLog';
+import { HousekeepingStaffManagement } from './housekeeping/HousekeepingStaffManagement';
 
 // Standard Checklists based on Housekeeping Blueprint
 const BEDROOM_CHECKLIST_ITEMS = [
@@ -99,7 +113,20 @@ const INSPECTION_CHECKLIST_ITEMS = [
   { id: 'overall', label: 'Overall presentation & guest-ready feel' },
 ];
 
-type HousekeepingTab = 'overview' | 'cleaning' | 'assignments' | 'inspections' | 'briefings' | 'requests' | 'reports';
+type HousekeepingTab = 
+  | 'overview' 
+  | 'cleaning' 
+  | 'inspections' 
+  | 'assignments' 
+  | 'staff' 
+  | 'inventory' 
+  | 'linen' 
+  | 'chemicals' 
+  | 'lost_and_found' 
+  | 'daily_log' 
+  | 'requests' 
+  | 'briefings' 
+  | 'reports';
 
 export function Housekeeping() {
   const navigate = useNavigate();
@@ -107,6 +134,7 @@ export function Housekeeping() {
 
   // Navigation Tab State
   const [activeTab, setActiveTab] = useState<HousekeepingTab>('overview');
+  const [activeProfileRoom, setActiveProfileRoom] = useState<Room | null>(null);
 
   // Core Data Collections
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -949,13 +977,13 @@ export function Housekeeping() {
           </div>
         </div>
 
-        {/* Quick Action Launcher Toolbar */}
+        {/* Quick Action Launcher Toolbar (Blueprint Section 1) */}
         <div className="flex flex-wrap items-center gap-2">
           <button 
             onClick={() => {
               const firstDirty = rooms.find(r => r.status === 'dirty');
               if (firstDirty) handleStartCleaning(firstDirty);
-              else toast.info('No dirty rooms found to clean!');
+              else setActiveTab('cleaning');
             }}
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-xl transition-all active:scale-95 shadow-md shadow-emerald-500/10"
             title="Start Cleaning next dirty room"
@@ -970,7 +998,34 @@ export function Housekeeping() {
             title="Report Maintenance Defect"
           >
             <Wrench size={14} />
-            <span>Report Defect</span>
+            <span>Report Maintenance</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('inventory')}
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 text-xs font-bold rounded-xl transition-all active:scale-95"
+            title="Add / Manage Inventory"
+          >
+            <Package size={14} />
+            <span>Add Inventory</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('lost_and_found')}
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 text-xs font-bold rounded-xl transition-all active:scale-95"
+            title="Hotel Lost & Found"
+          >
+            <Briefcase size={14} />
+            <span>Lost & Found</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('inspections')}
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-xs font-bold rounded-xl transition-all active:scale-95"
+            title="Room Quality Inspection"
+          >
+            <Eye size={14} />
+            <span>Room Inspection</span>
           </button>
 
           <button 
@@ -983,15 +1038,6 @@ export function Housekeeping() {
           </button>
 
           <button 
-            onClick={() => setShowGuestRequestModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs font-bold rounded-xl transition-all active:scale-95"
-            title="Record Guest Housekeeping Request"
-          >
-            <Plus size={14} />
-            <span>Guest Request</span>
-          </button>
-
-          <button 
             onClick={handleExportHousekeeping}
             className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 text-xs font-bold rounded-xl transition-all active:scale-95"
             title="Export Report"
@@ -1001,6 +1047,46 @@ export function Housekeeping() {
           </button>
         </div>
       </header>
+
+      {/* Real-time Housekeeping Alerts Banner (Blueprint Section 18) */}
+      {(metrics.awaitingInspection > 0 || metrics.activeMaintenanceCount > 0 || metrics.lowStockCount > 0) && (
+        <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1">
+              <AlertTriangle size={12} className="text-amber-400" />
+              Live Alerts:
+            </span>
+            {metrics.awaitingInspection > 0 && (
+              <button 
+                onClick={() => setActiveTab('inspections')}
+                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition-all flex items-center gap-1.5 animate-pulse"
+              >
+                <Clock size={12} />
+                <span>{metrics.awaitingInspection} Awaiting Inspection</span>
+              </button>
+            )}
+            {metrics.activeMaintenanceCount > 0 && (
+              <button 
+                onClick={() => setShowMaintenanceModal(true)}
+                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 transition-all flex items-center gap-1.5"
+              >
+                <Wrench size={12} />
+                <span>{metrics.activeMaintenanceCount} Maintenance Issues</span>
+              </button>
+            )}
+            {metrics.lowStockCount > 0 && (
+              <button 
+                onClick={() => setActiveTab('inventory')}
+                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30 transition-all flex items-center gap-1.5"
+              >
+                <Package size={12} />
+                <span>{metrics.lowStockCount} Low-Stock Items</span>
+              </button>
+            )}
+          </div>
+          <span className="text-[11px] text-zinc-500 font-mono">Live Firestore Sync Active</span>
+        </div>
+      )}
 
       {/* 2. Housekeeping Operational Dashboard Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2.5 sm:gap-3">
@@ -1050,18 +1136,18 @@ export function Housekeeping() {
         </div>
 
         <div className="bg-zinc-900/80 border border-zinc-800/80 p-3 rounded-xl flex flex-col justify-between">
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Maintenance</span>
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Out of Order</span>
           <div className="text-xl sm:text-2xl font-black text-zinc-300 mt-1">{metrics.maintenance}</div>
         </div>
 
         {/* Maintenance Integration Quick Card */}
         <div 
-          onClick={() => navigate('/maintenance')}
+          onClick={() => setShowMaintenanceModal(true)}
           className="bg-zinc-900/80 border border-amber-500/30 p-3 rounded-xl flex flex-col justify-between cursor-pointer hover:bg-amber-500/5 transition-all group"
-          title="Click to view Maintenance Module"
+          title="Click to report or review maintenance defects"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Defects</span>
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Maintenance</span>
             <Wrench size={12} className="text-amber-400 group-hover:rotate-45 transition-transform" />
           </div>
           <div className="text-xl sm:text-2xl font-black text-amber-400 mt-1">{metrics.activeMaintenanceCount}</div>
@@ -1069,9 +1155,9 @@ export function Housekeeping() {
 
         {/* Inventory Integration Quick Card */}
         <div 
-          onClick={() => navigate('/inventory')}
+          onClick={() => setActiveTab('inventory')}
           className="bg-zinc-900/80 border border-emerald-500/30 p-3 rounded-xl flex flex-col justify-between cursor-pointer hover:bg-emerald-500/5 transition-all group"
-          title="Click to view Inventory Module"
+          title="Click to view Housekeeping Inventory"
         >
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Low Supplies</span>
@@ -1081,7 +1167,7 @@ export function Housekeeping() {
         </div>
       </div>
 
-      {/* 3. Navigation Tabs (Mobile-Friendly Pill Carousel) */}
+      {/* 3. Navigation Tabs (Complete Blueprint Genesis to Revelation) */}
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar border-b border-zinc-800/80 pb-2">
         <button
           onClick={() => setActiveTab('overview')}
@@ -1143,6 +1229,87 @@ export function Housekeeping() {
         </button>
 
         <button
+          onClick={() => setActiveTab('staff')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
+            activeTab === 'staff'
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          )}
+        >
+          <UserIcon size={14} />
+          <span>Staff & Team</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('inventory')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
+            activeTab === 'inventory'
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          )}
+        >
+          <Package size={14} />
+          <span>Stock & Inventory</span>
+          {metrics.lowStockCount > 0 && (
+            <span className="text-[10px] font-mono px-1.5 rounded bg-purple-500 text-white font-bold">{metrics.lowStockCount}</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('linen')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
+            activeTab === 'linen'
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          )}
+        >
+          <Shirt size={14} />
+          <span>Linen Management</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('chemicals')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
+            activeTab === 'chemicals'
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          )}
+        >
+          <FlaskConical size={14} />
+          <span>Chemicals & Safety</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('lost_and_found')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
+            activeTab === 'lost_and_found'
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          )}
+        >
+          <Briefcase size={14} />
+          <span>Lost & Found</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('daily_log')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
+            activeTab === 'daily_log'
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          )}
+        >
+          <FileText size={14} />
+          <span>Daily Handover Log</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('requests')}
           className={cn(
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
@@ -1170,7 +1337,7 @@ export function Housekeeping() {
           )}
         >
           <Megaphone size={14} />
-          <span>Briefings & Logs</span>
+          <span>Briefings</span>
         </button>
 
         <button
@@ -1338,9 +1505,13 @@ export function Housekeeping() {
 
                       {/* Header Row: Room Number & Priority */}
                       <div className="flex items-start justify-between pr-8">
-                        <div>
+                        <div 
+                          onClick={() => setActiveProfileRoom(room)}
+                          className="cursor-pointer group/title"
+                          title="Click to view complete Room Profile"
+                        >
                           <div className="flex items-center gap-2">
-                            <span className="text-xl font-black text-zinc-50 tracking-tight">Room {room.roomNumber}</span>
+                            <span className="text-xl font-black text-zinc-50 group-hover/title:text-emerald-400 transition-colors tracking-tight">Room {room.roomNumber}</span>
                             {/* Priority Badge */}
                             {priority === 'urgent' && (
                               <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-500 text-white animate-pulse">
@@ -1357,6 +1528,16 @@ export function Housekeeping() {
                             {room.type} • Floor {room.floor}
                           </p>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setActiveProfileRoom(room)}
+                          className="px-2 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white text-[10px] font-bold transition-all flex items-center gap-1"
+                          title="View complete Room Profile"
+                        >
+                          <Info size={12} />
+                          <span>Profile</span>
+                        </button>
                       </div>
 
                       {/* Status Badges Row */}
@@ -1926,6 +2107,66 @@ export function Housekeeping() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 11. TAB CONTENT: Staff & Team Management (Blueprint Section 5) */}
+      {activeTab === 'staff' && (
+        <HousekeepingStaffManagement
+          staff={staff}
+          rooms={rooms}
+          onAssignRoom={async (roomId, staffId) => {
+            const currentRoom = rooms.find(r => r.id === roomId);
+            await updateRoomStatus(roomId, currentRoom?.status || 'dirty', { assignedTo: staffId });
+          }}
+        />
+      )}
+
+      {/* 12. TAB CONTENT: Housekeeping Inventory & Stock Management (Blueprint Sections 7, 8, 9, 10) */}
+      {activeTab === 'inventory' && (
+        <HousekeepingInventory staff={staff} />
+      )}
+
+      {/* 13. TAB CONTENT: Linen Management & Laundry Flow (Blueprint Section 14) */}
+      {activeTab === 'linen' && (
+        <HousekeepingLinen />
+      )}
+
+      {/* 14. TAB CONTENT: Chemical Safety & Stock Register (Blueprint Section 15) */}
+      {activeTab === 'chemicals' && (
+        <HousekeepingChemicals />
+      )}
+
+      {/* 15. TAB CONTENT: Hotel Lost & Found Register (Blueprint Section 13) */}
+      {activeTab === 'lost_and_found' && (
+        <HousekeepingLostAndFound rooms={rooms} staff={staff} />
+      )}
+
+      {/* 16. TAB CONTENT: Daily Housekeeping Log & Shift Handover (Blueprint Section 16) */}
+      {activeTab === 'daily_log' && (
+        <HousekeepingDailyLogView
+          rooms={rooms}
+          inspections={inspections}
+          maintenanceRequests={maintenanceRequests}
+          staff={staff}
+        />
+      )}
+
+      {/* --- ROOM PROFILE MODAL (Blueprint Section 2) --- */}
+      {activeProfileRoom && (
+        <RoomProfileModal
+          room={activeProfileRoom}
+          staff={staff}
+          reservations={reservations}
+          maintenanceRequests={maintenanceRequests}
+          onClose={() => setActiveProfileRoom(null)}
+          onUpdateStatus={updateRoomStatus}
+          onStartCleaning={handleStartCleaning}
+          onStartInspection={handleOpenInspection}
+          onReportMaintenance={(rn) => {
+            setMaintenanceForm(prev => ({ ...prev, roomNumber: rn }));
+            setShowMaintenanceModal(true);
+          }}
+        />
       )}
 
       {/* --- BULK ACTION BAR --- */}
