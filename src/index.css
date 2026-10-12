@@ -283,6 +283,13 @@
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    animation: none !important;
+  }
+
+  .fixed.inset-0::before,
+  div[class*="fixed inset-0"]::before {
+    display: none !important;
+    content: none !important;
   }
 
   /* Reset layout constraints so printed documents flow naturally across pages */
@@ -450,10 +457,58 @@
 }
 
 /* ================================================================ */
-/* MODAL & DIALOG VIEWPORT RESPONSIVENESS (ANTI-CLIPPING ENGINE)   */
-/* Solves UI covering and hidden application buttons at 100% zoom, */
-/* 67% zoom, or high-DPI scaling across all desktop & mobile sizes. */
+/* MODERN POPUP OVERLAY & DIALOG ELEVATION ENGINE                    */
+/* Transforms plain flat overlays into a modern, cinematic, frosted  */
+/* glass vignette with luminous depth and refined card rim lighting. */
 /* ================================================================ */
+
+/* Base overlay styling for backdrop-blur or background overlays */
+.fixed.inset-0[class*="bg-"]:not(#print-root),
+.fixed.inset-0[class*="backdrop-"]:not(#print-root) {
+  /* Rich layered vignette that draws optical focus toward the center dialog */
+  background: radial-gradient(
+    circle at 50% 35%,
+    rgba(24, 24, 32, 0.74) 0%,
+    rgba(14, 16, 24, 0.88) 48%,
+    rgba(7, 8, 14, 0.96) 100%
+  ) !important;
+
+  /* Modern ultra-smooth glassmorphism */
+  backdrop-filter: blur(16px) saturate(180%) contrast(105%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) contrast(105%) !important;
+
+  /* Ensure smooth fade entrance */
+  animation: modernOverlayFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Light mode overlay styling */
+:root:not(.dark) .fixed.inset-0[class*="bg-"]:not(#print-root),
+:root:not(.dark) .fixed.inset-0[class*="backdrop-"]:not(#print-root) {
+  background: radial-gradient(
+    circle at 50% 35%,
+    rgba(30, 41, 59, 0.48) 0%,
+    rgba(15, 23, 42, 0.70) 50%,
+    rgba(2, 6, 23, 0.86) 100%
+  ) !important;
+  backdrop-filter: blur(16px) saturate(160%) contrast(102%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(160%) contrast(102%) !important;
+}
+
+/* Subtle luminous halo centered behind modal dialogs */
+.fixed.inset-0[class*="bg-"]:not(#print-root)::before,
+.fixed.inset-0[class*="backdrop-"]:not(#print-root)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    650px circle at 50% 36%,
+    rgba(16, 185, 129, 0.05),
+    rgba(59, 130, 246, 0.035) 45%,
+    transparent 75%
+  );
+  z-index: -1;
+}
 
 /* Ensure all full-screen fixed overlays allow natural vertical scrolling and don't trap views */
 .fixed.inset-0:not(#print-root) {
@@ -472,18 +527,72 @@
   }
 }
 
-/* Ensure modal dialog cards never exceed viewport height so buttons are always accessible */
+/* Modern dialog card elevation & rim lighting */
 .fixed.inset-0:not(#print-root) > div:not(.print-container):not([class*="fixed"]),
 .fixed.inset-0:not(#print-root) > [class*="motion"]:not(.print-container),
 .fixed.inset-0:not(#print-root) .min-h-full > div:not(.print-container) {
   max-height: calc(100vh - 2rem);
   max-height: calc(100dvh - 2rem);
   box-sizing: border-box;
+
+  /* Modern multi-layer depth shadow & micro rim-highlight */
+  box-shadow: 
+    0 0 0 1px rgba(255, 255, 255, 0.09),
+    0 1px 2px 0 rgba(0, 0, 0, 0.4),
+    0 14px 28px -6px rgba(0, 0, 0, 0.55),
+    0 30px 65px -12px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Light mode dialog card rim lighting */
+:root:not(.dark) .fixed.inset-0:not(#print-root) > div:not(.print-container):not([class*="fixed"]),
+:root:not(.dark) .fixed.inset-0:not(#print-root) > [class*="motion"]:not(.print-container),
+:root:not(.dark) .fixed.inset-0:not(#print-root) .min-h-full > div:not(.print-container) {
+  box-shadow: 
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 1px 3px 0 rgba(0, 0, 0, 0.12),
+    0 14px 28px -6px rgba(15, 23, 42, 0.18),
+    0 30px 65px -12px rgba(15, 23, 42, 0.28),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Smooth entrance animation for static dialog containers */
+.fixed.inset-0:not(#print-root) > div:not(.print-container):not([class*="fixed"]):not([class*="motion"]):not([style*="transform"]):not([class*="animate-in"]) {
+  animation: modernModalCardEntrance 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Ensure modal footers containing action buttons (Save, Cancel, Submit, etc.) are never clipped */
 .fixed.inset-0:not(#print-root) [class*="border-t"]:last-child {
   flex-shrink: 0;
+}
+
+@keyframes modernOverlayFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes modernModalCardEntrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Accessibility: respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .fixed.inset-0[class*="bg-"]:not(#print-root),
+  .fixed.inset-0[class*="backdrop-"]:not(#print-root),
+  .fixed.inset-0:not(#print-root) > div {
+    animation: none !important;
+  }
 }
 
 /* ================================================================ */
