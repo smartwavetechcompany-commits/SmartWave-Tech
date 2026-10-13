@@ -545,7 +545,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       </div>
 
       {/* KPI Highlight Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 print:hidden">
         {/* Total Outstanding */}
         <div className="bg-zinc-900 rounded-2xl p-5 border border-zinc-800">
           <div className="flex items-center justify-between text-zinc-400 text-xs font-bold uppercase tracking-wider">

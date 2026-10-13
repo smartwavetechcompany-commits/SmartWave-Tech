@@ -55,9 +55,9 @@ function isolateElementForPrint(
     }
   });
 
-  // Remove interactive elements, close buttons, print triggers, and toasts
+  // Remove interactive elements, close buttons, print triggers, inputs, and toasts
   const elementsToRemove = cloned.querySelectorAll<HTMLElement>(
-    'button, .print\\:hidden, .no-print, [data-sonner-toaster], .cursor-pointer.hover\\:bg-white\\/10, [class*="print:hidden"]'
+    'button, .print\\:hidden, .no-print, [data-sonner-toaster], .cursor-pointer.hover\\:bg-white\\/10, [class*="print:hidden"], input:not([type="checkbox"]):not([type="radio"]), select, textarea'
   );
   elementsToRemove.forEach(el => el.remove());
 
@@ -143,6 +143,7 @@ function isolateElementForPrint(
   `;
 
   // Activate isolated printing mode
+  document.documentElement.classList.add('is-printing-active');
   document.body.classList.add('is-printing-active');
 
   // Define cleanup routine
@@ -151,6 +152,7 @@ function isolateElementForPrint(
     if (cleanedUp) return;
     cleanedUp = true;
     activeCleanupFn = null;
+    document.documentElement.classList.remove('is-printing-active');
     document.body.classList.remove('is-printing-active');
     if (options?.title) {
       document.title = originalTitle;
@@ -161,13 +163,19 @@ function isolateElementForPrint(
     if (printRoot) {
       printRoot.innerHTML = '';
     }
-    window.removeEventListener('afterprint', cleanup);
+    window.removeEventListener('afterprint', onAfterPrint);
+  };
+
+  const onAfterPrint = () => {
+    // Allow browser print spooler time to complete
+    setTimeout(cleanup, 2500);
   };
 
   activeCleanupFn = cleanup;
-  window.addEventListener('afterprint', cleanup);
-  // Failsafe timeout in case afterprint does not fire in all browsers
-  setTimeout(cleanup, 4000);
+  window.addEventListener('afterprint', onAfterPrint);
+
+  // Safety timeout (120 seconds) so user taking time in browser print dialog never gets document wiped
+  setTimeout(cleanup, 120000);
 }
 
 /**
@@ -190,7 +198,7 @@ export function printDocument(
   // Fallback discovery if target is not directly provided
   if (!element) {
     element = document.querySelector<HTMLElement>(
-      '#active-hotel-receipt, .receipt-container, .docket-container, #bulk-settle-invoice, .superadmin-receipt, .staff-handover-slip, .corporate-invoice, [data-printable="true"]'
+      '#active-hotel-receipt, .receipt-container, .docket-container, #bulk-settle-invoice, .superadmin-receipt, .staff-handover-slip, .corporate-invoice, #active-report-print-manifest, #breakfast-manifest-print-container, #dss-guest-report-print-container, [data-printable="true"]'
     );
   }
 
@@ -219,7 +227,7 @@ export function printDocument(
 /**
  * Global Automatic Print Interceptor:
  * Ensures that even if the user presses Ctrl+P or uses the browser's native Print command,
- * if an active document (receipt, invoice, docket, handover slip) or open modal is present,
+ * if an active document (receipt, invoice, docket, handover slip, or report) is present,
  * it automatically isolates that exact document into #print-root so the underlying screen/timeline NEVER leaks!
  */
 export function setupGlobalPrintListener(): void {
@@ -244,17 +252,27 @@ export function setupGlobalPrintListener(): void {
       '#breakfast-manifest-print-container',
       '#dss-guest-report-print-container',
       '#ar-outstanding-guest-ledger-container',
-      '#active-guest-timeline',
       '#reports-analytics-print-container',
+      '#active-report-print-manifest',
+      '#active-guest-timeline',
+      '.outstanding-ledger-document',
+      '.guest-timeline-document',
       '[data-printable="true"]'
     ];
 
     for (const selector of prioritySelectors) {
       const found = document.querySelector<HTMLElement>(selector);
-      // Check if found exists and is visible (not display: none or zero size)
-      if (found && (found.offsetWidth > 0 || found.offsetHeight > 0 || found.offsetParent !== null)) {
-        isolateElementForPrint(found);
-        break;
+      if (found && found.isConnected) {
+        // Verify container is connected in the active document view
+        const isPrintContainer = found.id.includes('print-container') || found.id.includes('print-manifest') || found.getAttribute('data-printable') === 'true';
+        const isRelevant = isPrintContainer
+          ? (found.parentElement !== null)
+          : (found.offsetWidth > 0 || found.offsetHeight > 0 || found.offsetParent !== null);
+
+        if (isRelevant) {
+          isolateElementForPrint(found);
+          break;
+        }
       }
     }
   });

@@ -208,26 +208,41 @@
 @media print {
   /* ================================================================ */
   /* ISOLATED DOCUMENT PRINTING MODE                                  */
-  /* When is-printing-active is set on body, HIDE #root entirely      */
-  /* (preventing any background page, other open modals, or timelines */
-  /* from leaking into print) and display ONLY #print-root.           */
+  /* When is-printing-active is set or #print-root contains children  */
+  /* HIDE #root entirely and display ONLY #print-root.                */
   /* ================================================================ */
-  body.is-printing-active {
+  html.is-printing-active,
+  body.is-printing-active,
+  body:has(#print-root:not(:empty)),
+  body:has(#print-root > *) {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
   }
 
-  body.is-printing-active #root {
+  html.is-printing-active #root,
+  body.is-printing-active #root,
+  body:has(#print-root:not(:empty)) #root,
+  body:has(#print-root > *) #root {
     display: none !important;
-    height: 0 !important;
-    overflow: hidden !important;
     visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    left: -99999px !important;
+    top: -99999px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
   }
 
-  body.is-printing-active #print-root {
+  html.is-printing-active #print-root,
+  body.is-printing-active #print-root,
+  body:has(#print-root:not(:empty)) #print-root,
+  body:has(#print-root > *) #print-root {
     display: block !important;
+    visibility: visible !important;
     position: static !important;
     width: 100% !important;
     height: auto !important;
@@ -237,25 +252,68 @@
     background: #ffffff !important;
     color: #000000 !important;
     overflow: visible !important;
-    visibility: visible !important;
+    opacity: 1 !important;
   }
 
-  body.is-printing-active #print-root * {
+  body.is-printing-active #print-root *,
+  #print-root:not(:empty) *,
+  #print-root > * * {
     visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
+  /* Strip interactive buttons and print:hidden elements inside #print-root */
   body.is-printing-active #print-root button,
   body.is-printing-active #print-root .print\:hidden,
   body.is-printing-active #print-root [class*="print:hidden"],
   body.is-printing-active #print-root .no-print,
-  body.is-printing-active #print-root [data-sonner-toaster] {
+  body.is-printing-active #print-root [data-sonner-toaster],
+  #print-root button,
+  #print-root .print\:hidden,
+  #print-root [class*="print:hidden"],
+  #print-root .no-print,
+  #print-root [data-sonner-toaster] {
     display: none !important;
+  }
+
+  /* Clean report table and container document styling inside #print-root */
+  #print-root [class*="bg-zinc-9"],
+  #print-root [class*="bg-zinc-8"],
+  #print-root [class*="bg-black"] {
+    background-color: transparent !important;
+    background-image: none !important;
+    border-color: #d4d4d8 !important;
+  }
+
+  #print-root table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  #print-root thead tr {
+    background-color: #f4f4f5 !important;
+    color: #000000 !important;
+    border-bottom: 2px solid #000000 !important;
+  }
+
+  #print-root th {
+    color: #000000 !important;
+    font-weight: 700 !important;
+    border-bottom: 1px solid #71717a !important;
+  }
+
+  #print-root td {
+    color: #18181b !important;
+    border-bottom: 1px solid #e4e4e7 !important;
   }
 
   /* ================================================================ */
   /* FALLBACK PRINTING MODE (e.g., standard browser Print command)   */
   /* ================================================================ */
-  /* Hide all app navigation, sidebars, headers, action bars, toasts, and non-printable buttons */
+  /* Hide all app navigation, sidebars, headers, action bars, toasts, inputs, and non-printable buttons */
   aside,
   nav,
   header,
@@ -263,8 +321,12 @@
   .topbar,
   .no-print,
   .print-hidden,
+  .print\:hidden,
+  [class*="print:hidden"],
   [data-sonner-toaster],
-  button:not(.allow-print) {
+  button:not(.allow-print),
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
     display: none !important;
   }
 

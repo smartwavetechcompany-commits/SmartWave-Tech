@@ -974,10 +974,17 @@ export function Reports() {
               <button 
                 onClick={() => {
                   const reportTitle = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
-                  printDocument(document.getElementById('reports-analytics-print-container'), {
+                  const targetElement = (activeReport === 'breakfast_list' && document.getElementById('breakfast-manifest-print-container'))
+                    || (activeReport === 'dss_guest_report' && document.getElementById('dss-guest-report-print-container'))
+                    || document.getElementById('reports-analytics-print-container');
+
+                  const isLandscape = activeReport === 'dss_guest_report' || activeReport === 'financial_ledger';
+
+                  printDocument(targetElement, {
                     title: `${hotel?.name || 'Hotel'}_${reportTitle}_${dateRange.start}_to_${dateRange.end}`,
-                    pageSize: 'A4 portrait',
-                    pageMargin: '8mm'
+                    pageSize: isLandscape ? 'A4 landscape' : 'A4 portrait',
+                    pageMargin: '8mm',
+                    landscape: isLandscape
                   });
                 }}
                 className="bg-zinc-900 border border-zinc-800 text-zinc-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-zinc-800 transition-all active:scale-95"
