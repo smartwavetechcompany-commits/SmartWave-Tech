@@ -67,6 +67,7 @@ import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGrac
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
+import { AvailableRoomsModal } from './AvailableRoomsModal';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -135,6 +136,53 @@ export function FrontDesk() {
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
+  const [showAvailableRooms, setShowAvailableRooms] = useState(false);
+
+  const handleSelectAvailableRoom = (room: Room, checkInDate: string, checkOutDate: string) => {
+    setShowAvailableRooms(false);
+    const diff = new Date(checkOutDate).getTime() - new Date(checkInDate).getTime();
+    const hours = diff / (1000 * 60 * 60);
+    const nightsCount = Math.max(1, Math.ceil(hours / 24));
+    const baseAmount = (room.price || 0) * nightsCount;
+
+    setNewBooking({
+      guestName: '',
+      guestEmail: '',
+      guestPhone: '',
+      idType: '',
+      idNumber: '',
+      address: '',
+      roomId: room.id,
+      checkIn: checkInDate,
+      checkInTime: hotel?.defaultCheckInTime || '14:00',
+      checkOut: checkOutDate,
+      checkOutTime: hotel?.defaultCheckOutTime || '12:00',
+      guestType: 'individual',
+      corporateId: '',
+      guestId: '',
+      totalAmount: baseAmount,
+      paidAmount: 0,
+      paymentStatus: 'unpaid' as const,
+      notes: '',
+      corporateReference: '',
+      discountAmount: 0,
+      discountType: 'fixed',
+      discountReason: '',
+      taxAmount: 0,
+      taxDetails: [],
+      initialPayment: 0,
+      paymentMethod: 'cash',
+      payments: [{ amount: 0, method: 'cash' }],
+      autoNightDeduction: true,
+      numberOfGuests: Math.min(Math.max(1, room.capacity || 1), 2),
+      mealPlan: 'Bed & Breakfast',
+      breakfastEntitlement: 'Standard Breakfast Included',
+      isPrincipalRoom: false,
+      bookingSource: defaultBookingSource?.name || 'Walk-in',
+      additionalStays: [] as any[]
+    });
+    setIsBooking(true);
+  };
   const [newBooking, setNewBooking] = useState({
     guestType: 'individual' as 'individual' | 'corporate',
     guestId: '',
@@ -270,18 +318,33 @@ export function FrontDesk() {
   useEffect(() => {
     const action = searchParams.get('action');
     const corporateId = searchParams.get('corporateId');
+    const roomId = searchParams.get('roomId');
+    const checkInParam = searchParams.get('checkIn');
+    const checkOutParam = searchParams.get('checkOut');
 
-    if (action === 'book' && corporateId) {
+    if (action === 'book') {
+      const selectedRoom = rooms.find(r => r.id === roomId);
+      const cIn = checkInParam || format(new Date(), 'yyyy-MM-dd');
+      const cOut = checkOutParam || format(addDays(new Date(), 1), 'yyyy-MM-dd');
+      
+      const diff = new Date(cOut).getTime() - new Date(cIn).getTime();
+      const hours = diff / (1000 * 60 * 60);
+      const nightsCount = Math.max(1, Math.ceil(hours / 24));
+      const baseAmount = selectedRoom ? (selectedRoom.price || 0) * nightsCount : 0;
+
       setNewBooking(prev => ({
         ...prev,
-        guestType: 'corporate',
-        corporateId: corporateId
+        ...(corporateId ? { guestType: 'corporate', corporateId } : {}),
+        ...(roomId ? { roomId } : {}),
+        checkIn: cIn,
+        checkOut: cOut,
+        totalAmount: baseAmount || prev.totalAmount
       }));
       setIsBooking(true);
       // Clear params after handling
       setSearchParams({});
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, rooms]);
 
   const filteredReservations = React.useMemo(() => {
     let baseList: any[] = [];
@@ -2539,6 +2602,14 @@ export function FrontDesk() {
           {(hotel?.settings?.reservations?.allowWalkIn ?? true) && hasPermission(profile, 'create_reservations') && (
             <>
               <button 
+                onClick={() => setShowAvailableRooms(true)}
+                className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3.5 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm cursor-pointer"
+                title="Check Live & Future Room Availability"
+              >
+                <CheckCircle2 size={18} />
+                <span>Available Rooms</span>
+              </button>
+              <button 
                 onClick={() => {
                   setNewBooking({
                     guestName: '',
@@ -2639,8 +2710,15 @@ export function FrontDesk() {
           <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Total Rooms</div>
           <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.total}</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
-          <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider mb-1">Available</div>
+        <div 
+          onClick={() => setShowAvailableRooms(true)}
+          className="bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 hover:border-emerald-500/40 p-3 sm:p-4 rounded-xl cursor-pointer transition-all active:scale-[0.98] group"
+          title="Click to view all available rooms"
+        >
+          <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>Available</span>
+            <span className="text-[8px] font-bold text-zinc-500 group-hover:text-emerald-400">View All →</span>
+          </div>
           <div className="text-lg sm:text-xl font-bold text-zinc-50">{roomStats.available}</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl">
@@ -5713,6 +5791,23 @@ export function FrontDesk() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAvailableRooms && (
+        <AvailableRoomsModal
+          isOpen={showAvailableRooms}
+          onClose={() => setShowAvailableRooms(false)}
+          rooms={rooms}
+          reservations={reservations}
+          roomBlockings={roomBlockings}
+          roomTypes={roomTypes}
+          hotel={hotel}
+          currency={currency}
+          exchangeRate={exchangeRate}
+          initialCheckIn={format(new Date(), 'yyyy-MM-dd')}
+          initialCheckOut={format(addDays(new Date(), 1), 'yyyy-MM-dd')}
+          onSelectRoom={handleSelectAvailableRoom}
+        />
       )}
     </div>
   );

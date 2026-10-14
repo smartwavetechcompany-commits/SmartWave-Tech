@@ -51,9 +51,13 @@ import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInte
 import { roomService } from '../services/roomService';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
 import { hasPermission } from '../utils/permissions';
+import { useNavigate } from 'react-router-dom';
+import { AvailableRoomsModal } from './AvailableRoomsModal';
 
 export function Rooms() {
+  const navigate = useNavigate();
   const { hotel, profile, currency, exchangeRate } = useAuth();
+  const [showAvailableRooms, setShowAvailableRooms] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
 
@@ -875,6 +879,14 @@ export function Rooms() {
         
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <button 
+            onClick={() => setShowAvailableRooms(true)}
+            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm cursor-pointer"
+            title="Check Live & Future Room Availability"
+          >
+            <CheckCircle2 size={15} />
+            <span>Available Rooms</span>
+          </button>
           {hasPermission(profile, 'create_rooms') && (
             <button 
               onClick={() => setIsAddingRoom(true)}
@@ -3062,6 +3074,26 @@ export function Rooms() {
             const targetRes = returningGuestDebtModalData.reservation;
             setReturningGuestDebtModalData(null);
             updateReservationStatus(targetRes, 'checked_in', true);
+          }}
+        />
+      )}
+
+      {showAvailableRooms && (
+        <AvailableRoomsModal
+          isOpen={showAvailableRooms}
+          onClose={() => setShowAvailableRooms(false)}
+          rooms={rooms}
+          reservations={reservations}
+          roomBlockings={blockings}
+          roomTypes={roomTypes}
+          hotel={hotel}
+          currency={currency}
+          exchangeRate={exchangeRate}
+          initialCheckIn={format(new Date(), 'yyyy-MM-dd')}
+          initialCheckOut={format(addDays(new Date(), 1), 'yyyy-MM-dd')}
+          onSelectRoom={(room, checkIn, checkOut) => {
+            setShowAvailableRooms(false);
+            navigate(`/front-desk?action=book&roomId=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}`);
           }}
         />
       )}
