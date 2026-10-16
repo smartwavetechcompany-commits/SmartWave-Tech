@@ -29,7 +29,10 @@ import {
   FileText,
   LayoutGrid,
   Receipt,
-  Zap
+  Zap,
+  Filter,
+  XCircle,
+  RotateCcw
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
@@ -37,7 +40,7 @@ import { RoomStatusDashboard } from './RoomStatusDashboard';
 import { GuestFolio } from './GuestFolio';
 import { QuickCheckInModal } from './QuickCheckInModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
+import { format, parseISO, differenceInDays, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { 
@@ -58,7 +61,8 @@ export function OperationsDashboard() {
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
   const [quickCheckInInitialRes, setQuickCheckInInitialRes] = useState<Reservation | null>(null);
-  const [reservationViewFilter, setReservationViewFilter] = useState<'today' | 'upcoming' | 'checked_in'>('today');
+  const [reservationViewFilter, setReservationViewFilter] = useState<'today' | 'upcoming' | 'checked_in' | 'confirmed' | 'cancelled' | 'all'>('today');
+  const [dateFilter, setDateFilter] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [searchTerm, setSearchTerm] = useState('');
   const [opView, setOpView] = useState<'flow' | 'room_status' | 'breakfast' | 'dss'>('flow');
   const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'due_checkouts' | 'checkouts' | 'inhouse'>('due_checkouts');
@@ -528,6 +532,48 @@ export function OperationsDashboard() {
     [reservations, today]
   );
 
+  // Confirmed reservations
+  const confirmedReservations = useMemo(() => 
+    reservations
+      .filter(r => r.status === 'confirmed')
+      .sort((a, b) => (a.checkIn || '').localeCompare(b.checkIn || '')), 
+    [reservations]
+  );
+
+  // Cancelled reservations
+  const cancelledReservations = useMemo(() => 
+    reservations
+      .filter(r => r.status === 'cancelled')
+      .sort((a, b) => (b.updatedAt || b.createdAt || b.checkIn || '').localeCompare(a.updatedAt || a.createdAt || a.checkIn || '')), 
+    [reservations]
+  );
+
+  const setDatePreset = (preset: 'today' | 'week' | 'month' | 'past_30' | 'next_30' | 'all') => {
+    const now = new Date();
+    if (preset === 'today') {
+      const t = format(now, 'yyyy-MM-dd');
+      setDateFilter({ start: t, end: t });
+    } else if (preset === 'week') {
+      const start = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const end = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      setDateFilter({ start, end });
+    } else if (preset === 'month') {
+      const start = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
+      const end = format(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'yyyy-MM-dd');
+      setDateFilter({ start, end });
+    } else if (preset === 'past_30') {
+      const past = new Date(now);
+      past.setDate(past.getDate() - 30);
+      setDateFilter({ start: format(past, 'yyyy-MM-dd'), end: format(now, 'yyyy-MM-dd') });
+    } else if (preset === 'next_30') {
+      const future = new Date(now);
+      future.setDate(future.getDate() + 30);
+      setDateFilter({ start: format(now, 'yyyy-MM-dd'), end: format(future, 'yyyy-MM-dd') });
+    } else {
+      setDateFilter({ start: '', end: '' });
+    }
+  };
+
   // Quick Stats live calculations
   const quickStatsData = useMemo(() => {
     const totalRooms = rooms.length;
@@ -563,6 +609,12 @@ export function OperationsDashboard() {
       data = upcomingReservations;
     } else if (reservationViewFilter === 'checked_in') {
       data = inhouse;
+    } else if (reservationViewFilter === 'confirmed') {
+      data = confirmedReservations;
+    } else if (reservationViewFilter === 'cancelled') {
+      data = cancelledReservations;
+    } else if (reservationViewFilter === 'all') {
+      data = reservations;
     } else {
       switch (activeTab) {
         case 'arrivals': data = arrivals; break;
@@ -572,11 +624,38 @@ export function OperationsDashboard() {
         case 'inhouse': data = inhouse; break;
       }
     }
+
+    // Apply Date Range Filter if active
+    if (dateFilter.start || dateFilter.end) {
+      data = data.filter(r => {
+        const checkIn = r.checkIn || '';
+        const checkOut = r.checkOut || checkIn;
+        const updatedDate = r.updatedAt ? r.updatedAt.slice(0, 10) : '';
+        const createdDate = r.createdAt ? r.createdAt.slice(0, 10) : '';
+
+        // Match if check-in falls in date range
+        const checkInInRange = (!dateFilter.start || checkIn >= dateFilter.start) &&
+                               (!dateFilter.end || checkIn <= dateFilter.end);
+
+        // Match if stay period overlaps date range
+        const stayOverlaps = (!dateFilter.start || checkOut >= dateFilter.start) &&
+                             (!dateFilter.end || checkIn <= dateFilter.end);
+
+        // Match if cancellation, update, or booking creation date falls in date range
+        const actionInRange = (updatedDate && (!dateFilter.start || updatedDate >= dateFilter.start) && (!dateFilter.end || updatedDate <= dateFilter.end)) ||
+                              (createdDate && (!dateFilter.start || createdDate >= dateFilter.start) && (!dateFilter.end || createdDate <= dateFilter.end));
+
+        return checkInInRange || stayOverlaps || actionInRange;
+      });
+    }
+
     return data.filter(r => 
       (r.guestName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
       (r.roomNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
       (r.guestEmail?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (r.guestPhone || '').includes(searchTerm)
+      (r.guestPhone || '').includes(searchTerm) ||
+      (r.id?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (r.bookingSource?.toLowerCase() || '').includes(searchTerm.toLowerCase())
     );
   };
 
@@ -1431,74 +1510,237 @@ export function OperationsDashboard() {
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
         <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-zinc-900/50">
           <div className="space-y-3">
-            {/* Filtering Component: Toggle between 'Today', 'Upcoming', and 'Checked-in' */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mr-1">Filter View:</span>
-              <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setReservationViewFilter('today')}
-                  className={cn(
-                    "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
-                    reservationViewFilter === 'today'
-                      ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
-                      : "text-zinc-400 hover:text-zinc-100"
-                  )}
-                >
-                  <Calendar size={13} />
-                  <span>Today</span>
-                  <span className={cn(
-                    "px-1.5 py-0.5 text-[10px] font-black rounded-full",
-                    reservationViewFilter === 'today' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
-                  )}>
-                    {arrivals.length + checkins.length + dueCheckouts.length}
-                  </span>
-                </button>
+            {/* Filtering Component: Toggle between 'Today', 'Upcoming', 'Checked-in', 'Confirmed', 'Cancelled', 'All' */}
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mr-1">Status View:</span>
+                <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setReservationViewFilter('today')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      reservationViewFilter === 'today'
+                        ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <Calendar size={13} />
+                    <span>Today</span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      reservationViewFilter === 'today' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {arrivals.length + checkins.length + dueCheckouts.length}
+                    </span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setReservationViewFilter('upcoming')}
-                  className={cn(
-                    "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
-                    reservationViewFilter === 'upcoming'
-                      ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
-                      : "text-zinc-400 hover:text-zinc-100"
-                  )}
-                >
-                  <Clock size={13} />
-                  <span>Upcoming</span>
-                  <span className={cn(
-                    "px-1.5 py-0.5 text-[10px] font-black rounded-full",
-                    reservationViewFilter === 'upcoming' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
-                  )}>
-                    {upcomingReservations.length}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setReservationViewFilter('upcoming')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      reservationViewFilter === 'upcoming'
+                        ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <Clock size={13} />
+                    <span>Upcoming</span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      reservationViewFilter === 'upcoming' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {upcomingReservations.length}
+                    </span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setReservationViewFilter('checked_in')}
-                  className={cn(
-                    "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
-                    reservationViewFilter === 'checked_in'
-                      ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
-                      : "text-zinc-400 hover:text-zinc-100"
+                  <button
+                    type="button"
+                    onClick={() => setReservationViewFilter('checked_in')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      reservationViewFilter === 'checked_in'
+                        ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <BedDouble size={13} />
+                    <span>Checked-in</span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      reservationViewFilter === 'checked_in' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {inhouse.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReservationViewFilter('confirmed')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      reservationViewFilter === 'confirmed'
+                        ? "bg-blue-500 text-zinc-950 font-black shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Confirmed</span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      reservationViewFilter === 'confirmed' ? "bg-zinc-950 text-blue-400" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {confirmedReservations.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReservationViewFilter('cancelled')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      reservationViewFilter === 'cancelled'
+                        ? "bg-red-500 text-zinc-950 font-black shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <XCircle size={13} />
+                    <span>Cancelled</span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      reservationViewFilter === 'cancelled' ? "bg-zinc-950 text-red-400" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {cancelledReservations.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReservationViewFilter('all')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      reservationViewFilter === 'all'
+                        ? "bg-zinc-700 text-zinc-50 font-black shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <span>All</span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      reservationViewFilter === 'all' ? "bg-zinc-950 text-zinc-300" : "bg-zinc-800 text-zinc-400"
+                    )}>
+                      {reservations.length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Date Filter Bar */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-800/80">
+                <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-semibold mr-1">
+                  <Filter size={13} className="text-emerald-400" />
+                  <span className="uppercase tracking-wider text-[10px]">Date Filter:</span>
+                </div>
+
+                <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 flex-wrap gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('all')}
+                    className={cn(
+                      "px-2.5 py-1 text-[10px] font-bold rounded transition-colors cursor-pointer",
+                      !dateFilter.start && !dateFilter.end ? "bg-zinc-800 text-zinc-100 font-black" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    All Dates
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('today')}
+                    className={cn(
+                      "px-2.5 py-1 text-[10px] font-bold rounded transition-colors cursor-pointer",
+                      dateFilter.start === today && dateFilter.end === today ? "bg-zinc-800 text-emerald-400 font-black" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('week')}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                  >
+                    This Week
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('month')}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                  >
+                    This Month
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('past_30')}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                    title="Filter records from past 30 days"
+                  >
+                    Past 30d
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('next_30')}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                    title="Filter records for next 30 days"
+                  >
+                    Next 30d
+                  </button>
+                </div>
+
+                {/* Custom Date Pickers */}
+                <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1">
+                  <span className="text-[10px] text-zinc-500 font-semibold uppercase">From</span>
+                  <input
+                    type="date"
+                    value={dateFilter.start}
+                    onChange={(e) => setDateFilter(prev => ({ ...prev, start: e.target.value }))}
+                    className="bg-transparent text-[11px] font-mono text-zinc-200 focus:outline-none"
+                    style={{ colorScheme: 'dark' }}
+                  />
+                  <span className="text-zinc-600 font-mono">-</span>
+                  <span className="text-[10px] text-zinc-500 font-semibold uppercase">To</span>
+                  <input
+                    type="date"
+                    value={dateFilter.end}
+                    min={dateFilter.start || undefined}
+                    onChange={(e) => setDateFilter(prev => ({ ...prev, end: e.target.value }))}
+                    className="bg-transparent text-[11px] font-mono text-zinc-200 focus:outline-none"
+                    style={{ colorScheme: 'dark' }}
+                  />
+                  {(dateFilter.start || dateFilter.end) && (
+                    <button
+                      type="button"
+                      onClick={() => setDateFilter({ start: '', end: '' })}
+                      className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors ml-1 cursor-pointer"
+                      title="Clear date filter"
+                    >
+                      <X size={12} />
+                    </button>
                   )}
-                >
-                  <BedDouble size={13} />
-                  <span>Checked-in</span>
-                  <span className={cn(
-                    "px-1.5 py-0.5 text-[10px] font-black rounded-full",
-                    reservationViewFilter === 'checked_in' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
-                  )}>
-                    {inhouse.length}
+                </div>
+
+                {(dateFilter.start || dateFilter.end) && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    Filtered by date ({filteredData().length} match{filteredData().length === 1 ? '' : 'es'})
                   </span>
-                </button>
+                )}
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 pt-1">
               <h2 className="text-lg font-bold text-zinc-50 tracking-tight">
+                {reservationViewFilter === 'confirmed' && 'Confirmed Reservations'}
+                {reservationViewFilter === 'cancelled' && 'Cancelled Reservations'}
+                {reservationViewFilter === 'all' && 'All Reservations'}
                 {reservationViewFilter === 'upcoming' && 'Upcoming Reservations (Future Stays)'}
                 {reservationViewFilter === 'checked_in' && 'Checked-In Guests (Currently In-House)'}
                 {reservationViewFilter === 'today' && activeTab === 'arrivals' && 'Arrivals (Expected Today)'}
@@ -1509,14 +1751,21 @@ export function OperationsDashboard() {
               </h2>
               <span className={cn(
                 "px-2 py-0.5 text-[10px] font-black rounded-full",
-                reservationViewFilter === 'today' && activeTab === 'due_checkouts' && filteredData().length > 0
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                  : "bg-zinc-800 text-zinc-400"
+                reservationViewFilter === 'cancelled'
+                  ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                  : reservationViewFilter === 'confirmed'
+                    ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                    : reservationViewFilter === 'today' && activeTab === 'due_checkouts' && filteredData().length > 0
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                      : "bg-zinc-800 text-zinc-400"
               )}>
                 {filteredData().length}
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
+              {reservationViewFilter === 'confirmed' && 'All verified upcoming and active bookings confirmed in the hotel system'}
+              {reservationViewFilter === 'cancelled' && 'All cancelled bookings and archived cancellation records'}
+              {reservationViewFilter === 'all' && 'Complete reservation register across all statuses with date and search filtering'}
               {reservationViewFilter === 'upcoming' && 'Future bookings and scheduled arrivals after today'}
               {reservationViewFilter === 'checked_in' && 'All guests currently occupying rooms and checked into the hotel'}
               {reservationViewFilter === 'today' && activeTab === 'arrivals' && 'Guests scheduled to check in today who have not arrived yet'}
@@ -1554,6 +1803,9 @@ export function OperationsDashboard() {
               {filteredData().length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
+                    {reservationViewFilter === 'confirmed' && ('No confirmed reservations found' + (dateFilter.start || dateFilter.end ? ' for selected date range' : ''))}
+                    {reservationViewFilter === 'cancelled' && ('No cancelled reservations found' + (dateFilter.start || dateFilter.end ? ' for selected date range' : ''))}
+                    {reservationViewFilter === 'all' && ('No reservations found' + (dateFilter.start || dateFilter.end ? ' for selected date range' : ''))}
                     {reservationViewFilter === 'upcoming' && 'No upcoming reservations scheduled after today'}
                     {reservationViewFilter === 'checked_in' && 'No checked-in guests currently in-house'}
                     {reservationViewFilter === 'today' && activeTab === 'arrivals' && 'No arrivals expected for today'}
@@ -1609,13 +1861,40 @@ export function OperationsDashboard() {
                       <div className="flex flex-col gap-1.5 items-start">
                         <div className={cn(
                           "inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider",
-                          res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
-                          res.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
-                          res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" : "bg-red-500/10 text-red-500"
+                          res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                          res.status === 'confirmed' ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" :
+                          res.status === 'pending' ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+                          res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400 border border-zinc-700/50" :
+                          res.status === 'cancelled' ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+                          "bg-rose-500/10 text-rose-400 border border-rose-500/20"
                         )}>
                           {res.status === 'checked_in' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-                          {res.status.replace('_', ' ')}
+                          {res.status === 'confirmed' && <CheckCircle2 size={11} className="text-blue-400" />}
+                          {res.status === 'cancelled' && <XCircle size={11} className="text-red-400" />}
+                          <span>{res.status.replace('_', ' ')}</span>
                         </div>
+
+                        {res.status === 'cancelled' && (
+                          <div className="flex flex-col gap-0.5 text-[10px] text-zinc-500 max-w-xs">
+                            {res.updatedAt && (
+                              <span className="text-[10px] text-zinc-400">
+                                Cancelled: {format(parseISO(res.updatedAt), 'MMM d, yyyy')}
+                              </span>
+                            )}
+                            {res.notes && (res.notes.toLowerCase().includes('cancel') || res.notes.toLowerCase().includes('buffer')) && (
+                              <span className="text-[10px] text-zinc-500 italic truncate" title={res.notes}>
+                                {res.notes.split('\n')[0]}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {res.status === 'confirmed' && (res.bookingSource || res.source) && (
+                          <span className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-zinc-800/80 text-zinc-400 border border-zinc-700/40">
+                            Source: {res.bookingSource || res.source}
+                          </span>
+                        )}
+
                         {res.status === 'checked_in' && res.checkOut <= today && (
                           <span className={cn(
                             "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border",
