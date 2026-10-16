@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, OperationType } from '../types';
+import { Reservation, Room, RoomBlocking, RoomType, OperationType } from '../types';
 import { cn, formatCurrency } from '../utils';
 import { 
   Users, 
@@ -28,12 +28,14 @@ import {
   Coffee,
   FileText,
   LayoutGrid,
-  Receipt
+  Receipt,
+  Zap
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
 import { RoomStatusDashboard } from './RoomStatusDashboard';
 import { GuestFolio } from './GuestFolio';
+import { QuickCheckInModal } from './QuickCheckInModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
@@ -49,9 +51,14 @@ import {
 } from 'recharts';
 
 export function OperationsDashboard() {
-  const { hotel, currency, exchangeRate } = useAuth();
+  const { hotel, currency, exchangeRate, profile } = useAuth();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
+  const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
+  const [quickCheckInInitialRes, setQuickCheckInInitialRes] = useState<Reservation | null>(null);
+  const [reservationViewFilter, setReservationViewFilter] = useState<'today' | 'upcoming' | 'checked_in'>('today');
   const [searchTerm, setSearchTerm] = useState('');
   const [opView, setOpView] = useState<'flow' | 'room_status' | 'breakfast' | 'dss'>('flow');
   const [activeTab, setActiveTab] = useState<'arrivals' | 'checkins' | 'due_checkouts' | 'checkouts' | 'inhouse'>('due_checkouts');
@@ -454,9 +461,19 @@ export function OperationsDashboard() {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
     });
 
+    const unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {
+      setRoomBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
+    }, () => {});
+
+    const unsubTypes = onSnapshot(collection(db, 'hotels', hotel.id, 'room_types'), (snap) => {
+      setRoomTypes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomType)));
+    }, () => {});
+
     return () => {
       unsubRes();
       unsubRooms();
+      unsubBlockings();
+      unsubTypes();
     };
   }, [hotel?.id]);
 
@@ -503,18 +520,63 @@ export function OperationsDashboard() {
     [reservations]
   );
 
+  // Upcoming: Future reservations scheduled to check in after today
+  const upcomingReservations = useMemo(() => 
+    reservations
+      .filter(r => r.checkIn > today && r.status !== 'cancelled' && r.status !== 'no_show')
+      .sort((a, b) => a.checkIn.localeCompare(b.checkIn)), 
+    [reservations, today]
+  );
+
+  // Quick Stats live calculations
+  const quickStatsData = useMemo(() => {
+    const totalRooms = rooms.length;
+    const occupiedCount = inhouse.length;
+    const occupancyPct = totalRooms > 0 ? Math.round((occupiedCount / totalRooms) * 100) : 0;
+    const vacantCount = Math.max(0, totalRooms - occupiedCount);
+
+    const pendingArrivals = arrivals.length;
+    const completedCheckins = checkins.length;
+    const totalArrivals = pendingArrivals + completedCheckins;
+
+    const pendingDepartures = dueCheckouts.length;
+    const completedCheckouts = checkouts.length;
+    const totalDepartures = pendingDepartures + completedCheckouts;
+
+    return {
+      occupancyPct,
+      occupiedCount,
+      totalRooms,
+      vacantCount,
+      totalArrivals,
+      pendingArrivals,
+      completedCheckins,
+      totalDepartures,
+      pendingDepartures,
+      completedCheckouts
+    };
+  }, [rooms.length, inhouse.length, arrivals.length, checkins.length, dueCheckouts.length, checkouts.length]);
+
   const filteredData = () => {
     let data: Reservation[] = [];
-    switch (activeTab) {
-      case 'arrivals': data = arrivals; break;
-      case 'checkins': data = checkins; break;
-      case 'due_checkouts': data = dueCheckouts; break;
-      case 'checkouts': data = checkouts; break;
-      case 'inhouse': data = inhouse; break;
+    if (reservationViewFilter === 'upcoming') {
+      data = upcomingReservations;
+    } else if (reservationViewFilter === 'checked_in') {
+      data = inhouse;
+    } else {
+      switch (activeTab) {
+        case 'arrivals': data = arrivals; break;
+        case 'checkins': data = checkins; break;
+        case 'due_checkouts': data = dueCheckouts; break;
+        case 'checkouts': data = checkouts; break;
+        case 'inhouse': data = inhouse; break;
+      }
     }
     return data.filter(r => 
       (r.guestName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (r.roomNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+      (r.roomNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (r.guestEmail?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (r.guestPhone || '').includes(searchTerm)
     );
   };
 
@@ -639,6 +701,116 @@ export function OperationsDashboard() {
           )}
         </div>
       </header>
+
+      {/* Quick Stats Summary Section */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden print:hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-zinc-800/80">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Zap size={18} className="fill-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-zinc-50 tracking-tight">Quick Stats</h2>
+                <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                  Live Operations
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Calculated live from active reservations and room inventory
+              </p>
+            </div>
+          </div>
+          <div className="text-xs text-zinc-400 font-medium flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Today: <strong className="text-zinc-200">{format(new Date(), 'EEEE, MMMM d, yyyy')}</strong></span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+          {/* Card 1: Current Occupancy */}
+          <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Current Occupancy</span>
+              <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                <BedDouble size={16} />
+              </div>
+            </div>
+            <div className="my-2.5">
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl sm:text-3xl font-black text-zinc-50 tracking-tight">
+                  {quickStatsData.occupancyPct}%
+                </span>
+                <span className="text-xs text-zinc-400 font-medium">
+                  ({quickStatsData.occupiedCount} of {quickStatsData.totalRooms} rooms)
+                </span>
+              </div>
+              {/* Occupancy visual progress bar */}
+              <div className="w-full bg-zinc-800 rounded-full h-1.5 mt-2.5 overflow-hidden">
+                <div 
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500",
+                    quickStatsData.occupancyPct >= 85 
+                      ? "bg-red-500" 
+                      : quickStatsData.occupancyPct >= 60 
+                        ? "bg-amber-500" 
+                        : "bg-emerald-500"
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, quickStatsData.occupancyPct))}%` }}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-[11px] pt-2 border-t border-zinc-900 text-zinc-500">
+              <span>Vacant / Ready: <strong className="text-emerald-400">{quickStatsData.vacantCount}</strong></span>
+              <span>Total Rooms: <strong className="text-zinc-300">{quickStatsData.totalRooms}</strong></span>
+            </div>
+          </div>
+
+          {/* Card 2: Arrival Count */}
+          <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Arrival Count</span>
+              <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                <LogIn size={16} />
+              </div>
+            </div>
+            <div className="my-2.5">
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl sm:text-3xl font-black text-zinc-50 tracking-tight">
+                  {quickStatsData.totalArrivals}
+                </span>
+                <span className="text-xs text-zinc-400 font-medium">Arrivals Today</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-[11px] pt-2 border-t border-zinc-900 text-zinc-500">
+              <span>Pending Check-in: <strong className="text-blue-400">{quickStatsData.pendingArrivals}</strong></span>
+              <span>Arrived: <strong className="text-emerald-400">{quickStatsData.completedCheckins}</strong></span>
+            </div>
+          </div>
+
+          {/* Card 3: Departure Count */}
+          <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between hover:border-zinc-700 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Departure Count</span>
+              <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <LogOut size={16} />
+              </div>
+            </div>
+            <div className="my-2.5">
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl sm:text-3xl font-black text-zinc-50 tracking-tight">
+                  {quickStatsData.totalDepartures}
+                </span>
+                <span className="text-xs text-zinc-400 font-medium">Departures Today</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-[11px] pt-2 border-t border-zinc-900 text-zinc-500">
+              <span>Due Departure: <strong className="text-amber-400">{quickStatsData.pendingDepartures}</strong></span>
+              <span>Departed: <strong className="text-zinc-300">{quickStatsData.completedCheckouts}</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {opView === 'room_status' && (
         <div className="space-y-6">
@@ -779,10 +951,13 @@ export function OperationsDashboard() {
           <button
             key={stat.tab}
             type="button"
-            onClick={() => setActiveTab(stat.tab)}
+            onClick={() => {
+              setReservationViewFilter('today');
+              setActiveTab(stat.tab);
+            }}
             className={cn(
-               "bg-zinc-900 border p-3 sm:p-4 rounded-xl transition-all text-left group relative",
-               activeTab === stat.tab 
+               "bg-zinc-900 border p-3 sm:p-4 rounded-xl transition-all text-left group relative cursor-pointer",
+               reservationViewFilter === 'today' && activeTab === stat.tab 
                  ? "border-emerald-500 ring-1 ring-emerald-500/20 shadow-lg shadow-emerald-500/5 bg-zinc-900/90" 
                  : "border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850/50"
             )}
@@ -797,7 +972,7 @@ export function OperationsDashboard() {
                     {stat.highlightBadge}
                   </span>
                 )}
-                {activeTab === stat.tab && (
+                {reservationViewFilter === 'today' && activeTab === stat.tab && (
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 )}
               </div>
@@ -1254,19 +1429,87 @@ export function OperationsDashboard() {
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
-        <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-900/50">
-          <div>
+        <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-zinc-900/50">
+          <div className="space-y-3">
+            {/* Filtering Component: Toggle between 'Today', 'Upcoming', and 'Checked-in' */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mr-1">Filter View:</span>
+              <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setReservationViewFilter('today')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
+                    reservationViewFilter === 'today'
+                      ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-100"
+                  )}
+                >
+                  <Calendar size={13} />
+                  <span>Today</span>
+                  <span className={cn(
+                    "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                    reservationViewFilter === 'today' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                  )}>
+                    {arrivals.length + checkins.length + dueCheckouts.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setReservationViewFilter('upcoming')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
+                    reservationViewFilter === 'upcoming'
+                      ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-100"
+                  )}
+                >
+                  <Clock size={13} />
+                  <span>Upcoming</span>
+                  <span className={cn(
+                    "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                    reservationViewFilter === 'upcoming' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                  )}>
+                    {upcomingReservations.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setReservationViewFilter('checked_in')}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
+                    reservationViewFilter === 'checked_in'
+                      ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-100"
+                  )}
+                >
+                  <BedDouble size={13} />
+                  <span>Checked-in</span>
+                  <span className={cn(
+                    "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                    reservationViewFilter === 'checked_in' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                  )}>
+                    {inhouse.length}
+                  </span>
+                </button>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-zinc-50 tracking-tight">
-                {activeTab === 'arrivals' && 'Arrivals (Expected)'}
-                {activeTab === 'checkins' && 'Check-Ins (Today)'}
-                {activeTab === 'due_checkouts' && 'Due Check-Outs (Pending Departure)'}
-                {activeTab === 'checkouts' && 'Completed Check-Outs (Departed)'}
-                {activeTab === 'inhouse' && 'In-House Guests'}
+                {reservationViewFilter === 'upcoming' && 'Upcoming Reservations (Future Stays)'}
+                {reservationViewFilter === 'checked_in' && 'Checked-In Guests (Currently In-House)'}
+                {reservationViewFilter === 'today' && activeTab === 'arrivals' && 'Arrivals (Expected Today)'}
+                {reservationViewFilter === 'today' && activeTab === 'checkins' && 'Check-Ins (Today)'}
+                {reservationViewFilter === 'today' && activeTab === 'due_checkouts' && 'Due Check-Outs (Pending Departure)'}
+                {reservationViewFilter === 'today' && activeTab === 'checkouts' && 'Completed Check-Outs (Departed)'}
+                {reservationViewFilter === 'today' && activeTab === 'inhouse' && 'In-House Guests (Today)'}
               </h2>
               <span className={cn(
                 "px-2 py-0.5 text-[10px] font-black rounded-full",
-                activeTab === 'due_checkouts' && filteredData().length > 0
+                reservationViewFilter === 'today' && activeTab === 'due_checkouts' && filteredData().length > 0
                   ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                   : "bg-zinc-800 text-zinc-400"
               )}>
@@ -1274,14 +1517,16 @@ export function OperationsDashboard() {
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
-              {activeTab === 'arrivals' && 'Guests scheduled to check in today who have not arrived yet'}
-              {activeTab === 'checkins' && 'Guests who have checked into the hotel today'}
-              {activeTab === 'due_checkouts' && 'In-house guests scheduled to depart today or overdue who have not yet checked out'}
-              {activeTab === 'checkouts' && 'Guests who have completed departure and checked out of the hotel'}
-              {activeTab === 'inhouse' && 'All guests currently occupying rooms'}
+              {reservationViewFilter === 'upcoming' && 'Future bookings and scheduled arrivals after today'}
+              {reservationViewFilter === 'checked_in' && 'All guests currently occupying rooms and checked into the hotel'}
+              {reservationViewFilter === 'today' && activeTab === 'arrivals' && 'Guests scheduled to check in today who have not arrived yet'}
+              {reservationViewFilter === 'today' && activeTab === 'checkins' && 'Guests who have checked into the hotel today'}
+              {reservationViewFilter === 'today' && activeTab === 'due_checkouts' && 'In-house guests scheduled to depart today or overdue who have not yet checked out'}
+              {reservationViewFilter === 'today' && activeTab === 'checkouts' && 'Guests who have completed departure and checked out of the hotel'}
+              {reservationViewFilter === 'today' && activeTab === 'inhouse' && 'All guests currently occupying rooms'}
             </p>
           </div>
-          <div className="relative">
+          <div className="relative self-start lg:self-center">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
             <input
               type="text"
@@ -1309,11 +1554,13 @@ export function OperationsDashboard() {
               {filteredData().length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
-                    {activeTab === 'arrivals' && 'No arrivals expected for today'}
-                    {activeTab === 'checkins' && 'No check-ins recorded for today'}
-                    {activeTab === 'due_checkouts' && 'No guests are due for check-out at this time'}
-                    {activeTab === 'checkouts' && 'No completed check-outs for today'}
-                    {activeTab === 'inhouse' && 'No in-house guests currently'}
+                    {reservationViewFilter === 'upcoming' && 'No upcoming reservations scheduled after today'}
+                    {reservationViewFilter === 'checked_in' && 'No checked-in guests currently in-house'}
+                    {reservationViewFilter === 'today' && activeTab === 'arrivals' && 'No arrivals expected for today'}
+                    {reservationViewFilter === 'today' && activeTab === 'checkins' && 'No check-ins recorded for today'}
+                    {reservationViewFilter === 'today' && activeTab === 'due_checkouts' && 'No guests are due for check-out at this time'}
+                    {reservationViewFilter === 'today' && activeTab === 'checkouts' && 'No completed check-outs for today'}
+                    {reservationViewFilter === 'today' && activeTab === 'inhouse' && 'No in-house guests currently'}
                   </td>
                 </tr>
               ) : (
@@ -1349,7 +1596,12 @@ export function OperationsDashboard() {
                         </div>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-500">
                           <Clock size={10} />
-                          <span>{res.nights} nights</span>
+                          <span>{res.nights || 1} nights</span>
+                          {res.checkIn > today && (
+                            <span className="text-purple-400 font-medium">
+                              • Starts in {differenceInDays(parseISO(res.checkIn), parseISO(today))}d
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -1430,19 +1682,35 @@ export function OperationsDashboard() {
                       })()}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedFolioRes(res)}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95",
-                          res.status === 'checked_in' && res.checkOut <= today
-                            ? "bg-amber-500 hover:bg-amber-400 text-black font-extrabold"
-                            : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                      <div className="flex items-center justify-end gap-2">
+                        {((reservationViewFilter === 'today' && activeTab === 'arrivals') || (res.checkIn === today && (res.status === 'pending' || res.status === 'confirmed'))) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuickCheckInInitialRes(res);
+                              setShowQuickCheckIn(true);
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-black transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-emerald-950/40 cursor-pointer"
+                            title="Quick check-in this arrival"
+                          >
+                            <LogIn size={13} className="stroke-[2.5]" />
+                            <span>Check In</span>
+                          </button>
                         )}
-                      >
-                        <Receipt size={13} className={res.status === 'checked_in' && res.checkOut <= today ? 'text-black' : 'text-emerald-400'} />
-                        <span>{res.status === 'checked_in' && res.checkOut <= today ? 'Settle & Check Out' : 'Folio'}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFolioRes(res)}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95",
+                            res.status === 'checked_in' && res.checkOut <= today
+                              ? "bg-amber-500 hover:bg-amber-400 text-black font-extrabold"
+                              : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                          )}
+                        >
+                          <Receipt size={13} className={res.status === 'checked_in' && res.checkOut <= today ? 'text-black' : 'text-emerald-400'} />
+                          <span>{res.status === 'checked_in' && res.checkOut <= today ? 'Settle & Check Out' : 'Folio'}</span>
+                        </button>
+                      </div>
                     </td>
                   </motion.tr>
                 ))
@@ -1458,6 +1726,49 @@ export function OperationsDashboard() {
         <GuestFolio
           reservation={selectedFolioRes}
           onClose={() => setSelectedFolioRes(null)}
+        />
+      )}
+
+      {/* Quick Check-in Floating Action Button (FAB) */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <button
+          type="button"
+          onClick={() => {
+            setQuickCheckInInitialRes(null);
+            setShowQuickCheckIn(true);
+          }}
+          className="flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black shadow-2xl shadow-emerald-950/70 hover:shadow-emerald-500/25 border border-emerald-300/40 transition-all duration-200 active:scale-95 group tracking-tight cursor-pointer"
+          title="Quick Check-in: Process expected arrivals & express walk-ins"
+          aria-label="Quick Check-in"
+        >
+          <div className="p-1 rounded-full bg-zinc-950/15 group-hover:bg-zinc-950/25 transition-colors">
+            <LogIn size={18} className="text-zinc-950 stroke-[2.5]" />
+          </div>
+          <span className="text-sm font-black uppercase tracking-wider">Quick Check-in</span>
+          {arrivals.length > 0 && (
+            <span className="ml-0.5 px-2 py-0.5 text-xs font-black rounded-full bg-zinc-950 text-emerald-400 border border-zinc-800 shadow-sm animate-pulse">
+              {arrivals.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {showQuickCheckIn && (
+        <QuickCheckInModal
+          isOpen={showQuickCheckIn}
+          onClose={() => {
+            setShowQuickCheckIn(false);
+            setQuickCheckInInitialRes(null);
+          }}
+          reservations={reservations}
+          rooms={rooms}
+          roomBlockings={roomBlockings}
+          roomTypes={roomTypes}
+          hotel={hotel}
+          profile={profile}
+          currency={currency}
+          exchangeRate={exchangeRate}
+          initialSelectedReservation={quickCheckInInitialRes}
         />
       )}
     </div>
