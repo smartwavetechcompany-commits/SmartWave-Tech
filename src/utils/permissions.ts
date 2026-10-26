@@ -889,3 +889,47 @@ export const hasAllPermissions = (
 ): boolean => {
   return permissions.every(p => hasPermission(profile, p, customRoles));
 };
+
+/**
+ * Determines whether a user profile has Financial Visibility (Finance staff or Hotel Admin).
+ * - Only users with Finance or Hotel Admin permissions should see complete financial figures
+ *   (total revenue, total collected, financial reports, revenue charts, detailed monetary movements).
+ * - General staff without finance permissions are restricted from seeing total revenue or total amount collected.
+ */
+export const hasFinancialVisibility = (
+  profile: any, 
+  customRoles: any[] = []
+): boolean => {
+  if (!profile) return false;
+  
+  // Super Admin and Hotel Admin / Admin have full administrative financial visibility
+  if (profile.role === 'superAdmin' || profile.role === 'hotelAdmin' || profile.role === 'admin' || profile.staffRole === 'admin') {
+    return true;
+  }
+  
+  // Dedicated Accountant role
+  if (profile.staffRole === 'accountant') {
+    return true;
+  }
+  
+  // Specific financial permissions check
+  const financePermissions: Permission[] = [
+    'view_financial_records',
+    'view_ledger',
+    'export_financial_data',
+    'view_debt_ledger',
+    'view_city_ledger'
+  ];
+  
+  if (hasAnyPermission(profile, financePermissions, customRoles)) {
+    return true;
+  }
+  
+  // Module-level assignment check for finance
+  if (isPMSModuleAssigned(profile, 'finance', customRoles)) {
+    return true;
+  }
+  
+  return false;
+};
+

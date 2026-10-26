@@ -29,6 +29,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useModuleAccess } from './PermissionGuard';
 import { cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
+import { hasFinancialVisibility } from '../utils/permissions';
 import { auth } from '../firebase';
 import { toast } from 'sonner';
 
@@ -37,7 +38,7 @@ import { useTranslation } from 'react-i18next';
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { profile, hotel, isSubscriptionActive, systemSettings, setSelectedHotelId } = useAuth();
+  const { profile, hotel, isSubscriptionActive, systemSettings, setSelectedHotelId, customRoles } = useAuth();
   const { canAccessModule, canAccessPMSModule } = useModuleAccess();
   const location = useLocation();
 
@@ -93,8 +94,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       return false;
     }
 
-    // Check dynamic visibility for Finance if configured in hotel settings
+    // Role-based restrictions: Only users with Finance or Hotel Admin permissions should see Finance & Debt Ledger
     if (item.path === '/finance' || item.path === '/debt-ledger') {
+      if (!hasFinancialVisibility(profile, customRoles)) {
+        return false;
+      }
       const allowed = hotel?.settings?.financial?.allowFinancialReportViewing ?? true;
       if (!allowed) {
         return false;

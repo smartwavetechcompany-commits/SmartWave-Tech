@@ -29,7 +29,7 @@ import { DSSGuestReport } from './DSSGuestReport';
 import { cn, formatCurrency, safeStringify } from '../utils';
 import { printDocument } from '../utils/printUtils';
 import { isModuleEnabled } from '../utils/plans';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission, hasFinancialVisibility } from '../utils/permissions';
 import { calculateGuestFinancialPosition } from '../services/financialService';
 import { ConfirmModal } from './ConfirmModal';
 import { deleteDoc, doc, addDoc } from 'firebase/firestore';
@@ -63,7 +63,8 @@ import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
 
 export function Reports() {
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
+  const canViewFinances = hasFinancialVisibility(profile, customRoles);
   const [dateRange, setDateRange] = useState({
     start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
@@ -111,19 +112,21 @@ export function Reports() {
         const occupiedRooms = roomsSnap.docs.filter(d => d.data().status === 'occupied').length;
         const currentOccupancy = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
-        // Fetch ledger entries for revenue
-        const ledgerSnap = await getDocs(collection(db, 'hotels', hotel.id, 'ledger'));
+        // Fetch ledger entries for revenue (only for finance users)
+        const ledgerSnap = canViewFinances
+          ? await getDocs(collection(db, 'hotels', hotel.id, 'ledger'))
+          : { docs: [] };
         const allEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
         
-        // Fetch all other data needed for reports
+        // Fetch all other data needed for reports; exclude sensitive financial queries for unauthorized users
         const [rSnap, gSnap, cSnap, fSnap, iSnap, aSnap, sSnap, staffSnap] = await Promise.all([
           getDocs(collection(db, 'hotels', hotel.id, 'reservations')),
           getDocs(collection(db, 'hotels', hotel.id, 'guests')),
-          getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts')),
-          getDocs(collection(db, 'hotels', hotel.id, 'finance')),
+          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts')) : Promise.resolve({ docs: [] } as any),
+          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'finance')) : Promise.resolve({ docs: [] } as any),
           getDocs(collection(db, 'hotels', hotel.id, 'inventory')),
-          getDocs(collection(db, 'hotels', hotel.id, 'accounts')),
-          getDocs(collection(db, 'hotels', hotel.id, 'suppliers')),
+          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'accounts')) : Promise.resolve({ docs: [] } as any),
+          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'suppliers')) : Promise.resolve({ docs: [] } as any),
           getDocs(query(collection(db, 'users'), where('hotelId', '==', hotel.id)))
         ]);
 
@@ -909,6 +912,25 @@ export function Reports() {
     if (r.enterprise && hotel?.plan !== 'enterprise') return false;
     if (r.module && !isModuleEnabled(hotel, r.module)) return false;
     
+    // Role-based restrictions: Only users with Finance or Hotel Admin permissions can access financial reports
+    const financialReportIds = [
+      'daily_sales', 
+      'monthly_sales', 
+      'payments', 
+      'staff_sales', 
+      'staff_payments', 
+      'taxation', 
+      'profit_loss', 
+      'expenses_detail', 
+      'supplier_balances', 
+      'trial_balance', 
+      'balance_sheet', 
+      'net_income'
+    ];
+    if (!canViewFinances && financialReportIds.includes(r.id)) {
+      return false;
+    }
+
     // Check for restrictive settings
     const settings = hotel?.settings?.reporting;
     if (settings?.restrictSensitiveReports && !['hotelAdmin', 'manager'].includes(profile?.role || '')) {
@@ -1040,7 +1062,7 @@ export function Reports() {
         <div className="flex-1 min-w-0">
           {activeReport === 'overview' && (
             <div className="space-y-8">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={cn("grid gap-3", canViewFinances ? "grid-cols-2 lg:grid-cols-4" : "grid-cols-2")}>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="flex items-center justify-between mb-2">
             <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
@@ -1050,24 +1072,28 @@ export function Reports() {
           <div className="text-xl font-bold text-zinc-50 mb-0.5">{stats.occupancy}%</div>
           <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Occupancy Rate</div>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
-              <TrendingUp size={16} />
+        {canViewFinances && (
+          <>
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
+                  <TrendingUp size={16} />
+                </div>
+              </div>
+              <div className="text-xl font-bold text-zinc-50 mb-0.5">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
+              <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">RevPAR</div>
             </div>
-          </div>
-          <div className="text-xl font-bold text-zinc-50 mb-0.5">{formatCurrency(stats.revPar, currency, exchangeRate)}</div>
-          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">RevPAR</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-500">
-              <TrendingUp size={16} />
+            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-500">
+                  <TrendingUp size={16} />
+                </div>
+              </div>
+              <div className="text-xl font-bold text-zinc-50 mb-0.5">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
+              <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">ADR</div>
             </div>
-          </div>
-          <div className="text-xl font-bold text-zinc-50 mb-0.5">{formatCurrency(stats.adr, currency, exchangeRate)}</div>
-          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">ADR</div>
-        </div>
+          </>
+        )}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="flex items-center justify-between mb-2">
             <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
@@ -1079,67 +1105,69 @@ export function Reports() {
         </div>
       </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <h3 className="font-bold text-zinc-50 mb-6">Revenue Trend</h3>
-                  <div className="h-[300px] w-full min-w-0 relative" style={{ minHeight: 300, width: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50} initialDimension={{ width: 500, height: 300 }}>
-                      <AreaChart data={revenueData}>
-                        <defs>
-                          <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                        <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                          itemStyle={{ color: '#10b981' }}
-                          formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
-                        />
-                        <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+      {canViewFinances && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <h3 className="font-bold text-zinc-50 mb-6">Revenue Trend</h3>
+            <div className="h-[300px] w-full min-w-0 relative" style={{ minHeight: 300, width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50} initialDimension={{ width: 500, height: 300 }}>
+                <AreaChart data={revenueData}>
+                  <defs>
+                    <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                  <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                    itemStyle={{ color: '#10b981' }}
+                    formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
+                  />
+                  <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
 
-                <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
-                  <h3 className="font-bold text-zinc-50 mb-6">Revenue Mix</h3>
-                  <div className="h-[300px] w-full min-w-0 relative" style={{ minHeight: 300, width: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50} initialDimension={{ width: 500, height: 300 }}>
-                      <PieChart>
-                        <Pie
-                          data={corporateData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={80}
-                          paddingAngle={5}
-                          dataKey="value"
-                        >
-                          {corporateData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                          formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="flex justify-center gap-6 mt-4">
+          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
+            <h3 className="font-bold text-zinc-50 mb-6">Revenue Mix</h3>
+            <div className="h-[300px] w-full min-w-0 relative" style={{ minHeight: 300, width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={250} debounce={50} initialDimension={{ width: 500, height: 300 }}>
+                <PieChart>
+                  <Pie
+                    data={corporateData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
                     {corporateData.map((entry, index) => (
-                      <div key={entry.name} className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
-                        <span className="text-xs text-zinc-400">{entry.name}</span>
-                      </div>
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
-                  </div>
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                    formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex justify-center gap-6 mt-4">
+              {corporateData.map((entry, index) => (
+                <div key={entry.name} className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }} />
+                  <span className="text-xs text-zinc-400">{entry.name}</span>
                 </div>
-              </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
             </div>
           )}
 

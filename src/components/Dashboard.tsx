@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom';
 import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking } from '../types';
+import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking, OutstandingDebt } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
+import { hasFinancialVisibility } from '../utils/permissions';
 import { 
   Users, 
   BedDouble, 
@@ -21,7 +22,8 @@ import {
   Calendar,
   DollarSign,
   Activity,
-  Download
+  Download,
+  Receipt
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -70,17 +72,22 @@ const safeFormatTimestamp = (ts: any, formatStr: string = 'MMM d, HH:mm'): strin
 };
 
 export function Dashboard() {
-  const { hotel, profile, isSubscriptionActive, currency, exchangeRate } = useAuth();
+  const { hotel, profile, isSubscriptionActive, currency, exchangeRate, customRoles } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [activeReservations, setActiveReservations] = useState<Reservation[]>([]);
   const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
+  const [debts, setDebts] = useState<OutstandingDebt[]>([]);
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
+  const [todayTransactionsCount, setTodayTransactionsCount] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [revenueChartData, setRevenueChartData] = useState<{ name: string; amount: number }[]>([]);
+
+  // RBAC: Determine if current user has Finance or Hotel Admin permissions
+  const canViewFinances = hasFinancialVisibility(profile, customRoles);
 
   useEffect(() => {
     if (!profile || hasPermissionError) return;
@@ -91,6 +98,7 @@ export function Dashboard() {
     let unsubRes = () => {};
     let unsubActiveRes = () => {};
     let unsubBlockings = () => {};
+    let unsubDebts = () => {};
     let unsubFinance = () => {};
 
     if (profile.role === 'superAdmin') {
@@ -122,31 +130,64 @@ export function Dashboard() {
       unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {
         setBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
       });
+
+      // Live listener for outstanding debts across the property (AR / Guest Debtors)
+      unsubDebts = onSnapshot(collection(db, 'hotels', hotel.id, 'outstanding_debt_ledger'), (snap) => {
+        setDebts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as OutstandingDebt)));
+      }, () => {});
  
-      unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(100)), (snap) => {
-        const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
-        setFinance(records);
+      // Live listener for transactions: restricted by role to avoid exposing monetary totals to unauthorized users
+      if (canViewFinances) {
+        unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(150)), (snap) => {
+          const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
+          setFinance(records);
+
+          // Calculate daily transaction count for today
+          const countToday = records.filter(r => {
+            const dateStr = getRecordDateString(r.timestamp);
+            return dateStr && isToday(new Date(dateStr));
+          }).length;
+          setTodayTransactionsCount(countToday);
  
-        // Process revenue chart data for last 7 days
-        const last7Days = Array.from({ length: 7 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          return d.toISOString().split('T')[0];
-        }).reverse();
+          // Process revenue chart data for last 7 days
+          const last7Days = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            return d.toISOString().split('T')[0];
+          }).reverse();
  
-        const chartData = last7Days.map(date => {
-          const dayRevenue = records
-            .filter(r => r.type === 'income' && getRecordDateString(r.timestamp).startsWith(date))
-            .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-          return {
-            name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
-            amount: dayRevenue
-          };
+          const chartData = last7Days.map(date => {
+            const dayRevenue = records
+              .filter(r => r.type === 'income' && getRecordDateString(r.timestamp).startsWith(date))
+              .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+            return {
+              name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
+              amount: dayRevenue
+            };
+          });
+          setRevenueChartData(chartData);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
         });
-        setRevenueChartData(chartData);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
-      });
+      } else {
+        // General staff: Listen solely for transaction events to calculate current day's transaction count.
+        // Do not store financial records or expose revenue figures in frontend state.
+        unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(100)), (snap) => {
+          let countToday = 0;
+          snap.docs.forEach(doc => {
+            const data = doc.data();
+            const dateStr = getRecordDateString(data.timestamp);
+            if (dateStr && isToday(new Date(dateStr))) {
+              countToday++;
+            }
+          });
+          setTodayTransactionsCount(countToday);
+          setFinance([]);
+          setRevenueChartData([]);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
+        });
+      }
     }
 
     return () => {
@@ -155,14 +196,54 @@ export function Dashboard() {
       unsubRes();
       unsubActiveRes();
       unsubBlockings();
+      unsubDebts();
       unsubFinance();
     };
-  }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError]);
+  }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError, canViewFinances]);
 
   useEffect(() => {
     setHasPermissionError(false);
   }, [profile?.uid, hotel?.id]);
 
+  // LIVE CALCULATION: Overall outstanding amount owing across the hotel
+  // Combines current in-house checked-in guest balances and unsettled debtor ledger balances
+  const inHouseOutstanding = rooms
+    .filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied')
+    .reduce((acc, r) => {
+      const res = activeReservations.find(res => res.roomId === r.id && res.status === 'checked_in');
+      if (res) {
+        const balance = getReservationLiveBalance(res, hotel);
+        return acc + Math.max(0, balance);
+      }
+      return acc;
+    }, 0);
+
+  const debtorOutstanding = debts
+    .filter(d => d.status === 'outstanding' || d.status === 'partially_paid')
+    .reduce((acc, d) => acc + Math.max(0, d.outstandingAmount || 0), 0);
+
+  const totalOutstandingOwing = inHouseOutstanding + debtorOutstanding;
+
+  // Complete financial summary calculations (strictly for Finance and Hotel Admin)
+  const totalRevenue = canViewFinances
+    ? finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+    : 0;
+
+  const todayRevenue = canViewFinances
+    ? finance
+        .filter(f => f.type === 'income' && f.timestamp && isToday(new Date(getRecordDateString(f.timestamp))))
+        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+    : 0;
+
+  const previousRevenue = canViewFinances
+    ? finance
+        .filter(f => f.type === 'income' && !getRecordDateString(f.timestamp).startsWith(new Date().toISOString().split('T')[0]))
+        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+    : 0;
+
+  const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
+
+  // Role-Based Dashboard Stats Card Definition
   const stats = profile?.role === 'superAdmin' 
     ? [
         { label: 'Total Hotels', value: allHotels.length, icon: BedDouble, color: 'text-blue-500' },
@@ -170,48 +251,95 @@ export function Dashboard() {
         { label: 'Suspended', value: allHotels.filter(h => h.subscriptionStatus === 'suspended').length, icon: AlertCircle, color: 'text-red-500' },
         { label: 'Expired', value: allHotels.filter(h => h.subscriptionStatus === 'expired').length, icon: Clock, color: 'text-amber-500' },
       ]
-    : [
-        { 
-          label: 'Occupancy', 
-          value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
-          icon: BedDouble, 
-          color: 'text-blue-500' 
-        },
-        { 
-          label: 'Active Guests', 
-          value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, 
-          icon: Users, 
-          color: 'text-emerald-500' 
-        },
-        { 
-          label: 'Today Revenue', 
-          value: formatCurrency(finance.filter(f => f.type === 'income' && f.timestamp && isToday(new Date(f.timestamp))).reduce((acc, curr) => acc + curr.amount, 0), currency, exchangeRate), 
-          icon: TrendingUp, 
-          color: 'text-amber-500',
-          module: 'finance'
-        },
-        { 
-          label: 'Outstanding', 
-          value: formatCurrency(rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').reduce((acc, r) => {
-            const res = activeReservations.find(res => res.roomId === r.id && res.status === 'checked_in');
-            if (res) {
-              const balance = getReservationLiveBalance(res, hotel);
-              return acc + Math.max(0, balance);
-            }
-            return acc;
-          }, 0), currency, exchangeRate), 
-          icon: DollarSign, 
-          color: 'text-red-500',
-          module: 'frontDesk'
-        },
-        { label: 'Dirty Rooms', value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, icon: AlertCircle, color: 'text-red-500' },
-      ].filter(s => profile?.role === 'superAdmin' || !s.module || isModuleEnabled(hotel, s.module));
-
-  const totalRevenue = finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-  const previousRevenue = finance.filter(f => f.type === 'income' && !f.timestamp?.startsWith(new Date().toISOString().split('T')[0])).reduce((acc, curr) => acc + curr.amount, 0);
-  const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
+    : canViewFinances
+      ? [
+          // Finance & Hotel Admin Visibility: Complete Financial Summary
+          { 
+            label: 'Occupancy', 
+            value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
+            icon: BedDouble, 
+            color: 'text-blue-500' 
+          },
+          { 
+            label: 'Active Guests', 
+            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, 
+            icon: Users, 
+            color: 'text-emerald-500' 
+          },
+          { 
+            label: 'Today Revenue', 
+            value: formatCurrency(todayRevenue, currency, exchangeRate), 
+            icon: TrendingUp, 
+            color: 'text-amber-500',
+            module: 'finance'
+          },
+          { 
+            label: 'Total Collected', 
+            value: formatCurrency(totalRevenue, currency, exchangeRate), 
+            icon: DollarSign, 
+            color: 'text-emerald-400',
+            module: 'finance'
+          },
+          { 
+            label: 'Today Transactions', 
+            value: todayTransactionsCount, 
+            icon: Receipt, 
+            color: 'text-cyan-400',
+            module: 'frontDesk'
+          },
+          { 
+            label: 'Overall Outstanding', 
+            value: formatCurrency(totalOutstandingOwing, currency, exchangeRate), 
+            icon: AlertCircle, 
+            color: 'text-red-500',
+            module: 'frontDesk'
+          },
+          { 
+            label: 'Dirty Rooms', 
+            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, 
+            icon: AlertCircle, 
+            color: 'text-amber-500' 
+          },
+        ].filter(s => !s.module || isModuleEnabled(hotel, s.module))
+      : [
+          // General Staff Visibility: See today's total transactions and overall outstanding balance owing, WITHOUT seeing total revenue or total amount collected!
+          { 
+            label: 'Occupancy', 
+            value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
+            icon: BedDouble, 
+            color: 'text-blue-500' 
+          },
+          { 
+            label: 'Active Guests', 
+            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, 
+            icon: Users, 
+            color: 'text-emerald-500' 
+          },
+          { 
+            label: "Today's Transactions", 
+            value: todayTransactionsCount, 
+            icon: Receipt, 
+            color: 'text-cyan-400' 
+          },
+          { 
+            label: 'Overall Outstanding', 
+            value: formatCurrency(totalOutstandingOwing, currency, exchangeRate), 
+            icon: AlertCircle, 
+            color: 'text-red-500' 
+          },
+          { 
+            label: 'Dirty Rooms', 
+            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, 
+            icon: AlertCircle, 
+            color: 'text-amber-500' 
+          },
+        ];
 
   const handleExportTransactions = () => {
+    if (!canViewFinances) {
+      toast.error('Permission denied: Financial records are restricted to Finance and Hotel Admin users.');
+      return;
+    }
     const dataToExport = (finance || []).slice(0, 100).map(f => ({
       Date: format(new Date(f.timestamp), 'MMM d, yyyy HH:mm'),
       Type: f.type.toUpperCase(),
@@ -292,8 +420,8 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
         <div className="lg:col-span-2 space-y-6 sm:space-y-8">
-          {/* Revenue Chart */}
-          {(profile?.role === 'superAdmin' || isModuleEnabled(hotel, 'finance')) && (
+          {/* Revenue Chart - Strictly restricted to Finance and Hotel Admin */}
+          {(profile?.role === 'superAdmin' || (canViewFinances && isModuleEnabled(hotel, 'finance'))) && (
             <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl">
               <div className="flex items-center justify-between mb-4 sm:mb-6">
                 <div>
@@ -375,8 +503,8 @@ export function Dashboard() {
             </div>
           </div>
 
-          {/* Recent Transactions */}
-          {(profile?.role === 'superAdmin' || isModuleEnabled(hotel, 'finance')) && (
+          {/* Recent Transactions - Strictly restricted to Finance and Hotel Admin */}
+          {(profile?.role === 'superAdmin' || (canViewFinances && isModuleEnabled(hotel, 'finance'))) && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
