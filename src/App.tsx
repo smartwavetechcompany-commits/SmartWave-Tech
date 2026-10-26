@@ -43,6 +43,7 @@ import { ForcePasswordChangeModal } from './components/ForcePasswordChangeModal'
 import { AccountSuspendedModal } from './components/AccountSuspendedModal';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { SetPasswordPage } from './components/SetPasswordPage';
+import { LandingLoadingScreen } from './components/LandingLoadingScreen';
 
 function DashboardRoute() {
   const { profile } = useAuth();
@@ -95,7 +96,7 @@ function DashboardRoute() {
 }
 
 function AppContent() {
-  const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection } = useAuth();
+  const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection, hasHotelError } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [resetCompletedInfo, setResetCompletedInfo] = React.useState<{ email?: string; message?: string } | null>(null);
   const location = useLocation();
@@ -127,11 +128,7 @@ function AppContent() {
   }, [location.pathname]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <LandingLoadingScreen />;
   }
 
   // If user is already active and verified, redirect away from activation routes to main application immediately
@@ -218,6 +215,10 @@ function AppContent() {
 
   // If subscription is expired and user is not superAdmin, show Expired page
   if (!isSubscriptionActive && profile.role !== 'superAdmin') {
+    // If hotel is still resolving for a hotel staff/admin account, keep showing landing loader to eliminate any interim flicker
+    if (!hotel && !hasHotelError && profile.hotelId && profile.hotelId !== 'system') {
+      return <LandingLoadingScreen />;
+    }
     return (
       <>
         <Toaster position="top-right" theme="dark" richColors />

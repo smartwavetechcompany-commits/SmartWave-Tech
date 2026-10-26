@@ -59,6 +59,7 @@ interface AuthContextType {
   currentSessionId: string | null;
   hasPermission: (permission: Permission) => boolean;
   signOut: () => Promise<void>;
+  hasHotelError: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -68,7 +69,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [hotel, setHotel] = useState<Hotel | null>(null);
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [profileResolved, setProfileResolved] = useState(false);
+  const [hotelResolved, setHotelResolved] = useState(false);
   const [hasProfileError, setHasProfileError] = useState(false);
   const [hasHotelError, setHasHotelError] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
@@ -86,6 +89,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return typeof localStorage !== 'undefined' ? localStorage.getItem('pms_selected_hotel_id') : null;
   });
 
+  // Loading state remains true until auth is settled and necessary profile/hotel documents are resolved
+  const loading = useMemo(() => {
+    if (!authResolved) return true;
+    if (!user) return false;
+    if (!profileResolved) return true;
+    if (!profile) return false;
+    if (profile.role === 'superAdmin' && (!profile.hotelId || profile.hotelId === 'system')) return false;
+    if (profile.hotelId && profile.hotelId !== 'system') {
+      if (!hotelResolved) return true;
+    }
+    return false;
+  }, [authResolved, user, profileResolved, profile, hotelResolved]);
+
   const setSelectedHotelId = (id: string | null) => {
     setSelectedHotelIdState(id);
     if (id) {
@@ -97,7 +113,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const retryConnection = () => {
     setIsOffline(false);
-    setLoading(true);
     window.location.reload();
   };
 
@@ -144,12 +159,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 1. Auth State Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setLoading(true);
       queryClient.clear();
       
       if (firebaseUser) {
         setProfile(null);
         setHotel(null);
+        setProfileResolved(false);
+        setHotelResolved(false);
         setHasProfileError(false);
         setHasHotelError(false);
         
@@ -157,19 +173,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .then(() => {
             const freshUser = auth.currentUser;
             setUser(freshUser);
+            setAuthResolved(true);
           })
           .catch((err) => {
             console.error("Session re-validation error:", err);
             setUser(firebaseUser);
+            setAuthResolved(true);
           });
       } else {
         setUser(null);
         setProfile(null);
         setHotel(null);
         setCustomRoles([]);
+        setProfileResolved(true);
+        setHotelResolved(true);
         setHasProfileError(false);
         setHasHotelError(false);
-        setLoading(false);
+        setAuthResolved(true);
       }
     });
     
@@ -178,12 +198,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 2. Profile Fetcher (Real-time Live Sync)
   useEffect(() => {
+    if (!authResolved) return;
     if (!user) {
       setProfile(null);
-      setLoading(false);
+      setProfileResolved(true);
       return;
     }
-    if (hasProfileError) return;
+    if (hasProfileError) {
+      setProfileResolved(true);
+      return;
+    }
 
     const currentUid = user.uid;
     const profileRef = doc(db, 'users', currentUid);
@@ -199,6 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Clear flag in background so they can log back in later if unlocked
           await updateDoc(profileRef, { forceLogout: false }).catch(() => {});
           await fbSignOut(auth);
+          setProfileResolved(true);
           return;
         }
 
@@ -206,17 +231,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.status === 'pending_activation') {
           toast.error("Your account is pending activation. Please use the activation link sent to your email to set your password.");
           await fbSignOut(auth);
+          setProfileResolved(true);
           return;
         }
 
         if (data.status === 'suspended') {
           toast.error("Your account has been suspended. Please contact your Hotel Administrator.");
           await fbSignOut(auth);
+          setProfileResolved(true);
           return;
         }
 
         setProfile(data);
-        setLoading(false);
+        setProfileResolved(true);
       } else if (user.email && SUPER_ADMIN_EMAILS.some(email => email.toLowerCase() === user.email?.toLowerCase())) {
         const bootstrapProfile: UserProfile = {
           email: user.email,
@@ -235,7 +262,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         if (auth.currentUser?.uid === currentUid) {
           setProfile(bootstrapProfile);
-          setLoading(false);
+          setProfileResolved(true);
         }
       } else {
         if (user.email) {
@@ -271,7 +298,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 
                 if (auth.currentUser?.uid === currentUid) {
                   setProfile(migratedProfile);
-                  setLoading(false);
+                  setProfileResolved(true);
                 }
                 return;
               }
@@ -282,7 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         if (auth.currentUser?.uid === currentUid) {
           setProfile(null);
-          setLoading(false);
+          setProfileResolved(true);
         }
       }
     }, (err: any) => {
@@ -294,14 +321,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (err.code === 'permission-denied') {
         setHasProfileError(true);
       }
-      setLoading(false);
+      setProfileResolved(true);
     });
 
     return () => unsubscribe();
-  }, [user?.uid, hasProfileError]);
+  }, [user?.uid, authResolved, hasProfileError]);
 
   // 3. Hotel Fetcher (Real-time Live Sync)
   useEffect(() => {
+    if (!profileResolved) return;
+
     let hotelId = profile?.hotelId;
     const role = profile?.role;
     const currentProfileUid = profile?.uid;
@@ -312,16 +341,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!hotelId || (hotelId === 'system' && role !== 'superAdmin') || hasHotelError) {
       setHotel(null);
+      setHotelResolved(true);
       return;
     }
 
     if (hotelId === 'system' && role === 'superAdmin' && !selectedHotelId) {
       setHotel(null);
+      setHotelResolved(true);
       return;
     }
 
     if (hotel?.id !== hotelId) {
       setHotel(null);
+      setHotelResolved(false);
     }
 
     settingsManager.initialize(hotelId);
@@ -347,18 +379,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         settingsManager.setSettings(settings);
         setHotel({ id: snap.id, ...data, settings } as Hotel);
+        setHotelResolved(true);
       } else {
         setHotel(null);
+        setHotelResolved(true);
       }
     }, (err: any) => {
       if (profile?.uid !== currentProfileUid) return;
       if (err.code === 'permission-denied') {
         setHasHotelError(true);
       }
+      setHotelResolved(true);
     });
 
     return () => unsub();
-  }, [profile?.hotelId, profile?.role, selectedHotelId, hasHotelError]);
+  }, [profile?.hotelId, profile?.role, profileResolved, selectedHotelId, hasHotelError]);
 
   // 4. Custom Roles Listener (Real-time Live RBAC Synchronization)
   useEffect(() => {
@@ -530,7 +565,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSelectedHotelId,
       currentSessionId,
       hasPermission,
-      signOut
+      signOut,
+      hasHotelError
     }}>
       {children}
     </AuthContext.Provider>
