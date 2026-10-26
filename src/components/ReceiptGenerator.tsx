@@ -264,7 +264,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
         {(branding.showLogoOnReceipt ?? true) && (
           branding.logoUrl ? (
-            <img src={branding.logoUrl} alt={hotel.name} className="h-20 mx-auto mb-4 object-contain" referrerPolicy="no-referrer" />
+            <img src={branding.logoUrl} alt={hotel.name} className="h-20 mx-auto mb-4 object-contain max-w-[240px]" referrerPolicy="no-referrer" />
           ) : (
             <div className="w-16 h-16 bg-zinc-100 text-zinc-900 rounded-full flex items-center justify-center mx-auto mb-4 font-black text-2xl border-2 border-zinc-900">
               {hotel.name.charAt(0)}
@@ -272,23 +272,49 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
           )
         )}
         <h1 className="text-2xl font-black uppercase tracking-tighter">{branding.organizationName || hotel.name}</h1>
-        <div className="text-[10px] text-zinc-500 font-medium mt-1 space-y-0.5">
-          {(branding.showAddressOnReceipt ?? true) && (
-            <p className="flex items-center justify-center gap-1"><MapPin size={10} /> {branding.address || 'Hotel Address'}</p>
+        
+        <div className="text-[10px] text-zinc-500 font-medium mt-1.5 space-y-1">
+          {(branding.showAddressOnReceipt ?? true) && branding.address && (
+            <p className="flex items-center justify-center gap-1"><MapPin size={10} /> {branding.address}</p>
           )}
-          <p className="flex items-center justify-center gap-1">
-            {(branding.showPhoneOnReceipt ?? true) && (
-              <><Phone size={10} /> {branding.phone || '+123456789'}</>
-            )}
-            {(branding.showPhoneOnReceipt ?? true) && (branding.showEmailOnReceipt ?? true) && branding.email && (
-              <span className="mx-2">|</span>
+
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
+            {(branding.showPhoneOnReceipt ?? true) && branding.phone && (
+              <p className="flex items-center gap-1"><Phone size={10} /> {branding.phone}</p>
             )}
             {(branding.showEmailOnReceipt ?? true) && branding.email && (
-              <><Mail size={10} /> {branding.email}</>
+              <p className="flex items-center gap-1"><Mail size={10} /> {branding.email}</p>
             )}
-          </p>
-          {(branding.showWebsiteOnReceipt ?? true) && (branding.website || hotel.website) && (
-            <p className="text-emerald-600 font-bold text-xs">{branding.website || hotel.website}</p>
+            {(branding.showWebsiteOnReceipt ?? true) && (branding.website || hotel.website) && (
+              <p className="text-emerald-700 font-bold">{branding.website || hotel.website}</p>
+            )}
+          </div>
+
+          {/* Tax Identification (TIN) & CAC / Business Registration Number */}
+          {((branding.showTinOnReceipt ?? true) && branding.tin || (branding.showCacOnReceipt ?? true) && branding.cac) && (
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-0.5 pt-0.5 text-zinc-600 font-mono text-[9px]">
+              {(branding.showTinOnReceipt ?? true) && branding.tin && (
+                <span className="bg-zinc-100 px-2 py-0.5 rounded border border-zinc-200">
+                  <strong className="font-sans font-bold text-zinc-800">TIN:</strong> {branding.tin}
+                </span>
+              )}
+              {(branding.showCacOnReceipt ?? true) && branding.cac && (
+                <span className="bg-zinc-100 px-2 py-0.5 rounded border border-zinc-200">
+                  <strong className="font-sans font-bold text-zinc-800">CAC / RC:</strong> {branding.cac}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Additional Custom Information Fields */}
+          {branding.customInfo && branding.customInfo.filter(c => c.isEnabled && c.label && c.value).length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-1 text-zinc-600 text-[9px]">
+              {branding.customInfo.filter(c => c.isEnabled && c.label && c.value).map((info) => (
+                <span key={info.id} className="bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200/80">
+                  <span className="font-bold text-zinc-800">{info.label}:</span> {info.value}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -630,26 +656,73 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       </div>
 
       {/* Bank Details Section */}
-      {(branding.showBankDetailsOnReceipt ?? true) && (branding.bankName || branding.accountNumber) && (
-        <div className="mt-4 p-3 border border-zinc-100 rounded-lg text-[9px]">
-          <p className="text-zinc-400 font-bold uppercase tracking-widest mb-1">Bank Details</p>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Bank Name:</span>
-            <span className="font-bold">{branding.bankName || 'N/A'}</span>
+      {(branding.showBankDetailsOnReceipt ?? true) && (() => {
+        const activeBanks = (branding.bankAccounts && branding.bankAccounts.length > 0)
+          ? branding.bankAccounts.filter(b => b.isEnabled && (b.bankName || b.accountNumber))
+          : (branding.bankName || branding.accountNumber)
+            ? [{ 
+                id: 'default', 
+                bankName: branding.bankName || '', 
+                accountNumber: branding.accountNumber || '', 
+                accountName: branding.organizationName || hotel.name || '', 
+                isEnabled: true 
+              }]
+            : [];
+
+        if (activeBanks.length === 0) return null;
+
+        return (
+          <div className="mt-5 p-3.5 border border-zinc-200 rounded-xl text-[9px] bg-zinc-50/70">
+            <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-zinc-200/60">
+              <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Official Bank Payment Accounts</span>
+              <span className="text-[8px] font-semibold text-zinc-400">
+                {activeBanks.length} account{activeBanks.length > 1 ? 's' : ''} on record
+              </span>
+            </div>
+            
+            <div className={cn(
+              "grid gap-2.5",
+              activeBanks.length > 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
+            )}>
+              {activeBanks.map((bank, index) => (
+                <div key={bank.id || index} className="p-2.5 rounded-lg bg-white border border-zinc-200/80 shadow-xs space-y-1">
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="text-zinc-500 font-medium">Bank:</span>
+                    <span className="font-bold text-zinc-900">{bank.bankName || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-zinc-500 font-medium">Account No:</span>
+                    <span className="font-mono font-black text-emerald-850 tracking-wider">{bank.accountNumber || 'N/A'}</span>
+                  </div>
+                  {bank.accountName && (
+                    <div className="flex justify-between items-center text-[8px] pt-0.5 border-t border-zinc-100">
+                      <span className="text-zinc-400">Account Name:</span>
+                      <span className="font-semibold text-zinc-700 truncate max-w-[150px]">{bank.accountName}</span>
+                    </div>
+                  )}
+                  {bank.sortCode && (
+                    <div className="flex justify-between items-center text-[8px]">
+                      <span className="text-zinc-400">Sort Code:</span>
+                      <span className="font-mono text-zinc-600">{bank.sortCode}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex justify-between mt-0.5">
-            <span className="text-zinc-500">Account Number:</span>
-            <span className="font-bold">{branding.accountNumber || 'N/A'}</span>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Footer */}
       <div className="mt-6 text-center">
-        <p className="text-xs font-bold mb-1 italic">{branding.greeting || `Thank you for choosing ${hotel.name}!`}</p>
-        <p className="text-[9px] text-zinc-400 max-w-[250px] mx-auto leading-relaxed">
-          {branding.footerNotes || 'We hope you enjoyed your stay. Please keep this receipt for your records.'}
-        </p>
+        {(branding.showGreetingOnReceipt ?? true) && (
+          <p className="text-xs font-bold mb-1 italic text-zinc-800">{branding.greeting || `Thank you for choosing ${hotel.name}!`}</p>
+        )}
+        {(branding.showFooterNotesOnReceipt ?? true) && (
+          <p className="text-[9px] text-zinc-500 max-w-[340px] mx-auto leading-relaxed">
+            {branding.footerNotes || 'We hope you enjoyed your stay. Please keep this receipt for your records.'}
+          </p>
+        )}
         <div className="mt-4 pt-4 border-t border-zinc-100 flex items-center justify-center gap-2 opacity-30 grayscale">
           <div className="w-3 h-3 bg-zinc-900 rounded-sm" />
           <span className="text-[7px] font-black uppercase tracking-widest">PMS Enterprise Certified</span>

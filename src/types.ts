@@ -123,6 +123,22 @@ export interface PasswordResetToken {
   resetUrl?: string;
 }
 
+export interface HotelBankAccount {
+  id: string;
+  bankName: string;
+  accountNumber: string;
+  accountName?: string;
+  sortCode?: string;
+  isEnabled: boolean;
+}
+
+export interface HotelCustomInfoField {
+  id: string;
+  label: string;
+  value: string;
+  isEnabled: boolean;
+}
+
 export interface HotelBranding {
   logoUrl?: string;
   primaryColor?: string;
@@ -135,13 +151,21 @@ export interface HotelBranding {
   organizationName?: string;
   accountNumber?: string;
   bankName?: string;
+  bankAccounts?: HotelBankAccount[];
+  tin?: string; // Tax Identification Number
+  cac?: string; // CAC / RC Registration Number
+  customInfo?: HotelCustomInfoField[];
   greeting?: string;
   showLogoOnReceipt?: boolean;
   showAddressOnReceipt?: boolean;
   showPhoneOnReceipt?: boolean;
   showEmailOnReceipt?: boolean;
   showWebsiteOnReceipt?: boolean;
+  showTinOnReceipt?: boolean;
+  showCacOnReceipt?: boolean;
   showBankDetailsOnReceipt?: boolean;
+  showGreetingOnReceipt?: boolean;
+  showFooterNotesOnReceipt?: boolean;
   customReceiptTitle?: string;
   statusColors?: {
     clean?: string;

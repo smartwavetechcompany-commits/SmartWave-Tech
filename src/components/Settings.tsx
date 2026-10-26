@@ -4,7 +4,7 @@ import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch, where } fr
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { database } from '../utils/database';
-import { Tax, Reservation } from '../types';
+import { Tax, Reservation, HotelBankAccount, HotelCustomInfoField } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 import { 
   User, 
@@ -32,7 +32,15 @@ import {
   Coins,
   Globe,
   RefreshCw,
-  Clock
+  Clock,
+  Upload,
+  Image as ImageIcon,
+  MapPin,
+  Phone,
+  Landmark,
+  Hash,
+  Sliders,
+  FileText
 } from 'lucide-react';
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
@@ -78,13 +86,32 @@ export function Settings() {
       organizationName: hotel?.branding?.organizationName || hotel?.name || '',
       accountNumber: hotel?.branding?.accountNumber || '',
       bankName: hotel?.branding?.bankName || '',
+      bankAccounts: (hotel?.branding?.bankAccounts && hotel.branding.bankAccounts.length > 0)
+        ? hotel.branding.bankAccounts
+        : (hotel?.branding?.bankName || hotel?.branding?.accountNumber)
+          ? [{
+              id: 'bank_initial',
+              bankName: hotel.branding.bankName || '',
+              accountNumber: hotel.branding.accountNumber || '',
+              accountName: hotel.branding.organizationName || hotel.name || '',
+              sortCode: '',
+              isEnabled: true
+            }]
+          : [],
+      tin: hotel?.branding?.tin || '',
+      cac: hotel?.branding?.cac || '',
+      customInfo: hotel?.branding?.customInfo || [],
       greeting: hotel?.branding?.greeting || 'Thank you for staying with us!',
       showLogoOnReceipt: hotel?.branding?.showLogoOnReceipt ?? true,
       showAddressOnReceipt: hotel?.branding?.showAddressOnReceipt ?? true,
       showPhoneOnReceipt: hotel?.branding?.showPhoneOnReceipt ?? true,
       showEmailOnReceipt: hotel?.branding?.showEmailOnReceipt ?? true,
       showWebsiteOnReceipt: hotel?.branding?.showWebsiteOnReceipt ?? true,
+      showTinOnReceipt: hotel?.branding?.showTinOnReceipt ?? true,
+      showCacOnReceipt: hotel?.branding?.showCacOnReceipt ?? true,
       showBankDetailsOnReceipt: hotel?.branding?.showBankDetailsOnReceipt ?? true,
+      showGreetingOnReceipt: hotel?.branding?.showGreetingOnReceipt ?? true,
+      showFooterNotesOnReceipt: hotel?.branding?.showFooterNotesOnReceipt ?? true,
       customReceiptTitle: hotel?.branding?.customReceiptTitle || '',
       statusColors: hotel?.branding?.statusColors || {
         clean: '#10b981',
@@ -126,13 +153,34 @@ export function Settings() {
           organizationName: hotel.branding?.organizationName || hotel.name || prev.branding.organizationName,
           accountNumber: hotel.branding?.accountNumber || prev.branding.accountNumber,
           bankName: hotel.branding?.bankName || prev.branding.bankName,
+          bankAccounts: (hotel.branding?.bankAccounts && hotel.branding.bankAccounts.length > 0)
+            ? hotel.branding.bankAccounts
+            : (prev.branding.bankAccounts && prev.branding.bankAccounts.length > 0)
+              ? prev.branding.bankAccounts
+              : (hotel.branding?.bankName || hotel.branding?.accountNumber)
+                ? [{
+                    id: 'bank_initial',
+                    bankName: hotel.branding.bankName || '',
+                    accountNumber: hotel.branding.accountNumber || '',
+                    accountName: hotel.branding.organizationName || hotel.name || '',
+                    sortCode: '',
+                    isEnabled: true
+                  }]
+                : [],
+          tin: hotel.branding?.tin || prev.branding.tin,
+          cac: hotel.branding?.cac || prev.branding.cac,
+          customInfo: hotel.branding?.customInfo || prev.branding.customInfo,
           greeting: hotel.branding?.greeting || prev.branding.greeting,
           showLogoOnReceipt: hotel.branding?.showLogoOnReceipt ?? prev.branding.showLogoOnReceipt,
           showAddressOnReceipt: hotel.branding?.showAddressOnReceipt ?? prev.branding.showAddressOnReceipt,
           showPhoneOnReceipt: hotel.branding?.showPhoneOnReceipt ?? prev.branding.showPhoneOnReceipt,
           showEmailOnReceipt: hotel.branding?.showEmailOnReceipt ?? prev.branding.showEmailOnReceipt,
           showWebsiteOnReceipt: hotel.branding?.showWebsiteOnReceipt ?? prev.branding.showWebsiteOnReceipt,
+          showTinOnReceipt: hotel.branding?.showTinOnReceipt ?? prev.branding.showTinOnReceipt,
+          showCacOnReceipt: hotel.branding?.showCacOnReceipt ?? prev.branding.showCacOnReceipt,
           showBankDetailsOnReceipt: hotel.branding?.showBankDetailsOnReceipt ?? prev.branding.showBankDetailsOnReceipt,
+          showGreetingOnReceipt: hotel.branding?.showGreetingOnReceipt ?? prev.branding.showGreetingOnReceipt,
+          showFooterNotesOnReceipt: hotel.branding?.showFooterNotesOnReceipt ?? prev.branding.showFooterNotesOnReceipt,
           customReceiptTitle: hotel.branding?.customReceiptTitle || prev.branding.customReceiptTitle,
           statusColors: hotel.branding?.statusColors || prev.branding.statusColors
         }
@@ -415,20 +463,204 @@ export function Settings() {
     }
   };
 
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose a valid image file (PNG, JPG, SVG, WebP)');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image is too large. Please select an image under 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const rawDataUrl = event.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const maxDimension = 600;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.88);
+          setFormData(prev => ({
+            ...prev,
+            branding: { ...prev.branding, logoUrl: compressed }
+          }));
+          toast.success('Logo uploaded and optimized for receipts!');
+        } else {
+          setFormData(prev => ({
+            ...prev,
+            branding: { ...prev.branding, logoUrl: rawDataUrl }
+          }));
+          toast.success('Logo uploaded!');
+        }
+      };
+      img.onerror = () => {
+        setFormData(prev => ({
+          ...prev,
+          branding: { ...prev.branding, logoUrl: rawDataUrl }
+        }));
+        toast.success('Logo uploaded!');
+      };
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+    if (e.target) e.target.value = '';
+  };
+
+  const handleRemoveLogo = () => {
+    setFormData(prev => ({
+      ...prev,
+      branding: { ...prev.branding, logoUrl: '' }
+    }));
+    toast.info('Logo removed');
+  };
+
+  const handleAddBankAccount = () => {
+    const newBank: HotelBankAccount = {
+      id: `bank_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      bankName: '',
+      accountNumber: '',
+      accountName: formData.branding.organizationName || formData.hotelName || '',
+      sortCode: '',
+      isEnabled: true
+    };
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        bankAccounts: [...(prev.branding.bankAccounts || []), newBank]
+      }
+    }));
+  };
+
+  const handleUpdateBankAccount = (id: string, field: keyof HotelBankAccount, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        bankAccounts: (prev.branding.bankAccounts || []).map(b => 
+          b.id === id ? { ...b, [field]: value } : b
+        )
+      }
+    }));
+  };
+
+  const handleToggleBankAccount = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        bankAccounts: (prev.branding.bankAccounts || []).map(b => 
+          b.id === id ? { ...b, isEnabled: !b.isEnabled } : b
+        )
+      }
+    }));
+  };
+
+  const handleRemoveBankAccount = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        bankAccounts: (prev.branding.bankAccounts || []).filter(b => b.id !== id)
+      }
+    }));
+  };
+
+  const handleAddCustomInfo = () => {
+    const newField: HotelCustomInfoField = {
+      id: `info_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      label: '',
+      value: '',
+      isEnabled: true
+    };
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        customInfo: [...(prev.branding.customInfo || []), newField]
+      }
+    }));
+  };
+
+  const handleUpdateCustomInfo = (id: string, field: keyof HotelCustomInfoField, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        customInfo: (prev.branding.customInfo || []).map(c => 
+          c.id === id ? { ...c, [field]: value } : c
+        )
+      }
+    }));
+  };
+
+  const handleToggleCustomInfo = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        customInfo: (prev.branding.customInfo || []).map(c => 
+          c.id === id ? { ...c, isEnabled: !c.isEnabled } : c
+        )
+      }
+    }));
+  };
+
+  const handleRemoveCustomInfo = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      branding: {
+        ...prev.branding,
+        customInfo: (prev.branding.customInfo || []).filter(c => c.id !== id)
+      }
+    }));
+  };
+
   const handleSaveBranding = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
 
     setIsSaving(true);
     try {
+      // Sync legacy primary bank account fields for backwards compatibility
+      const activeBank = (formData.branding.bankAccounts || []).find(b => b.isEnabled) || formData.branding.bankAccounts?.[0];
+      const brandingToSave = {
+        ...formData.branding,
+        bankName: activeBank?.bankName || formData.branding.bankName || '',
+        accountNumber: activeBank?.accountNumber || formData.branding.accountNumber || '',
+      };
+
       const updates = {
-        branding: formData.branding,
+        branding: brandingToSave,
       };
 
       // Calculate changed fields
       const changes: Record<string, { from: any, to: any }> = {};
       const oldBranding = hotel.branding || {};
-      const newBranding = formData.branding;
+      const newBranding = brandingToSave;
 
       Object.keys(newBranding).forEach(key => {
         const newVal = (newBranding as any)[key];
@@ -443,11 +675,11 @@ export function Settings() {
         hotelId: hotel.id,
         module: 'Settings',
         action: 'UPDATE_HOTEL_BRANDING',
-        details: 'Updated hotel branding and visual settings',
+        details: 'Updated hotel branding, receipt customization, and payment accounts',
         metadata: { changes }
       });
 
-      toast.success('Hotel branding updated!');
+      toast.success('Hotel branding and receipt customization saved!');
     } catch (err: any) {
       console.error("Save branding error:", err.message || safeStringify(err));
       toast.error('Failed to update hotel branding.');
@@ -578,15 +810,15 @@ export function Settings() {
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8">
+    <div className={cn("p-4 sm:p-8 mx-auto space-y-8 transition-all", activeTab === 'branding' ? "max-w-7xl" : "max-w-4xl")}>
       <header>
         <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">{t('settings.title')}</h1>
         <p className="text-zinc-400">Manage your account and system preferences</p>
       </header>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col lg:flex-row gap-8">
         {/* Sidebar Tabs */}
-        <aside className="w-64 space-y-2">
+        <aside className="w-full lg:w-64 space-y-2 shrink-0">
           <button 
             onClick={() => setActiveTab('profile')}
             className={cn(
@@ -619,8 +851,8 @@ export function Settings() {
                 activeTab === 'branding' ? "bg-emerald-500 text-black" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50"
               )}
             >
-              <Smartphone size={18} />
-              {t('settings.branding')}
+              <Receipt size={18} />
+              <span>Branding & Receipts</span>
             </button>
           )}
 
@@ -1019,366 +1251,971 @@ export function Settings() {
           )}
 
           {activeTab === 'branding' && profile?.role === 'hotelAdmin' && (
-            <form onSubmit={handleSaveBranding} className="space-y-6">
-              <div className="mb-8">
-                <h3 className="text-lg font-bold text-zinc-50 mb-1">Hotel Branding</h3>
-                <p className="text-sm text-zinc-500">Customize your hotel's visual identity and receipt details</p>
+            <div className="space-y-8">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-5">
+                <div>
+                  <h3 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
+                    <Receipt className="text-emerald-400" size={22} />
+                    Hotel Branding & Receipt Customization
+                  </h3>
+                  <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                    Upload your logo, configure official business identifiers (TIN & CAC), manage bank accounts, and toggle visible receipt fields.
+                  </p>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={handleSaveBranding}
+                  disabled={isSaving}
+                  className="bg-emerald-500 text-black px-6 py-2.5 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-emerald-950/40 cursor-pointer text-xs uppercase tracking-wider shrink-0"
+                >
+                  <Save size={16} />
+                  {isSaving ? 'Saving...' : 'Save All Changes'}
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Logo URL</label>
-                  <input 
-                    type="url" 
-                    placeholder="https://example.com/logo.png"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.logoUrl}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, logoUrl: e.target.value } 
-                    })}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Primary Color</label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="color" 
-                      className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
-                      value={formData.branding.primaryColor}
-                      onChange={(e) => setFormData({ 
-                        ...formData, 
-                        branding: { ...formData.branding, primaryColor: e.target.value } 
-                      })}
-                    />
-                    <input 
-                      type="text" 
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-sm"
-                      value={formData.branding.primaryColor}
-                      onChange={(e) => setFormData({ 
-                        ...formData, 
-                        branding: { ...formData.branding, primaryColor: e.target.value } 
-                      })}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Secondary Color</label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="color" 
-                      className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
-                      value={formData.branding.secondaryColor}
-                      onChange={(e) => setFormData({ 
-                        ...formData, 
-                        branding: { ...formData.branding, secondaryColor: e.target.value } 
-                      })}
-                    />
-                    <input 
-                      type="text" 
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-sm"
-                      value={formData.branding.secondaryColor}
-                      onChange={(e) => setFormData({ 
-                        ...formData, 
-                        branding: { ...formData.branding, secondaryColor: e.target.value } 
-                      })}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Contact Phone</label>
-                  <input 
-                    type="tel" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.phone}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, phone: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Contact Email</label>
-                  <input 
-                    type="email" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.email}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, email: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Organization Name</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.organizationName}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, organizationName: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Bank Name</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.bankName}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, bankName: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Account Number</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.accountNumber}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, accountNumber: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Receipt Greeting</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    placeholder="e.g. Thank you for your business!"
-                    value={formData.branding.greeting}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, greeting: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Address</label>
-                  <textarea 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
-                    value={formData.branding.address}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, address: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Receipt Footer Notes</label>
-                  <textarea 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none resize-none h-20"
-                    placeholder="Thank you for staying with us!"
-                    value={formData.branding.footerNotes}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, footerNotes: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Website URL (Printed on Receipt)</label>
-                  <input 
-                    type="url" 
-                    placeholder="https://yourhotel.com"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.website}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, website: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Custom Receipt Title (e.g. Tax Invoice, Bill Statement)</label>
-                  <input 
-                    type="text" 
-                    placeholder="Defaults to standard OFFICIAL GUEST RECEIPT"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={formData.branding.customReceiptTitle}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      branding: { ...formData.branding, customReceiptTitle: e.target.value } 
-                    })}
-                  />
-                </div>
-
-                <div className="md:col-span-2 pt-6 border-t border-zinc-800">
-                  <h4 className="text-sm font-bold text-zinc-50 mb-1">Receipt Information Customization</h4>
-                  <p className="text-xs text-zinc-500 mb-4 font-normal">Choose which sections or details to show or hide on guest receipts</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
-                      <input 
-                        type="checkbox"
-                        checked={formData.branding.showLogoOnReceipt}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          branding: { ...formData.branding, showLogoOnReceipt: e.target.checked }
-                        })}
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="text-xs font-semibold block">Show Hotel Logo</span>
-                        <span className="text-[10px] text-zinc-500 block">Include your branding logo if uploaded</span>
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+                {/* Form Controls Column */}
+                <form onSubmit={handleSaveBranding} className="xl:col-span-7 space-y-6">
+                  {/* Card 1: Logo & Visual Identity */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-5">
+                    <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                      <div className="flex items-center gap-2">
+                        <ImageIcon size={18} className="text-emerald-400" />
+                        <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Hotel Logo & Identity</h4>
                       </div>
-                    </label>
+                      <label className="flex items-center gap-2 text-xs font-semibold text-zinc-300 cursor-pointer select-none">
+                        <input 
+                          type="checkbox"
+                          checked={formData.branding.showLogoOnReceipt}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            branding: { ...formData.branding, showLogoOnReceipt: e.target.checked }
+                          })}
+                          className="w-4 h-4 rounded border-zinc-800 bg-zinc-900 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                        />
+                        <span>Show Logo on Receipt</span>
+                      </label>
+                    </div>
 
-                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
+                    <div className="space-y-4">
+                      {/* Hidden File Input */}
                       <input 
-                        type="checkbox"
-                        checked={formData.branding.showAddressOnReceipt}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          branding: { ...formData.branding, showAddressOnReceipt: e.target.checked }
-                        })}
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
+                        type="file"
+                        ref={logoInputRef}
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        onChange={handleLogoFileUpload}
+                        className="hidden"
                       />
-                      <div>
-                        <span className="text-xs font-semibold block">Show Address</span>
-                        <span className="text-[10px] text-zinc-500 block">Include physical address at the header</span>
-                      </div>
-                    </label>
 
-                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
-                      <input 
-                        type="checkbox"
-                        checked={formData.branding.showPhoneOnReceipt}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          branding: { ...formData.branding, showPhoneOnReceipt: e.target.checked }
-                        })}
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="text-xs font-semibold block">Show Contact Phone</span>
-                        <span className="text-[10px] text-zinc-500 block">Display contact phone number</span>
-                      </div>
-                    </label>
+                      <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/50">
+                        {formData.branding.logoUrl ? (
+                          <div className="relative group shrink-0">
+                            <div className="w-24 h-24 rounded-xl border-2 border-zinc-700 bg-white p-2 flex items-center justify-center overflow-hidden shadow-md">
+                              <img 
+                                src={formData.branding.logoUrl} 
+                                alt="Hotel Logo" 
+                                className="max-w-full max-h-full object-contain"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleRemoveLogo}
+                              className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transition-transform hover:scale-110 cursor-pointer"
+                              title="Remove logo"
+                            >
+                              <XCircle size={16} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="w-24 h-24 rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-950 flex flex-col items-center justify-center text-zinc-500 text-center p-2 shrink-0">
+                            <ImageIcon size={24} className="mb-1 text-zinc-600" />
+                            <span className="text-[10px] font-semibold">No Logo</span>
+                          </div>
+                        )}
 
-                    <label className="flex items-center gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
-                      <input 
-                        type="checkbox"
-                        checked={formData.branding.showEmailOnReceipt}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          branding: { ...formData.branding, showEmailOnReceipt: e.target.checked }
-                        })}
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="text-xs font-semibold block">Show Contact Email</span>
-                        <span className="text-[10px] text-zinc-500 block">Display contact email address</span>
+                        <div className="flex-1 space-y-2 text-center sm:text-left">
+                          <h5 className="text-xs font-bold text-zinc-200">Official Hotel Logo</h5>
+                          <p className="text-[11px] text-zinc-400 leading-relaxed">
+                            Upload your PNG, JPG, WebP, or SVG logo. It will be printed at the top of receipts and customer folios.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => logoInputRef.current?.click()}
+                              className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                            >
+                              <Upload size={14} />
+                              <span>{formData.branding.logoUrl ? 'Replace Logo' : 'Upload Logo File'}</span>
+                            </button>
+                            {formData.branding.logoUrl && (
+                              <button
+                                type="button"
+                                onClick={handleRemoveLogo}
+                                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-red-400 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                              >
+                                <Trash2 size={13} />
+                                <span>Remove</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </label>
 
-                    <label className="flex items-center gap-3 bg-zinc-920 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
-                      <input 
-                        type="checkbox"
-                        checked={formData.branding.showWebsiteOnReceipt}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          branding: { ...formData.branding, showWebsiteOnReceipt: e.target.checked }
-                        })}
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                      />
                       <div>
-                        <span className="text-xs font-semibold block">Show Website Link</span>
-                        <span className="text-[10px] text-zinc-500 block">Display the hotel website URL if set</span>
-                      </div>
-                    </label>
-
-                    <label className="flex items-center gap-3 bg-zinc-920 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-900 cursor-pointer text-zinc-200">
-                      <input 
-                        type="checkbox"
-                        checked={formData.branding.showBankDetailsOnReceipt}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          branding: { ...formData.branding, showBankDetailsOnReceipt: e.target.checked }
-                        })}
-                        className="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <span className="text-xs font-semibold block">Show Bank Details</span>
-                        <span className="text-[10px] text-zinc-500 block">Include bank and account transfer info</span>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="md:col-span-2 pt-6 border-t border-zinc-800">
-                  <h4 className="text-sm font-bold text-zinc-50 mb-4">Room Status Colors</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {(['clean', 'dirty', 'occupied', 'maintenance', 'vacant', 'out_of_service'] as const).map((status) => (
-                      <div key={status}>
-                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">
-                          {status.replace(/_/g, ' ')}
+                        <label className="block text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+                          Or Provide Logo Direct URL
                         </label>
-                        <div className="flex gap-2">
-                          <input 
-                            type="color" 
-                            className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
-                            value={formData.branding.statusColors?.[status] || '#71717a'}
-                            onChange={(e) => setFormData({ 
-                              ...formData, 
-                              branding: { 
-                                ...formData.branding, 
-                                statusColors: { 
-                                  ...formData.branding.statusColors, 
-                                  [status]: e.target.value 
-                                } 
-                              } 
-                            })}
-                          />
+                        <input 
+                          type="url" 
+                          placeholder="https://example.com/logo.png"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={formData.branding.logoUrl}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            branding: { ...formData.branding, logoUrl: e.target.value } 
+                          })}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+                            Organization / Hotel Name
+                          </label>
                           <input 
                             type="text" 
-                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-sm"
-                            value={formData.branding.statusColors?.[status] || '#71717a'}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={formData.branding.organizationName}
                             onChange={(e) => setFormData({ 
                               ...formData, 
-                              branding: { 
-                                ...formData.branding, 
-                                statusColors: { 
-                                  ...formData.branding.statusColors, 
-                                  [status]: e.target.value 
-                                } 
-                              } 
+                              branding: { ...formData.branding, organizationName: e.target.value } 
+                            })}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-1.5">
+                            Custom Receipt Header Title
+                          </label>
+                          <input 
+                            type="text" 
+                            placeholder="OFFICIAL GUEST RECEIPT (Default)"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={formData.branding.customReceiptTitle}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, customReceiptTitle: e.target.value } 
                             })}
                           />
                         </div>
                       </div>
-                    ))}
+                    </div>
+                  </div>
+
+                  {/* Card 2: Official Business Identifiers (TIN & CAC) */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                      <Hash size={18} className="text-blue-400" />
+                      <div>
+                        <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Official Registration & Tax Information</h4>
+                        <p className="text-[11px] text-zinc-500">Add mandatory business registration identifiers to receipts for corporate compliance</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* TIN Field */}
+                      <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                            Tax ID Number (TIN)
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showTinOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showTinOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                            />
+                            <span>Print on Receipt</span>
+                          </label>
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. 12345678-0001"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={formData.branding.tin}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            branding: { ...formData.branding, tin: e.target.value } 
+                          })}
+                        />
+                      </div>
+
+                      {/* CAC / RC Field */}
+                      <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                            CAC / RC Registration No.
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showCacOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showCacOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                            />
+                            <span>Print on Receipt</span>
+                          </label>
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. RC 1234567 or BN 9876543"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={formData.branding.cac}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            branding: { ...formData.branding, cac: e.target.value } 
+                          })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Contact & Address Information */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                      <MapPin size={18} className="text-amber-400" />
+                      <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Address & Contact Information</h4>
+                    </div>
+
+                    <div className="space-y-4">
+                      {/* Address */}
+                      <div className="bg-zinc-900/50 border border-zinc-850 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                            Physical Hotel Address
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showAddressOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showAddressOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                            />
+                            <span>Print Address</span>
+                          </label>
+                        </div>
+                        <textarea 
+                          rows={2}
+                          placeholder="e.g. 14 Victoria Island Boulevard, Lagos, Nigeria"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none"
+                          value={formData.branding.address}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            branding: { ...formData.branding, address: e.target.value } 
+                          })}
+                        />
+                      </div>
+
+                      {/* Phone, Email, Website Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {/* Phone */}
+                        <div className="bg-zinc-900/50 border border-zinc-850 rounded-xl p-3 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-zinc-300 uppercase">Phone</span>
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showPhoneOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showPhoneOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                              title="Toggle phone visibility on receipt"
+                            />
+                          </div>
+                          <input 
+                            type="tel" 
+                            placeholder="+234 800 000 0000"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={formData.branding.phone}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, phone: e.target.value } 
+                            })}
+                          />
+                        </div>
+
+                        {/* Email */}
+                        <div className="bg-zinc-900/50 border border-zinc-850 rounded-xl p-3 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-zinc-300 uppercase">Email</span>
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showEmailOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showEmailOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                              title="Toggle email visibility on receipt"
+                            />
+                          </div>
+                          <input 
+                            type="email" 
+                            placeholder="info@hotel.com"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={formData.branding.email}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, email: e.target.value } 
+                            })}
+                          />
+                        </div>
+
+                        {/* Website */}
+                        <div className="bg-zinc-900/50 border border-zinc-850 rounded-xl p-3 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-zinc-300 uppercase">Website</span>
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showWebsiteOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showWebsiteOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                              title="Toggle website visibility on receipt"
+                            />
+                          </div>
+                          <input 
+                            type="url" 
+                            placeholder="https://hotel.com"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={formData.branding.website}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, website: e.target.value } 
+                            })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 4: Official Bank Accounts (Multi-Account Management with On/Off switches) */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-900 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Landmark size={18} className="text-emerald-400" />
+                        <div>
+                          <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Bank Payment Accounts</h4>
+                          <p className="text-[11px] text-zinc-500">Add multiple bank accounts for customer direct transfers. Turn off ones you don't need printed.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 text-xs font-semibold text-zinc-300 cursor-pointer select-none">
+                          <input 
+                            type="checkbox"
+                            checked={formData.branding.showBankDetailsOnReceipt}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              branding: { ...formData.branding, showBankDetailsOnReceipt: e.target.checked }
+                            })}
+                            className="w-4 h-4 rounded border-zinc-800 bg-zinc-900 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                          />
+                          <span>Show Bank Section</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={handleAddBankAccount}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Plus size={14} />
+                          <span>Add Bank</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {(!formData.branding.bankAccounts || formData.branding.bankAccounts.length === 0) ? (
+                      <div className="p-6 text-center rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 space-y-3">
+                        <Landmark size={28} className="mx-auto text-zinc-600" />
+                        <div className="space-y-1">
+                          <p className="text-xs font-bold text-zinc-300">No Bank Accounts Configured</p>
+                          <p className="text-[11px] text-zinc-500 max-w-sm mx-auto">
+                            Add your hotel's settlement bank accounts. You can add as many as you need and turn on/off individual accounts anytime.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddBankAccount}
+                          className="px-4 py-2 rounded-lg bg-emerald-500 text-zinc-950 font-bold text-xs inline-flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+                        >
+                          <Plus size={14} />
+                          <span>Add First Bank Account</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {formData.branding.bankAccounts.map((bank, index) => (
+                          <div 
+                            key={bank.id || index}
+                            className={cn(
+                              "p-4 rounded-xl border transition-all space-y-3",
+                              bank.isEnabled 
+                                ? "bg-zinc-900/60 border-zinc-800" 
+                                : "bg-zinc-950/40 border-zinc-850 opacity-60"
+                            )}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-black flex items-center justify-center">
+                                  {index + 1}
+                                </span>
+                                <span className="text-xs font-bold text-zinc-200">
+                                  {bank.bankName || 'New Bank Account'}
+                                </span>
+                                {bank.isEnabled ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold">
+                                    Active on Receipt
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-500 text-[9px] font-bold">
+                                    Hidden / Disabled
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBankAccount(bank.id)}
+                                  className={cn(
+                                    "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border",
+                                    bank.isEnabled 
+                                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25"
+                                      : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:text-zinc-200"
+                                  )}
+                                >
+                                  {bank.isEnabled ? 'Turn Off' : 'Turn On'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveBankAccount(bank.id)}
+                                  className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                                  title="Remove this bank account"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                              <div>
+                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">Bank Name</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="e.g. Zenith Bank"
+                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={bank.bankName}
+                                  onChange={(e) => handleUpdateBankAccount(bank.id, 'bankName', e.target.value)}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">Account Number</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="e.g. 1012345678"
+                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={bank.accountNumber}
+                                  onChange={(e) => handleUpdateBankAccount(bank.id, 'accountNumber', e.target.value)}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">Account Name (Optional)</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="e.g. Hotel Main Operations"
+                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={bank.accountName || ''}
+                                  onChange={(e) => handleUpdateBankAccount(bank.id, 'accountName', e.target.value)}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1">Sort Code (Optional)</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="e.g. 057150013"
+                                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-50 focus:border-emerald-500 outline-none"
+                                  value={bank.sortCode || ''}
+                                  onChange={(e) => handleUpdateBankAccount(bank.id, 'sortCode', e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 5: Additional Custom Information Fields */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-900 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Sliders size={18} className="text-purple-400" />
+                        <div>
+                          <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Additional Custom Fields</h4>
+                          <p className="text-[11px] text-zinc-500">Add custom key-value details to print on receipts (e.g. VAT Reg, WhatsApp line, Wi-Fi info)</p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddCustomInfo}
+                        className="px-3 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                      >
+                        <Plus size={14} />
+                        <span>Add Information Field</span>
+                      </button>
+                    </div>
+
+                    {(!formData.branding.customInfo || formData.branding.customInfo.length === 0) ? (
+                      <div className="p-4 text-center rounded-xl border border-zinc-850 bg-zinc-900/30 text-zinc-500 text-xs">
+                        No extra custom information fields. Click <strong className="text-purple-400 font-semibold cursor-pointer" onClick={handleAddCustomInfo}>Add Information Field</strong> to display additional details on receipts.
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {formData.branding.customInfo.map((info, idx) => (
+                          <div 
+                            key={info.id || idx}
+                            className={cn(
+                              "flex flex-col sm:flex-row items-center gap-2.5 p-3 rounded-xl border transition-all",
+                              info.isEnabled ? "bg-zinc-900/60 border-zinc-800" : "bg-zinc-950/40 border-zinc-850 opacity-60"
+                            )}
+                          >
+                            <div className="w-full sm:w-1/3">
+                              <input 
+                                type="text"
+                                placeholder="Field Label (e.g. VAT No)"
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-semibold focus:border-purple-500 outline-none"
+                                value={info.label}
+                                onChange={(e) => handleUpdateCustomInfo(info.id, 'label', e.target.value)}
+                              />
+                            </div>
+                            <div className="w-full sm:flex-1">
+                              <input 
+                                type="text"
+                                placeholder="Value (e.g. 10023456-001)"
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:border-purple-500 outline-none"
+                                value={info.value}
+                                onChange={(e) => handleUpdateCustomInfo(info.id, 'value', e.target.value)}
+                              />
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCustomInfo(info.id)}
+                                className={cn(
+                                  "px-2.5 py-1 rounded text-[10px] font-bold uppercase transition-all cursor-pointer border",
+                                  info.isEnabled 
+                                    ? "bg-purple-500/15 text-purple-300 border-purple-500/30" 
+                                    : "bg-zinc-800 text-zinc-500 border-zinc-700"
+                                )}
+                              >
+                                {info.isEnabled ? 'Active' : 'Off'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCustomInfo(info.id)}
+                                className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-850 transition-colors cursor-pointer"
+                                title="Remove this field"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 6: Receipt Greeting & Footer Notes */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                      <FileText size={18} className="text-zinc-400" />
+                      <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Receipt Greeting & Footer Terms</h4>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="bg-zinc-900/50 border border-zinc-850 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                            Receipt Greeting Message
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showGreetingOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showGreetingOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                            />
+                            <span>Print Greeting</span>
+                          </label>
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. Thank you for staying with us! We appreciate your patronage."
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={formData.branding.greeting}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            branding: { ...formData.branding, greeting: e.target.value } 
+                          })}
+                        />
+                      </div>
+
+                      <div className="bg-zinc-900/50 border border-zinc-850 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-bold text-zinc-300 uppercase tracking-wider">
+                            Receipt Footer Notes / Policies
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              checked={formData.branding.showFooterNotesOnReceipt}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                branding: { ...formData.branding, showFooterNotesOnReceipt: e.target.checked }
+                              })}
+                              className="w-3.5 h-3.5 rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-500 cursor-pointer"
+                            />
+                            <span>Print Footer Notes</span>
+                          </label>
+                        </div>
+                        <textarea 
+                          rows={2}
+                          placeholder="e.g. Please retain this receipt for warranty and tax purposes. Valuables must be kept in the safe."
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-50 focus:border-emerald-500 outline-none resize-none"
+                          value={formData.branding.footerNotes}
+                          onChange={(e) => setFormData({ 
+                            ...formData, 
+                            branding: { ...formData.branding, footerNotes: e.target.value } 
+                          })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 7: Theme & Room Status Colors */}
+                  <div className="bg-zinc-950/70 border border-zinc-800 rounded-2xl p-5 space-y-5">
+                    <div className="flex items-center gap-2 border-b border-zinc-900 pb-3">
+                      <Sliders size={18} className="text-emerald-400" />
+                      <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">Brand & Room Status Colors</h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5">Primary Brand Color</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
+                            value={formData.branding.primaryColor}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, primaryColor: e.target.value } 
+                            })}
+                          />
+                          <input 
+                            type="text" 
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-xs"
+                            value={formData.branding.primaryColor}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, primaryColor: e.target.value } 
+                            })}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-1.5">Secondary Brand Color</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            className="w-10 h-10 bg-zinc-950 border border-zinc-800 rounded-lg p-1 outline-none cursor-pointer"
+                            value={formData.branding.secondaryColor}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, secondaryColor: e.target.value } 
+                            })}
+                          />
+                          <input 
+                            type="text" 
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-50 focus:border-emerald-500 outline-none font-mono text-xs"
+                            value={formData.branding.secondaryColor}
+                            onChange={(e) => setFormData({ 
+                              ...formData, 
+                              branding: { ...formData.branding, secondaryColor: e.target.value } 
+                            })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <label className="block text-[10px] font-bold text-zinc-400 uppercase mb-3">Room Status Colors on Grid</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {(['clean', 'dirty', 'occupied', 'maintenance', 'vacant', 'out_of_service'] as const).map((status) => (
+                          <div key={status} className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850">
+                            <span className="block text-[10px] font-semibold text-zinc-400 uppercase mb-1.5 truncate">
+                              {status.replace(/_/g, ' ')}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <input 
+                                type="color" 
+                                className="w-7 h-7 bg-transparent border border-zinc-700 rounded-md p-0.5 outline-none cursor-pointer"
+                                value={formData.branding.statusColors?.[status] || '#71717a'}
+                                onChange={(e) => setFormData({ 
+                                  ...formData, 
+                                  branding: { 
+                                    ...formData.branding, 
+                                    statusColors: { 
+                                      ...formData.branding.statusColors, 
+                                      [status]: e.target.value 
+                                    } 
+                                  } 
+                                })}
+                              />
+                              <span className="text-[10px] font-mono text-zinc-400 uppercase">
+                                {formData.branding.statusColors?.[status] || '#71717a'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex justify-end">
+                    <button 
+                      type="submit"
+                      disabled={isSaving}
+                      className="bg-emerald-500 text-black px-8 py-3 rounded-xl font-black flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 shadow-xl shadow-emerald-950/50 cursor-pointer text-xs uppercase tracking-wider"
+                    >
+                      <Save size={16} />
+                      {isSaving ? 'Saving Changes...' : 'Save Branding & Receipt Settings'}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Right Column: Live Interactive Receipt Preview */}
+                <div className="xl:col-span-5 sticky top-6 space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">Live Receipt Preview</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500">Real-time rendered</span>
+                  </div>
+
+                  {/* Miniature Receipt Canvas */}
+                  <div className="bg-white text-zinc-900 rounded-2xl p-6 shadow-2xl border border-zinc-200 font-sans text-[11px] leading-relaxed max-w-md mx-auto">
+                    {/* Header */}
+                    <div className="text-center border-b-2 border-zinc-900 pb-4 mb-4">
+                      {formData.branding.showLogoOnReceipt && (
+                        formData.branding.logoUrl ? (
+                          <img 
+                            src={formData.branding.logoUrl} 
+                            alt="Preview Logo" 
+                            className="h-14 mx-auto mb-2 object-contain"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 bg-zinc-100 text-zinc-900 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl border-2 border-zinc-900">
+                            {(formData.branding.organizationName || formData.hotelName || 'H').charAt(0)}
+                          </div>
+                        )
+                      )}
+
+                      <h2 className="text-base font-black uppercase tracking-tight text-zinc-950">
+                        {formData.branding.organizationName || formData.hotelName || 'Grand Hotel'}
+                      </h2>
+
+                      <div className="text-[9px] text-zinc-500 space-y-0.5 mt-1">
+                        {formData.branding.showAddressOnReceipt && formData.branding.address && (
+                          <p className="flex items-center justify-center gap-1">
+                            <MapPin size={9} /> {formData.branding.address}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center justify-center gap-2 text-[9px]">
+                          {formData.branding.showPhoneOnReceipt && formData.branding.phone && (
+                            <span className="flex items-center gap-0.5"><Phone size={8} /> {formData.branding.phone}</span>
+                          )}
+                          {formData.branding.showEmailOnReceipt && formData.branding.email && (
+                            <span className="flex items-center gap-0.5"><Mail size={8} /> {formData.branding.email}</span>
+                          )}
+                          {formData.branding.showWebsiteOnReceipt && formData.branding.website && (
+                            <span className="text-emerald-700 font-bold">{formData.branding.website}</span>
+                          )}
+                        </div>
+
+                        {/* TIN & CAC Preview Badges */}
+                        {((formData.branding.showTinOnReceipt && formData.branding.tin) || (formData.branding.showCacOnReceipt && formData.branding.cac)) && (
+                          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 font-mono text-[8px] text-zinc-700">
+                            {formData.branding.showTinOnReceipt && formData.branding.tin && (
+                              <span className="bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
+                                <strong className="font-sans font-bold">TIN:</strong> {formData.branding.tin}
+                              </span>
+                            )}
+                            {formData.branding.showCacOnReceipt && formData.branding.cac && (
+                              <span className="bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
+                                <strong className="font-sans font-bold">CAC / RC:</strong> {formData.branding.cac}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Custom Fields in Header */}
+                        {formData.branding.customInfo && formData.branding.customInfo.filter(c => c.isEnabled && c.label && c.value).length > 0 && (
+                          <div className="flex flex-wrap items-center justify-center gap-1.5 pt-0.5 text-[8px] text-zinc-600">
+                            {formData.branding.customInfo.filter(c => c.isEnabled && c.label && c.value).map(info => (
+                              <span key={info.id} className="bg-zinc-50 px-1.5 py-0.2 rounded border border-zinc-200">
+                                <strong>{info.label}:</strong> {info.value}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Receipt Title & Meta */}
+                    <div className="flex justify-between items-center text-[10px] mb-3 pb-2 border-b border-zinc-100">
+                      <div>
+                        <span className="text-zinc-400 font-bold uppercase text-[8px]">Document</span>
+                        <p className="font-black text-zinc-900 text-xs">
+                          {formData.branding.customReceiptTitle || 'OFFICIAL GUEST RECEIPT'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-zinc-400 font-bold uppercase text-[8px]">Receipt No.</span>
+                        <p className="font-mono font-bold text-zinc-800">#REC-884920</p>
+                      </div>
+                    </div>
+
+                    {/* Sample Guest & Stay */}
+                    <div className="grid grid-cols-2 gap-2 text-[9px] mb-3 p-2 rounded-lg bg-zinc-50 border border-zinc-100">
+                      <div>
+                        <span className="text-zinc-400 uppercase font-bold text-[8px] block">Guest Name</span>
+                        <span className="font-bold text-zinc-900">Dr. Olumide Adeleke</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-zinc-400 uppercase font-bold text-[8px] block">Room & Dates</span>
+                        <span className="font-semibold text-zinc-800">Room 204 • 2 Nights</span>
+                      </div>
+                    </div>
+
+                    {/* Sample Charges Table */}
+                    <div className="space-y-1.5 text-[9px] mb-3">
+                      <div className="flex justify-between text-zinc-400 font-bold uppercase border-b border-zinc-200 pb-1 text-[8px]">
+                        <span>Description</span>
+                        <span>Amount</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Deluxe Suite (2 Nights @ ₦45,000)</span>
+                        <span className="font-bold">₦90,000.00</span>
+                      </div>
+                      <div className="flex justify-between text-zinc-500">
+                        <span>Complimentary Breakfast</span>
+                        <span className="font-bold">₦0.00</span>
+                      </div>
+                      <div className="border-t border-zinc-100 pt-1 flex justify-between font-bold">
+                        <span>Subtotal</span>
+                        <span>₦90,000.00</span>
+                      </div>
+                      <div className="flex justify-between text-zinc-600 text-[8px]">
+                        <span>VAT (7.5%)</span>
+                        <span>₦6,750.00</span>
+                      </div>
+                      <div className="border-t border-zinc-900 pt-1 flex justify-between text-xs font-black">
+                        <span>Grand Total</span>
+                        <span className="text-emerald-700">₦96,750.00</span>
+                      </div>
+                    </div>
+
+                    {/* Bank Details in Preview */}
+                    {formData.branding.showBankDetailsOnReceipt && (() => {
+                      const enabledBanks = (formData.branding.bankAccounts || []).filter(b => b.isEnabled && (b.bankName || b.accountNumber));
+                      if (enabledBanks.length === 0) return null;
+
+                      return (
+                        <div className="mt-3 p-2.5 rounded-lg border border-zinc-200 bg-zinc-50/80 space-y-1.5 text-[9px]">
+                          <div className="flex justify-between items-center text-[8px] font-bold text-zinc-500 uppercase border-b border-zinc-200 pb-1">
+                            <span>Official Bank Accounts</span>
+                            <span>{enabledBanks.length} Active</span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {enabledBanks.map((b, idx) => (
+                              <div key={b.id || idx} className="p-1.5 rounded bg-white border border-zinc-200/80 space-y-0.5">
+                                <div className="flex justify-between">
+                                  <span className="text-zinc-500 font-medium">Bank:</span>
+                                  <strong className="text-zinc-900">{b.bankName || 'N/A'}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-zinc-500 font-medium">Account:</span>
+                                  <strong className="font-mono text-emerald-800">{b.accountNumber || 'N/A'}</strong>
+                                </div>
+                                {b.accountName && (
+                                  <div className="flex justify-between text-[8px] text-zinc-600">
+                                    <span>Name:</span>
+                                    <span>{b.accountName}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Footer in Preview */}
+                    <div className="mt-4 text-center border-t border-zinc-100 pt-3 space-y-1">
+                      {formData.branding.showGreetingOnReceipt && (
+                        <p className="text-[10px] font-bold italic text-zinc-800">
+                          {formData.branding.greeting || 'Thank you for staying with us!'}
+                        </p>
+                      )}
+                      {formData.branding.showFooterNotesOnReceipt && (
+                        <p className="text-[8px] text-zinc-400 leading-tight">
+                          {formData.branding.footerNotes || 'Please retain this receipt for your records.'}
+                        </p>
+                      )}
+                      <div className="pt-2 flex items-center justify-center gap-1.5 opacity-40">
+                        <div className="w-2.5 h-2.5 bg-zinc-900 rounded-xs" />
+                        <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">PMS Certified</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <div className="pt-6 border-t border-zinc-800 flex justify-end">
-                <button 
-                  disabled={isSaving}
-                  className="bg-emerald-500 text-black px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:scale-100"
-                >
-                  <Save size={18} />
-                  {isSaving ? 'Saving...' : 'Save Branding'}
-                </button>
-              </div>
-            </form>
+            </div>
           )}
 
           {activeTab === 'preferences' && (
