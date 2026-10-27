@@ -121,7 +121,6 @@ export const canCheckIn = (
   }
   
   const settings = hotel.settings?.checkIn;
-  if (!settings) return { allowed: true };
 
   // Check Blacklist (DNR)
   if (hotel.settings?.guests?.allowBlacklisting && guest) {
@@ -135,22 +134,33 @@ export const canCheckIn = (
       return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently occupied by another guest.` };
     }
 
-    if (settings.preventCheckInDirty && (room.status === 'dirty' || room.status === 'cleaning')) {
-      return { allowed: false, message: 'Cannot check-in to a dirty / readying room. Housekeeping must clear it first.' };
+    const isDirty = room.status === 'dirty' || 
+                    room.status === 'cleaning' || 
+                    room.housekeepingStatus === 'dirty' || 
+                    room.housekeepingStatus === 'cleaning' || 
+                    room.housekeepingStatus === 'failed';
+
+    const preventDirty = settings ? settings.preventCheckInDirty !== false : true;
+    if (preventDirty && isDirty) {
+      return { 
+        allowed: false, 
+        message: `Cannot check in to Room ${room.roomNumber}: Room is currently dirty or undergoing housekeeping. Housekeeping must service and inspect the room before check-in.` 
+      };
     }
 
-    if (settings.preventCheckInMaintenance && (room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order')) {
-      return { allowed: false, message: 'Cannot check-in. This room is currently down for maintenance or out of order.' };
+    const preventMaintenance = settings ? settings.preventCheckInMaintenance !== false : true;
+    if (preventMaintenance && (room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order')) {
+      return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently down for maintenance or out of order.` };
     }
 
-    if (settings.requireRoomInspection && room.status !== 'clean' && room.status !== 'vacant' && room.status !== 'inspected') {
+    if (settings?.requireRoomInspection && room.status !== 'clean' && room.status !== 'vacant' && room.status !== 'inspected' && room.housekeepingStatus !== 'ready') {
       if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
-        return { allowed: false, message: 'Room must be clean before check-in.' };
+        return { allowed: false, message: `Room ${room.roomNumber} must be clean and inspected before check-in.` };
       }
     }
   }
 
-  if (settings.requirePaymentBeforeCheckIn) {
+  if (settings?.requirePaymentBeforeCheckIn) {
     const totalAmount = reservation.totalAmount || 0;
     const paidAmount = (reservation.paidAmount || 0) + (reservation.totalDiscount || 0);
     if (paidAmount < totalAmount) {

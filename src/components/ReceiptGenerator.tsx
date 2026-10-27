@@ -4,7 +4,7 @@ import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
-import { calculateBilling } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateReservationAccount } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
@@ -151,9 +151,25 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const totalTaxDebits = processedEntries.filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   let otherTaxAmount = 0;
   
-  // If room charges are already in ledger, don't add reservation.totalAmount again
-  const hasRoomChargeInLedger = processedEntries.some(e => getSafeStr(e.category).toLowerCase() === 'room' && e.type === 'debit');
-  
+  // Room charges check and unposted accommodation calculation
+  const roomDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() === 'room' || e.chargeType === 'room_rate');
+  const hasRoomChargeInLedger = roomDebits.length > 0;
+  const postedNightsCount = roomDebits.length;
+
+  let unpostedRoomBase = 0;
+  if (reservation && type !== 'restaurant') {
+    const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
+    const totalNights = resAccount.totalNights || reservation.nights || 1;
+    const nightlyRate = reservation.nightlyRate || (reservation.nights && reservation.totalAmount ? (reservation.totalAmount / reservation.nights) : 0);
+
+    if (totalNights > postedNightsCount && nightlyRate > 0) {
+      unpostedRoomBase = (totalNights - postedNightsCount) * nightlyRate;
+    } else if (postedNightsCount === 0 && (reservation.totalAmount || 0) > 0) {
+      const stayTaxTotal = reservation.taxAmount || 0;
+      unpostedRoomBase = Math.max(0, (reservation.totalAmount || 0) - stayTaxTotal);
+    }
+  }
+
   // Subtotal represents the gross charges of all stay/service items.
   // We keep inclusive taxes as part of the subtotal (since they are built into the prices).
   // Therefore, we only subtract exclusive tax debits from the ledger's total debits.
@@ -161,7 +177,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     .filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit' && !getSafeStr(e.description).toLowerCase().includes('inclusive'))
     .reduce((acc, e) => acc + e.amount, 0);
 
-  const subtotal = Math.max(0, totalDebits - totalExclusiveTaxDebits);
+  const subtotal = Math.max(0, (totalDebits - totalExclusiveTaxDebits) + unpostedRoomBase);
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -231,10 +247,25 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     }
   }
 
-  const grandTotal = subtotal + exclusiveTaxTotal;
+  let grandTotal = subtotal + exclusiveTaxTotal;
+  if (reservation && type !== 'corporate' && type !== 'restaurant' && totalDebits === 0 && (reservation.totalAmount || 0) > grandTotal) {
+    grandTotal = reservation.totalAmount;
+  }
+
   const hasPaymentInLedger = activeLedger.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
-  const balance = grandTotal - totalPaid;
+  let balance = grandTotal - totalPaid;
+
+  // Authoritative fallback cross-check with getReservationLiveBalance
+  if (reservation && type !== 'corporate' && type !== 'restaurant') {
+    const liveBal = getReservationLiveBalance(reservation, hotel, activeLedger);
+    if (balance <= 0.005 && liveBal > 0.005) {
+      balance = liveBal;
+      if (grandTotal < totalPaid + liveBal) {
+        grandTotal = totalPaid + liveBal;
+      }
+    }
+  }
 
   const receiptContainerRef = useRef<HTMLDivElement>(null);
 
@@ -641,13 +672,22 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               </div>
             )}
             <div className="border-t border-zinc-200 pt-2 flex justify-between items-center">
-              <span className="text-xs font-black uppercase tracking-tighter">
-                {balance < 0 ? 'Credit Balance' : 'Balance Due'}
+              <span 
+                className={cn(
+                  "text-xs font-black uppercase tracking-tighter",
+                  balance < -0.005 ? "text-emerald-600" : "text-red-600 font-black"
+                )}
+                style={{ color: balance < -0.005 ? '#059669' : '#dc2626' }}
+              >
+                {balance < -0.005 ? 'Credit Balance' : 'Balance Due'}
               </span>
-              <span className={cn(
-                "text-lg font-black",
-                balance < 0 ? "text-emerald-600" : ""
-              )}>
+              <span 
+                className={cn(
+                  "text-lg font-black",
+                  balance < -0.005 ? "text-emerald-600" : "text-red-600 font-black"
+                )}
+                style={{ color: balance < -0.005 ? '#059669' : '#dc2626' }}
+              >
                 {formatCurrency(Math.abs(balance), currency, exchangeRate)}
               </span>
             </div>

@@ -18,6 +18,22 @@
             }
           }
         });
+        // Filter benign WebChannel transport reconnection warnings
+        var originalWarn = console.warn;
+        console.warn = function() {
+          var args = Array.prototype.slice.call(arguments);
+          var joined = args.map(function(arg) {
+            try {
+              return typeof arg === 'string' ? arg : JSON.stringify(arg);
+            } catch (e) {
+              return String(arg);
+            }
+          }).join(' ');
+          if (joined.includes('WebChannelConnection') || joined.includes('RPC \'Listen\' stream') || joined.includes('transport errored')) {
+            return;
+          }
+          originalWarn.apply(console, arguments);
+        };
         try {
           var saved = localStorage.getItem('pms_ui_scale');
           if (saved) {

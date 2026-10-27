@@ -968,7 +968,7 @@ export function FandB() {
                                 )}
 
                                 {balanceOwing > 0 ? (
-                                  <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold">
+                                  <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 font-bold">
                                     <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
                                       <AlertCircle size={12} /> Owing / Balance Due
                                     </span>
@@ -1595,7 +1595,7 @@ export function FandB() {
                             </div>
 
                             {posOwing > 0 ? (
-                              <div className="flex justify-between items-center p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold text-xs">
+                              <div className="flex justify-between items-center p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-xs">
                                 <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
                                   <AlertCircle size={12} /> Owing / Balance Due
                                 </span>

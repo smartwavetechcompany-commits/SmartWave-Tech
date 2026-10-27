@@ -3715,9 +3715,9 @@ export function FrontDesk() {
                     </div>
                   ) : null;
                 })()}
-                <div className="flex justify-between text-xs font-bold text-zinc-50 pt-1">
-                  <span>Balance Due</span>
-                  <span className="text-red-500">
+                <div className="flex justify-between text-xs font-bold text-red-500 pt-1">
+                  <span className="text-red-500 font-bold">Balance Due</span>
+                  <span className="text-red-500 font-bold">
                     {formatCurrency(
                       Math.max(0, (newBooking.totalAmount - (newBooking.discountType === 'percentage' ? (newBooking.totalAmount * newBooking.discountAmount) / 100 : newBooking.discountAmount)) - (newBooking.payments?.reduce((acc: number, p: any) => acc + (p.amount || 0), 0) || 0)),
                       currency,

@@ -24,12 +24,23 @@ import { canCheckIn } from '../utils/policyUtils';
 import { hasPermission } from '../utils/permissions';
 import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, differenceInDays } from 'date-fns';
-import { doc, collection, addDoc, updateDoc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, collection, addDoc, updateDoc, setDoc, getDoc, getDocs, query, where, limit, increment, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
 import { logActivity } from '../utils/activityLogger';
 import { postToLedger, settleLedger } from '../services/ledgerService';
 import { toast } from 'sonner';
+
+export function isRoomDirtyOrUnprepared(room: Room | undefined | null): boolean {
+  if (!room) return false;
+  return (
+    room.status === 'dirty' ||
+    room.status === 'cleaning' ||
+    room.housekeepingStatus === 'dirty' ||
+    room.housekeepingStatus === 'cleaning' ||
+    room.housekeepingStatus === 'failed'
+  );
+}
 
 interface QuickCheckInModalProps {
   isOpen: boolean;
@@ -111,6 +122,10 @@ export function QuickCheckInModal({
       if (room.status === 'occupied' || room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order') {
         return false;
       }
+      // Cleanliness check: A dirty/unprepared room must NEVER be assigned for immediate walk-in check-in
+      if (isRoomDirtyOrUnprepared(room)) {
+        return false;
+      }
       // Check availability against all reservations and blockings
       return isRoomAvailable(room.id, checkInDate, checkOutDate, reservations, roomBlockings, hotel);
     });
@@ -189,6 +204,11 @@ export function QuickCheckInModal({
     }
 
     const room = rooms.find(r => r.id === res.roomId);
+    if (isRoomDirtyOrUnprepared(room)) {
+      toast.error(`Check-in Blocked: Room ${res.roomNumber} is currently dirty. Housekeeping must service and inspect the room before check-in.`);
+      return;
+    }
+
     const policy = canCheckIn(hotel, profile, res, room, undefined, reservations);
     if (!policy.allowed) {
       toast.error(policy.message || 'Check-in denied by hotel policy');
@@ -226,13 +246,110 @@ export function QuickCheckInModal({
         details: `Room ${res.roomNumber} occupied during quick check-in`
       });
 
+      // 2b. Synchronize with Guest Module (hotels/{hotel.id}/guests)
+      let resolvedGuestId = res.guestId || '';
+      try {
+        const guestsCol = collection(db, 'hotels', hotel.id, 'guests');
+        if (resolvedGuestId) {
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', resolvedGuestId);
+          const guestSnap = await getDoc(guestRef);
+          if (guestSnap.exists()) {
+            await database.safeUpdate(guestRef, {
+              totalStays: increment(1),
+              lastStay: res.checkIn || todayStr,
+              updatedAt: now.toISOString()
+            }, {
+              hotelId: hotel.id,
+              module: 'Guests',
+              action: 'STAY_COUNT_INCREMENT',
+              details: `Incremented stay count for guest ${resolvedGuestId} upon arrival quick check-in`
+            });
+          } else {
+            // Re-create guest document if ID existed on res but doc was missing
+            await setDoc(guestRef, {
+              name: res.guestName,
+              email: res.guestEmail || '',
+              phone: res.guestPhone || '',
+              status: 'active',
+              hotelId: hotel.id,
+              totalStays: 1,
+              totalNights: res.nights || 1,
+              totalSpent: res.paidAmount || 0,
+              lastStay: res.checkIn || todayStr,
+              ledgerBalance: 0,
+              preferredBookingSource: res.bookingSource || 'Direct',
+              createdAt: now.toISOString(),
+              updatedAt: now.toISOString()
+            }, { merge: true });
+          }
+        } else {
+          // If reservation had no guestId, lookup or create active guest
+          const trimmedPhone = (res.guestPhone || '').trim();
+          const trimmedEmail = (res.guestEmail || '').trim();
+          const trimmedName = (res.guestName || '').trim();
+          let existingSnap = null;
+          if (trimmedPhone) {
+            const snap = await getDocs(query(guestsCol, where('phone', '==', trimmedPhone), limit(1)));
+            if (!snap.empty) existingSnap = snap.docs[0];
+          }
+          if (!existingSnap && trimmedEmail) {
+            const snap = await getDocs(query(guestsCol, where('email', '==', trimmedEmail), limit(1)));
+            if (!snap.empty) existingSnap = snap.docs[0];
+          }
+          if (!existingSnap && trimmedName) {
+            const snap = await getDocs(query(guestsCol, where('name', '==', trimmedName), limit(1)));
+            if (!snap.empty) existingSnap = snap.docs[0];
+          }
+
+          if (existingSnap) {
+            resolvedGuestId = existingSnap.id;
+            await database.safeUpdate(doc(db, 'hotels', hotel.id, 'guests', resolvedGuestId), {
+              totalStays: increment(1),
+              lastStay: res.checkIn || todayStr,
+              updatedAt: now.toISOString()
+            }, {
+              hotelId: hotel.id,
+              module: 'Guests',
+              action: 'STAY_COUNT_INCREMENT',
+              details: `Incremented stay count for existing guest ${resolvedGuestId} upon quick check-in`
+            });
+          } else {
+            const newGuestRef = await addDoc(guestsCol, {
+              name: trimmedName,
+              email: trimmedEmail,
+              phone: trimmedPhone,
+              status: 'active',
+              hotelId: hotel.id,
+              totalStays: 1,
+              totalNights: res.nights || 1,
+              totalSpent: res.paidAmount || 0,
+              lastStay: res.checkIn || todayStr,
+              ledgerBalance: 0,
+              preferredBookingSource: res.bookingSource || 'Direct',
+              createdAt: now.toISOString(),
+              updatedAt: now.toISOString()
+            });
+            resolvedGuestId = newGuestRef.id;
+          }
+
+          await database.safeUpdate(resRef, { guestId: resolvedGuestId }, {
+            hotelId: hotel.id,
+            module: 'Front Desk',
+            action: 'ATTACH_GUEST_ID',
+            details: `Attached guestId ${resolvedGuestId} to reservation ${res.id}`
+          });
+        }
+      } catch (guestErr) {
+        console.warn('Could not sync guest module for arrival quick check-in:', guestErr);
+      }
+
       // 3. Write checkin_history
       const checkInHistoryRef = doc(db, 'hotels', hotel.id, 'checkin_history', res.id);
       await setDoc(checkInHistoryRef, {
         ...res,
         id: res.id,
         reservationId: res.id,
-        guestId: res.guestId || 'guest_walkin',
+        guestId: resolvedGuestId || res.guestId || 'guest_walkin',
         guestName: res.guestName,
         guestEmail: res.guestEmail || '',
         guestPhone: res.guestPhone || '',
@@ -316,6 +433,12 @@ export function QuickCheckInModal({
       return;
     }
 
+    // Cleanliness check: cannot check in to a dirty room
+    if (isRoomDirtyOrUnprepared(selectedRoom)) {
+      toast.error(`Check-in Blocked: Room ${selectedRoom.roomNumber} is currently dirty. Housekeeping must service and inspect the room before check-in.`);
+      return;
+    }
+
     try {
       setIsSubmittingWalkIn(true);
       const now = new Date();
@@ -328,12 +451,75 @@ export function QuickCheckInModal({
           ? 'partial' 
           : 'unpaid';
 
-      // 1. Create reservation document
+      // 1. Resolve or create guest in hotel's guests collection
+      let linkedGuestId = '';
+      const trimmedPhone = guestPhone.trim();
+      const trimmedEmail = guestEmail.trim();
+      const trimmedName = guestName.trim();
+
+      try {
+        const guestsCol = collection(db, 'hotels', hotel.id, 'guests');
+        let existingGuestSnap = null;
+        if (trimmedPhone) {
+          const snap = await getDocs(query(guestsCol, where('phone', '==', trimmedPhone), limit(1)));
+          if (!snap.empty) existingGuestSnap = snap.docs[0];
+        }
+        if (!existingGuestSnap && trimmedEmail) {
+          const snap = await getDocs(query(guestsCol, where('email', '==', trimmedEmail), limit(1)));
+          if (!snap.empty) existingGuestSnap = snap.docs[0];
+        }
+        if (!existingGuestSnap && trimmedName) {
+          const snap = await getDocs(query(guestsCol, where('name', '==', trimmedName), limit(1)));
+          if (!snap.empty) existingGuestSnap = snap.docs[0];
+        }
+
+        if (existingGuestSnap) {
+          linkedGuestId = existingGuestSnap.id;
+          const guestRef = doc(db, 'hotels', hotel.id, 'guests', linkedGuestId);
+          await database.safeUpdate(guestRef, {
+            totalStays: increment(1),
+            totalNights: increment(walkInNights),
+            totalSpent: increment(initialPaid),
+            lastStay: checkInDate,
+            phone: trimmedPhone || existingGuestSnap.data().phone || '',
+            email: trimmedEmail || existingGuestSnap.data().email || '',
+            updatedAt: now.toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'Guests',
+            action: 'GUEST_UPDATED',
+            details: `Updated stay count and details for guest ${trimmedName} on Express Walk-in Check-in`
+          });
+        } else {
+          const guestDocRef = await addDoc(guestsCol, {
+            name: trimmedName,
+            email: trimmedEmail,
+            phone: trimmedPhone,
+            status: 'active',
+            hotelId: hotel.id,
+            totalStays: 1,
+            totalNights: walkInNights,
+            totalSpent: initialPaid,
+            lastStay: checkInDate,
+            ledgerBalance: 0,
+            preferredBookingSource: 'Walk-in',
+            createdAt: now.toISOString(),
+            updatedAt: now.toISOString()
+          });
+          linkedGuestId = guestDocRef.id;
+        }
+      } catch (guestErr) {
+        console.error('Failed to link/create guest record during quick check-in:', guestErr);
+        linkedGuestId = `guest_${Date.now()}`;
+      }
+
+      // 2. Create reservation document with linked guestId
       const reservationsCol = collection(db, 'hotels', hotel.id, 'reservations');
       const newResData: any = {
-        guestName: guestName.trim(),
-        guestPhone: guestPhone.trim(),
-        guestEmail: guestEmail.trim(),
+        guestName: trimmedName,
+        guestPhone: trimmedPhone,
+        guestEmail: trimmedEmail,
+        guestId: linkedGuestId,
         roomId: selectedRoom.id,
         roomNumber: selectedRoom.roomNumber,
         checkIn: checkInDate,
@@ -366,31 +552,31 @@ export function QuickCheckInModal({
       const resDocRef = await addDoc(reservationsCol, newResData);
       const reservationId = resDocRef.id;
 
-      // 2. Mark room occupied
+      // 3. Mark room occupied
       const roomRef = doc(db, 'hotels', hotel.id, 'rooms', selectedRoom.id);
       await database.safeUpdate(roomRef, { status: 'occupied' }, {
         hotelId: hotel.id,
         module: 'Rooms',
         action: 'ROOM_CHECKIN',
-        details: `Room ${selectedRoom.roomNumber} occupied by walk-in guest ${guestName}`
+        details: `Room ${selectedRoom.roomNumber} occupied by walk-in guest ${trimmedName}`
       });
 
-      // 3. Write checkin_history
+      // 4. Write checkin_history
       const checkInHistoryRef = doc(db, 'hotels', hotel.id, 'checkin_history', reservationId);
       await setDoc(checkInHistoryRef, {
         ...newResData,
         id: reservationId,
         reservationId,
-        guestId: 'guest_walkin',
+        guestId: linkedGuestId,
         checkInTimestamp: now.toISOString()
       }, { merge: true });
 
-      // 4. Post initial payment to ledger if collected
+      // 5. Post initial payment to ledger if collected
       if (initialPaid > 0 && paymentOption !== 'unpaid') {
         try {
           await settleLedger(
             hotel.id,
-            'guest_walkin',
+            linkedGuestId,
             reservationId,
             initialPaid,
             paymentOption === 'card' ? 'card' : paymentOption === 'transfer' ? 'transfer' : 'cash',
@@ -411,14 +597,14 @@ export function QuickCheckInModal({
         profile,
         'EXPRESS_WALKIN_CHECKIN',
         'Operations Dashboard',
-        `Express Walk-in check-in created for ${guestName} in Room ${selectedRoom.roomNumber} (${walkInNights} night${walkInNights > 1 ? 's' : ''})`,
+        `Express Walk-in check-in created for ${trimmedName} in Room ${selectedRoom.roomNumber} (${walkInNights} night${walkInNights > 1 ? 's' : ''})`,
         reservationId,
         null,
-        { status: 'checked_in', roomNumber: selectedRoom.roomNumber, totalAmount: walkInTotalAmount },
-        { reservationId, roomNumber: selectedRoom.roomNumber, guestName }
+        { status: 'checked_in', roomNumber: selectedRoom.roomNumber, totalAmount: walkInTotalAmount, guestId: linkedGuestId },
+        { reservationId, roomNumber: selectedRoom.roomNumber, guestName: trimmedName, guestId: linkedGuestId }
       );
 
-      toast.success(`Express Check-In Successful! ${guestName} checked in to Room ${selectedRoom.roomNumber}.`);
+      toast.success(`Express Check-In Successful! ${trimmedName} checked in to Room ${selectedRoom.roomNumber}.`);
       onClose();
     } catch (err: any) {
       console.error('Express walk-in check-in error:', err);
@@ -553,6 +739,7 @@ export function QuickCheckInModal({
                       r.status === 'checked_in' && 
                       r.id !== res.id
                     );
+                    const isDirty = isRoomDirtyOrUnprepared(room);
                     const isProcessing = processingId === res.id;
 
                     return (
@@ -562,7 +749,9 @@ export function QuickCheckInModal({
                           "p-3.5 sm:p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3",
                           activeOccupant 
                             ? "bg-red-500/5 border-red-500/20" 
-                            : "bg-zinc-950/60 border-zinc-800 hover:border-zinc-700"
+                            : isDirty
+                              ? "bg-amber-500/5 border-amber-500/20"
+                              : "bg-zinc-950/60 border-zinc-800 hover:border-zinc-700"
                         )}
                       >
                         <div className="space-y-1.5 flex-1 min-w-0">
@@ -576,6 +765,11 @@ export function QuickCheckInModal({
                             {room?.type && (
                               <span className="text-[10px] text-zinc-400 uppercase tracking-wider">
                                 • {room.type}
+                              </span>
+                            )}
+                            {isDirty && (
+                              <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                Dirty / Needs Cleaning
                               </span>
                             )}
                           </div>
@@ -609,16 +803,23 @@ export function QuickCheckInModal({
                               <span>Occupied by in-house guest "{activeOccupant.guestName}". Requires checkout first.</span>
                             </div>
                           )}
+
+                          {!activeOccupant && isDirty && (
+                            <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium">
+                              <AlertCircle size={13} />
+                              <span>Room {res.roomNumber} is dirty. Housekeeping must service and inspect before check-in.</span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="sm:self-center shrink-0">
                           <button
                             type="button"
-                            disabled={isProcessing || !!activeOccupant}
+                            disabled={isProcessing || !!activeOccupant || isDirty}
                             onClick={() => handleCheckInArrival(res)}
                             className={cn(
                               "w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm",
-                              activeOccupant
+                              activeOccupant || isDirty
                                 ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700"
                                 : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black shadow-emerald-950/40"
                             )}
@@ -627,6 +828,16 @@ export function QuickCheckInModal({
                               <>
                                 <span className="w-3.5 h-3.5 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
                                 <span>Checking In...</span>
+                              </>
+                            ) : isDirty ? (
+                              <>
+                                <AlertCircle size={15} className="text-amber-400" />
+                                <span>Room Dirty</span>
+                              </>
+                            ) : activeOccupant ? (
+                              <>
+                                <AlertCircle size={15} className="text-red-400" />
+                                <span>Occupied</span>
                               </>
                             ) : (
                               <>
@@ -757,7 +968,14 @@ export function QuickCheckInModal({
                   {availableRoomsForWalkIn.length === 0 ? (
                     <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 flex items-center gap-2">
                       <AlertCircle size={15} className="shrink-0" />
-                      <span>No available rooms found for the selected stay dates. Adjust dates or clear rooms.</span>
+                      <span>
+                        No clean and available rooms found for the selected stay dates.
+                        {rooms.some(isRoomDirtyOrUnprepared) && (
+                          <span className="block mt-0.5 text-zinc-400">
+                            (Some rooms are pending housekeeping clearance)
+                          </span>
+                        )}
+                      </span>
                     </div>
                   ) : (
                     <select
@@ -773,10 +991,10 @@ export function QuickCheckInModal({
                       }}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-xs sm:text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
                     >
-                      <option value="">-- Choose an available room --</option>
+                      <option value="">-- Choose an available clean room --</option>
                       {availableRoomsForWalkIn.map((r) => (
                         <option key={r.id} value={r.id}>
-                          Room {r.roomNumber} • {r.type} • {formatCurrency(r.price || 0, safeCurrency, exchangeRate)}/night ({r.status.toUpperCase()})
+                          Room {r.roomNumber} • {r.type} • {formatCurrency(r.price || 0, safeCurrency, exchangeRate)}/night (CLEAN / READY)
                         </option>
                       ))}
                     </select>
