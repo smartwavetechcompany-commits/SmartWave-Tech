@@ -341,7 +341,7 @@ export function Dashboard() {
       return;
     }
     const dataToExport = (finance || []).slice(0, 100).map(f => ({
-      Date: format(new Date(f.timestamp), 'MMM d, yyyy HH:mm'),
+      Date: safeFormatTimestamp(f.timestamp, 'MMM d, yyyy HH:mm'),
       Type: f.type.toUpperCase(),
       Category: f.category,
       Description: f.description,

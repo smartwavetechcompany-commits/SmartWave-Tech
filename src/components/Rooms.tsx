@@ -43,7 +43,7 @@ import {
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
-import { calculateStayDuration } from '../utils/dateUtils';
+import { calculateStayDuration, safeFormatDate } from '../utils/dateUtils';
 import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -1522,7 +1522,7 @@ export function Rooms() {
                     <div key={b.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
                       <div>
                         <div className="font-bold text-zinc-50">Room {rooms.find(r => r.id === b.roomId)?.roomNumber}</div>
-                        <div className="text-xs text-zinc-500">{format(new Date(b.startDate), 'MMM dd')} - {format(new Date(b.endDate), 'MMM dd')}</div>
+                        <div className="text-xs text-zinc-500">{safeFormatDate(b.startDate, 'MMM dd')} - {safeFormatDate(b.endDate, 'MMM dd')}</div>
                         <div className="text-[10px] text-emerald-500 font-bold uppercase mt-1">{b.reason}</div>
                       </div>
                       <button 
@@ -1756,7 +1756,7 @@ export function Rooms() {
                                 <div>
                                   <div className="text-[10px] font-bold text-zinc-100">{s.name}</div>
                                   <div className="text-[9px] text-zinc-500 font-medium">
-                                    {format(new Date(s.startDate), 'MMM dd')} - {format(new Date(s.endDate), 'MMM dd, yyyy')}
+                                    {safeFormatDate(s.startDate, 'MMM dd')} - {safeFormatDate(s.endDate, 'MMM dd, yyyy')}
                                   </div>
                                 </div>
                               </div>
@@ -2569,7 +2569,7 @@ export function Rooms() {
                                 "absolute inset-1 rounded-md p-1 text-[8px] font-bold overflow-hidden shadow-lg border text-left transition-all hover:scale-[1.02] active:scale-95 z-10",
                                 reservation.status === 'checked_in' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
                               )}
-                              title={`${reservation.guestName} (${format(parseISO(reservation.checkIn), 'MMM dd')} - ${format(parseISO(reservation.checkOut), 'MMM dd')})`}
+                              title={`${reservation.guestName} (${safeFormatDate(reservation.checkIn, 'MMM dd')} - ${safeFormatDate(reservation.checkOut, 'MMM dd')})`}
                             >
                               <div className="truncate">{reservation.guestName}</div>
                               <div className="opacity-60 flex items-center justify-between">
@@ -2660,11 +2660,11 @@ export function Rooms() {
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
                     <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-In</div>
-                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkIn), 'MMM dd, yyyy')}</div>
+                    <div className="text-xs font-bold text-zinc-50">{safeFormatDate(selectedReservation.checkIn, 'MMM dd, yyyy')}</div>
                   </div>
                   <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800">
                     <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">Check-Out</div>
-                    <div className="text-xs font-bold text-zinc-50">{format(parseISO(selectedReservation.checkOut), 'MMM dd, yyyy')}</div>
+                    <div className="text-xs font-bold text-zinc-50">{safeFormatDate(selectedReservation.checkOut, 'MMM dd, yyyy')}</div>
                   </div>
                 </div>
 

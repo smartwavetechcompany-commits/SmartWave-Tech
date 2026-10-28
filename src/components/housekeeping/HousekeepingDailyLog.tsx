@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { cn, exportToCSV } from '../../utils';
 import { format, parseISO, isToday } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
 
 interface HousekeepingDailyLogProps {
@@ -299,7 +300,7 @@ export function HousekeepingDailyLogView({
                   </div>
                   <div>
                     <h4 className="font-bold text-white text-sm">
-                      Daily Summary — {log.date ? format(parseISO(log.date), 'MMMM d, yyyy') : log.date}
+                      Daily Summary — {safeFormatDate(log.date, 'MMMM d, yyyy', log.date || '')}
                     </h4>
                     <p className="text-[11px] text-zinc-400">Supervisor: {log.supervisorName}</p>
                   </div>

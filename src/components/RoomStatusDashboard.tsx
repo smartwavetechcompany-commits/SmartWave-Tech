@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format, parseISO, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { GuestFolio } from './GuestFolio';
 import { toast } from 'sonner';
 import { createAuditLog } from '../utils/database';
@@ -705,9 +706,9 @@ export function RoomStatusDashboard() {
                   ? 'Booked From:' 
                   : 'Status:';
             const dateValue = currentRes?.checkOut 
-              ? format(parseISO(currentRes.checkOut), 'dd MMM') 
+              ? safeFormatDate(currentRes.checkOut, 'dd MMM', 'Available') 
               : upcomingRes?.checkIn 
-                ? format(parseISO(upcomingRes.checkIn), 'dd MMM') 
+                ? safeFormatDate(upcomingRes.checkIn, 'dd MMM', 'Available') 
                 : 'Available';
 
             return (
@@ -816,7 +817,7 @@ export function RoomStatusDashboard() {
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-400">Stay Dates:</span>
                     <span className="text-zinc-200">
-                      {format(parseISO(activeReservation.checkIn), 'MMM dd, yyyy')} - {format(parseISO(activeReservation.checkOut), 'MMM dd, yyyy')}
+                      {safeFormatDate(activeReservation.checkIn, 'MMM dd, yyyy')} - {safeFormatDate(activeReservation.checkOut, 'MMM dd, yyyy')}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

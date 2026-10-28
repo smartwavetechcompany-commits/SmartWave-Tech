@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../utils';
 import { format, parseISO } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 
 interface RoomProfileModalProps {
   room: Room;
@@ -211,7 +212,7 @@ export function RoomProfileModal({
                 Last Cleaned:
               </span>
               <span className="font-mono text-zinc-200">
-                {room.lastCleanedAt ? format(parseISO(room.lastCleanedAt), 'MMM d, yyyy HH:mm') : 'Never recorded'}
+                {safeFormatDate(room.lastCleanedAt, 'MMM d, yyyy HH:mm', 'Never recorded')}
               </span>
             </div>
             <div className="flex items-center justify-between text-zinc-400">
@@ -220,7 +221,7 @@ export function RoomProfileModal({
                 Last Inspected:
               </span>
               <span className="font-mono text-zinc-200">
-                {room.lastInspectedAt ? format(parseISO(room.lastInspectedAt), 'MMM d, yyyy HH:mm') : 'Pending inspection'}
+                {safeFormatDate(room.lastInspectedAt, 'MMM d, yyyy HH:mm', 'Pending inspection')}
               </span>
             </div>
             <div className="flex items-center justify-between text-zinc-400">

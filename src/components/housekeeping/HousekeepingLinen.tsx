@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { cn, exportToCSV } from '../../utils';
 import { format, parseISO } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
 
 const DEFAULT_LINEN_ITEMS: Omit<HousekeepingLinenItem, 'id' | 'lastUpdated'>[] = [
@@ -411,7 +412,7 @@ export function HousekeepingLinen() {
                 {movements.slice(0, 10).map((m: any, i) => (
                   <tr key={m.id || i} className="hover:bg-zinc-800/40">
                     <td className="py-2.5 px-3 text-zinc-400 font-mono">
-                      {m.timestamp ? format(parseISO(m.timestamp), 'MMM d, HH:mm') : ''}
+                      {safeFormatDate(m.timestamp, 'MMM d, HH:mm', '')}
                     </td>
                     <td className="py-2.5 px-3 font-bold text-white">{m.linenName}</td>
                     <td className="py-2.5 px-3 text-zinc-300">{m.details}</td>

@@ -6,7 +6,7 @@ import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { calculateGuestFinancialPosition } from '../services/financialService';
 import { 
@@ -46,22 +46,7 @@ import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenc
 import * as XLSX from 'xlsx';
 
 const safeDateFormat = (val: any, formatStr: string, fallback: string = 'N/A'): string => {
-  if (!val) return fallback;
-  try {
-    let d: Date;
-    if (typeof val.toDate === 'function') {
-      d = val.toDate();
-    } else if (typeof val.seconds === 'number') {
-      d = new Date(val.seconds * 1000);
-    } else if (val instanceof Date) {
-      d = val;
-    } else {
-      d = new Date(val);
-    }
-    return isValid(d) ? format(d, formatStr) : fallback;
-  } catch {
-    return fallback;
-  }
+  return safeFormatDate(val, formatStr, fallback);
 };
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
@@ -627,10 +612,15 @@ export function GuestManagement() {
         const matchesType = reportFilter.type === 'all' || 
           (reportFilter.type === 'corporate' ? !!guest.corporateId : !guest.corporateId);
         
-        const guestDate = guest.createdAt ? new Date(guest.createdAt) : null;
-        const matchesDate = !guestDate || isWithinInterval(guestDate, {
-          start: startOfDay(new Date(reportFilter.startDate)),
-          end: endOfDay(new Date(reportFilter.endDate))
+        const guestDate = guest.createdAt ? parseTimestampToDate(guest.createdAt) : null;
+        const isGuestDateValid = guestDate && !isNaN(guestDate.getTime()) && guestDate.getTime() > 0;
+        const startD = parseTimestampToDate(reportFilter.startDate);
+        const endD = parseTimestampToDate(reportFilter.endDate);
+        const isRangeValid = !isNaN(startD.getTime()) && startD.getTime() > 0 && !isNaN(endD.getTime()) && endD.getTime() > 0;
+
+        const matchesDate = !isGuestDateValid || !isRangeValid || isWithinInterval(guestDate, {
+          start: startOfDay(startD),
+          end: endOfDay(endD)
         });
 
         return matchesType && matchesDate;
@@ -735,7 +725,11 @@ export function GuestManagement() {
         (res.paymentStatus && res.paymentStatus.toLowerCase().includes(q));
       const matchesDate = matchesDateFilter(res.checkIn || res.createdAt, resDateFilter);
       return matchesSearch && matchesDate;
-    }).sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
+    }).sort((a, b) => {
+      const tA = parseTimestampToDate(a.checkIn).getTime();
+      const tB = parseTimestampToDate(b.checkIn).getTime();
+      return tB - tA;
+    });
   }, [guestHistory, resSearchQuery, resDateFilter]);
 
   const paginatedGuestHistory = useMemo(() => {

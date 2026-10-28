@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { cn, exportToCSV } from '../../utils';
 import { format, parseISO } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
 
 // Standard Blueprint Items to initialize if collection is empty
@@ -638,7 +639,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                   return (
                     <tr key={tx.id || idx} className="hover:bg-zinc-800/40 transition-colors">
                       <td className="py-3 px-4 font-mono text-zinc-400">
-                        {tx.timestamp ? format(parseISO(tx.timestamp), 'MMM d, HH:mm') : tx.date}
+                        {safeFormatDate(tx.timestamp, 'MMM d, HH:mm', tx.date || '')}
                       </td>
                       <td className="py-3 px-4">
                         <span className={cn(

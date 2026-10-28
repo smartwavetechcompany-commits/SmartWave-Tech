@@ -16,28 +16,43 @@ export interface StayDuration {
 
 /**
  * Universal safe parser for any Firestore timestamp, ISO string, number, or Date object.
+ * Always returns a valid Date object (or Date(0) if invalid).
  */
 export function parseTimestampToDate(ts: any): Date {
   if (!ts) return new Date(0);
-  if (ts instanceof Date) return ts;
+  if (ts instanceof Date) {
+    return isNaN(ts.getTime()) ? new Date(0) : ts;
+  }
   if (typeof ts.toDate === 'function') {
-    try { return ts.toDate(); } catch { return new Date(0); }
+    try {
+      const converted = ts.toDate();
+      return (converted instanceof Date && !isNaN(converted.getTime())) ? converted : new Date(0);
+    } catch { return new Date(0); }
   }
   if (typeof ts === 'object' && typeof ts.seconds === 'number') {
-    return new Date(ts.seconds * 1000);
+    const d = new Date(ts.seconds * 1000);
+    return isNaN(d.getTime()) ? new Date(0) : d;
   }
   if (typeof ts === 'number') {
-    return new Date(ts);
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? new Date(0) : d;
   }
   if (typeof ts === 'string') {
-    if (ts.includes('T')) {
+    const trimmed = ts.trim();
+    if (!trimmed) return new Date(0);
+    if (trimmed.includes('T')) {
       try {
-        const parsed = parseISO(ts);
+        const parsed = parseISO(trimmed);
         if (!isNaN(parsed.getTime())) return parsed;
       } catch {}
     }
-    const d = new Date(ts);
-    return isNaN(d.getTime()) ? new Date(0) : d;
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) return d;
+    try {
+      const parsed = parseISO(trimmed);
+      if (!isNaN(parsed.getTime())) return parsed;
+    } catch {}
+    return new Date(0);
   }
   return new Date(0);
 }
@@ -45,13 +60,14 @@ export function parseTimestampToDate(ts: any): Date {
 /**
  * Safely format any timestamp without throwing RangeError on invalid or Firestore objects.
  */
-export function safeFormatDate(ts: any, formatPattern: string = 'MMM d, HH:mm'): string {
+export function safeFormatDate(ts: any, formatPattern: string = 'MMM d, HH:mm', fallback: string = 'N/A'): string {
+  if (!ts) return fallback;
   try {
     const d = parseTimestampToDate(ts);
-    if (isNaN(d.getTime()) || d.getTime() === 0) return 'N/A';
+    if (!d || isNaN(d.getTime()) || d.getTime() === 0) return fallback;
     return format(d, formatPattern);
   } catch {
-    return 'N/A';
+    return fallback;
   }
 }
 

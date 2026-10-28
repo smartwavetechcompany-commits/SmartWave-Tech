@@ -376,7 +376,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               </p>
               <p className="font-bold text-sm">Room {reservation.roomNumber}</p>
               <p className="text-zinc-500 text-xs">
-                {format(new Date(reservation.checkIn), 'MMM dd')} - {format(new Date(reservation.checkOut), 'MMM dd, yyyy')}
+                {safeFormatDate(reservation.checkIn, 'MMM dd', 'N/A')} - {safeFormatDate(reservation.checkOut, 'MMM dd, yyyy', 'N/A')}
               </p>
             </div>
             <div className="text-right">
@@ -463,13 +463,16 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                       
                       for (let i = 0; i < unpostedNights; i++) {
                         const nightIndex = postedNightsCount + i;
-                        const checkInDate = parseISO(reservation.checkIn);
-                        const nightDate = addDays(checkInDate, nightIndex);
+                        const checkInDate = parseTimestampToDate(reservation.checkIn);
+                        const nightDate = (checkInDate && !isNaN(checkInDate.getTime()) && checkInDate.getTime() > 0)
+                          ? addDays(checkInDate, nightIndex)
+                          : new Date();
                         const isOverstay = nightIndex >= (reservation.nights || 0);
+                        const dateFormatted = safeFormatDate(nightDate, 'MMM dd, yyyy', 'Date N/A');
                         
                         const title = isOverstay 
-                          ? `Projected Overstay Room Charge (Night of ${format(nightDate, 'MMM dd, yyyy')})`
-                          : `Projected Room Charge (Night of ${format(nightDate, 'MMM dd, yyyy')})`;
+                          ? `Projected Overstay Room Charge (Night of ${dateFormatted})`
+                          : `Projected Room Charge (Night of ${dateFormatted})`;
                         
                         const rateForThisNight = nightlyRate;
                         

@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, safeStringify } from '../utils';
 import { errorService, ErrorSeverity } from '../services/errorService';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 
 interface Notification {
   id: string;
@@ -164,7 +165,7 @@ export function Notifications() {
                           <div className="flex items-center justify-between gap-2 mb-1">
                             <h4 className="text-xs font-bold text-zinc-50 truncate">{notification.title}</h4>
                             <span className="text-[10px] text-zinc-500 whitespace-nowrap">
-                              {format(new Date(notification.timestamp), 'HH:mm')}
+                              {safeFormatDate(notification.timestamp, 'HH:mm')}
                             </span>
                           </div>
                           <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">

@@ -63,7 +63,7 @@ import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOf
 import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGracePeriodInfo } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGracePeriodInfo, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
@@ -4406,7 +4406,7 @@ export function FrontDesk() {
                   </span>
                   {(res.checkInTime || res.actualCheckIn) && (
                     <span className="text-zinc-500 text-[9px] font-mono">
-                      ({res.checkInTime || format(new Date(res.actualCheckIn), 'HH:mm')})
+                      ({res.checkInTime || safeFormatDate(res.actualCheckIn, 'HH:mm')})
                     </span>
                   )}
                 </div>
@@ -4420,7 +4420,7 @@ export function FrontDesk() {
                   </span>
                   {(res.checkOutTime || res.actualCheckOut) && (
                     <span className="text-zinc-500 text-[9px] font-mono">
-                      ({res.checkOutTime || format(new Date(res.actualCheckOut), 'HH:mm')})
+                      ({res.checkOutTime || safeFormatDate(res.actualCheckOut, 'HH:mm')})
                     </span>
                   )}
                 </div>
@@ -4431,7 +4431,7 @@ export function FrontDesk() {
                   <span className="text-zinc-400 truncate max-w-[130px]" title={getStaffDisplay(res.bookedBy, (res as any).bookedByName)}>
                     {getStaffDisplay(res.bookedBy, (res as any).bookedByName)}
                   </span>
-                  {res.createdAt && <span className="text-zinc-600 text-[9px]">({format(new Date(res.createdAt), 'MMM dd')})</span>}
+                  {res.createdAt && <span className="text-zinc-600 text-[9px]">({safeFormatDate(res.createdAt, 'MMM dd')})</span>}
                 </div>
               )}
               {resLedger.length > 0 && (
@@ -5600,7 +5600,7 @@ export function FrontDesk() {
                       {getStaffDisplay(showAuditModal.bookedBy, (showAuditModal as any).bookedByName)}
                     </div>
                     <div className="text-[11px] text-zinc-400 mt-0.5">
-                      Created: {showAuditModal.createdAt ? format(new Date(showAuditModal.createdAt), 'MMM dd, yyyy HH:mm') : 'Direct Booking'}
+                      Created: {showAuditModal.createdAt ? safeFormatDate(showAuditModal.createdAt, 'MMM dd, yyyy HH:mm') : 'Direct Booking'}
                     </div>
                   </div>
                   <div className="mt-3 pt-2 border-t border-zinc-900 text-[10px] text-zinc-500">
@@ -5622,7 +5622,7 @@ export function FrontDesk() {
                     </div>
                     <div className="text-[11px] text-zinc-400 mt-0.5">
                       {showAuditModal.checkInDateTime || showAuditModal.actualCheckIn 
-                        ? format(new Date(showAuditModal.checkInDateTime || showAuditModal.actualCheckIn!), 'MMM dd, yyyy HH:mm')
+                        ? safeFormatDate(showAuditModal.checkInDateTime || showAuditModal.actualCheckIn, 'MMM dd, yyyy HH:mm')
                         : `Scheduled: ${showAuditModal.checkIn} ${showAuditModal.checkInTime || ''}`}
                     </div>
                   </div>
@@ -5645,7 +5645,7 @@ export function FrontDesk() {
                     </div>
                     <div className="text-[11px] text-zinc-400 mt-0.5">
                       {showAuditModal.checkOutDateTime || showAuditModal.actualCheckOut 
-                        ? format(new Date(showAuditModal.checkOutDateTime || showAuditModal.actualCheckOut!), 'MMM dd, yyyy HH:mm')
+                        ? safeFormatDate(showAuditModal.checkOutDateTime || showAuditModal.actualCheckOut, 'MMM dd, yyyy HH:mm')
                         : `Scheduled: ${showAuditModal.checkOut} ${showAuditModal.checkOutTime || ''}`}
                     </div>
                   </div>
@@ -5734,7 +5734,7 @@ export function FrontDesk() {
                             return (
                               <tr key={entry.id} className="hover:bg-zinc-900/50 transition-colors">
                                 <td className="px-4 py-2.5 text-zinc-400 font-mono text-[11px]">
-                                  {entry.timestamp ? format(new Date(entry.timestamp), 'MMM dd, HH:mm') : '-'}
+                                  {entry.timestamp ? safeFormatDate(entry.timestamp, 'MMM dd, HH:mm') : '-'}
                                 </td>
                                 <td className="px-4 py-2.5">
                                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-zinc-900 text-zinc-400 border border-zinc-800">

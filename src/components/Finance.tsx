@@ -51,7 +51,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate } from '../utils/dateUtils';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 import { hasPermission } from '../utils/permissions';
@@ -732,7 +732,7 @@ export function Finance() {
         data = filterByDate(records)
           .filter(r => reportFilter.category === 'all' || r.category === reportFilter.category)
           .map(r => ({
-            Date: format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: safeFormatDate(r.timestamp, 'yyyy-MM-dd HH:mm'),
             Description: r.description,
             Category: r.category,
             Type: r.type,
@@ -957,7 +957,7 @@ export function Finance() {
       if (activeTab === 'transactions') {
         const record = item as FinanceRecord;
         return {
-          Date: format(new Date(record.timestamp), 'yyyy-MM-dd HH:mm'),
+          Date: safeFormatDate(record.timestamp, 'yyyy-MM-dd HH:mm'),
           Description: record.description,
           Type: record.type,
           Category: record.category,
@@ -1004,7 +1004,7 @@ export function Finance() {
       filename = `transactions_${dateStamp}.pdf`;
       headers = ['Date', 'Description', 'Type', 'Category', 'Amount', 'Payment Method'];
       rows = filteredRecords.map(r => [
-        format(new Date(r.timestamp), 'yyyy-MM-dd HH:mm'),
+        safeFormatDate(r.timestamp, 'yyyy-MM-dd HH:mm'),
         r.description || 'N/A',
         (r.type || '').toUpperCase(),
         r.category || 'General',
@@ -2076,7 +2076,7 @@ export function Finance() {
                                     </td>
                                     <td className="px-6 py-4">
                                       <div className="text-xs font-medium text-zinc-300">
-                                        {format(new Date(res.checkIn), 'MMM d, yyyy')} - {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                                        {safeFormatDate(res.checkIn, 'MMM d, yyyy')} - {safeFormatDate(res.checkOut, 'MMM d, yyyy')}
                                       </div>
                                       <StayDurationDisplay checkIn={res.checkIn} checkOut={res.checkOut} overstayNights={res.overstayNights} status={res.status} className="text-[10px] font-black text-amber-500 mt-0.5" />
                                     </td>
