@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../../utils';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc, increment } from 'firebase/firestore';
@@ -248,7 +249,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                           </span>
                         </div>
                         <div className="text-sm text-zinc-500 font-medium mt-0.5">
-                          {vendor?.name || 'Unknown Vendor'} • {format(new Date(po.timestamp), 'MMM d, yyyy')}
+                          {vendor?.name || 'Unknown Vendor'} • {safeFormatDate(po.timestamp, 'MMM d, yyyy')}
                         </div>
                       </div>
                     </div>
@@ -264,7 +265,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                       </div>
                       <div className="text-center">
                         <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest mb-1">Due Date</div>
-                        <div className="text-sm font-bold text-zinc-300">{po.dueDate ? format(new Date(po.dueDate), 'MMM d') : '-'}</div>
+                        <div className="text-sm font-bold text-zinc-300">{safeFormatDate(po.dueDate, 'MMM d', '-')}</div>
                       </div>
                     </div>
 

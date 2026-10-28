@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import { doc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import { logActivity } from '../utils/activityLogger';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 
 interface ExtendGracePeriodModalProps {
   isOpen: boolean;
@@ -232,7 +233,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
             <div className="pt-2 border-t border-zinc-800/60 flex justify-between items-center text-xs">
               <span className="text-zinc-400 font-semibold">Current Effective Deadline:</span>
               <span className="font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                {format(graceInfo.effectiveDeadlineDateTime, 'MMM d, yyyy @ h:mm a')}
+                {safeFormatDate(graceInfo.effectiveDeadlineDateTime, 'MMM d, yyyy @ h:mm a')}
               </span>
             </div>
 
@@ -331,7 +332,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
               <span>New Effective Departure Time:</span>
             </div>
             <div className="text-sm font-black text-amber-300 font-mono">
-              {format(prospectiveDeadline, 'EEEE, MMM d, yyyy @ h:mm a')}
+              {safeFormatDate(prospectiveDeadline, 'EEEE, MMM d, yyyy @ h:mm a')}
             </div>
             <p className="text-[11px] text-zinc-400 leading-relaxed pt-1">
               Guest will remain free of overstay room charges and automated nightly fees until this time. Auto-billing rules will only resume if the guest remains in room after this threshold.
@@ -352,7 +353,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
                       <span className="text-zinc-200 font-semibold">+{hist.minutes}m</span> &bull; {hist.reason || 'Approved'}
                     </div>
                     <div className="text-zinc-500">
-                      by {hist.approvedBy} ({format(new Date(hist.timestamp), 'h:mm a')})
+                      by {hist.approvedBy} ({safeFormatDate(hist.timestamp, 'h:mm a')})
                     </div>
                   </div>
                 ))}

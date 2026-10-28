@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../../utils';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc, increment } from 'firebase/firestore';
@@ -177,7 +178,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                 return (
                   <tr key={tx.id} className="hover:bg-zinc-800/30 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-xs text-zinc-400 font-medium">{format(new Date(tx.timestamp), 'MMM d, HH:mm')}</div>
+                      <div className="text-xs text-zinc-400 font-medium">{safeFormatDate(tx.timestamp, 'MMM d, HH:mm')}</div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-bold text-white">{item?.name || 'Unknown Item'}</div>

@@ -13,6 +13,7 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        'date-fns': path.resolve(__dirname, 'src/utils/safeDateFns.ts'),
       },
     },
     server: {

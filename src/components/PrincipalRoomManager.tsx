@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format, parseISO } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { toast } from 'sonner';
@@ -562,7 +563,7 @@ export function PrincipalRoomManager({
                             {entry.category}
                           </td>
                           <td className="py-2.5 px-4 text-zinc-400 text-[11px]">
-                            {entry.date ? format(new Date(entry.date), 'MMM dd, HH:mm') : '-'}
+                            {safeFormatDate(entry.date, 'MMM dd, HH:mm', '-')}
                           </td>
                           <td className="py-2.5 px-4 text-zinc-400">
                             {entry.postedByName || entry.postedBy || 'Staff'}

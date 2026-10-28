@@ -58,6 +58,7 @@ import { cn, exportToCSV } from '../utils';
 import { hasPermission } from '../utils/permissions';
 import { canUpdateRoomStatus } from '../utils/policyUtils';
 import { format, isWithinInterval, parseISO, isToday } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -1008,7 +1009,7 @@ export function Housekeeping() {
         Occupancy: activeRes ? `Occupied (${activeRes.guestName})` : 'Vacant',
         Priority: (r.cleaningPriority || 'normal').toUpperCase(),
         AssignedStaff: cleaner?.displayName || cleaner?.email || 'Unassigned',
-        LastCleaned: r.lastCleanedAt ? format(parseISO(r.lastCleanedAt), 'yyyy-MM-dd HH:mm') : 'N/A',
+        LastCleaned: safeFormatDate(r.lastCleanedAt, 'yyyy-MM-dd HH:mm', 'N/A'),
         Notes: r.notes || ''
       };
     });
@@ -2052,7 +2053,7 @@ export function Housekeeping() {
                   {inspections.slice(0, 15).map((ins, i) => (
                     <tr key={ins.id || i} className="hover:bg-zinc-800/40 transition-colors">
                       <td className="py-3 px-4 text-zinc-400">
-                        {ins.timestamp ? format(parseISO(ins.timestamp), 'MMM d, HH:mm') : 'N/A'}
+                        {safeFormatDate(ins.timestamp, 'MMM d, HH:mm', 'N/A')}
                       </td>
                       <td className="py-3 px-4 font-bold text-white">Room {ins.roomNumber}</td>
                       <td className="py-3 px-4 text-zinc-300">{ins.inspectorName}</td>
@@ -2170,7 +2171,7 @@ export function Housekeeping() {
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-zinc-800 text-xs">
                   <span className="text-zinc-500">
-                    {req.requestedAt ? format(parseISO(req.requestedAt), 'HH:mm') : ''}
+                    {safeFormatDate(req.requestedAt, 'HH:mm', '')}
                   </span>
                   {req.status !== 'completed' && req.id && (
                     <button

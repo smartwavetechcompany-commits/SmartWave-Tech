@@ -505,10 +505,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                           Room {res.roomNumber}
                         </td>
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(res.checkIn), 'MMM d, yyyy')}
+                          {safeFormatDate(res.checkIn, 'MMM d, yyyy')}
                         </td>
                         <td className="px-6 py-4 text-xs text-zinc-400">
-                          {format(new Date(res.checkOut), 'MMM d, yyyy')}
+                          {safeFormatDate(res.checkOut, 'MMM d, yyyy')}
                         </td>
                         <td className={cn(
                           "px-6 py-4 text-right text-sm font-bold",
@@ -621,7 +621,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               const csvContent = [
                 headers.join(','),
                 ...ledgerEntries.map(e => [
-                  format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+                  safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
                   `"${e.description}"`,
                   e.category,
                   e.type === 'debit' ? e.amount : 0,

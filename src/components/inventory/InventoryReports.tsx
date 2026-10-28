@@ -10,6 +10,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion } from 'motion/react';
 import { cn, formatCurrency, exportToCSV } from '../../utils';
 import { format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, subMonths } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
 
 interface InventoryReportsProps {
@@ -63,7 +64,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
       .map(tx => {
         const item = items.find(i => i.id === tx.itemId);
         return {
-          Date: format(new Date(tx.timestamp), 'yyyy-MM-dd HH:mm'),
+          Date: safeFormatDate(tx.timestamp, 'yyyy-MM-dd HH:mm'),
           Item: item?.name || 'Unknown',
           Quantity: tx.quantity,
           Unit: item?.unit || '',

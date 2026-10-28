@@ -17,6 +17,7 @@ import {
   Compass
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { toast } from 'sonner';
 
 interface DigitalKeyModalProps {
@@ -186,7 +187,7 @@ export function DigitalKeyModal({ reservation, hotel, onClose }: DigitalKeyModal
                         <span>Valid From:</span>
                       </div>
                       <span className="font-bold text-zinc-300">
-                        {format(new Date(keyData.validFrom), 'MMM d, h:mm a')}
+                        {safeFormatDate(keyData.validFrom, 'MMM d, h:mm a')}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 justify-between">
@@ -195,7 +196,7 @@ export function DigitalKeyModal({ reservation, hotel, onClose }: DigitalKeyModal
                         <span>Valid Until:</span>
                       </div>
                       <span className="font-bold text-zinc-300">
-                        {format(new Date(keyData.validUntil), 'MMM d, h:mm a')}
+                        {safeFormatDate(keyData.validUntil, 'MMM d, h:mm a')}
                       </span>
                     </div>
                   </div>

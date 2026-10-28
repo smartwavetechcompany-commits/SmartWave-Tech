@@ -29,6 +29,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 import { format, isAfter, startOfDay, parseISO, isSameDay } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -353,13 +354,13 @@ export function Tasks() {
                           isOverdue ? "text-red-500" : "text-zinc-500"
                         )}>
                           <Calendar size={14} />
-                          Due {format(new Date(task.dueDate), 'MMM d, yyyy')}
+                          Due {safeFormatDate(task.dueDate, 'MMM d, yyyy')}
                         </div>
                       )}
                       {task.reminderAt && task.status !== 'completed' && (
                         <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500">
                           <Bell size={14} className="animate-bounce" />
-                          Reminder at {format(new Date(task.reminderAt), 'HH:mm')}
+                          Reminder at {safeFormatDate(task.reminderAt, 'HH:mm')}
                         </div>
                       )}
                       {task.assignedTo && (

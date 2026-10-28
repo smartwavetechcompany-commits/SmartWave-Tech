@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion } from 'motion/react';
 import { cn } from '../../utils';
 import { format, subDays, isAfter } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 
 interface InventoryDashboardProps {
   items: InventoryItem[];
@@ -150,7 +151,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
                     </div>
                     <div className="text-xs text-zinc-500 flex items-center justify-between">
                       <span className="capitalize">{tx.type.replace('_', ' ')}</span>
-                      <span>{format(new Date(tx.timestamp), 'HH:mm')}</span>
+                      <span>{safeFormatDate(tx.timestamp, 'HH:mm')}</span>
                     </div>
                   </div>
                   <div className={cn(

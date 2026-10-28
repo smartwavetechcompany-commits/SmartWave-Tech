@@ -57,7 +57,7 @@ import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { exportTableToPDF } from '../utils/pdfExport';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateStayDuration, formatStayDuration, StayDurationDisplay } from '../utils/dateUtils';
+import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
@@ -188,7 +188,7 @@ export function Reports() {
         const dailyRevenue: { [key: string]: number } = {};
         filteredEntries.forEach(entry => {
           if (entry.type === 'debit') {
-            const day = format(new Date(entry.timestamp), 'MMM d');
+            const day = safeFormatDate(entry.timestamp, 'MMM d');
             dailyRevenue[day] = (dailyRevenue[day] || 0) + entry.amount;
           }
         });
@@ -362,7 +362,7 @@ export function Reports() {
         let curr = new Date(startDate);
         while (curr <= endDate) {
           const dayStr = format(curr, 'yyyy-MM-dd');
-          const dayEntries = ledgerEntries.filter(e => format(new Date(e.timestamp), 'yyyy-MM-dd') === dayStr);
+          const dayEntries = ledgerEntries.filter(e => safeFormatDate(e.timestamp, 'yyyy-MM-dd') === dayStr);
           
           const roomRev = dayEntries.filter(e => e.category === 'room' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const fbRev = dayEntries.filter(e => ['restaurant', 'f & b', 'food', 'bar', 'beverage'].includes((e.category || '').toLowerCase()) && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
@@ -441,7 +441,7 @@ export function Reports() {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
             return {
-              Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+              Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
               Guest: res?.guestName || 'Unknown',
               Room: res?.roomNumber || 'N/A',
               Method: e.description.split('via ')[1] || 'Cash',
@@ -465,7 +465,7 @@ export function Reports() {
             return {
               'Staff Name': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
               'User Role': staffMember?.role || 'Staff',
-              Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+              Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
               Guest: res?.guestName || 'Unknown',
               Room: res?.roomNumber || 'N/A',
               Amount: e.amount,
@@ -552,7 +552,7 @@ export function Reports() {
         return ledgerEntries
           .filter(e => ['restaurant', 'laundry', 'F & B', 'service'].includes(e.category) && e.type === 'debit')
           .map(e => ({
-            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
             Service: e.category.toUpperCase(),
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
@@ -566,7 +566,7 @@ export function Reports() {
         return ledgerEntries
           .filter(e => e.category === 'laundry' && e.type === 'debit')
           .map(e => ({
-            Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+            Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
             Guest: reservations.find(r => r.id === e.reservationId)?.guestName || 'Unknown',
             Room: reservations.find(r => r.id === e.reservationId)?.roomNumber || 'N/A',
             Description: e.description,
@@ -608,7 +608,7 @@ export function Reports() {
         return financeRecords
           .filter(r => r.type === 'expense')
           .map(r => ({
-            Date: format(new Date(r.timestamp), 'yyyy-MM-dd'),
+            Date: safeFormatDate(r.timestamp, 'yyyy-MM-dd'),
             Category: r.category,
             Description: r.description,
             Amount: r.amount,
@@ -666,7 +666,7 @@ export function Reports() {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
             return {
-              Date: format(new Date(e.timestamp), 'yyyy-MM-dd HH:mm'),
+              Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
               'Tax Type': e.description.includes('(') ? e.description.split('(')[0].trim() : 'Tax/VAT',
               Description: e.description,
               Amount: e.amount,

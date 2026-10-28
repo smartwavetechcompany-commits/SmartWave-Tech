@@ -19,6 +19,7 @@ import { cn } from '../utils';
 import { db, handleFirestoreError } from '../firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { useNavigate } from 'react-router-dom';
 import { hasPermission } from '../utils/permissions';
 import { toast } from 'sonner';
@@ -307,7 +308,7 @@ export function Inventory() {
                   </span>
                 </td>
                 <td className="px-6 py-4 text-zinc-500 text-sm">
-                  {item.lastUpdated ? format(new Date(item.lastUpdated), 'dd/MM/yyyy') : '-'}
+                  {safeFormatDate(item.lastUpdated, 'dd/MM/yyyy', '-')}
                 </td>
                 <td className="px-6 py-4 text-right">
                   <button className="text-zinc-500 hover:text-white transition-colors">

@@ -39,6 +39,7 @@ import {
   startOfMonth,
   endOfMonth
 } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -1222,7 +1223,7 @@ export function BreakfastList() {
                           </td>
 
                           <td className="py-3 px-4 text-[11px] text-zinc-400 font-mono">
-                            <span>{format(parseISO(entry.checkIn), 'MMM dd')} - {format(parseISO(entry.checkOut), 'MMM dd')}</span>
+                            <span>{safeFormatDate(entry.checkIn, 'MMM dd')} - {safeFormatDate(entry.checkOut, 'MMM dd')}</span>
                           </td>
 
                           <td className="py-3 px-4 text-center">

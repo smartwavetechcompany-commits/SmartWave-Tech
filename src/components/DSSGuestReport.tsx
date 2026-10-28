@@ -31,6 +31,7 @@ import {
   subDays, 
   isWithinInterval 
 } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -533,12 +534,12 @@ export function DSSGuestReport() {
 
                     {/* Arrival Date */}
                     <td className="py-3 px-4 font-medium text-emerald-400">
-                      {format(parseISO(record.arrivalDate), 'MMM dd, yyyy')}
+                      {safeFormatDate(record.arrivalDate, 'MMM dd, yyyy')}
                     </td>
 
                     {/* Departure Date */}
                     <td className="py-3 px-4 font-medium text-amber-400">
-                      {format(parseISO(record.departureDate), 'MMM dd, yyyy')}
+                      {safeFormatDate(record.departureDate, 'MMM dd, yyyy')}
                     </td>
 
                     {/* Phone Number */}

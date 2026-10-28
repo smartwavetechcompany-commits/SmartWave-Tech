@@ -45,6 +45,7 @@ import {
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { format, isValid } from 'date-fns';
+import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 
 import { useTranslation } from 'react-i18next';
 
@@ -1220,15 +1221,12 @@ export function Settings() {
                   
                   <div className="flex items-center gap-3 text-xs text-zinc-400">
                     <Calendar size={14} />
-                    <span>Expires on {hotel?.subscriptionExpiry ? (
-                      isValid(new Date(hotel.subscriptionExpiry)) 
-                        ? (() => {
-                            const d = new Date(hotel.subscriptionExpiry);
-                            const daysLeft = Math.ceil((d.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
-                            return `${format(d, 'MMMM d, yyyy')} (${daysLeft > 0 ? `${daysLeft} days remaining` : 'Expired'})`;
-                          })()
-                        : 'N/A'
-                    ) : 'N/A'}</span>
+                    <span>Expires on {hotel?.subscriptionExpiry ? (() => {
+                      const d = parseTimestampToDate(hotel.subscriptionExpiry);
+                      if (!d || isNaN(d.getTime()) || d.getTime() === 0) return 'N/A';
+                      const daysLeft = Math.ceil((d.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+                      return `${safeFormatDate(d, 'MMMM d, yyyy')} (${daysLeft > 0 ? `${daysLeft} days remaining` : 'Expired'})`;
+                    })() : 'N/A'}</span>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs text-zinc-400">
@@ -2571,7 +2569,7 @@ export function Settings() {
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase">Subscription Expiry</span>
                     <p className="text-sm text-zinc-50 flex items-center gap-2 flex-wrap">
-                      <span>{hotel?.subscriptionExpiry ? format(new Date(hotel.subscriptionExpiry), 'MMM d, yyyy') : 'N/A'}</span>
+                      <span>{hotel?.subscriptionExpiry ? safeFormatDate(hotel.subscriptionExpiry, 'MMM d, yyyy') : 'N/A'}</span>
                       {hotel?.subscriptionExpiry && (() => {
                         const daysLeft = Math.ceil((new Date(hotel.subscriptionExpiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
                         return daysLeft > 0 ? (

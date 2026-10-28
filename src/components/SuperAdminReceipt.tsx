@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { TrackingCodeRequest, SystemSettings, PlanType } from '../types';
 import { formatCurrency } from '../utils';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail, CheckCircle2 } from 'lucide-react';
 import { printDocument } from '../utils/printUtils';
 
@@ -58,7 +59,7 @@ export function SuperAdminReceipt({ request, settings }: SuperAdminReceiptProps)
             <Receipt size={10} /> Receipt No.
           </p>
           <p className="font-bold text-sm">#SUB-{(request.id || '').slice(-6).toUpperCase()}</p>
-          <p className="text-zinc-500">{format(new Date(request.timestamp), 'MMM dd, yyyy')}</p>
+          <p className="text-zinc-500">{safeFormatDate(request.timestamp, 'MMM dd, yyyy')}</p>
         </div>
       </div>
 

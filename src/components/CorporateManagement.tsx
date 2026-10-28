@@ -32,6 +32,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { fuzzySearch } from '../utils/searchUtils';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../utils/dateUtils';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { postToLedger, processAutomatedBillingForReservation } from '../services/ledgerService';
@@ -1861,7 +1862,7 @@ export function CorporateManagement() {
                               </div>
                               <div className="text-[10px] text-zinc-500 flex items-center gap-1">
                                 <Calendar size={10} />
-                                {format(new Date(rate.startDate), 'MMM d, yyyy')} - {format(new Date(rate.endDate), 'MMM d, yyyy')}
+                                {safeFormatDate(rate.startDate, 'MMM d, yyyy')} - {safeFormatDate(rate.endDate, 'MMM d, yyyy')}
                               </div>
                               {rate.conditions && (
                                 <div className="mt-2 p-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">

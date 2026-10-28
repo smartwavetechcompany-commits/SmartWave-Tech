@@ -10,6 +10,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils';
 import { format } from 'date-fns';
+import { safeFormatDate } from '../../utils/dateUtils';
 import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc } from 'firebase/firestore';
@@ -139,7 +140,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                       Audit: {location?.name || 'Full Inventory'}
                     </div>
                     <div className="text-sm text-zinc-500 font-medium mt-0.5">
-                      Completed by {(audit.userId || '').slice(-6)} • {audit.timestamp ? format(new Date(audit.timestamp), 'MMM d, yyyy HH:mm') : 'N/A'}
+                      Completed by {(audit.userId || '').slice(-6)} • {safeFormatDate(audit.timestamp, 'MMM d, yyyy HH:mm', 'N/A')}
                     </div>
                   </div>
                 </div>
