@@ -409,7 +409,25 @@ export function Rooms() {
     if (!hotel?.id) return;
     const room = rooms.find(r => r.id === roomId);
     try {
-      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'rooms', roomId), { status }, {
+      const now = new Date().toISOString();
+      const updateData: any = { 
+        status, 
+        updatedAt: now 
+      };
+      if (status === 'clean') {
+        updateData.housekeepingStatus = 'ready';
+        updateData.lastCleanedAt = now;
+      } else if (status === 'dirty') {
+        updateData.housekeepingStatus = 'dirty';
+        updateData.lastFlaggedAt = now;
+      } else if (status === 'cleaning') {
+        updateData.housekeepingStatus = 'cleaning';
+        updateData.cleaningStartedAt = now;
+      } else if (status === 'inspected') {
+        updateData.housekeepingStatus = 'awaiting_inspection';
+      }
+
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'rooms', roomId), updateData, {
         hotelId: hotel.id,
         module: 'Rooms',
         action: 'UPDATE_ROOM_STATUS',
@@ -459,12 +477,26 @@ export function Rooms() {
     const loadingToast = toast.loading(`Updating ${selectedRooms.length} rooms...`);
     
     try {
+      const now = new Date().toISOString();
       const batch = writeBatch(db);
       selectedRooms.forEach(roomId => {
-        batch.update(doc(db, 'hotels', hotel.id!, 'rooms', roomId), { 
+        const updateData: any = { 
           status,
-          updatedAt: new Date().toISOString()
-        });
+          updatedAt: now
+        };
+        if (status === 'clean') {
+          updateData.housekeepingStatus = 'ready';
+          updateData.lastCleanedAt = now;
+        } else if (status === 'dirty') {
+          updateData.housekeepingStatus = 'dirty';
+          updateData.lastFlaggedAt = now;
+        } else if (status === 'cleaning') {
+          updateData.housekeepingStatus = 'cleaning';
+          updateData.cleaningStartedAt = now;
+        } else if (status === 'inspected') {
+          updateData.housekeepingStatus = 'awaiting_inspection';
+        }
+        batch.update(doc(db, 'hotels', hotel.id!, 'rooms', roomId), updateData);
       });
       
       await database.commitBatch(hotel.id, batch, {

@@ -134,11 +134,11 @@ export const canCheckIn = (
       return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently occupied by another guest.` };
     }
 
-    const isDirty = room.status === 'dirty' || 
-                    room.status === 'cleaning' || 
-                    room.housekeepingStatus === 'dirty' || 
-                    room.housekeepingStatus === 'cleaning' || 
-                    room.housekeepingStatus === 'failed';
+    const isDirty = (room.status === 'cleaning' || room.housekeepingStatus === 'cleaning' || room.housekeepingStatus === 'failed')
+      ? true
+      : (room.status === 'clean' || room.housekeepingStatus === 'ready' || (room.housekeepingStatus as string) === 'clean')
+        ? false
+        : (room.status === 'dirty' || room.housekeepingStatus === 'dirty');
 
     const preventDirty = settings ? settings.preventCheckInDirty !== false : true;
     if (preventDirty && isDirty) {
@@ -153,7 +153,7 @@ export const canCheckIn = (
       return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently down for maintenance or out of order.` };
     }
 
-    if (settings?.requireRoomInspection && room.status !== 'clean' && room.status !== 'vacant' && room.status !== 'inspected' && room.housekeepingStatus !== 'ready') {
+    if (settings?.requireRoomInspection && room.status !== 'clean' && room.status !== 'vacant' && room.status !== 'inspected' && room.housekeepingStatus !== 'ready' && (room.housekeepingStatus as string) !== 'clean') {
       if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
         return { allowed: false, message: `Room ${room.roomNumber} must be clean and inspected before check-in.` };
       }

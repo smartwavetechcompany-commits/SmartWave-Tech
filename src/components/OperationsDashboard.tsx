@@ -463,6 +463,8 @@ export function OperationsDashboard() {
 
     const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    }, (err) => {
+      console.warn('Realtime rooms snapshot in OperationsDashboard:', err);
     });
 
     const unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {

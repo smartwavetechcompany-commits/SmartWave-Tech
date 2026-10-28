@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   LogIn, 
@@ -24,7 +24,7 @@ import { canCheckIn } from '../utils/policyUtils';
 import { hasPermission } from '../utils/permissions';
 import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, differenceInDays } from 'date-fns';
-import { doc, collection, addDoc, updateDoc, setDoc, getDoc, getDocs, query, where, limit, increment, serverTimestamp } from 'firebase/firestore';
+import { doc, collection, addDoc, updateDoc, setDoc, getDoc, getDocs, query, where, limit, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
 import { logActivity } from '../utils/activityLogger';
@@ -33,13 +33,28 @@ import { toast } from 'sonner';
 
 export function isRoomDirtyOrUnprepared(room: Room | undefined | null): boolean {
   if (!room) return false;
-  return (
-    room.status === 'dirty' ||
-    room.status === 'cleaning' ||
-    room.housekeepingStatus === 'dirty' ||
-    room.housekeepingStatus === 'cleaning' ||
-    room.housekeepingStatus === 'failed'
-  );
+  // If actively in cleaning progress, room is not ready for guest arrival
+  if (room.status === 'cleaning' || room.housekeepingStatus === 'cleaning') {
+    return true;
+  }
+  // If explicitly failed housekeeping inspection, room needs correction
+  if (room.housekeepingStatus === 'failed') {
+    return true;
+  }
+  // If explicitly clean or ready in either status or housekeepingStatus, room is clean & prepared
+  if (
+    room.status === 'clean' || 
+    room.housekeepingStatus === 'ready' || 
+    (room.housekeepingStatus as string) === 'clean'
+  ) {
+    return false;
+  }
+  // If explicitly flagged dirty in either status or housekeepingStatus, room is dirty
+  if (room.status === 'dirty' || room.housekeepingStatus === 'dirty') {
+    return true;
+  }
+  // Standard vacant rooms without dirty flags are clean & prepared
+  return false;
 }
 
 interface QuickCheckInModalProps {
@@ -73,13 +88,70 @@ export function QuickCheckInModal({
   const tomorrowStr = format(addDays(new Date(), 1), 'yyyy-MM-dd');
   const safeCurrency: 'NGN' | 'USD' = currency === 'USD' ? 'USD' : 'NGN';
 
+  // Live real-time Firestore synchronization for instantaneous reactive updates
+  const [liveRooms, setLiveRooms] = useState<Room[]>(rooms);
+  const [liveReservations, setLiveReservations] = useState<Reservation[]>(reservations);
+  const [liveBlockings, setLiveBlockings] = useState<RoomBlocking[]>(roomBlockings);
+
+  useEffect(() => {
+    setLiveRooms(rooms);
+  }, [rooms]);
+
+  useEffect(() => {
+    setLiveReservations(reservations);
+  }, [reservations]);
+
+  useEffect(() => {
+    setLiveBlockings(roomBlockings);
+  }, [roomBlockings]);
+
+  useEffect(() => {
+    if (!isOpen || !hotel?.id) return;
+
+    const unsubRooms = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'rooms'), 
+      (snap) => {
+        setLiveRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      },
+      (err) => {
+        console.warn('Live rooms snapshot in QuickCheckInModal:', err);
+      }
+    );
+
+    const unsubRes = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'reservations'), 
+      (snap) => {
+        setLiveReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      },
+      (err) => {
+        console.warn('Live reservations snapshot in QuickCheckInModal:', err);
+      }
+    );
+
+    const unsubBlockings = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'room_blockings'), 
+      (snap) => {
+        setLiveBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
+      },
+      (err) => {
+        console.warn('Live blockings snapshot in QuickCheckInModal:', err);
+      }
+    );
+
+    return () => {
+      unsubRooms();
+      unsubRes();
+      unsubBlockings();
+    };
+  }, [isOpen, hotel?.id]);
+
   // Expected arrivals scheduled for today that haven't checked in yet
   const todayArrivals = useMemo(() => {
-    return reservations.filter(r => 
+    return liveReservations.filter(r => 
       r.checkIn === todayStr && 
       (r.status === 'pending' || r.status === 'confirmed')
     );
-  }, [reservations, todayStr]);
+  }, [liveReservations, todayStr]);
 
   // Mode: 'arrivals' (select existing arrival) or 'walkin' (express walk-in arrival)
   const [activeMode, setActiveMode] = useState<'arrivals' | 'walkin'>(() => {
@@ -117,7 +189,7 @@ export function QuickCheckInModal({
   // Filter available rooms for walk-in check-in dates
   const availableRoomsForWalkIn = useMemo(() => {
     if (!checkInDate || !checkOutDate) return [];
-    return rooms.filter(room => {
+    return liveRooms.filter(room => {
       // Physical status check: cannot be occupied or maintenance/out_of_service
       if (room.status === 'occupied' || room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order') {
         return false;
@@ -127,14 +199,14 @@ export function QuickCheckInModal({
         return false;
       }
       // Check availability against all reservations and blockings
-      return isRoomAvailable(room.id, checkInDate, checkOutDate, reservations, roomBlockings, hotel);
+      return isRoomAvailable(room.id, checkInDate, checkOutDate, liveReservations, liveBlockings, hotel);
     });
-  }, [rooms, checkInDate, checkOutDate, reservations, roomBlockings, hotel]);
+  }, [liveRooms, checkInDate, checkOutDate, liveReservations, liveBlockings, hotel]);
 
   // Selected room details
   const selectedRoom = useMemo(() => {
-    return rooms.find(r => r.id === selectedRoomId);
-  }, [rooms, selectedRoomId]);
+    return liveRooms.find(r => r.id === selectedRoomId);
+  }, [liveRooms, selectedRoomId]);
 
   // Calculate stay nights
   const walkInNights = useMemo(() => {
@@ -193,7 +265,7 @@ export function QuickCheckInModal({
     }
 
     // Check if room is currently occupied by someone else
-    const activeStay = reservations.find(r => 
+    const activeStay = liveReservations.find(r => 
       r.roomId === res.roomId && 
       r.status === 'checked_in' && 
       r.id !== res.id
@@ -203,13 +275,13 @@ export function QuickCheckInModal({
       return;
     }
 
-    const room = rooms.find(r => r.id === res.roomId);
+    const room = liveRooms.find(r => r.id === res.roomId);
     if (isRoomDirtyOrUnprepared(room)) {
       toast.error(`Check-in Blocked: Room ${res.roomNumber} is currently dirty. Housekeeping must service and inspect the room before check-in.`);
       return;
     }
 
-    const policy = canCheckIn(hotel, profile, res, room, undefined, reservations);
+    const policy = canCheckIn(hotel, profile, res, room, undefined, liveReservations);
     if (!policy.allowed) {
       toast.error(policy.message || 'Check-in denied by hotel policy');
       return;
@@ -417,14 +489,14 @@ export function QuickCheckInModal({
     }
 
     // Availability re-check
-    const isAvail = isRoomAvailable(selectedRoom.id, checkInDate, checkOutDate, reservations, roomBlockings, hotel);
+    const isAvail = isRoomAvailable(selectedRoom.id, checkInDate, checkOutDate, liveReservations, liveBlockings, hotel);
     if (!isAvail) {
       toast.error(`Room ${selectedRoom.roomNumber} is no longer available for these dates.`);
       return;
     }
 
     // Check if room currently has active checked in guest
-    const activeStay = reservations.find(r => 
+    const activeStay = liveReservations.find(r => 
       r.roomId === selectedRoom.id && 
       r.status === 'checked_in'
     );
@@ -733,8 +805,8 @@ export function QuickCheckInModal({
               ) : (
                 <div className="space-y-2.5">
                   {filteredArrivals.map((res) => {
-                    const room = rooms.find(r => r.id === res.roomId);
-                    const activeOccupant = reservations.find(r => 
+                    const room = liveRooms.find(r => r.id === res.roomId);
+                    const activeOccupant = liveReservations.find(r => 
                       r.roomId === res.roomId && 
                       r.status === 'checked_in' && 
                       r.id !== res.id
@@ -970,7 +1042,7 @@ export function QuickCheckInModal({
                       <AlertCircle size={15} className="shrink-0" />
                       <span>
                         No clean and available rooms found for the selected stay dates.
-                        {rooms.some(isRoomDirtyOrUnprepared) && (
+                        {liveRooms.some(isRoomDirtyOrUnprepared) && (
                           <span className="block mt-0.5 text-zinc-400">
                             (Some rooms are pending housekeeping clearance)
                           </span>
@@ -984,7 +1056,7 @@ export function QuickCheckInModal({
                       onChange={(e) => {
                         const newId = e.target.value;
                         setSelectedRoomId(newId);
-                        const r = rooms.find(rm => rm.id === newId);
+                        const r = liveRooms.find(rm => rm.id === newId);
                         if (r && customRate === '') {
                           // Keep room default
                         }

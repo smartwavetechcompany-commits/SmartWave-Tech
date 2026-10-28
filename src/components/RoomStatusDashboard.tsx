@@ -354,11 +354,23 @@ export function RoomStatusDashboard() {
     if (!hotel?.id || !activeRoom) return;
     try {
       const roomRef = doc(db, 'hotels', hotel.id, 'rooms', activeRoom.id);
-      await updateDoc(roomRef, {
+      const now = new Date().toISOString();
+      const updatePayload: any = {
         status: newStatus,
-        lastCleanedAt: newStatus === 'clean' ? new Date().toISOString() : undefined,
-        lastFlaggedAt: new Date().toISOString()
-      });
+        updatedAt: now,
+        lastCleanedAt: newStatus === 'clean' ? now : undefined,
+        lastFlaggedAt: now
+      };
+      if (newStatus === 'clean') {
+        updatePayload.housekeepingStatus = 'ready';
+      } else if (newStatus === 'dirty') {
+        updatePayload.housekeepingStatus = 'dirty';
+      } else if (newStatus === 'cleaning') {
+        updatePayload.housekeepingStatus = 'cleaning';
+      } else if (newStatus === 'inspected') {
+        updatePayload.housekeepingStatus = 'awaiting_inspection';
+      }
+      await updateDoc(roomRef, updatePayload);
 
       await createAuditLog(
         hotel.id,
