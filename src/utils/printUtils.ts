@@ -198,7 +198,7 @@ export function printDocument(
   // Fallback discovery if target is not directly provided
   if (!element) {
     element = document.querySelector<HTMLElement>(
-      '#active-hotel-receipt, .receipt-container, .docket-container, #bulk-settle-invoice, .superadmin-receipt, .staff-handover-slip, .corporate-invoice, #active-report-print-manifest, #breakfast-manifest-print-container, #dss-guest-report-print-container, [data-printable="true"]'
+      '#standard-print-document, #active-hotel-receipt, .receipt-container, .docket-container, #bulk-settle-invoice, .superadmin-receipt, .staff-handover-slip, .corporate-invoice, #active-report-print-manifest, #breakfast-manifest-print-container, #dss-guest-report-print-container, [data-printable="true"]'
     );
   }
 
@@ -239,6 +239,7 @@ export function setupGlobalPrintListener(): void {
 
     // Check for open printable documents in priority order
     const prioritySelectors = [
+      '#standard-print-document',
       '#active-hotel-receipt',
       '.receipt-container',
       '.docket-container',

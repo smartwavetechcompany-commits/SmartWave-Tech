@@ -10,10 +10,12 @@ import { collection, query, where, getDocs, limit, or } from 'firebase/firestore
 import { db } from '../firebase';
 import { cn } from '../utils';
 import { toast } from 'sonner';
+import { GlobalSearchModal } from './GlobalSearchModal';
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const navigate = useNavigate();
   const { hotel, profile, isOffline, setSelectedHotelId, user } = useAuth();
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [hotels, setHotels] = useState<any[]>([]);
@@ -48,6 +50,11 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsGlobalSearchOpen(prev => !prev);
+        return;
+      }
       if (e.key === 'Escape') {
         setShowResults(false);
         setIsSelectingHotel(false);
@@ -302,158 +309,21 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           )}
         </div>
 
-        {/* Global Search Bar */}
-        <div className="relative max-w-md w-full ml-4 hidden md:block" ref={searchRef}>
-          <div className="relative">
-            <Search className={cn("absolute left-3 top-1/2 -translate-y-1/2 transition-colors", isSearching ? "text-emerald-500" : "text-zinc-500")} size={16} />
-            <input 
-              type="text"
-              placeholder="Search hotels, rooms, guests..."
-              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-10 pr-10 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none transition-all"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => searchQuery.length >= 2 && setShowResults(true)}
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => {
-                  setSearchQuery('');
-                  setShowResults(false);
-                }}
-                className="absolute right-10 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
-              >
-                <XCircle size={14} />
-              </button>
-            )}
-            {isSearching && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 animate-spin" size={14} />
-            )}
-          </div>
-
-          <AnimatePresence>
-            {showResults && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden z-50 max-h-[400px] overflow-y-auto backdrop-blur-xl"
-              >
-                {!isSearching && !hasResults ? (
-                  <div className="p-8 text-center">
-                    <Search className="mx-auto mb-2 text-zinc-700" size={24} />
-                    <p className="text-sm text-zinc-500">No results found for "{searchQuery}"</p>
-                  </div>
-                ) : (
-                  <div className="p-2 space-y-4">
-                    {searchResults.hotels.length > 0 && (
-                      <div>
-                        <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Hotels</div>
-                        {searchResults.hotels.map(h => (
-                          <button 
-                            key={h.id}
-                            onClick={() => {
-                              setSelectedHotelId(h.id);
-                              setShowResults(false);
-                              setSearchQuery('');
-                              navigate('/');
-                            }}
-                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors text-left group"
-                          >
-                            <div className="w-8 h-8 bg-blue-500/10 text-blue-500 rounded-lg flex items-center justify-center">
-                              <Building2 size={16} />
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-zinc-50">{h.name}</div>
-                              <div className="text-[10px] text-zinc-500">{h.location || 'System Hotel'}</div>
-                            </div>
-                            <ArrowRight size={14} className="text-zinc-700 group-hover:text-zinc-400 transition-colors" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {searchResults.rooms.length > 0 && (
-                      <div>
-                        <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Rooms</div>
-                        {searchResults.rooms.map(r => (
-                          <button 
-                            key={r.id}
-                            onClick={() => {
-                              setShowResults(false);
-                              setSearchQuery('');
-                              navigate('/rooms');
-                            }}
-                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors text-left group"
-                          >
-                            <div className="w-8 h-8 bg-emerald-500/10 text-emerald-500 rounded-lg flex items-center justify-center">
-                              <Bed size={16} />
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-zinc-50">Room {r.roomNumber}</div>
-                              <div className="text-[10px] text-zinc-500">{r.type} • {r.status}</div>
-                            </div>
-                            <ArrowRight size={14} className="text-zinc-700 group-hover:text-zinc-400 transition-colors" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {searchResults.guests.length > 0 && (
-                      <div>
-                        <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Guests</div>
-                        {searchResults.guests.map(g => (
-                          <button 
-                            key={g.id}
-                            onClick={() => {
-                              setShowResults(false);
-                              setSearchQuery('');
-                              navigate('/guests');
-                            }}
-                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors text-left group"
-                          >
-                            <div className="w-8 h-8 bg-purple-500/10 text-purple-500 rounded-lg flex items-center justify-center">
-                              <Users size={16} />
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-zinc-50">{g.name}</div>
-                              <div className="text-[10px] text-zinc-500">{g.phone || g.email}</div>
-                            </div>
-                            <ArrowRight size={14} className="text-zinc-700 group-hover:text-zinc-400 transition-colors" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {searchResults.reservations.length > 0 && (
-                      <div>
-                        <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Reservations</div>
-                        {searchResults.reservations.map(res => (
-                          <button 
-                            key={res.id}
-                            onClick={() => {
-                              setShowResults(false);
-                              setSearchQuery('');
-                              navigate('/front-desk');
-                            }}
-                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800 transition-colors text-left group"
-                          >
-                            <div className="w-8 h-8 bg-amber-500/10 text-amber-500 rounded-lg flex items-center justify-center">
-                              <Calendar size={16} />
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-zinc-50">{res.guestName}</div>
-                              <div className="text-[10px] text-zinc-500">Room {res.roomNumber} • {res.checkIn}</div>
-                            </div>
-                            <ArrowRight size={14} className="text-zinc-700 group-hover:text-zinc-400 transition-colors" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+        {/* Global Search Bar Quick Launcher */}
+        <div className="relative max-w-md w-full ml-4 hidden md:block">
+          <button 
+            type="button"
+            onClick={() => setIsGlobalSearchOpen(true)}
+            className="w-full bg-zinc-900/60 border border-zinc-800 hover:border-zinc-700/80 rounded-xl pl-10 pr-3 py-1.5 text-xs text-left text-zinc-400 flex items-center justify-between group transition-all cursor-pointer shadow-sm relative"
+          >
+            <div className="flex items-center gap-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 group-hover:text-emerald-400 transition-colors" size={16} />
+              <span className="truncate group-hover:text-zinc-200">Search guests, reservations, room numbers...</span>
+            </div>
+            <kbd className="hidden lg:inline-flex items-center font-mono text-[10px] text-zinc-500 bg-zinc-950 border border-zinc-800 px-1.5 py-0.5 rounded">
+              Ctrl K
+            </kbd>
+          </button>
         </div>
 
         {isManaging && (
@@ -475,6 +345,15 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
       <div className="flex items-center gap-1.5 sm:gap-4 md:gap-6 shrink-0">
         <div className="flex items-center gap-1 sm:gap-2.5 md:gap-4 border-r border-zinc-800 pr-1 sm:pr-4 md:pr-6 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsGlobalSearchOpen(true)}
+            className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all active:scale-95 cursor-pointer relative"
+            title="Global Search guests, reservations, room numbers (Ctrl+K)"
+            aria-label="Global Search"
+          >
+            <Search size={18} />
+          </button>
           <UIScaleControl />
           <CurrencyToggle />
           <Notifications />
@@ -499,6 +378,12 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           </div>
         </div>
       </div>
+
+      <GlobalSearchModal 
+        isOpen={isGlobalSearchOpen} 
+        onClose={() => setIsGlobalSearchOpen(false)} 
+        initialQuery={searchQuery}
+      />
     </div>
   );
 }

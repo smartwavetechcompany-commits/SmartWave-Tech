@@ -380,27 +380,72 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     text-shadow: none !important;
+    box-shadow: none !important;
   }
 
+  @page {
+    margin: 10mm 12mm;
+    size: auto;
+  }
+
+  /* Standardized paper layout container */
+  #standard-print-document,
+  .receipt-container,
   .print-container {
     display: block !important;
     width: 100% !important;
+    max-width: 100% !important;
     background: #ffffff !important;
     color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
+  /* Prevent page-break splitting inside key document blocks */
+  .break-inside-avoid,
+  .page-break-inside-avoid,
+  .print-avoid-break,
+  tr,
+  section,
+  header,
+  footer {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Crisp high-contrast report and invoice tables */
   table {
     border-collapse: collapse !important;
     width: 100% !important;
   }
 
-  tr {
-    break-inside: avoid !important;
-    page-break-inside: avoid !important;
-  }
-
   thead {
     display: table-header-group !important;
+  }
+
+  th {
+    border-bottom: 2px solid #000000 !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+  }
+
+  td {
+    border-bottom: 1px solid #d4d4d8 !important;
+    color: #18181b !important;
+  }
+
+  /* Ensure logos and QR codes render sharp without print dithering */
+  img, canvas {
+    image-rendering: -webkit-optimize-contrast !important;
+    image-rendering: crisp-edges !important;
+    max-width: 100% !important;
+  }
+
+  /* Never print URL footnotes on anchor links */
+  a[href]:after {
+    content: none !important;
   }
 }
 
