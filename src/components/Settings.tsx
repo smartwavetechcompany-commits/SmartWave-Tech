@@ -56,6 +56,7 @@ export function Settings() {
   const [activeTab, setActiveTab] = useState<'profile' | 'hotel' | 'branding' | 'security' | 'support' | 'taxes' | 'preferences' | 'shortcuts' | 'danger'>('profile');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [showConfirmSystemReset, setShowConfirmSystemReset] = useState(false);
+  const [showConfirmPurgeTransactions, setShowConfirmPurgeTransactions] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -702,6 +703,150 @@ export function Settings() {
     }
   };
 
+  const handlePurgeTransactionsAndDebt = async () => {
+    if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
+    
+    setIsSaving(true);
+    try {
+      const transactionCollectionsToClear = [
+        'outstanding_debt_ledger',
+        'debt_ledger',
+        'debts',
+        'debtors',
+        'ledger',
+        'finance',
+        'transactions',
+        'inventory_transactions',
+        'housekeeping_stock_transactions',
+        'commissions'
+      ];
+
+      for (const collName of transactionCollectionsToClear) {
+        const q = query(collection(db, 'hotels', hotel.id, collName));
+        const snap = await getDocs(q);
+        
+        // Delete in batches of 500 (Firestore limit)
+        const batches = [];
+        let currentBatch = writeBatch(db);
+        let count = 0;
+
+        for (const docSnap of snap.docs) {
+          currentBatch.delete(docSnap.ref);
+          count++;
+          if (count === 500) {
+            batches.push(currentBatch.commit());
+            currentBatch = writeBatch(db);
+            count = 0;
+          }
+        }
+        if (count > 0) {
+          batches.push(currentBatch.commit());
+        }
+        await Promise.all(batches);
+      }
+
+      // Reset financial balances, payments, charges, and debt balances on all reservations
+      const resSnap = await getDocs(collection(db, 'hotels', hotel.id, 'reservations'));
+      const resBatches = [];
+      let resBatch = writeBatch(db);
+      let resCount = 0;
+      for (const rDoc of resSnap.docs) {
+        resBatch.update(rDoc.ref, {
+          paidAmount: 0,
+          charges: [],
+          payments: [],
+          ledgerBalance: 0,
+          financialStatus: 'unpaid',
+          paymentStatus: 'unpaid',
+          advanceDeposit: 0,
+          discountAmount: 0,
+          totalDiscount: 0,
+          overstayNights: 0
+        });
+        resCount++;
+        if (resCount === 500) {
+          resBatches.push(resBatch.commit());
+          resBatch = writeBatch(db);
+          resCount = 0;
+        }
+      }
+      if (resCount > 0) {
+        resBatches.push(resBatch.commit());
+      }
+      await Promise.all(resBatches);
+
+      // Reset balances on corporate accounts
+      const corpSnap = await getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts'));
+      const corpBatches = [];
+      let corpBatch = writeBatch(db);
+      let corpCount = 0;
+      for (const cDoc of corpSnap.docs) {
+        corpBatch.update(cDoc.ref, {
+          balance: 0,
+          outstandingBalance: 0
+        });
+        corpCount++;
+        if (corpCount === 500) {
+          corpBatches.push(corpBatch.commit());
+          corpBatch = writeBatch(db);
+          corpCount = 0;
+        }
+      }
+      if (corpCount > 0) {
+        corpBatches.push(corpBatch.commit());
+      }
+      await Promise.all(corpBatches);
+
+      // Reset balances on guests
+      const guestsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'guests'));
+      const guestBatches = [];
+      let guestBatch = writeBatch(db);
+      let guestCount = 0;
+      for (const gDoc of guestsSnap.docs) {
+        guestBatch.update(gDoc.ref, {
+          balance: 0,
+          totalSpend: 0
+        });
+        guestCount++;
+        if (guestCount === 500) {
+          guestBatches.push(guestBatch.commit());
+          guestBatch = writeBatch(db);
+          guestCount = 0;
+        }
+      }
+      if (guestCount > 0) {
+        guestBatches.push(guestBatch.commit());
+      }
+      await Promise.all(guestBatches);
+
+      // Log transaction & debt ledger purge in activity logs
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        userName: profile.displayName || profile.name || 'Hotel Admin',
+        action: 'PURGE_TRANSACTIONS_AND_DEBT_LEDGER',
+        module: 'Finance',
+        details: 'Purged all transactions, folio ledger entries, and outstanding debt ledger records'
+      }, {
+        hotelId: hotel.id,
+        module: 'Settings',
+        action: 'PURGE_TRANSACTIONS_LOG',
+        details: 'Purged all transactions and outstanding debt ledger records'
+      });
+
+      toast.success('All transactions and debt ledger records cleared successfully!');
+      setShowConfirmPurgeTransactions(false);
+      window.location.reload();
+    } catch (err: any) {
+      console.error("Purge transactions error:", err.message || safeStringify(err));
+      toast.error('Failed to clear transactions and debt ledger.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSystemReset = async () => {
     if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
     
@@ -712,6 +857,10 @@ export function Settings() {
         'guests',
         'ledger',
         'finance',
+        'outstanding_debt_ledger',
+        'debt_ledger',
+        'debts',
+        'debtors',
         'activityLogs',
         'auditLogs',
         'AuditLogs',
@@ -719,6 +868,7 @@ export function Settings() {
         'housekeeping',
         'inventory',
         'purchaseOrders',
+        'purchase_orders',
         'suppliers',
         'accounts',
         'commissions',
@@ -730,7 +880,10 @@ export function Settings() {
         'rate_configurations',
         'inventory_consumption_rules',
         'inventory_transactions',
-        'transactions'
+        'inventory_audits',
+        'housekeeping_stock_transactions',
+        'transactions',
+        'notifications'
       ];
 
       for (const collName of collectionsToClear) {
@@ -2684,35 +2837,81 @@ export function Settings() {
             <div className="space-y-8">
               <div className="mb-8">
                 <h3 className="text-lg font-bold text-zinc-50 mb-1">Danger Zone</h3>
-                <p className="text-sm text-zinc-500">Highly sensitive actions that can permanently affect your data.</p>
+                <p className="text-sm text-zinc-500">Highly sensitive actions that can permanently affect your financial and operational data.</p>
               </div>
 
-              <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6 space-y-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center">
-                    <Trash2 size={24} />
+              {/* Action 1: Delete All Transactions & Debt Ledger */}
+              <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-6 space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 bg-amber-500/10 text-amber-500 rounded-xl flex items-center justify-center shrink-0">
+                    <Receipt size={24} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-red-500">System Reset</h4>
-                    <p className="text-sm text-zinc-500">Permanently delete all reservations, transactions, and guest data. This action cannot be undone.</p>
+                    <h4 className="font-bold text-amber-500 text-base">Purge Financial Transactions & Debt Ledger</h4>
+                    <p className="text-sm text-zinc-400 mt-1 leading-relaxed">
+                      Permanently delete all financial transactions, folio debits and credits, receipts, invoices, and every record under the debt ledger (including all outstanding guest and corporate debt). Resets all reservation balances, guest spend history, and corporate debts to ₦0.
+                    </p>
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-red-500/10">
+                <div className="pt-4 border-t border-amber-500/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                  <span className="text-xs text-zinc-500">
+                    Irreversible action. Requires explicit text confirmation before execution.
+                  </span>
+                  <button 
+                    onClick={() => setShowConfirmPurgeTransactions(true)}
+                    className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-bold px-6 py-2.5 rounded-lg transition-all active:scale-95 cursor-pointer text-sm shadow-md"
+                  >
+                    <Trash2 size={16} />
+                    Delete All Transactions & Debt Ledger
+                  </button>
+                </div>
+              </div>
+
+              {/* Action 2: Complete System Reset */}
+              <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6 space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center shrink-0">
+                    <Trash2 size={24} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-red-500 text-base">Complete System Reset</h4>
+                    <p className="text-sm text-zinc-500 mt-1 leading-relaxed">
+                      Permanently wipe all operational data including reservations, guest directories, all transactions even under the debt ledger, inventory logs, and reset all rooms. This action cannot be undone.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-red-500/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                  <span className="text-xs text-zinc-500">
+                    Wipes the entire property operational history. Requires CONFIRM PURGE confirmation.
+                  </span>
                   <button 
                     onClick={() => setShowConfirmSystemReset(true)}
-                    className="flex items-center justify-center gap-2 w-full bg-red-500 text-white font-bold py-3 rounded-lg hover:bg-red-600 transition-all active:scale-95"
+                    className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-2.5 rounded-lg transition-all active:scale-95 cursor-pointer text-sm shadow-md"
                   >
-                    <RefreshCw size={18} />
+                    <RefreshCw size={16} />
                     Reset All System Data
                   </button>
                 </div>
               </div>
 
               <ConfirmModal
+                isOpen={showConfirmPurgeTransactions}
+                title="CRITICAL: Delete All Transactions & Debt Ledger"
+                message="Are you sure you want to permanently delete ALL financial transactions, folio ledger entries, invoices, payments, and every record under the debt ledger? All guest and corporate debt records will be wiped clean to ₦0. This action is PERMANENT and cannot be undone."
+                onConfirm={handlePurgeTransactionsAndDebt}
+                onCancel={() => setShowConfirmPurgeTransactions(false)}
+                type="danger"
+                confirmText="Yes, Delete All Transactions & Debt Ledger"
+                requireConfirmationText="CONFIRM PURGE"
+                confirmationPlaceholder="Type CONFIRM PURGE to clear transactions"
+              />
+
+              <ConfirmModal
                 isOpen={showConfirmSystemReset}
-                title="CRITICAL: System Reset"
-                message="Are you sure you want to clear ALL system data? This will delete all reservations, guest history, financial records, and reset all rooms. This action is PERMANENT and cannot be undone."
+                title="CRITICAL: Complete System Reset"
+                message="Are you sure you want to clear ALL system data? This will delete all reservations, guest history, financial records, all debt ledger transactions, and reset all rooms. This action is PERMANENT and cannot be undone."
                 onConfirm={handleSystemReset}
                 onCancel={() => setShowConfirmSystemReset(false)}
                 type="danger"
