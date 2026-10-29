@@ -1,6 +1,8 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 export interface PDFExportOptions {
   title: string;
@@ -18,6 +20,17 @@ export interface PDFExportOptions {
   summaryRows?: (string | number)[][];
   orientation?: 'portrait' | 'landscape';
   columnStyles?: Record<number, any>;
+}
+
+export interface GeneratePdfExportOptions {
+  filename?: string;
+  title?: string;
+  pageSize?: 'a4' | 'letter';
+  orientation?: 'portrait' | 'landscape';
+  margin?: number; // mm
+  scale?: number;
+  backgroundColor?: string;
+  autoSave?: boolean;
 }
 
 /**
@@ -170,3 +183,198 @@ export function exportTableToPDF(options: PDFExportOptions): void {
   const cleanFilename = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
   doc.save(cleanFilename);
 }
+
+/**
+ * Universal PDF Export Utility that utilizes the existing standardized print layout
+ * (e.g., PrintTemplate, active-hotel-receipt, receipt-container, or custom printable element)
+ * to generate downloadable, multi-page, high-resolution PDF files for guests.
+ * 
+ * Automatically strips all extraneous UI elements, close buttons, action toolbars,
+ * and toast overlays, producing a clean, paper-optimized vector-sharp document.
+ */
+export async function generatePdfExport(
+  target?: HTMLElement | string | null | GeneratePdfExportOptions,
+  options?: GeneratePdfExportOptions
+): Promise<jsPDF | void> {
+  let resolvedElement: HTMLElement | null = null;
+  let resolvedOptions: GeneratePdfExportOptions = {};
+
+  // Check if target is actually options object
+  if (target && typeof target === 'object' && !(target instanceof HTMLElement)) {
+    resolvedOptions = target as GeneratePdfExportOptions;
+  } else {
+    if (typeof target === 'string') {
+      resolvedElement = document.getElementById(target) || document.querySelector<HTMLElement>(target);
+    } else if (target instanceof HTMLElement) {
+      resolvedElement = target;
+    }
+    if (options) {
+      resolvedOptions = options;
+    }
+  }
+
+  // Fallback discovery: Look for active standardized printable containers in priority order
+  if (!resolvedElement && typeof document !== 'undefined') {
+    const prioritySelectors = [
+      '#standard-print-document',
+      '#active-hotel-receipt',
+      '.receipt-container',
+      '#bulk-settle-invoice',
+      '#superadmin-subscription-receipt',
+      '#staff-handover-slip',
+      '#fandb-kitchen-docket',
+      '#breakfast-manifest-print-container',
+      '#dss-guest-report-print-container',
+      '#reports-analytics-print-container',
+      '.print-container',
+      '[data-printable="true"]'
+    ];
+
+    for (const sel of prioritySelectors) {
+      const found = document.querySelector<HTMLElement>(sel);
+      if (found && (found.offsetWidth > 0 || found.offsetHeight > 0 || found.isConnected)) {
+        resolvedElement = found;
+        break;
+      }
+    }
+  }
+
+  if (!resolvedElement) {
+    console.error('generatePdfExport: No printable element or layout template found in the DOM.');
+    toast.error('Could not locate printable document layout.');
+    return;
+  }
+
+  const {
+    filename,
+    title = 'Document',
+    pageSize = 'a4',
+    orientation = 'portrait',
+    margin = 8,
+    scale = 2,
+    backgroundColor = '#ffffff',
+    autoSave = true
+  } = resolvedOptions;
+
+  const toastId = toast.loading('Generating high-resolution PDF...');
+
+  try {
+    // Capture high-fidelity canvas representation
+    const canvas = await html2canvas(resolvedElement, {
+      scale,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor,
+      logging: false,
+      ignoreElements: (element: Element) => {
+        const classNames = element.className || '';
+        const isStringClass = typeof classNames === 'string';
+        if (
+          isStringClass && (
+            classNames.includes('print:hidden') ||
+            classNames.includes('no-print') ||
+            classNames.includes('print-hidden')
+          )
+        ) {
+          return true;
+        }
+        if (element.hasAttribute('data-sonner-toaster')) {
+          return true;
+        }
+        if (element.tagName === 'BUTTON' && !element.classList?.contains('allow-print')) {
+          return true;
+        }
+        return false;
+      }
+    });
+
+    const pdf = new jsPDF({
+      orientation,
+      unit: 'mm',
+      format: pageSize
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const marginMm = margin;
+    const contentWidthMm = pageWidth - marginMm * 2;
+    const contentHeightMm = pageHeight - marginMm * 2;
+
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    const pxPerMm = canvasWidth / contentWidthMm;
+    const pageHeightPx = contentHeightMm * pxPerMm;
+
+    let renderedHeightPx = 0;
+    let pageNum = 0;
+
+    // Slice canvas page by page for clean multi-page documents
+    while (renderedHeightPx < canvasHeight) {
+      if (pageNum > 0) {
+        pdf.addPage(pageSize, orientation);
+      }
+
+      const sliceHeightPx = Math.min(pageHeightPx, canvasHeight - renderedHeightPx);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvasWidth;
+      pageCanvas.height = sliceHeightPx;
+      const ctx = pageCanvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, canvasWidth, sliceHeightPx);
+        ctx.drawImage(
+          canvas,
+          0, renderedHeightPx, canvasWidth, sliceHeightPx,
+          0, 0, canvasWidth, sliceHeightPx
+        );
+
+        const sliceDataUrl = pageCanvas.toDataURL('image/jpeg', 0.95);
+        const sliceHeightMm = sliceHeightPx / pxPerMm;
+        pdf.addImage(sliceDataUrl, 'JPEG', marginMm, marginMm, contentWidthMm, sliceHeightMm);
+      }
+
+      renderedHeightPx += sliceHeightPx;
+      pageNum++;
+    }
+
+    // Add clean running footers
+    const totalPages = (pdf as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      pdf.setPage(i);
+      pdf.setFontSize(7.5);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(148, 163, 184);
+
+      pdf.text(
+        `Official Guest Document  •  Generated on ${format(new Date(), 'yyyy-MM-dd HH:mm')}`,
+        marginMm,
+        pageHeight - 4
+      );
+      pdf.text(
+        `Page ${i} of ${totalPages}`,
+        pageWidth - marginMm,
+        pageHeight - 4,
+        { align: 'right' }
+      );
+    }
+
+    const defaultFilename = `${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`;
+    const finalFilename = filename 
+      ? (filename.endsWith('.pdf') ? filename : `${filename}.pdf`)
+      : defaultFilename;
+
+    if (autoSave) {
+      pdf.save(finalFilename);
+    }
+
+    toast.dismiss(toastId);
+    toast.success('PDF document downloaded successfully');
+    return pdf;
+  } catch (err: any) {
+    console.error('generatePdfExport error:', err);
+    toast.dismiss(toastId);
+    toast.error('Failed to generate PDF. Please try again.');
+  }
+}
+

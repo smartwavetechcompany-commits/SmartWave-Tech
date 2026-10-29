@@ -281,3 +281,5 @@ export function setupGlobalPrintListener(): void {
 
 // Automatically install global print listener on module load
 setupGlobalPrintListener();
+
+export { generatePdfExport, type GeneratePdfExportOptions } from './pdfExport';

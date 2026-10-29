@@ -48,7 +48,7 @@ import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/bi
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate, getGracePeriodInfo } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
-import { printDocument } from '../utils/printUtils';
+import { printDocument, generatePdfExport } from '../utils/printUtils';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -1010,7 +1010,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         {showReceipt && hotel && (
           <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[90] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
             <div className="relative w-full max-w-5xl my-8 print:my-0 print:w-full print:static">
-              <div className="absolute -top-12 right-0 flex items-center gap-3 print:hidden">
+              <div className="absolute -top-12 right-0 flex items-center gap-2 sm:gap-3 print:hidden">
+                <button 
+                  onClick={() => {
+                    const target = document.getElementById('active-hotel-receipt') || document.querySelector('.receipt-container');
+                    generatePdfExport(target, {
+                      title: 'Official-Receipt',
+                      filename: `${hotel.name || 'Hotel'}-Receipt-${currentReservation.guestName.replace(/[^a-z0-9]/gi, '_')}`
+                    });
+                  }}
+                  className="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-zinc-700 shadow-md active:scale-95 cursor-pointer"
+                  title="Download PDF"
+                >
+                  <Download size={14} className="text-emerald-400" />
+                  <span>Download PDF</span>
+                </button>
                 <button 
                   onClick={() => {
                     printDocument(document.getElementById('active-hotel-receipt') || document.querySelector('.receipt-container'), {
@@ -1019,7 +1033,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       pageMargin: '8mm'
                     });
                   }}
-                  className="px-3.5 py-1.5 bg-emerald-500 text-black rounded-xl text-xs font-bold hover:bg-emerald-400 transition-all flex items-center gap-1.5 shadow-md active:scale-95"
+                  className="px-3.5 py-1.5 bg-emerald-500 text-black rounded-xl text-xs font-bold hover:bg-emerald-400 transition-all flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
                 >
                   <Printer size={14} />
                   <span>Print Receipt</span>
