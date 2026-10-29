@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { DEFAULT_SETTINGS } from '../constants';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert, Building2 } from 'lucide-react';
 import { cn } from '../utils';
+import { playNotificationSound } from '../utils/notificationSound';
 
 interface AuthPageProps {
   initialEmail?: string;
@@ -107,6 +108,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    playNotificationSound(type);
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
   };

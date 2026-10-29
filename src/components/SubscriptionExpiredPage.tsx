@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils';
 import { motion } from 'motion/react';
+import { playNotificationSound } from '../utils/notificationSound';
 
 export function SubscriptionExpiredPage() {
   const { hotel, profile } = useAuth();
@@ -44,6 +45,7 @@ export function SubscriptionExpiredPage() {
   }, []);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    playNotificationSound(type);
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
   };
