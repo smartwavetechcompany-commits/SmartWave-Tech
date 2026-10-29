@@ -22,6 +22,7 @@ import { CorporateManagement } from './components/CorporateManagement';
 import { OperationsDashboard } from './components/OperationsDashboard';
 import { Finance } from './components/Finance';
 import { OutstandingGuestLedger } from './components/OutstandingGuestLedger';
+import { PromotionsManagement } from './components/PromotionsManagement';
 import { Reports } from './components/Reports';
 import { BreakfastList } from './components/BreakfastList';
 import { DSSGuestReport } from './components/DSSGuestReport';
@@ -375,6 +376,11 @@ function AppContent() {
             <Route path="/admin-settings" element={
               <PermissionGuard moduleId="settings" showError>
                 <AdminSettings />
+              </PermissionGuard>
+            } />
+            <Route path="/promotions" element={
+              <PermissionGuard moduleId="settings" showError>
+                <PromotionsManagement />
               </PermissionGuard>
             } />
             <Route path="/activity-logs" element={

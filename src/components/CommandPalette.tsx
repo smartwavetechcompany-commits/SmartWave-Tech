@@ -23,6 +23,7 @@ import {
   UserCog,
   ShieldCheck,
   Settings,
+  Tag,
   X
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -70,6 +71,7 @@ export function CommandPalette() {
     { icon: UserCog, label: 'Staff Management', category: 'Navigation', path: '/staff', keywords: ['staff', 'employees', 'roles', 'users', 'departments'], capability: 'manage_staff', module: 'staff' },
     { icon: ClipboardList, label: 'Audit Logs & Security', category: 'Navigation', path: '/activity-logs', keywords: ['logs', 'audit', 'activity', 'security', 'history'], capability: 'view_activity_logs', module: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin Control Center', category: 'Navigation', path: '/super-admin', keywords: ['superadmin', 'hotels', 'system', 'licensing'], capability: 'access_super_admin', module: null },
+    { icon: Tag, label: 'Discounts & Promotions', category: 'Admin', path: '/promotions', keywords: ['promo', 'discount', 'coupon', 'code', 'promotion', 'campaign'], capability: 'edit_hotel_settings', module: 'settings' },
     { icon: Settings, label: 'Hotel Branding & Preferences', category: 'Navigation', path: '/settings', keywords: ['branding', 'settings', 'logo', 'receipts', 'colors', 'personalization'], capability: 'view_settings', module: 'settings' },
   ];
 

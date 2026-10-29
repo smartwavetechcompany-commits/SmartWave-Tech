@@ -23,13 +23,14 @@ import {
   X,
   Coffee,
   FileText,
-  Receipt
+  Receipt,
+  Tag
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useModuleAccess } from './PermissionGuard';
 import { cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
-import { hasFinancialVisibility } from '../utils/permissions';
+import { hasFinancialVisibility, hasPermission } from '../utils/permissions';
 import { auth } from '../firebase';
 import { toast } from 'sonner';
 
@@ -62,6 +63,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     { icon: FileText, label: 'DSS Report', path: '/dss-report', capability: 'view_reports', module: 'reports', pmsModuleId: 'reports' },
     { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff', pmsModuleId: 'staff' },
     { icon: ShieldCheck, label: 'Admin Controls', path: '/admin-settings', capability: 'edit_hotel_settings', module: 'settings', pmsModuleId: 'settings' },
+    { icon: Tag, label: 'Discounts & Promos', path: '/promotions', capability: 'edit_hotel_settings', module: 'settings', pmsModuleId: 'settings' },
     { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff', pmsModuleId: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', capability: 'access_super_admin' },
     { icon: Settings, label: t('sidebar.settings'), path: '/settings', capability: 'view_settings', module: 'settings', pmsModuleId: 'settings' },
@@ -101,6 +103,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       }
       const allowed = hotel?.settings?.financial?.allowFinancialReportViewing ?? true;
       if (!allowed) {
+        return false;
+      }
+    }
+
+    // Promotions Management: Only visible to Hotel Admins, Super Admins (handled above), or users with settings privileges
+    if (item.path === '/promotions') {
+      const hasSettingsPerm = hasPermission(profile, 'edit_hotel_settings', customRoles) || hasPermission(profile, 'edit_settings', customRoles);
+      if (!hasSettingsPerm) {
         return false;
       }
     }

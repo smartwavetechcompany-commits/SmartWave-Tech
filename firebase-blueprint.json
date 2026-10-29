@@ -425,6 +425,40 @@
         "resetUrl": { "type": "string" }
       },
       "required": ["token", "type", "targetUid", "targetEmail", "hotelId", "createdAt", "expiresAt", "status"]
+    },
+    "Promotion": {
+      "title": "Discount and Promotional Campaign",
+      "description": "Marketing discount codes and promotional campaigns created by Hotel Admins",
+      "type": "object",
+      "properties": {
+        "hotelId": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["percentage", "fixed", "seasonal", "special_offer", "minimum_stay", "date_specific"] },
+        "discountType": { "type": "string", "enum": ["percentage", "fixed"] },
+        "value": { "type": "number" },
+        "currency": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "expiryDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["active", "paused", "expired"] },
+        "targetGuestType": { "type": "string", "enum": ["all", "individual_only", "corporate_only", "selected_corporate"] },
+        "eligibleCorporateIds": { "type": "array", "items": { "type": "string" } },
+        "allowStackOnNegotiatedRate": { "type": "boolean" },
+        "eligibleRoomTypes": { "type": "array", "items": { "type": "string" } },
+        "eligibleRooms": { "type": "array", "items": { "type": "string" } },
+        "eligibleBookingSources": { "type": "array", "items": { "type": "string" } },
+        "minStayNights": { "type": "number" },
+        "minBookingAmount": { "type": "number" },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "maxDiscountCap": { "type": "number" },
+        "appliesTo": { "type": "string", "enum": ["room_only", "all_charges"] },
+        "combinable": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["hotelId", "code", "name", "discountType", "value", "startDate", "expiryDate", "status", "usedCount", "appliesTo", "createdAt", "createdBy"]
     }
   },
   "firestore": {
@@ -543,6 +577,10 @@
     "/hotels/{hotelId}/passwordResetTokens/{tokenId}": {
       "schema": "PasswordResetToken",
       "description": "Hotel property staff password reset and activation tokens"
+    },
+    "/hotels/{hotelId}/promotions/{promoId}": {
+      "schema": "Promotion",
+      "description": "Hotel promotional campaigns and discount codes"
     }
   }
 }

@@ -507,6 +507,8 @@ export interface Reservation {
   discountAmount?: number;
   discountType?: 'fixed' | 'percentage';
   discountReason?: string;
+  discountCode?: string; // Associated promotional / discount campaign code
+  promotionId?: string; // ID of the applied Promotion document
   nightlyRate?: number; // Added for nightly audit synchronization
   totalDiscount?: number; // Added to track total discounts separately from payments
   taxAmount?: number;
@@ -1128,6 +1130,60 @@ export interface HousekeepingIncident {
   supervisorId: string;
   supervisorName: string;
   timestamp: string;
+}
+
+export type PromotionType = 'percentage' | 'fixed' | 'seasonal' | 'special_offer' | 'minimum_stay' | 'date_specific';
+export type PromotionStatus = 'active' | 'paused' | 'expired';
+export type PromotionTargetGuestType = 'all' | 'individual_only' | 'corporate_only' | 'selected_corporate';
+
+export interface PromotionRedemption {
+  reservationId: string;
+  guestName: string;
+  roomNumber?: string;
+  bookingSource?: string;
+  corporateId?: string;
+  corporateName?: string;
+  discountAmount: number;
+  originalAmount: number;
+  finalAmount: number;
+  timestamp: string;
+  appliedBy: string;
+  appliedByName?: string;
+}
+
+export interface Promotion {
+  id: string;
+  hotelId: string;
+  code: string; // Unique uppercase promotional code (e.g., SUMMER25)
+  name: string; // Campaign title
+  description?: string;
+  type: PromotionType;
+  discountType: 'percentage' | 'fixed';
+  value: number; // e.g. 15 for 15% or 5000 for fixed 5000
+  currency?: 'NGN' | 'USD';
+  startDate: string; // YYYY-MM-DD
+  expiryDate: string; // YYYY-MM-DD
+  status: PromotionStatus;
+  targetGuestType?: PromotionTargetGuestType; // Target audience: all, individual_only, corporate_only, or selected_corporate
+  eligibleCorporateIds?: string[]; // Allowed corporate account IDs when targetGuestType is selected_corporate
+  allowStackOnNegotiatedRate?: boolean; // When true, promo discount can stack with negotiated corporate contract rates
+  eligibleRoomTypes?: string[]; // Empty or ['all'] means any room type
+  eligibleRooms?: string[]; // Specific room IDs (optional)
+  eligibleBookingSources?: string[]; // Empty or ['all'] means any source
+  minStayNights?: number; // Minimum stay duration required
+  minBookingAmount?: number; // Minimum booking subtotal
+  maxUses?: number; // Maximum total redemptions permitted (undefined = unlimited)
+  usedCount: number; // Current total redemptions
+  maxDiscountCap?: number; // Max discount ceiling for percentage promotions
+  appliesTo: 'room_only' | 'all_charges';
+  combinable: boolean;
+  redemptions?: PromotionRedemption[];
+  createdAt: string;
+  createdBy: string;
+  createdByName?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  updatedByName?: string;
 }
 
 export interface HousekeepingGuestRequest {

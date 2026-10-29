@@ -272,6 +272,16 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || hasStaffManagementPermission()));
       }
 
+      // Promotional campaigns and discount codes
+      match /promotions/{promoId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
+        allow create, delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow update: if isSuperAdmin() || 
+                         (sameHotel(hotelId) && isHotelAdmin()) ||
+                         (sameHotel(hotelId) && isStaffOf(hotelId) && 
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount', 'redemptions', 'updatedAt', 'updatedBy']));
+      }
+
       // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||

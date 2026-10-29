@@ -34,8 +34,10 @@ import {
   Check,
   X,
   Star,
-  Globe
+  Globe,
+  Tag
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
 
@@ -717,6 +719,23 @@ export function AdminSettings() {
                 {renderToggle('financial', 'allowRefunds', 'Enable Refund Processing', 'Allow the reversal of payments back to guests.')}
                 {renderToggle('financial', 'requireApprovalForRefunds', 'Refunds Require Approval', 'Manager/Admin override required for all refund transactions.')}
                 {renderToggle('financial', 'allowDiscounts', 'Enable Discount Engine', 'Support manual price adjustments on folios.')}
+                <div className="p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                      <Tag size={15} className="text-emerald-400" />
+                      Promotions & Discount Codes Management
+                    </p>
+                    <p className="text-xs text-zinc-400">
+                      Configure marketing discount codes, seasonal promotions, minimum-stay rules, and audit usage.
+                    </p>
+                  </div>
+                  <Link
+                    to="/promotions"
+                    className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold rounded-lg transition-all shadow-sm shrink-0"
+                  >
+                    Open Promotions
+                  </Link>
+                </div>
                 {renderToggle('financial', 'requireApprovalForLargeDiscounts', 'Cap Discount Visibility', 'Require approval for discounts exceeding a set threshold.')}
                 {renderInput('financial', 'largeDiscountThreshold', 'Large Discount Limit (%)', 'Percentage above which approval is mandated.')}
                 {renderToggle('financial', 'allowManualLedgerAdjustments', 'Allow Ledger Write-Ins', 'Permit direct manual debits/credits to the guest ledger.')}

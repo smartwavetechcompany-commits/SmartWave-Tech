@@ -55,6 +55,7 @@ import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
 import { roomService } from '../services/roomService';
+import { validatePromotion, recordPromotionRedemption } from '../services/promotionService';
 import { hasPermission } from '../utils/permissions';
 import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canApplyDiscount } from '../utils/policyUtils';
 import { logActivity } from '../utils/activityLogger';
@@ -168,6 +169,8 @@ export function FrontDesk() {
       discountAmount: 0,
       discountType: 'fixed',
       discountReason: '',
+      discountCode: '',
+      promotionId: '',
       taxAmount: 0,
       taxDetails: [],
       initialPayment: 0,
@@ -181,6 +184,8 @@ export function FrontDesk() {
       bookingSource: defaultBookingSource?.name || 'Walk-in',
       additionalStays: [] as any[]
     });
+    setPromoCodeInput('');
+    setPromoValidationResult({ status: 'idle' });
     setIsBooking(true);
   };
   const [newBooking, setNewBooking] = useState({
@@ -206,6 +211,8 @@ export function FrontDesk() {
     discountAmount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage',
     discountReason: '',
+    discountCode: '',
+    promotionId: '',
     taxAmount: 0,
     taxDetails: [] as { name: string; percentage: number; amount: number; isInclusive: boolean }[],
     initialPayment: 0,
@@ -219,6 +226,16 @@ export function FrontDesk() {
     bookingSource: '',
     additionalStays: [] as any[]
   });
+
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [promoValidationResult, setPromoValidationResult] = useState<{
+    status: 'idle' | 'valid' | 'invalid';
+    message?: string;
+    originalCharge?: number;
+    discountAmount?: number;
+    revisedCharge?: number;
+  }>({ status: 'idle' });
+  const [isValidatingPromo, setIsValidatingPromo] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
@@ -926,6 +943,97 @@ export function FrontDesk() {
     setHasPermissionError(false);
   }, [profile?.uid, hotel?.id]);
 
+  const handleApplyPromoCode = async () => {
+    if (!hotel?.id) return;
+    if (!promoCodeInput.trim()) {
+      toast.error('Please enter a promotional code.');
+      return;
+    }
+    const selectedRoom = rooms.find(r => r.id === newBooking.roomId);
+    if (!selectedRoom) {
+      toast.error('Please select a room before applying a promotional code.');
+      return;
+    }
+    setIsValidatingPromo(true);
+
+    try {
+      const checkInDateTime = parseLocalDateTime(newBooking.checkIn, newBooking.checkInTime || '14:00');
+      const checkOutDateTime = parseLocalDateTime(newBooking.checkOut, newBooking.checkOutTime || '12:00');
+      const hours = (checkOutDateTime.getTime() - checkInDateTime.getTime()) / (1000 * 60 * 60);
+      const nights = Math.max(1, Math.ceil(hours / 24));
+      const roomRate = selectedRoom.price || 0;
+      const baseRoomAmount = roomRate * nights;
+      const subtotal = newBooking.totalAmount > 0 ? newBooking.totalAmount : baseRoomAmount;
+      const selectedCorp = newBooking.guestType === 'corporate' && newBooking.corporateId
+        ? corporateAccounts.find(c => c.id === newBooking.corporateId)
+        : undefined;
+
+      const res = await validatePromotion(hotel.id, promoCodeInput, {
+        roomTypeId: selectedRoom.roomTypeId || selectedRoom.type,
+        roomId: newBooking.roomId,
+        checkIn: newBooking.checkIn,
+        checkOut: newBooking.checkOut,
+        bookingSource: newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in',
+        subtotal,
+        roomCharges: baseRoomAmount,
+        currency,
+        exchangeRate,
+        guestType: newBooking.guestType,
+        corporateId: newBooking.corporateId,
+        corporateName: selectedCorp?.name,
+        corporateStatus: selectedCorp?.status,
+        isNegotiatedRate
+      });
+
+      if (res.isValid && res.promotion) {
+        setPromoValidationResult({
+          status: 'valid',
+          message: `Campaign "${res.promotion.name}" applied successfully.`,
+          originalCharge: res.originalCharge,
+          discountAmount: res.discountAmount,
+          revisedCharge: res.revisedCharge
+        });
+        setNewBooking(prev => ({
+          ...prev,
+          discountCode: res.promotion!.code,
+          promotionId: res.promotion!.id,
+          discountAmount: res.discountAmount,
+          discountType: 'fixed',
+          discountReason: `Promo Code [${res.promotion!.code}]: ${res.promotion!.name}`
+        }));
+        toast.success(`Promo code "${res.promotion.code}" applied! -${formatCurrency(res.discountAmount, currency, exchangeRate)}`);
+      } else {
+        setPromoValidationResult({
+          status: 'invalid',
+          message: res.errorReason || 'Invalid promotional code.'
+        });
+        toast.error(res.errorReason || 'Invalid promotional code.');
+      }
+    } catch (err: any) {
+      console.error('Validation error:', err);
+      setPromoValidationResult({
+        status: 'invalid',
+        message: err.message || 'Failed to validate code.'
+      });
+      toast.error(err.message || 'Failed to validate code.');
+    } finally {
+      setIsValidatingPromo(false);
+    }
+  };
+
+  const handleRemovePromoCode = () => {
+    setPromoCodeInput('');
+    setPromoValidationResult({ status: 'idle' });
+    setNewBooking(prev => ({
+      ...prev,
+      discountCode: '',
+      promotionId: '',
+      discountAmount: 0,
+      discountReason: ''
+    }));
+    toast.info('Promotional code removed.');
+  };
+
   const handleBooking = async () => {
     if (!hotel?.id || !profile || loading) return;
 
@@ -1191,6 +1299,10 @@ export function FrontDesk() {
           resData.discountAmount = newBooking.discountAmount;
           resData.discountType = newBooking.discountType;
           resData.discountReason = newBooking.discountReason;
+          if (newBooking.discountCode) {
+            resData.discountCode = newBooking.discountCode;
+            resData.promotionId = newBooking.promotionId;
+          }
           resData.totalDiscount = 0; // Initialize to 0; postToLedger will update it via increment
         }
 
@@ -1278,6 +1390,34 @@ export function FrontDesk() {
         }
       }
 
+      // Record promotional code redemption if promo was applied
+      if (newBooking.promotionId && newBooking.discountCode && createdStays.length > 0) {
+        const firstStay = createdStays[0];
+        const selectedCorp = newBooking.guestType === 'corporate' && newBooking.corporateId
+          ? corporateAccounts.find(c => c.id === newBooking.corporateId)
+          : undefined;
+
+        await recordPromotionRedemption(
+          hotel.id,
+          newBooking.promotionId,
+          {
+            reservationId: firstStay.resId,
+            guestName: newBooking.guestName,
+            roomNumber: firstStay.roomNumber,
+            bookingSource: newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in',
+            corporateId: newBooking.guestType === 'corporate' ? newBooking.corporateId : undefined,
+            corporateName: newBooking.guestType === 'corporate' ? (selectedCorp?.name || 'Corporate Account') : undefined,
+            discountAmount: newBooking.discountAmount,
+            originalAmount: firstStay.totalAmount,
+            finalAmount: Math.max(0, firstStay.totalAmount - newBooking.discountAmount),
+            timestamp: new Date().toISOString(),
+            appliedBy: profile.uid,
+            appliedByName: profile.displayName || profile.name || profile.email
+          },
+          profile
+        );
+      }
+
       setIsBooking(false);
       setSelectedRateType('auto');
       setCustomRateAmount(0);
@@ -1304,6 +1444,8 @@ export function FrontDesk() {
         discountAmount: 0,
         discountType: 'fixed',
         discountReason: '',
+        discountCode: '',
+        promotionId: '',
         taxAmount: 0,
         taxDetails: [],
         initialPayment: 0,
@@ -2634,6 +2776,8 @@ export function FrontDesk() {
                     discountAmount: 0,
                     discountType: 'fixed',
                     discountReason: '',
+                    discountCode: '',
+                    promotionId: '',
                     taxAmount: 0,
                     taxDetails: [],
                     initialPayment: 0,
@@ -2679,6 +2823,8 @@ export function FrontDesk() {
                     discountAmount: 0,
                     discountType: 'fixed',
                     discountReason: '',
+                    discountCode: '',
+                    promotionId: '',
                     taxAmount: 0,
                     taxDetails: [],
                     initialPayment: 0,
@@ -3509,48 +3655,129 @@ export function FrontDesk() {
               </div>
 
               <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-4">
-                <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs uppercase tracking-wider">
-                  <Tag size={14} />
-                  Discount (Optional)
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs uppercase tracking-wider">
+                    <Tag size={14} />
+                    Promotions & Discounts
+                  </div>
+                  {newBooking.discountCode && (
+                    <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-md font-mono text-[10px] font-bold">
+                      PROMO: {newBooking.discountCode}
+                    </span>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
+
+                {/* Promotional Code Input */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-semibold text-zinc-400 uppercase">
+                    Promotional / Discount Code
+                  </label>
+                  <div className="flex gap-2">
                     <input 
-                      type="number" 
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                      value={newBooking.discountType === 'fixed' && currency === 'USD' ? (newBooking.discountAmount / exchangeRate) || '' : newBooking.discountAmount || ''}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setNewBooking({ 
-                          ...newBooking, 
-                          discountAmount: newBooking.discountType === 'fixed' && currency === 'USD' ? val * exchangeRate : val 
-                        });
+                      type="text" 
+                      placeholder="e.g. SUMMER25, SPECIAL10"
+                      className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 font-mono uppercase focus:border-emerald-500 outline-none"
+                      value={promoCodeInput}
+                      onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9_\-]/g, ''))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleApplyPromoCode();
+                        }
                       }}
+                      disabled={Boolean(newBooking.discountCode) || isValidatingPromo}
                     />
+                    {newBooking.discountCode ? (
+                      <button
+                        type="button"
+                        onClick={handleRemovePromoCode}
+                        className="px-3 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-800/60 rounded-lg text-xs font-semibold transition-colors"
+                      >
+                        Remove
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleApplyPromoCode}
+                        disabled={isValidatingPromo || !promoCodeInput.trim()}
+                        className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-black rounded-lg text-xs font-bold transition-all"
+                      >
+                        {isValidatingPromo ? 'Checking...' : 'Apply Code'}
+                      </button>
+                    )}
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Type</label>
-                    <select 
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                      value={newBooking.discountType}
-                      onChange={(e) => setNewBooking({ ...newBooking, discountType: e.target.value as 'fixed' | 'percentage' })}
-                    >
-                      <option value="fixed">Fixed ({currency})</option>
-                      <option value="percentage">Percentage (%)</option>
-                    </select>
+
+                  {/* Validation Feedback Banner */}
+                  {promoValidationResult.status === 'valid' && (
+                    <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg space-y-1 text-xs">
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                        <CheckCircle2 size={13} />
+                        {promoValidationResult.message}
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] pt-1 text-zinc-300 border-t border-emerald-900/30">
+                        <span>Original Charge: <strong className="font-mono text-zinc-200">{formatCurrency(promoValidationResult.originalCharge || 0, currency, exchangeRate)}</strong></span>
+                        <span className="text-emerald-400 font-bold">Discount: -{formatCurrency(promoValidationResult.discountAmount || 0, currency, exchangeRate)}</span>
+                        <span>Revised Charge: <strong className="font-mono text-white">{formatCurrency(promoValidationResult.revisedCharge || 0, currency, exchangeRate)}</strong></span>
+                      </div>
+                    </div>
+                  )}
+
+                  {promoValidationResult.status === 'invalid' && (
+                    <div className="p-2.5 bg-red-950/40 border border-red-900/40 rounded-lg flex items-start gap-2 text-xs text-red-300">
+                      <AlertCircle size={14} className="shrink-0 mt-0.5 text-red-400" />
+                      <span>{promoValidationResult.message}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Optional Ad-hoc / Manual Discount (when no promo code applied) */}
+                {!newBooking.discountCode && (
+                  <div className="pt-2 border-t border-zinc-800/60 space-y-3">
+                    <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+                      Or Apply Custom / Manager Discount
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-zinc-400 uppercase mb-1">Amount / Value</label>
+                        <input 
+                          type="number" 
+                          min="0"
+                          placeholder="0.00"
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 font-mono focus:border-emerald-500 outline-none"
+                          value={newBooking.discountType === 'fixed' && currency === 'USD' ? (newBooking.discountAmount / exchangeRate) || '' : newBooking.discountAmount || ''}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setNewBooking({ 
+                              ...newBooking, 
+                              discountAmount: newBooking.discountType === 'fixed' && currency === 'USD' ? val * exchangeRate : val 
+                            });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-zinc-400 uppercase mb-1">Discount Type</label>
+                        <select 
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                          value={newBooking.discountType}
+                          onChange={(e) => setNewBooking({ ...newBooking, discountType: e.target.value as 'fixed' | 'percentage' })}
+                        >
+                          <option value="fixed">Fixed ({currency})</option>
+                          <option value="percentage">Percentage (%)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-zinc-400 uppercase mb-1">Reason / Authorization Notes</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. VIP Courtesy, Manager Discretion"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                        value={newBooking.discountReason}
+                        onChange={(e) => setNewBooking({ ...newBooking, discountReason: e.target.value })}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Reason</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Management Approval"
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={newBooking.discountReason}
-                    onChange={(e) => setNewBooking({ ...newBooking, discountReason: e.target.value })}
-                  />
-                </div>
+                )}
               </div>
 
               <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-4">
