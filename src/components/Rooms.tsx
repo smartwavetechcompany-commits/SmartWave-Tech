@@ -1168,7 +1168,7 @@ export function Rooms() {
         <motion.div 
           initial={{ y: 50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 border border-emerald-500/30 shadow-2xl shadow-emerald-500/10 px-6 py-4 rounded-2xl flex items-center gap-6 backdrop-blur-xl"
+          className="fixed bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 z-40 bg-zinc-900 border border-emerald-500/30 shadow-2xl shadow-emerald-500/10 px-3.5 sm:px-6 py-2.5 sm:py-4 rounded-2xl flex items-center gap-3 sm:gap-6 backdrop-blur-xl max-w-[calc(100vw-1.5rem)] overflow-x-auto no-scrollbar pb-[max(0.625rem,env(safe-area-inset-bottom))]"
         >
           <div className="flex items-center gap-3 pr-6 border-r border-zinc-800">
             <div className="w-8 h-8 rounded-full bg-emerald-500 text-black flex items-center justify-center font-bold text-sm">
@@ -2246,7 +2246,7 @@ export function Rooms() {
       />
 
       {view === 'grid' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5 sm:gap-4">
           {filteredRooms.length === 0 ? (
             <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
               <Bed size={48} className="mx-auto text-zinc-700 mb-4" />
@@ -2261,7 +2261,7 @@ export function Rooms() {
                   key={room.id}
                   onClick={() => toggleRoomSelection(room.id)}
                   className={cn(
-                    "aspect-square rounded-xl border-2 p-4 flex flex-col justify-between transition-all group relative overflow-hidden cursor-pointer",
+                    "aspect-square min-h-[140px] rounded-xl border-2 p-3 sm:p-4 flex flex-col justify-between transition-all group relative overflow-hidden cursor-pointer",
                     displayStatus ? statusColors[displayStatus] : 'border-zinc-800 text-zinc-500 bg-zinc-800/5',
                     selectedRooms.includes(room.id) && "ring-2 ring-emerald-500 ring-offset-4 ring-offset-zinc-950 scale-[0.98]"
                   )}
@@ -2273,10 +2273,10 @@ export function Rooms() {
                   )}
                   <div className="flex justify-between items-start">
                     <div className="flex flex-col">
-                      <span className="text-xl font-bold font-mono tracking-tight">{room.roomNumber}</span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 truncate max-w-[100px]">{room.type}</span>
+                      <span className="text-lg sm:text-xl font-bold font-mono tracking-tight">{room.roomNumber}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 truncate max-w-[80px] sm:max-w-[100px]">{room.type}</span>
                     </div>
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
+                      <div className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
                         <div className="flex gap-1">
                           {hasPermission(profile, 'edit_rooms') && (
                             <button 

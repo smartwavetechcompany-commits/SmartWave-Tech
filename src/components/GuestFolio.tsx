@@ -922,12 +922,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-2 sm:p-4">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex items-center justify-center p-2 sm:p-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]"
+        className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[96dvh] sm:max-h-[90vh] shadow-2xl"
       >
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+        <div className="p-3.5 sm:p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 gap-2">
           <div className="flex items-center gap-3 block">
             <div className="w-9 h-9 sm:w-10 sm:h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500 border border-emerald-500/10">
               <Receipt size={18} />
@@ -1053,31 +1053,31 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8 custom-scrollbar">
           {/* Folio View Switcher: Folio Ledger & Billing vs Guest Activity Timeline */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-zinc-950 p-2 rounded-2xl border border-zinc-800">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar flex-nowrap w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => setFolioTab('ledger')}
                 className={cn(
-                  "flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2",
+                  "flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 whitespace-nowrap shrink-0",
                   folioTab === 'ledger'
                     ? "bg-zinc-100 text-black shadow-md"
                     : "bg-zinc-900/90 text-zinc-400 hover:text-zinc-200 border border-zinc-800"
                 )}
               >
-                <Receipt size={15} />
+                <Receipt size={15} className="shrink-0" />
                 <span>Folio Ledger & Billing</span>
               </button>
               <button
                 type="button"
                 onClick={() => setFolioTab('timeline')}
                 className={cn(
-                  "flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2",
+                  "flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 whitespace-nowrap shrink-0",
                   folioTab === 'timeline'
                     ? "bg-emerald-500 text-black shadow-md"
                     : "bg-zinc-900/90 text-zinc-400 hover:text-zinc-200 border border-zinc-800"
                 )}
               >
-                <History size={15} />
+                <History size={15} className="shrink-0" />
                 <span>Guest Activity Timeline</span>
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                   Live

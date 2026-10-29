@@ -712,50 +712,50 @@ export function OperationsDashboard() {
           <h1 className="text-xl sm:text-2xl font-bold text-zinc-50 tracking-tight">Daily Operations</h1>
           <p className="text-xs text-zinc-400">Manage today's guest movements and room status</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
+          <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 overflow-x-auto no-scrollbar max-w-full flex-nowrap shrink-0">
             <button
               type="button"
               onClick={() => setOpView('flow')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0",
                 opView === 'flow' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
               )}
             >
-              <Calendar size={14} />
+              <Calendar size={14} className="shrink-0" />
               <span>Daily Movements</span>
             </button>
             <button
               type="button"
               onClick={() => setOpView('room_status')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0",
                 opView === 'room_status' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
               )}
             >
-              <LayoutGrid size={14} />
+              <LayoutGrid size={14} className="shrink-0" />
               <span>Room Grid</span>
             </button>
             <button
               type="button"
               onClick={() => setOpView('breakfast')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0",
                 opView === 'breakfast' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
               )}
             >
-              <Coffee size={14} />
+              <Coffee size={14} className="shrink-0" />
               <span>Breakfast List</span>
             </button>
             <button
               type="button"
               onClick={() => setOpView('dss')}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0",
                 opView === 'dss' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-zinc-100"
               )}
             >
-              <FileText size={14} />
+              <FileText size={14} className="shrink-0" />
               <span>DSS Report</span>
             </button>
           </div>
@@ -1515,22 +1515,22 @@ export function OperationsDashboard() {
             {/* Filtering Component: Toggle between 'Today', 'Upcoming', 'Checked-in', 'Confirmed', 'Cancelled', 'All' */}
             <div className="space-y-2.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mr-1">Status View:</span>
-                <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 flex-wrap gap-1">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mr-1 shrink-0">Status View:</span>
+                <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 overflow-x-auto no-scrollbar max-w-full flex-nowrap gap-1">
                   <button
                     type="button"
                     onClick={() => setReservationViewFilter('today')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                       reservationViewFilter === 'today'
                         ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
                         : "text-zinc-400 hover:text-zinc-100"
                     )}
                   >
-                    <Calendar size={13} />
+                    <Calendar size={13} className="shrink-0" />
                     <span>Today</span>
                     <span className={cn(
-                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full shrink-0",
                       reservationViewFilter === 'today' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
                     )}>
                       {arrivals.length + checkins.length + dueCheckouts.length}
@@ -1541,16 +1541,16 @@ export function OperationsDashboard() {
                     type="button"
                     onClick={() => setReservationViewFilter('upcoming')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                       reservationViewFilter === 'upcoming'
                         ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
                         : "text-zinc-400 hover:text-zinc-100"
                     )}
                   >
-                    <Clock size={13} />
+                    <Clock size={13} className="shrink-0" />
                     <span>Upcoming</span>
                     <span className={cn(
-                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full shrink-0",
                       reservationViewFilter === 'upcoming' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
                     )}>
                       {upcomingReservations.length}
@@ -1561,16 +1561,16 @@ export function OperationsDashboard() {
                     type="button"
                     onClick={() => setReservationViewFilter('checked_in')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                       reservationViewFilter === 'checked_in'
                         ? "bg-emerald-500 text-zinc-950 font-black shadow-sm"
                         : "text-zinc-400 hover:text-zinc-100"
                     )}
                   >
-                    <BedDouble size={13} />
+                    <BedDouble size={13} className="shrink-0" />
                     <span>Checked-in</span>
                     <span className={cn(
-                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full shrink-0",
                       reservationViewFilter === 'checked_in' ? "bg-zinc-950 text-emerald-400" : "bg-zinc-800 text-zinc-400"
                     )}>
                       {inhouse.length}
@@ -1581,16 +1581,16 @@ export function OperationsDashboard() {
                     type="button"
                     onClick={() => setReservationViewFilter('confirmed')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                       reservationViewFilter === 'confirmed'
                         ? "bg-blue-500 text-zinc-950 font-black shadow-sm"
                         : "text-zinc-400 hover:text-zinc-100"
                     )}
                   >
-                    <CheckCircle2 size={13} />
+                    <CheckCircle2 size={13} className="shrink-0" />
                     <span>Confirmed</span>
                     <span className={cn(
-                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full shrink-0",
                       reservationViewFilter === 'confirmed' ? "bg-zinc-950 text-blue-400" : "bg-zinc-800 text-zinc-400"
                     )}>
                       {confirmedReservations.length}
@@ -1601,16 +1601,16 @@ export function OperationsDashboard() {
                     type="button"
                     onClick={() => setReservationViewFilter('cancelled')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                       reservationViewFilter === 'cancelled'
                         ? "bg-red-500 text-zinc-950 font-black shadow-sm"
                         : "text-zinc-400 hover:text-zinc-100"
                     )}
                   >
-                    <XCircle size={13} />
+                    <XCircle size={13} className="shrink-0" />
                     <span>Cancelled</span>
                     <span className={cn(
-                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full shrink-0",
                       reservationViewFilter === 'cancelled' ? "bg-zinc-950 text-red-400" : "bg-zinc-800 text-zinc-400"
                     )}>
                       {cancelledReservations.length}
@@ -1621,7 +1621,7 @@ export function OperationsDashboard() {
                     type="button"
                     onClick={() => setReservationViewFilter('all')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                       reservationViewFilter === 'all'
                         ? "bg-zinc-700 text-zinc-50 font-black shadow-sm"
                         : "text-zinc-400 hover:text-zinc-100"
@@ -1629,7 +1629,7 @@ export function OperationsDashboard() {
                   >
                     <span>All</span>
                     <span className={cn(
-                      "px-1.5 py-0.5 text-[10px] font-black rounded-full",
+                      "px-1.5 py-0.5 text-[10px] font-black rounded-full shrink-0",
                       reservationViewFilter === 'all' ? "bg-zinc-950 text-zinc-300" : "bg-zinc-800 text-zinc-400"
                     )}>
                       {reservations.length}
@@ -1789,8 +1789,8 @@ export function OperationsDashboard() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="bg-zinc-950/50 text-zinc-500 text-xs font-bold uppercase tracking-wider">
                 <th className="px-6 py-4 border-b border-zinc-800">Guest</th>
@@ -2011,23 +2011,23 @@ export function OperationsDashboard() {
       )}
 
       {/* Quick Check-in Floating Action Button (FAB) */}
-      <div className="fixed bottom-6 right-6 z-40">
+      <div className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-40 pb-[env(safe-area-inset-bottom,0px)]">
         <button
           type="button"
           onClick={() => {
             setQuickCheckInInitialRes(null);
             setShowQuickCheckIn(true);
           }}
-          className="flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black shadow-2xl shadow-emerald-950/70 hover:shadow-emerald-500/25 border border-emerald-300/40 transition-all duration-200 active:scale-95 group tracking-tight cursor-pointer"
+          className="flex items-center gap-2 sm:gap-2.5 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px] rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black shadow-2xl shadow-emerald-950/70 hover:shadow-emerald-500/25 border border-emerald-300/40 transition-all duration-200 active:scale-95 group tracking-tight cursor-pointer"
           title="Quick Check-in: Process expected arrivals & express walk-ins"
           aria-label="Quick Check-in"
         >
           <div className="p-1 rounded-full bg-zinc-950/15 group-hover:bg-zinc-950/25 transition-colors">
             <LogIn size={18} className="text-zinc-950 stroke-[2.5]" />
           </div>
-          <span className="text-sm font-black uppercase tracking-wider">Quick Check-in</span>
+          <span className="text-xs sm:text-sm font-black uppercase tracking-wider">Quick Check-in</span>
           {arrivals.length > 0 && (
-            <span className="ml-0.5 px-2 py-0.5 text-xs font-black rounded-full bg-zinc-950 text-emerald-400 border border-zinc-800 shadow-sm animate-pulse">
+            <span className="ml-0.5 px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-xs font-black rounded-full bg-zinc-950 text-emerald-400 border border-zinc-800 shadow-sm animate-pulse">
               {arrivals.length}
             </span>
           )}

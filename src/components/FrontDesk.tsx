@@ -4015,9 +4015,9 @@ export function FrontDesk() {
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-zinc-800 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <h3 className="font-bold text-zinc-50 text-sm">{selectedReservations.length > 0 ? `Selected: ${selectedReservations.length}` : 'Reservations'}</h3>
-              <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 flex-wrap gap-1">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 max-w-full">
+              <h3 className="font-bold text-zinc-50 text-sm shrink-0">{selectedReservations.length > 0 ? `Selected: ${selectedReservations.length}` : 'Reservations'}</h3>
+              <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 overflow-x-auto no-scrollbar max-w-full flex-nowrap gap-1">
                 {(['all', 'arrivals', 'departures', 'checked_in', 'overstay', 'checkin_history', 'checkout_history'] as const).map((tab) => (
                   <button
                     key={tab}
@@ -4026,7 +4026,7 @@ export function FrontDesk() {
                       setSelectedReservations([]);
                     }}
                     className={cn(
-                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all whitespace-nowrap",
+                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all whitespace-nowrap shrink-0 cursor-pointer",
                       activeTab === tab 
                         ? "bg-emerald-500 text-black shadow-lg" 
                         : "text-zinc-500 hover:text-zinc-300"
@@ -4165,8 +4165,8 @@ export function FrontDesk() {
             </div>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
+        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="w-full text-left min-w-[700px]">
             <thead>
               <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider border-b border-zinc-800">
                 <th className="px-6 py-4 w-10">

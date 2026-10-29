@@ -12,10 +12,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Security Headers Middleware (OWASP recommended defense-in-depth)
+  // Security Headers Middleware (iFrame compatible for AI Studio preview)
   app.use((req, res, next) => {
     res.header("X-Content-Type-Options", "nosniff");
-    res.header("X-Frame-Options", "SAMEORIGIN");
     res.header("X-XSS-Protection", "1; mode=block");
     res.header("Referrer-Policy", "strict-origin-when-cross-origin");
     next();

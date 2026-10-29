@@ -145,24 +145,25 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       <div className="flex items-center gap-2 sm:gap-4 flex-1">
         <button 
           onClick={onMenuClick}
-          className="lg:hidden p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
+          className="lg:hidden min-w-[42px] min-h-[42px] flex items-center justify-center p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all shrink-0 active:scale-95"
           title="Toggle Menu"
+          aria-label="Toggle Navigation Menu"
         >
           <Menu size={20} />
         </button>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-zinc-400 min-w-fit cursor-pointer hover:text-zinc-50 transition-colors group" onClick={() => navigate('/')}>
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-2 text-zinc-400 min-w-0 cursor-pointer hover:text-zinc-50 transition-colors group" onClick={() => navigate('/')}>
             {hotel?.branding?.logoUrl ? (
               <img 
                 src={hotel.branding.logoUrl} 
                 alt={hotel?.name || 'Hotel Logo'} 
-                className="w-5 h-5 rounded-md object-contain bg-zinc-900 border border-zinc-800"
+                className="w-5 h-5 rounded-md object-contain bg-zinc-900 border border-zinc-800 shrink-0"
                 onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
               />
             ) : (
-              <Building2 size={16} className="text-emerald-500 group-hover:scale-110 transition-transform" />
+              <Building2 size={16} className="text-emerald-500 group-hover:scale-110 transition-transform shrink-0" />
             )}
-            <span className="text-xs sm:text-sm font-bold text-zinc-100 tracking-tight truncate max-w-[120px] sm:max-w-[240px]">{hotel?.name || 'Hotel PMS'}</span>
+            <span className="text-xs sm:text-sm font-bold text-zinc-100 tracking-tight truncate max-w-[110px] xs:max-w-[150px] sm:max-w-[240px]">{hotel?.name || 'Hotel PMS'}</span>
           </div>
 
           {hotel?.subscriptionExpiry && (
@@ -472,15 +473,15 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 sm:gap-4 md:gap-6">
-        <div className="flex items-center gap-1 sm:gap-3 md:gap-4 border-r border-zinc-800 pr-1.5 sm:pr-4 md:pr-6">
+      <div className="flex items-center gap-1.5 sm:gap-4 md:gap-6 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2.5 md:gap-4 border-r border-zinc-800 pr-1 sm:pr-4 md:pr-6 shrink-0">
           <UIScaleControl />
           <CurrencyToggle />
           <Notifications />
         </div>
         
-        <div className="flex items-center gap-3">
-          <div className="text-right hidden sm:block">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="text-right hidden md:block">
             <div className="text-sm font-bold text-zinc-50 leading-none mb-1">
               {profile?.displayName || profile?.email?.split('@')[0]}
             </div>
@@ -490,9 +491,11 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           </div>
           <div 
             onClick={() => navigate('/settings')}
-            className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 cursor-pointer hover:bg-zinc-800 transition-colors"
+            className="w-9 h-9 sm:w-10 sm:h-10 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 cursor-pointer hover:bg-zinc-800 active:scale-95 transition-all shrink-0"
+            title="Settings & Profile"
+            aria-label="User profile settings"
           >
-            <User size={20} />
+            <User size={18} className="sm:size-5" />
           </div>
         </div>
       </div>

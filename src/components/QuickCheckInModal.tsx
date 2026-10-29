@@ -690,26 +690,26 @@ export function QuickCheckInModal({
 
   return (
     <div 
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overscroll-contain animate-in fade-in duration-150"
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4 overscroll-contain animate-in fade-in duration-150"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl flex flex-col max-h-[92vh] sm:max-h-[88vh] shadow-2xl overflow-hidden min-h-0 relative my-auto">
+      <div className="bg-zinc-900 border-0 sm:border border-zinc-800 rounded-none sm:rounded-2xl w-full max-w-2xl flex flex-col h-[100dvh] sm:h-auto sm:max-h-[88vh] shadow-2xl overflow-hidden min-h-0 relative my-auto">
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-zinc-800 shrink-0 bg-zinc-900/95 sticky top-0 z-10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-              <LogIn size={20} className="stroke-[2.5]" />
+        <div className="px-4 py-3 sm:px-5 sm:py-4 border-b border-zinc-800 shrink-0 bg-zinc-900/95 sticky top-0 z-10 flex items-center justify-between pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 sm:p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
+              <LogIn size={18} className="sm:w-5 sm:h-5 stroke-[2.5]" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-zinc-50 tracking-tight">Quick Check-in</h3>
-                <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-zinc-50 tracking-tight truncate">Quick Check-in</h3>
+                <span className="px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wider rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
                   Rapid Arrival
                 </span>
               </div>
-              <p className="text-xs text-zinc-400 mt-0.5">
+              <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5 line-clamp-1 sm:line-clamp-none">
                 Fast guest arrival processing for expected bookings and express walk-ins
               </p>
             </div>
@@ -717,7 +717,7 @@ export function QuickCheckInModal({
           <button 
             type="button"
             onClick={onClose} 
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-xl transition-colors shrink-0 cursor-pointer"
             aria-label="Close dialog"
           >
             <X size={20} />
@@ -725,22 +725,22 @@ export function QuickCheckInModal({
         </div>
 
         {/* Mode Switcher Tabs */}
-        <div className="px-4 sm:px-6 pt-3 pb-0 bg-zinc-900 shrink-0 border-b border-zinc-800/80">
-          <div className="flex gap-2">
+        <div className="px-3 sm:px-6 pt-2 pb-0 bg-zinc-900 shrink-0 border-b border-zinc-800/80">
+          <div className="flex gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={() => setActiveMode('arrivals')}
               className={cn(
-                "flex-1 pb-3 pt-2 text-xs font-bold border-b-2 flex items-center justify-center gap-2 transition-all",
+                "flex-1 min-h-[44px] pb-2.5 pt-2 text-[11px] sm:text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer",
                 activeMode === 'arrivals'
                   ? "border-emerald-500 text-emerald-400"
                   : "border-transparent text-zinc-400 hover:text-zinc-200"
               )}
             >
-              <Clock size={15} />
-              <span>Expected Arrivals (Today)</span>
+              <Clock size={14} className="shrink-0" />
+              <span className="truncate">Expected Arrivals</span>
               <span className={cn(
-                "px-2 py-0.5 text-[10px] font-black rounded-full",
+                "px-1.5 sm:px-2 py-0.5 text-[10px] font-black rounded-full shrink-0",
                 todayArrivals.length > 0 
                   ? "bg-emerald-500 text-zinc-950" 
                   : "bg-zinc-800 text-zinc-400"
@@ -752,20 +752,20 @@ export function QuickCheckInModal({
               type="button"
               onClick={() => setActiveMode('walkin')}
               className={cn(
-                "flex-1 pb-3 pt-2 text-xs font-bold border-b-2 flex items-center justify-center gap-2 transition-all",
+                "flex-1 min-h-[44px] pb-2.5 pt-2 text-[11px] sm:text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer",
                 activeMode === 'walkin'
                   ? "border-emerald-500 text-emerald-400"
                   : "border-transparent text-zinc-400 hover:text-zinc-200"
               )}
             >
-              <Sparkles size={15} />
-              <span>Express Walk-In Arrival</span>
+              <Sparkles size={14} className="shrink-0" />
+              <span className="truncate">Express Walk-In</span>
             </button>
           </div>
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar space-y-4">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-6 custom-scrollbar space-y-4 overscroll-contain">
           {/* TAB 1: EXPECTED ARRIVALS */}
           {activeMode === 'arrivals' && (
             <div className="space-y-4">
@@ -777,13 +777,13 @@ export function QuickCheckInModal({
                   placeholder="Quick search by guest name, room # or phone..."
                   value={arrivalSearch}
                   onChange={(e) => setArrivalSearch(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500/50 min-h-[44px]"
                   autoFocus
                 />
               </div>
 
               {filteredArrivals.length === 0 ? (
-                <div className="p-8 text-center bg-zinc-950/40 border border-zinc-800/80 rounded-xl space-y-3">
+                <div className="p-6 sm:p-8 text-center bg-zinc-950/40 border border-zinc-800/80 rounded-xl space-y-3">
                   <div className="w-12 h-12 rounded-full bg-zinc-800/60 text-zinc-500 flex items-center justify-center mx-auto">
                     <CheckCircle2 size={24} />
                   </div>
@@ -796,7 +796,7 @@ export function QuickCheckInModal({
                   <button
                     type="button"
                     onClick={() => setActiveMode('walkin')}
-                    className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-colors"
+                    className="mt-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-colors cursor-pointer"
                   >
                     <span>Switch to Express Walk-In</span>
                     <ArrowRight size={14} />
@@ -884,13 +884,13 @@ export function QuickCheckInModal({
                           )}
                         </div>
 
-                        <div className="sm:self-center shrink-0">
+                        <div className="w-full sm:w-auto sm:self-center shrink-0 pt-1 sm:pt-0">
                           <button
                             type="button"
                             disabled={isProcessing || !!activeOccupant || isDirty}
                             onClick={() => handleCheckInArrival(res)}
                             className={cn(
-                              "w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm",
+                              "w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm cursor-pointer",
                               activeOccupant || isDirty
                                 ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700"
                                 : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black shadow-emerald-950/40"
@@ -913,7 +913,7 @@ export function QuickCheckInModal({
                               </>
                             ) : (
                               <>
-                                <CheckCircle2 size={15} className="stroke-[2.5]" />
+                                <CheckCircle2 size={16} className="stroke-[2.5]" />
                                 <span>Check In Now</span>
                               </>
                             )}
@@ -946,7 +946,7 @@ export function QuickCheckInModal({
                     placeholder="e.g. Adebayo Adeleke"
                     value={guestName}
                     onChange={(e) => setGuestName(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     autoFocus
                   />
                 </div>
@@ -960,7 +960,7 @@ export function QuickCheckInModal({
                       placeholder="+234..."
                       value={guestPhone}
                       onChange={(e) => setGuestPhone(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     />
                   </div>
                   <div>
@@ -972,7 +972,7 @@ export function QuickCheckInModal({
                       placeholder="guest@example.com"
                       value={guestEmail}
                       onChange={(e) => setGuestEmail(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     />
                   </div>
                 </div>
@@ -985,16 +985,16 @@ export function QuickCheckInModal({
                     <BedDouble size={14} className="text-emerald-400" />
                     <span>Stay & Room Selection</span>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     {[1, 2, 3, 5].map((n) => (
                       <button
                         key={n}
                         type="button"
                         onClick={() => setQuickDuration(n)}
                         className={cn(
-                          "px-2 py-0.5 rounded text-[11px] font-bold border transition-colors",
+                          "px-2.5 py-1 min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center justify-center",
                           walkInNights === n
-                            ? "bg-emerald-500 text-zinc-950 border-emerald-400"
+                            ? "bg-emerald-500 text-zinc-950 border-emerald-400 shadow-sm"
                             : "bg-zinc-800/80 text-zinc-400 border-zinc-700 hover:text-zinc-200"
                         )}
                       >
@@ -1011,7 +1011,7 @@ export function QuickCheckInModal({
                       type="date"
                       value={checkInDate}
                       onChange={(e) => setCheckInDate(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[44px] [color-scheme:dark]"
                     />
                   </div>
                   <div>
@@ -1021,7 +1021,7 @@ export function QuickCheckInModal({
                       value={checkOutDate}
                       min={checkInDate}
                       onChange={(e) => setCheckOutDate(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[44px] [color-scheme:dark]"
                     />
                   </div>
                 </div>
@@ -1061,7 +1061,7 @@ export function QuickCheckInModal({
                           // Keep room default
                         }
                       }}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-xs sm:text-sm text-zinc-100 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[46px] cursor-pointer"
                     >
                       <option value="">-- Choose an available clean room --</option>
                       {availableRoomsForWalkIn.map((r) => (
@@ -1091,14 +1091,14 @@ export function QuickCheckInModal({
                       min={0}
                       value={customRate !== '' ? customRate : (selectedRoom?.price || 0)}
                       onChange={(e) => setCustomRate(e.target.value ? Number(e.target.value) : '')}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono min-h-[44px]"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-zinc-400 mb-1">
                       Calculated Total ({walkInNights} night{walkInNights > 1 ? 's' : ''})
                     </label>
-                    <div className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-emerald-400 flex items-center justify-between">
+                    <div className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs sm:text-sm font-mono font-bold text-emerald-400 flex items-center justify-between min-h-[44px]">
                       <span>{formatCurrency(walkInTotalAmount, safeCurrency, exchangeRate)}</span>
                       <span className="text-[10px] text-zinc-500 font-sans font-normal">Auto-computed</span>
                     </div>
@@ -1121,9 +1121,9 @@ export function QuickCheckInModal({
                         type="button"
                         onClick={() => handlePaymentOptionChange(opt.id as any)}
                         className={cn(
-                          "py-1.5 px-2 rounded-lg text-xs font-bold border transition-colors text-center",
+                          "min-h-[44px] py-2 px-2.5 rounded-lg text-xs font-bold border transition-colors text-center flex items-center justify-center cursor-pointer",
                           paymentOption === opt.id
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/40"
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-sm"
                             : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200"
                         )}
                       >
@@ -1143,7 +1143,7 @@ export function QuickCheckInModal({
                         max={walkInTotalAmount || undefined}
                         value={paymentAmount}
                         onChange={(e) => setPaymentAmount(e.target.value ? Number(e.target.value) : '')}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono min-h-[44px]"
                         placeholder="Amount"
                       />
                     </div>
@@ -1151,28 +1151,28 @@ export function QuickCheckInModal({
                 </div>
               </div>
 
-              {/* Submit Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-3">
+              {/* Submit Buttons (Sticky footer on phone for effortless one-handed thumb completion) */}
+              <div className="pt-3 border-t border-zinc-800/80 flex flex-col-reverse sm:flex-row items-stretch sm:items-center sm:justify-end gap-2.5 sm:gap-3 sticky bottom-0 bg-zinc-900/95 -mx-3.5 -mb-3.5 p-3.5 sm:mx-0 sm:mb-0 sm:p-0 sm:bg-transparent sm:static sm:border-t-0 backdrop-blur-sm pb-[max(0.875rem,env(safe-area-inset-bottom))]">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-bold transition-colors"
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-bold transition-colors text-center cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingWalkIn || !guestName.trim() || !selectedRoomId}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition-all active:scale-95"
+                  className="min-h-[48px] px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all active:scale-95 cursor-pointer"
                 >
                   {isSubmittingWalkIn ? (
                     <>
-                      <span className="w-3.5 h-3.5 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
+                      <span className="w-4 h-4 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
                       <span>Checking In...</span>
                     </>
                   ) : (
                     <>
-                      <LogIn size={15} className="stroke-[2.5]" />
+                      <LogIn size={16} className="stroke-[2.5]" />
                       <span>Complete Walk-In Check-In</span>
                     </>
                   )}
