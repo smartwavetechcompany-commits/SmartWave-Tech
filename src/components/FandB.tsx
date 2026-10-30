@@ -36,7 +36,9 @@ import {
   DollarSign,
   X,
   AlertTriangle,
-  ClipboardList
+  ClipboardList,
+  Lock,
+  CreditCard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
@@ -81,6 +83,21 @@ export function FandB() {
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
+
+  // Direct Settlement in F&B State
+  const [settleOrderModal, setSettleOrderModal] = useState<KitchenOrder | null>(null);
+  const [settleAmount, setSettleAmount] = useState<number>(0);
+  const [settleMethod, setSettleMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
+  const [settleNotes, setSettleNotes] = useState<string>('');
+  const [isSettling, setIsSettling] = useState(false);
+
+  // Add Items Before Delivery State
+  const [addItemsOrderModal, setAddItemsOrderModal] = useState<KitchenOrder | null>(null);
+  const [additionalCart, setAdditionalCart] = useState<{ id: string; name: string; price: number; quantity: number }[]>([]);
+  const [addCategoryFilter, setAddCategoryFilter] = useState<string>('all');
+  const [addSearchQuery, setAddSearchQuery] = useState<string>('');
+  const [customAddItem, setCustomAddItem] = useState({ name: '', price: 0 });
+  const [isAddingItems, setIsAddingItems] = useState(false);
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
@@ -513,6 +530,340 @@ export function FandB() {
     }
   };
 
+  // Direct Settlement in F&B Handlers
+  const openSettleModal = (order: KitchenOrder, currentBalance: number) => {
+    const orderTotal = order.totalAmount || order.price || 0;
+    let paymentsList: { amount: number; method: string }[] = [];
+    if (Array.isArray(order.payments) && order.payments.length > 0) {
+      paymentsList = order.payments;
+    } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
+      paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
+    }
+    const directPaid = paymentsList
+      .filter(p => p.method !== 'room')
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    const remaining = Math.max(0, currentBalance > 0 ? currentBalance : (orderTotal - directPaid));
+    setSettleOrderModal(order);
+    setSettleAmount(remaining);
+    setSettleMethod('cash');
+    setSettleNotes('');
+  };
+
+  const handleSettleOrderPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !settleOrderModal || isSettling) return;
+
+    if (settleAmount <= 0) {
+      toast.error('Please enter a valid payment amount greater than 0.');
+      return;
+    }
+
+    const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
+
+    // Calculate existing direct paid
+    let currentPayments: { amount: number; method: string; date?: string; reference?: string }[] = [];
+    if (Array.isArray(settleOrderModal.payments) && settleOrderModal.payments.length > 0) {
+      currentPayments = settleOrderModal.payments.filter(p => (p.amount || 0) > 0 && p.method !== 'room');
+    } else if (settleOrderModal.paidAmount !== undefined && settleOrderModal.paidAmount > 0 && settleOrderModal.paymentMethod !== 'room') {
+      currentPayments = [{
+        amount: settleOrderModal.paidAmount,
+        method: settleOrderModal.paymentMethod || 'cash',
+        date: settleOrderModal.timestamp
+      }];
+    }
+
+    const prevDirectPaid = currentPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const newDirectPaid = prevDirectPaid + settleAmount;
+
+    const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
+    const res = isRoomOrder 
+      ? (reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') || reservations.find(r => r.id === settleOrderModal.guestId))
+      : undefined;
+    const guestId = settleOrderModal.guestId || res?.guestId;
+
+    setIsSettling(true);
+    try {
+      const newPaymentRecord = {
+        amount: settleAmount,
+        method: settleMethod,
+        date: new Date().toISOString(),
+        reference: settleNotes || `F&B Direct Settlement (${settleMethod.toUpperCase()})`
+      };
+
+      const updatedPayments = [...currentPayments, newPaymentRecord];
+      
+      // If room order and remaining uncollected balance exists, reflect remaining room charge
+      if (isRoomOrder && newDirectPaid < orderTotal) {
+        updatedPayments.push({
+          amount: Math.max(0, orderTotal - newDirectPaid),
+          method: 'room',
+          date: new Date().toISOString(),
+          reference: 'Charged to Room Folio'
+        });
+      }
+
+      // 1. Update Kitchen Order in Firestore
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', settleOrderModal.id), {
+        payments: updatedPayments,
+        paidAmount: newDirectPaid,
+        lastPaymentAt: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'SETTLE_ORDER_PAYMENT',
+        details: `Settled ${formatCurrency(settleAmount, currency, exchangeRate)} via ${settleMethod} for Order ${settleOrderModal.id}`
+      });
+
+      // 2. Post to Hotel Finance Collection as Income
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+        type: 'income',
+        amount: settleAmount,
+        category: 'F & B Revenue',
+        description: `F & B Direct Payment (${settleMethod.toUpperCase()}) - Room ${settleOrderModal.roomNumber || 'Walk-in'} (Order ${settleOrderModal.id.slice(-6)})${settleNotes ? `: ${settleNotes}` : ''}`,
+        timestamp: new Date().toISOString(),
+        paymentMethod: settleMethod,
+        referenceId: settleOrderModal.id,
+        postedBy: profile.uid
+      }, {
+        hotelId: hotel.id,
+        module: 'Finance',
+        action: 'F&B_INCOME_RECORD',
+        details: `Recorded F&B direct payment of ${settleAmount}`
+      });
+
+      // 3. If linked to an in-house room reservation, credit the guest ledger so room folio stays synchronized
+      if (isRoomOrder && res && guestId) {
+        await postToLedger(hotel.id, guestId, res.id, {
+          amount: settleAmount,
+          type: 'credit',
+          category: 'payment',
+          description: `F & B Direct Payment (${settleMethod.toUpperCase()}): ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`,
+          referenceId: `${settleOrderModal.id}_PAY_${Date.now()}`,
+          postedBy: profile.uid,
+          paymentMethod: settleMethod as any
+        }, profile.uid, res.corporateId, settleMethod as any, {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        });
+      }
+
+      // 4. Log Activity
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'F&B_ORDER_PAYMENT_RECORDED',
+        resource: `Order ${settleOrderModal.id} (Room ${settleOrderModal.roomNumber}): ${formatCurrency(settleAmount, currency, exchangeRate)} via ${settleMethod}`,
+        hotelId: hotel.id,
+        module: 'F & B'
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Recorded F&B order direct settlement'
+      });
+
+      toast.success(`Payment of ${formatCurrency(settleAmount, currency, exchangeRate)} recorded successfully.`);
+      setSettleOrderModal(null);
+    } catch (err: any) {
+      console.error('Error settling F&B order payment:', err);
+      toast.error(err.message || 'Failed to record payment');
+    } finally {
+      setIsSettling(false);
+    }
+  };
+
+  // Add Items Before Delivery Handlers
+  const openAddItemsModal = (order: KitchenOrder) => {
+    if (order.status === 'delivered') {
+      toast.error('This order has already been delivered. No more items can be added after delivery.');
+      return;
+    }
+    setAddItemsOrderModal(order);
+    setAdditionalCart([]);
+    setAddCategoryFilter('all');
+    setAddSearchQuery('');
+    setCustomAddItem({ name: '', price: 0 });
+  };
+
+  const addToAdditionalCart = (item: InventoryItem | { name: string; price: number; id?: string }) => {
+    setAdditionalCart(prev => {
+      const id = item.id || `custom-${Date.now()}`;
+      const existing = prev.find(i => i.id === id || (i.name.toLowerCase() === item.name.toLowerCase() && i.id.startsWith('custom-')));
+      if (existing) {
+        return prev.map(i => (i.id === id || (i.name.toLowerCase() === item.name.toLowerCase() && i.id.startsWith('custom-'))) ? { ...i, quantity: i.quantity + 1 } : i);
+      }
+      return [...prev, { id: id, name: item.name, price: item.price, quantity: 1 }];
+    });
+  };
+
+  const updateAdditionalCartQuantity = (id: string, delta: number) => {
+    setAdditionalCart(prev => prev.map(i => {
+      if (i.id === id) {
+        const newQty = i.quantity + delta;
+        return newQty > 0 ? { ...i, quantity: newQty } : null;
+      }
+      return i;
+    }).filter(Boolean) as { id: string; name: string; price: number; quantity: number }[]);
+  };
+
+  const removeAdditionalCartItem = (id: string) => {
+    setAdditionalCart(prev => prev.filter(i => i.id !== id));
+  };
+
+  const addCustomToAdditionalCart = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customAddItem.name.trim() || customAddItem.price <= 0) return;
+    addToAdditionalCart({ name: customAddItem.name.trim(), price: customAddItem.price });
+    setCustomAddItem({ name: '', price: 0 });
+    toast.success('Custom item added');
+  };
+
+  const handleAddItemsToExistingOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !addItemsOrderModal || isAddingItems) return;
+
+    // Strict constraint: After clicking delivered no more items can be added
+    if (addItemsOrderModal.status === 'delivered') {
+      toast.error('This order has already been marked as DELIVERED. No more items can be added.');
+      setAddItemsOrderModal(null);
+      return;
+    }
+
+    if (additionalCart.length === 0) {
+      toast.error('Please select at least one item to add.');
+      return;
+    }
+
+    setIsAddingItems(true);
+    try {
+      const additionalSubtotal = additionalCart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const newSubtotal = (addItemsOrderModal.price || 0) + additionalSubtotal;
+
+      // Calculate Taxes on new subtotal
+      const activeTaxes = (hotel?.taxes || []).filter(t => {
+        const status = (t.status || '').toLowerCase().trim();
+        const category = (t.category || '').toLowerCase().trim();
+        return status === 'active' && (category === 'restaurant' || category === 'f & b' || category === 'all');
+      });
+      const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
+      const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (newSubtotal * (t.percentage / 100)), 0);
+      const taxDetails = activeTaxes.map(t => ({
+        name: t.name,
+        percentage: t.percentage,
+        amount: t.isInclusive ? (newSubtotal - (newSubtotal / (1 + (t.percentage / 100)))) : (newSubtotal * (t.percentage / 100)),
+        isInclusive: t.isInclusive
+      }));
+
+      // Respect existing discount if any
+      let discountAmount = 0;
+      const existingDiscount = (addItemsOrderModal as any).discount || 0;
+      const existingDiscountType = (addItemsOrderModal as any).discountType || 'fixed';
+      if (existingDiscount > 0) {
+        if (existingDiscountType === 'percentage') {
+          discountAmount = ((newSubtotal + totalExclusiveTax) * existingDiscount) / 100;
+        } else {
+          discountAmount = existingDiscount;
+        }
+      }
+
+      const newFinalPrice = newSubtotal + totalExclusiveTax - discountAmount;
+      const previousTotal = addItemsOrderModal.totalAmount || addItemsOrderModal.price || 0;
+      const incrementalCharge = newFinalPrice - previousTotal;
+
+      // Merge itemsList
+      const existingList: { id: string; name: string; price: number; quantity: number }[] = 
+        Array.isArray(addItemsOrderModal.itemsList) && addItemsOrderModal.itemsList.length > 0
+          ? [...addItemsOrderModal.itemsList]
+          : [];
+
+      const mergedList = [...existingList];
+      for (const newItem of additionalCart) {
+        const idx = mergedList.findIndex(i => i.id === newItem.id || i.name.toLowerCase() === newItem.name.toLowerCase());
+        if (idx >= 0) {
+          mergedList[idx] = {
+            ...mergedList[idx],
+            quantity: mergedList[idx].quantity + newItem.quantity
+          };
+        } else {
+          mergedList.push({ ...newItem });
+        }
+      }
+
+      const newItemsString = mergedList.map(i => `${i.quantity}x ${i.name}`).join(', ');
+      const addedItemsString = additionalCart.map(i => `${i.quantity}x ${i.name}`).join(', ');
+
+      // 1. Update Kitchen Order in Firestore
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', addItemsOrderModal.id), {
+        itemsList: mergedList,
+        items: newItemsString,
+        price: newSubtotal,
+        taxAmount: totalExclusiveTax,
+        taxDetails: taxDetails,
+        totalAmount: newFinalPrice,
+        lastItemsAddedAt: new Date().toISOString()
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ADD_ITEMS_TO_ORDER',
+        details: `Added [${addedItemsString}] to Order ${addItemsOrderModal.id}`
+      });
+
+      // 2. If room order and reservation exists, post incremental debit to ledger
+      const isRoomOrder = addItemsOrderModal.roomNumber && addItemsOrderModal.roomNumber !== 'Walk-in';
+      const res = isRoomOrder 
+        ? (reservations.find(r => r.roomNumber === addItemsOrderModal.roomNumber && r.status === 'checked_in') || reservations.find(r => r.id === addItemsOrderModal.guestId))
+        : undefined;
+      const guestId = addItemsOrderModal.guestId || res?.guestId;
+
+      if (isRoomOrder && res && guestId && incrementalCharge > 0) {
+        await postToLedger(hotel.id, guestId, res.id, {
+          amount: incrementalCharge,
+          type: 'debit',
+          category: 'F & B',
+          description: `F & B Order Additional Items (Room ${addItemsOrderModal.roomNumber}): ${addedItemsString}`,
+          referenceId: `${addItemsOrderModal.id}_ADD_${Date.now()}`,
+          postedBy: profile.uid
+        }, profile.uid, res.corporateId, 'cash', {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        });
+      }
+
+      // 3. Log Activity
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'F&B_ORDER_ITEMS_ADDED',
+        resource: `Order ${addItemsOrderModal.id} (Room ${addItemsOrderModal.roomNumber}): Added ${addedItemsString} (+${formatCurrency(incrementalCharge, currency, exchangeRate)})`,
+        hotelId: hotel.id,
+        module: 'F & B'
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Added items to active F&B order'
+      });
+
+      toast.success(`Successfully added items to order #${addItemsOrderModal.id.slice(-6)}`);
+      setAddItemsOrderModal(null);
+      setAdditionalCart([]);
+    } catch (err: any) {
+      console.error('Error adding items to order:', err);
+      toast.error(err.message || 'Failed to add items to order');
+    } finally {
+      setIsAddingItems(false);
+    }
+  };
+
   const filteredOrders = orders.filter(o => {
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
@@ -830,15 +1181,43 @@ export function FandB() {
                   <p>No orders found</p>
                 </div>
               ) : (
-                filteredOrders.map((order) => (
-                  <motion.div
-                    key={order.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col"
-                  >
+                filteredOrders.map((order) => {
+                  const orderTotal = order.totalAmount || order.price || 0;
+                  
+                  // Gather payments
+                  let paymentsList: { amount: number; method: string }[] = [];
+                  if (Array.isArray(order.payments) && order.payments.length > 0) {
+                    paymentsList = order.payments;
+                  } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
+                    paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
+                    if (order.paymentMethod === 'room' && order.paidAmount < orderTotal) {
+                      paymentsList.push({ amount: orderTotal - order.paidAmount, method: 'room' });
+                    }
+                  } else if (order.paymentMethod) {
+                    paymentsList = [{ amount: orderTotal, method: order.paymentMethod }];
+                  }
+
+                  const directPaid = paymentsList
+                    .filter(p => p.method !== 'room')
+                    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                  const roomCharged = paymentsList
+                    .filter(p => p.method === 'room')
+                    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                  const totalAccounted = directPaid + roomCharged;
+                  const balanceOwing = orderTotal - totalAccounted;
+                  const weOweGuest = directPaid - orderTotal;
+
+                  return (
+                    <motion.div
+                      key={order.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col"
+                    >
                     <div className="p-5 flex-1">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
@@ -911,35 +1290,6 @@ export function FandB() {
                             </div>
                           ))}
 
-                          {(() => {
-                            const orderTotal = order.totalAmount || order.price || 0;
-                            
-                            // Gather payments
-                            let paymentsList: { amount: number; method: string }[] = [];
-                            if (Array.isArray(order.payments) && order.payments.length > 0) {
-                              paymentsList = order.payments;
-                            } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
-                              paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
-                              if (order.paymentMethod === 'room' && order.paidAmount < orderTotal) {
-                                paymentsList.push({ amount: orderTotal - order.paidAmount, method: 'room' });
-                              }
-                            } else if (order.paymentMethod) {
-                              paymentsList = [{ amount: orderTotal, method: order.paymentMethod }];
-                            }
-
-                            const directPaid = paymentsList
-                              .filter(p => p.method !== 'room')
-                              .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-                            const roomCharged = paymentsList
-                              .filter(p => p.method === 'room')
-                              .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-                            const totalAccounted = directPaid + roomCharged;
-                            const balanceOwing = orderTotal - totalAccounted;
-                            const weOweGuest = directPaid - orderTotal;
-
-                            return (
                               <div className="space-y-1.5 pt-2 mt-2 border-t border-zinc-800/30">
                                 <div className="flex items-center justify-between">
                                   <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Grand Total</span>
@@ -972,7 +1322,20 @@ export function FandB() {
                                     <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
                                       <AlertCircle size={12} /> Owing / Balance Due
                                     </span>
-                                    <span className="text-xs">{formatCurrency(balanceOwing, currency, exchangeRate)}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs">{formatCurrency(balanceOwing, currency, exchangeRate)}</span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openSettleModal(order, balanceOwing);
+                                        }}
+                                        className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black uppercase rounded-lg shadow transition-all active:scale-95 flex items-center gap-1"
+                                        title="Settle directly in F&B"
+                                      >
+                                        <DollarSign size={11} /> Settle
+                                      </button>
+                                    </div>
                                   </div>
                                 ) : weOweGuest > 0 ? (
                                   <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-bold">
@@ -990,8 +1353,6 @@ export function FandB() {
                                   </div>
                                 )}
                               </div>
-                            );
-                          })()}
                         </div>
                         {order.notes && (
                           <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800">
@@ -1002,50 +1363,79 @@ export function FandB() {
                       </div>
                     </div>
 
-                    {order.status !== 'delivered' && (
-                      <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
-                        {(hasPermission(profile, 'edit_fb_orders', customRoles) || hasPermission(profile, 'manage_kitchen', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
-                          <>
-                            {order.status === 'pending' && (
-                              <button
-                                onClick={() => updateOrderStatus(order.id, 'preparing')}
-                                className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
-                              >
-                                <ChefHat size={14} />
-                                Start Preparing
-                              </button>
-                            )}
-                            {order.status === 'preparing' && (
-                              <button
-                                onClick={() => updateOrderStatus(order.id, 'ready')}
-                                className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
-                              >
-                                <Bell size={14} />
-                                Mark as Ready
-                              </button>
-                            )}
-                            {order.status === 'ready' && (
-                              <button
-                                onClick={() => updateOrderStatus(order.id, 'delivered')}
-                                className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
-                              >
-                                <CheckCircle2 size={14} />
-                                Confirm Delivery
-                              </button>
-                            )}
-                          </>
-                        )}
+                    <div className="p-3 bg-zinc-950 border-t border-zinc-800 grid grid-cols-1 gap-2">
+                      {order.status !== 'delivered' ? (
+                        <>
+                          {(hasPermission(profile, 'edit_fb_orders', customRoles) || hasPermission(profile, 'manage_kitchen', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                            <>
+                              {order.status === 'pending' && (
+                                <button
+                                  onClick={() => updateOrderStatus(order.id, 'preparing')}
+                                  className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                                >
+                                  <ChefHat size={14} />
+                                  Start Preparing
+                                </button>
+                              )}
+                              {order.status === 'preparing' && (
+                                <button
+                                  onClick={() => updateOrderStatus(order.id, 'ready')}
+                                  className="flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 py-2 rounded-xl text-xs font-bold transition-colors"
+                                >
+                                  <Bell size={14} />
+                                  Mark as Ready
+                                </button>
+                              )}
+                              {order.status === 'ready' && (
+                                <button
+                                  onClick={() => updateOrderStatus(order.id, 'delivered')}
+                                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                                >
+                                  <CheckCircle2 size={14} />
+                                  Confirm Delivery
+                                </button>
+                              )}
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openAddItemsModal(order)}
+                            className="flex items-center justify-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                          >
+                            <PlusCircle size={14} />
+                            Add More Items
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-900 border border-zinc-800/80 text-zinc-400 text-xs font-medium">
+                          <Lock size={13} className="text-zinc-500" />
+                          <span>Delivered • Receipt Finalized</span>
+                        </div>
+                      )}
+
+                      {/* Direct settlement button for any order with balance due */}
+                      {balanceOwing > 0 && (
                         <button
-                          onClick={() => setPrintingOrder(order)}
-                          className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                          type="button"
+                          onClick={() => openSettleModal(order, balanceOwing)}
+                          className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black py-2 rounded-xl text-xs font-black transition-all shadow-md active:scale-95"
                         >
-                          <Printer size={14} />
-                          Print Docket
+                          <DollarSign size={14} />
+                          Settle Payment ({formatCurrency(balanceOwing, currency, exchangeRate)})
                         </button>
-                      </div>
-                    )}
+                      )}
+
+                      <button
+                        onClick={() => setPrintingOrder(order)}
+                        className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                      >
+                        <Printer size={14} />
+                        Print Docket
+                      </button>
+                    </div>
                   </motion.div>
-                ))
+                );
+              })
               )}
             </AnimatePresence>
           </div>
@@ -1768,6 +2158,488 @@ export function FandB() {
                 {editingTable ? 'Update Table' : 'Add Table'}
               </button>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Settle Order Payment Modal */}
+      {settleOrderModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg overflow-hidden my-auto shadow-2xl"
+          >
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
+                  <DollarSign size={20} className="text-emerald-400" />
+                  Settle Order Payment
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Order #{settleOrderModal.id.slice(-6)} • Room {settleOrderModal.roomNumber || 'Walk-in'} ({settleOrderModal.guestName || 'Guest'})
+                </p>
+              </div>
+              <button 
+                onClick={() => setSettleOrderModal(null)} 
+                className="p-1.5 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                <XCircle size={22} />
+              </button>
+            </div>
+
+            {(() => {
+              const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
+              let paymentsList: { amount: number; method: string }[] = [];
+              if (Array.isArray(settleOrderModal.payments) && settleOrderModal.payments.length > 0) {
+                paymentsList = settleOrderModal.payments.filter(p => (p.amount || 0) > 0 && p.method !== 'room');
+              } else if (settleOrderModal.paidAmount !== undefined && settleOrderModal.paidAmount > 0 && settleOrderModal.paymentMethod !== 'room') {
+                paymentsList = [{ amount: settleOrderModal.paidAmount, method: settleOrderModal.paymentMethod || 'cash' }];
+              }
+              const currentDirectPaid = paymentsList.reduce((sum, p) => sum + p.amount, 0);
+              const remainingDue = Math.max(0, orderTotal - currentDirectPaid);
+
+              return (
+                <form onSubmit={handleSettleOrderPayment} className="p-6 space-y-5">
+                  {/* Order Financial Summary */}
+                  <div className="bg-zinc-950 border border-zinc-800/80 rounded-2xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-400">Order Grand Total</span>
+                      <span className="font-bold text-zinc-200">{formatCurrency(orderTotal, currency, exchangeRate)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-400">Directly Paid to F&B</span>
+                      <span className="font-bold text-emerald-400">{formatCurrency(currentDirectPaid, currency, exchangeRate)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs pt-2 border-t border-zinc-800 font-bold">
+                      <span className="text-red-400">Outstanding Balance Due</span>
+                      <span className="text-sm font-black text-red-400">{formatCurrency(remainingDue, currency, exchangeRate)}</span>
+                    </div>
+                  </div>
+
+                  {/* Payment Amount Input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                        Payment Amount ({currency})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setSettleAmount(remainingDue)}
+                        className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+                      >
+                        Pay Full Balance
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="any"
+                        min="1"
+                        max={remainingDue > 0 ? remainingDue : orderTotal}
+                        required
+                        value={settleAmount || ''}
+                        onChange={(e) => setSettleAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-lg font-black text-emerald-400 focus:outline-none focus:border-emerald-500/50"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSettleAmount(remainingDue)}
+                        className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-semibold transition-colors"
+                      >
+                        Full ({formatCurrency(remainingDue, currency, exchangeRate)})
+                      </button>
+                      {remainingDue > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setSettleAmount(Math.round(remainingDue / 2))}
+                          className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-semibold transition-colors"
+                        >
+                          Half ({formatCurrency(Math.round(remainingDue / 2), currency, exchangeRate)})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Payment Method Selector */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                      Payment Method
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['cash', 'card', 'transfer'] as const).map((method) => (
+                        <button
+                          key={method}
+                          type="button"
+                          onClick={() => setSettleMethod(method)}
+                          className={cn(
+                            "py-2.5 px-3 rounded-xl border text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5",
+                            settleMethod === method
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 ring-1 ring-emerald-500/30"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                          )}
+                        >
+                          {method === 'cash' && <DollarSign size={14} />}
+                          {method === 'card' && <CreditCard size={14} />}
+                          {method === 'transfer' && <RefreshCw size={14} />}
+                          {method}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Notes / Reference */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                      Notes / Reference (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={settleNotes}
+                      onChange={(e) => setSettleNotes(e.target.value)}
+                      placeholder="e.g. Paid at restaurant counter, POS slip #9872"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setSettleOrderModal(null)}
+                      className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSettling || settleAmount <= 0}
+                      className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black rounded-xl text-xs font-black transition-all shadow-lg active:scale-95 flex items-center justify-center gap-1.5"
+                    >
+                      {isSettling ? (
+                        <>
+                          <RefreshCw size={14} className="animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={15} />
+                          Confirm Payment ({formatCurrency(settleAmount, currency, exchangeRate)})
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              );
+            })()}
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add Items to Order Modal (Available Before Delivery Only) */}
+      {addItemsOrderModal && addItemsOrderModal.status !== 'delivered' && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-5xl max-h-[90vh] h-[85vh] flex flex-col overflow-hidden my-auto shadow-2xl"
+          >
+            {/* Modal Header */}
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
+                  <PlusCircle size={20} className="text-blue-400" />
+                  Add Items to Order #{addItemsOrderModal.id.slice(-6)}
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Room {addItemsOrderModal.roomNumber || 'Walk-in'} • Status:{' '}
+                  <span className="font-bold uppercase text-amber-400">{addItemsOrderModal.status}</span> • Current Total:{' '}
+                  <span className="font-bold text-zinc-200">
+                    {formatCurrency(addItemsOrderModal.totalAmount || addItemsOrderModal.price || 0, currency, exchangeRate)}
+                  </span>
+                </p>
+              </div>
+              <button 
+                onClick={() => setAddItemsOrderModal(null)} 
+                className="p-1.5 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                <XCircle size={22} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left Column: Menu Items Selection */}
+              <div className="flex-1 border-r border-zinc-800 flex flex-col overflow-hidden">
+                {/* Search & Category Filter */}
+                <div className="p-4 border-b border-zinc-800 space-y-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input
+                      type="text"
+                      placeholder="Search F&B items..."
+                      value={addSearchQuery}
+                      onChange={(e) => setAddSearchQuery(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-4 py-2 text-xs text-zinc-200 focus:outline-none focus:border-blue-500/50"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAddCategoryFilter('all')}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                        addCategoryFilter === 'all'
+                          ? "bg-blue-500 text-white"
+                          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                      )}
+                    >
+                      All
+                    </button>
+                    {fbCategories.map(cat => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setAddCategoryFilter(cat.name)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                          addCategoryFilter === cat.name
+                            ? "bg-blue-500 text-white"
+                            : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                        )}
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Items Grid & Custom Item Form */}
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+                  {(() => {
+                    const filteredAddInventory = inventory.filter(item => {
+                      const isFBItem = fbCategoryNames.includes(item.category);
+                      const matchesCategory = addCategoryFilter === 'all' ? true : item.category === addCategoryFilter;
+                      const matchesSearch = !addSearchQuery.trim() || item.name.toLowerCase().includes(addSearchQuery.toLowerCase());
+                      return isFBItem && matchesCategory && matchesSearch;
+                    });
+
+                    if (filteredAddInventory.length === 0) {
+                      return (
+                        <div className="text-center py-10 text-zinc-600">
+                          <Utensils size={32} className="mx-auto mb-2 opacity-30" />
+                          <p className="text-xs">No matching menu items found.</p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {filteredAddInventory.map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => addToAdditionalCart(item)}
+                            className="bg-zinc-950 border border-zinc-800/80 hover:border-blue-500/40 p-3 rounded-xl text-left transition-all hover:scale-[1.02] active:scale-95 group flex flex-col justify-between"
+                          >
+                            <div className="text-xs font-bold text-zinc-200 group-hover:text-blue-400 line-clamp-1 mb-1">
+                              {item.name}
+                            </div>
+                            <div className="text-[11px] font-black text-emerald-400">
+                              {formatCurrency(item.price, currency, exchangeRate)}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Add Custom Item */}
+                  <div className="bg-zinc-950 border border-zinc-800/80 p-4 rounded-xl mt-auto">
+                    <h3 className="text-xs font-bold text-zinc-300 mb-2.5 flex items-center gap-1.5">
+                      <Plus size={14} className="text-blue-400" />
+                      Add Custom Item
+                    </h3>
+                    <form onSubmit={addCustomToAdditionalCart} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Item Name"
+                        value={customAddItem.name}
+                        onChange={(e) => setCustomAddItem({ ...customAddItem, name: e.target.value })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500/50"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Price"
+                        value={customAddItem.price || ''}
+                        onChange={(e) => setCustomAddItem({ ...customAddItem, price: Number(e.target.value) })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500/50"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!customAddItem.name.trim() || customAddItem.price <= 0}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all py-1.5"
+                      >
+                        Add to Cart
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Existing Order Summary + Additional Items to Add */}
+              <div className="w-84 bg-zinc-950 flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                  <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShoppingCart size={15} className="text-blue-400" />
+                    Additional Items Cart
+                  </span>
+                  <span className="text-xs font-bold text-blue-400">
+                    {additionalCart.reduce((sum, i) => sum + i.quantity, 0)} items
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {/* Existing Items in Order */}
+                  <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">
+                      Already in Order #{addItemsOrderModal.id.slice(-6)}
+                    </div>
+                    <p className="text-xs text-zinc-300 font-medium leading-relaxed">
+                      {addItemsOrderModal.items}
+                    </p>
+                  </div>
+
+                  {/* Additional Items List */}
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400 mb-2">
+                      New Items to Append
+                    </div>
+                    {additionalCart.length === 0 ? (
+                      <div className="text-center py-8 text-zinc-600 border border-dashed border-zinc-800 rounded-xl">
+                        <PlusCircle size={24} className="mx-auto mb-1.5 opacity-30 text-blue-400" />
+                        <p className="text-xs">Click items on the left to add them to this receipt</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {additionalCart.map(item => (
+                          <div 
+                            key={item.id} 
+                            className="flex items-center justify-between gap-2 bg-zinc-900 p-2.5 rounded-xl border border-zinc-800"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-bold text-zinc-200 truncate">{item.name}</div>
+                              <div className="text-[10px] text-emerald-400 font-bold">
+                                {formatCurrency(item.price * item.quantity, currency, exchangeRate)}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => updateAdditionalCartQuantity(item.id, -1)}
+                                className="w-6 h-6 bg-zinc-800 hover:bg-zinc-700 rounded-lg flex items-center justify-center text-zinc-300"
+                              >
+                                <Minus size={12} />
+                              </button>
+                              <span className="text-xs font-bold text-zinc-100 w-5 text-center">{item.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateAdditionalCartQuantity(item.id, 1)}
+                                className="w-6 h-6 bg-zinc-800 hover:bg-zinc-700 rounded-lg flex items-center justify-center text-zinc-300"
+                              >
+                                <Plus size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeAdditionalCartItem(item.id)}
+                                className="w-6 h-6 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg flex items-center justify-center ml-1"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Totals & Submit */}
+                <div className="p-4 border-t border-zinc-800 bg-zinc-900/90 space-y-3">
+                  {(() => {
+                    const additionalSubtotal = additionalCart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                    const currentTotal = addItemsOrderModal.totalAmount || addItemsOrderModal.price || 0;
+                    
+                    // Taxes for added items
+                    const activeTaxes = (hotel?.taxes || []).filter(t => {
+                      const status = (t.status || '').toLowerCase().trim();
+                      const category = (t.category || '').toLowerCase().trim();
+                      return status === 'active' && (category === 'restaurant' || category === 'f & b' || category === 'all');
+                    });
+                    const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
+                    const additionalTax = exclusiveTaxes.reduce((acc, t) => acc + (additionalSubtotal * (t.percentage / 100)), 0);
+                    const additionalGrandTotal = additionalSubtotal + additionalTax;
+                    const revisedGrandTotal = currentTotal + additionalGrandTotal;
+
+                    return (
+                      <>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center justify-between text-zinc-400">
+                            <span>Added Items Subtotal</span>
+                            <span className="font-bold text-zinc-200">{formatCurrency(additionalSubtotal, currency, exchangeRate)}</span>
+                          </div>
+                          {additionalTax > 0 && (
+                            <div className="flex items-center justify-between text-zinc-400">
+                              <span>Estimated Taxes</span>
+                              <span className="font-bold text-zinc-200">+{formatCurrency(additionalTax, currency, exchangeRate)}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-zinc-400 pt-1 border-t border-zinc-800">
+                            <span>Additional Charge</span>
+                            <span className="font-bold text-blue-400">+{formatCurrency(additionalGrandTotal, currency, exchangeRate)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm font-black pt-1 border-t border-zinc-800 text-emerald-400">
+                            <span>New Total Receipt</span>
+                            <span>{formatCurrency(revisedGrandTotal, currency, exchangeRate)}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setAddItemsOrderModal(null)}
+                            className="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isAddingItems || additionalCart.length === 0}
+                            onClick={handleAddItemsToExistingOrder}
+                            className="flex-2 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
+                          >
+                            {isAddingItems ? (
+                              <>
+                                <RefreshCw size={14} className="animate-spin" />
+                                Updating...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 size={15} />
+                                Update Receipt (+{formatCurrency(additionalGrandTotal, currency, exchangeRate)})
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
           </motion.div>
         </div>
       )}
