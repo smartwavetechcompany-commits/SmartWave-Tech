@@ -649,8 +649,16 @@ export interface KitchenOrder {
   notes?: string;
   price: number;
   paidAmount?: number;
-  payments?: { amount: number; method: string; date?: string; reference?: string }[];
+  payments?: { 
+    amount: number; 
+    method: string; 
+    date?: string; 
+    reference?: string; 
+    settlementSource?: 'Front Desk' | 'F&B Outlet';
+    processedBy?: { uid: string; name: string; role: string };
+  }[];
   paymentMethod: 'cash' | 'card' | 'transfer' | 'room';
+  settlementSource?: 'Front Desk' | 'F&B Outlet';
   preparedAt?: string;
   readyAt?: string;
   deliveredAt?: string;
@@ -689,6 +697,7 @@ export interface FinanceRecord {
     name: string;
     role: string;
   };
+  settlementSource?: 'Front Desk' | 'F&B Outlet';
   status?: 'pending' | 'completed' | 'cancelled';
 }
 
@@ -982,6 +991,7 @@ export interface LedgerEntry {
   isLinkedRoomCharge?: boolean;
   masterReservationId?: string;
   postedByName?: string;
+  settlementSource?: 'Front Desk' | 'F&B Outlet';
 }
 
 export interface CorporateAccount {
