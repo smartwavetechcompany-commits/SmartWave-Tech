@@ -138,7 +138,9 @@
         "autoNightDeduction": { "type": "boolean" },
         "customGracePeriodMinutes": { "type": "number" },
         "approvedLateCheckoutTime": { "type": "string" },
-        "effectiveCheckoutTime": { "type": "string" }
+        "effectiveCheckoutTime": { "type": "string" },
+        "gracePeriodRequest": { "type": "object" },
+        "gracePeriodRequestsHistory": { "type": "array", "items": { "type": "object" } }
       },
       "required": ["guestName", "roomId", "checkIn", "checkOut", "status", "createdBy"]
     },

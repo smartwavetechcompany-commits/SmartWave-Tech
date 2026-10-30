@@ -1239,13 +1239,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <button
                 type="button"
                 onClick={() => setShowExtendGraceModal(true)}
-                className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl sm:rounded-2xl text-amber-300 hover:bg-amber-500 hover:text-black transition-all group active:scale-95"
+                className={cn(
+                  "flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 rounded-xl sm:rounded-2xl transition-all group active:scale-95 border",
+                  currentReservation.gracePeriodRequest?.status === 'pending'
+                    ? "bg-amber-500/20 border-amber-500/60 text-amber-300 animate-pulse shadow-md shadow-amber-500/10"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500 hover:text-black"
+                )}
+                title={currentReservation.gracePeriodRequest?.status === 'pending' ? "Review pending staff grace request" : "Extend checkout grace period without penalty"}
               >
                 <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
                   <Clock size={16} className="sm:size-5" />
                 </div>
                 <div className="text-left">
-                  <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-tight">Grace</p>
+                  <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-tight">
+                    {currentReservation.gracePeriodRequest?.status === 'pending' ? 'Req Pending' : 'Grace'}
+                  </p>
                   <p className="text-xs sm:text-sm font-bold">Extension</p>
                 </div>
               </button>
@@ -1430,9 +1438,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <button
                         type="button"
                         onClick={() => setShowExtendGraceModal(true)}
-                        className="text-[10px] font-bold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-md transition-colors"
+                        className={cn(
+                          "text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors border",
+                          currentReservation.gracePeriodRequest?.status === 'pending'
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/50 animate-pulse"
+                            : "text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30"
+                        )}
                       >
-                        Extend Grace
+                        {currentReservation.gracePeriodRequest?.status === 'pending' ? 'Review Grace Request' : 'Extend Grace'}
                       </button>
                     )}
                   </div>

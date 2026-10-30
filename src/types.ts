@@ -482,6 +482,21 @@ export interface Room {
   }[];
 }
 
+export interface GracePeriodRequest {
+  id: string;
+  requestedMinutes: number;
+  requestedAt: string;
+  requestedBy: string;
+  requestedByUid: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  prospectiveCheckoutTime?: string;
+  adminNote?: string;
+  reviewedBy?: string;
+  reviewedByUid?: string;
+  reviewedAt?: string;
+}
+
 export interface Reservation {
   id: string;
   guestName: string;
@@ -538,6 +553,8 @@ export interface Reservation {
     previousCheckoutTime?: string;
     newEffectiveCheckoutTime: string;
   }[];
+  gracePeriodRequest?: GracePeriodRequest;
+  gracePeriodRequestsHistory?: GracePeriodRequest[];
   lastDeductionDate?: string; // Tracks when the last nightly charge was applied
   checkInDateTime?: string; // Complete ISO timestamp for actual check-in
   actualCheckIn?: string; // Complete ISO timestamp for operational check-in

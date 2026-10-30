@@ -46,6 +46,7 @@ import {
   Filter,
   TrendingUp,
   ArrowDownRight,
+  ArrowRight,
   Users,
   Sparkles,
   History,
@@ -4563,6 +4564,42 @@ export function FrontDesk() {
             </div>
           </div>
         </div>
+
+        {/* Pending Grace Period Requests Alert Banner */}
+        {(() => {
+          const pendingGraceReservations = reservations.filter(r => r.status === 'checked_in' && r.gracePeriodRequest?.status === 'pending');
+          if (pendingGraceReservations.length === 0) return null;
+
+          return (
+            <div className="mx-6 mt-4 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <Clock className="w-4 h-4 animate-spin" />
+                </div>
+                <div>
+                  <div className="font-bold text-amber-300 flex items-center gap-2">
+                    <span>{pendingGraceReservations.length} Pending Grace Period Request{pendingGraceReservations.length > 1 ? 's' : ''}</span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-400 text-zinc-950">
+                      Needs Hotel Admin Action
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Staff requested extra checkout grace time for: {pendingGraceReservations.map(r => `Room ${r.roomNumber} (${r.guestName})`).join(', ')}.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedResForGraceModal(pendingGraceReservations[0])}
+                className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 active:scale-95 shadow-xs shadow-amber-500/20"
+              >
+                <span>Review Request</span>
+                <ArrowRight size={13} />
+              </button>
+            </div>
+          );
+        })()}
+
         <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
           <table className="w-full text-left min-w-[700px]">
             <thead>
@@ -4767,6 +4804,17 @@ export function FrontDesk() {
                   className="text-[10px] font-black uppercase text-zinc-500 bg-zinc-950 px-1 inline-block rounded border border-zinc-800/50 italic tracking-tighter"
                 />
               </div>
+              {res.status === 'checked_in' && res.gracePeriodRequest?.status === 'pending' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedResForGraceModal(res)}
+                  title={`Grace extension requested (+${res.gracePeriodRequest.requestedMinutes}m) by ${res.gracePeriodRequest.requestedBy}. Click to review.`}
+                  className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 hover:bg-amber-500/30 transition-all cursor-pointer animate-pulse"
+                >
+                  <Clock size={10} className="text-amber-400" />
+                  Req: +{res.gracePeriodRequest.requestedMinutes}m
+                </button>
+              )}
               {res.status === 'checked_in' && (() => {
                 const graceInfo = getGracePeriodInfo(res, hotel);
                 if (graceInfo.isWithinGracePeriod) {
@@ -5238,11 +5286,19 @@ export function FrontDesk() {
                             <button 
                               type="button"
                               onClick={() => setSelectedResForGraceModal(res)}
-                              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider"
-                              title="Extend checkout grace period without penalty"
+                              className={cn(
+                                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all active:scale-95 font-bold text-[10px] uppercase tracking-wider border",
+                                res.gracePeriodRequest?.status === 'pending'
+                                  ? "bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-xs shadow-amber-500/20 animate-pulse"
+                                  : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/30"
+                              )}
+                              title={res.gracePeriodRequest?.status === 'pending' ? `Pending grace request: +${res.gracePeriodRequest.requestedMinutes}m. Click to review.` : "Extend checkout grace period without penalty"}
                             >
                               <Clock size={13} className="text-amber-400" />
-                              Grace
+                              <span>Grace</span>
+                              {res.gracePeriodRequest?.status === 'pending' && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                              )}
                             </button>
                           )}
 
