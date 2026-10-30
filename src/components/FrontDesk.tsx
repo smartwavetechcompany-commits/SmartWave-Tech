@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
@@ -55,7 +55,7 @@ import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
 import { fuzzySearch } from '../utils/searchUtils';
 import { roomService } from '../services/roomService';
-import { validatePromotion, recordPromotionRedemption } from '../services/promotionService';
+import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { hasPermission } from '../utils/permissions';
 import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canApplyDiscount } from '../utils/policyUtils';
 import { logActivity } from '../utils/activityLogger';
@@ -129,6 +129,15 @@ export function FrontDesk() {
     type: 'fixed' as 'fixed' | 'percentage',
     reason: '' 
   });
+  const [availablePromotions, setAvailablePromotions] = useState<Promotion[]>([]);
+  const [modalPromoCode, setModalPromoCode] = useState('');
+  const [modalAppliedPromo, setModalAppliedPromo] = useState<Promotion | null>(null);
+  const [modalPromoLimit, setModalPromoLimit] = useState<number | null>(null);
+  const [isValidatingModalPromo, setIsValidatingModalPromo] = useState(false);
+  const [modalPromoFeedback, setModalPromoFeedback] = useState<{
+    status: 'idle' | 'valid' | 'invalid';
+    message?: string;
+  }>({ status: 'idle' });
   const [newCheckOutDate, setNewCheckOutDate] = useState('');
   const [chargeDetails, setChargeDetails] = useState({
     amount: 0,
@@ -674,6 +683,10 @@ export function FrontDesk() {
       setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
     });
 
+    const unsubPromo = subscribePromotions(hotel.id, (promos) => {
+      setAvailablePromotions(promos.filter(p => p.status === 'active'));
+    });
+
     return () => {
       unsubRes();
       unsubRooms();
@@ -686,6 +699,7 @@ export function FrontDesk() {
       unsubCheckOutHist();
       unsubRateConfigs();
       unsubLedger();
+      unsubPromo();
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -1749,12 +1763,123 @@ export function FrontDesk() {
     }
   };
 
+  const openDiscountModal = (res: Reservation) => {
+    setShowDiscountModal(res);
+    setModalPromoCode(res.discountCode || '');
+    setModalAppliedPromo(null);
+    setModalPromoLimit(null);
+    setModalPromoFeedback({ status: 'idle' });
+    setDiscountData({
+      amount: 0,
+      type: 'fixed',
+      reason: ''
+    });
+  };
+
+  const handleValidateModalPromo = async (codeToValidate?: string) => {
+    const rawCode = codeToValidate !== undefined ? codeToValidate : modalPromoCode;
+    if (!hotel?.id || !showDiscountModal) return;
+    if (!rawCode.trim()) {
+      setModalPromoFeedback({ status: 'invalid', message: 'Please enter or select a promotional code.' });
+      return;
+    }
+
+    setIsValidatingModalPromo(true);
+    setModalPromoFeedback({ status: 'idle' });
+
+    try {
+      const res = showDiscountModal;
+      const room = rooms.find(r => r.id === res.roomId);
+      const stayDuration = calculateStayDuration(res.checkIn, res.checkOut);
+      const nights = Math.max(1, res.nights || stayDuration.totalNights || stayDuration.bookedNights || 1);
+      const roomCharges = room ? (room.price || 0) * nights : res.totalAmount;
+      const subtotal = res.totalAmount > 0 ? res.totalAmount : roomCharges;
+      const isCorporate = Boolean(res.corporateId);
+      const guestType: 'individual' | 'corporate' = isCorporate ? 'corporate' : 'individual';
+      const selectedCorp = isCorporate && res.corporateId
+        ? corporateAccounts.find(c => c.id === res.corporateId)
+        : undefined;
+
+      const result = await validatePromotion(hotel.id, rawCode, {
+        roomTypeId: room?.roomTypeId || room?.type,
+        roomId: res.roomId,
+        checkIn: res.checkIn,
+        checkOut: res.checkOut,
+        bookingSource: res.bookingSource || (res as any).source || defaultBookingSource?.name || 'Walk-in',
+        subtotal,
+        roomCharges,
+        currency,
+        exchangeRate,
+        guestType,
+        corporateId: res.corporateId,
+        corporateName: selectedCorp?.name,
+        corporateStatus: selectedCorp?.status,
+        isNegotiatedRate: isCorporate
+      });
+
+      if (result.isValid && result.promotion) {
+        setModalAppliedPromo(result.promotion);
+        setModalPromoLimit(result.discountAmount);
+        setModalPromoCode(result.promotion.code);
+        setModalPromoFeedback({
+          status: 'valid',
+          message: `Campaign "${result.promotion.name}" (${result.promotion.code}) verified! Maximum discount limit: ${formatCurrency(result.discountAmount, currency, exchangeRate)}.`
+        });
+
+        // Set discount type and amount strictly to the promo discount limit
+        setDiscountData({
+          type: result.promotion.discountType === 'percentage' ? 'percentage' : 'fixed',
+          amount: result.promotion.discountType === 'percentage' ? result.promotion.value : result.discountAmount,
+          reason: `Promo Code [${result.promotion.code}]: ${result.promotion.name}`
+        });
+
+        toast.success(`Promo code "${result.promotion.code}" applied! -${formatCurrency(result.discountAmount, currency, exchangeRate)}`);
+      } else {
+        setModalAppliedPromo(null);
+        setModalPromoLimit(null);
+        setModalPromoFeedback({
+          status: 'invalid',
+          message: result.errorReason || 'Promotional code is not valid for this stay.'
+        });
+        toast.error(result.errorReason || 'Promotional code is not valid.');
+      }
+    } catch (err: any) {
+      console.error('Modal promo validation error:', err);
+      setModalAppliedPromo(null);
+      setModalPromoLimit(null);
+      setModalPromoFeedback({
+        status: 'invalid',
+        message: err.message || 'Failed to validate promotional code.'
+      });
+      toast.error(err.message || 'Failed to validate promotional code.');
+    } finally {
+      setIsValidatingModalPromo(false);
+    }
+  };
+
+  const handleClearModalPromo = () => {
+    setModalPromoCode('');
+    setModalAppliedPromo(null);
+    setModalPromoLimit(null);
+    setModalPromoFeedback({ status: 'idle' });
+    setDiscountData({ amount: 0, type: 'fixed', reason: '' });
+  };
+
   const handleApplyDiscount = async () => {
     if (!showDiscountModal || !hotel?.id || !discountData.amount || !profile) return;
     
     let finalAmount = discountData.amount;
     if (discountData.type === 'percentage') {
       finalAmount = (showDiscountModal.totalAmount * discountData.amount) / 100;
+    }
+
+    // Enforce promotional price limit if promo code is applied
+    if (modalAppliedPromo && modalPromoLimit !== null) {
+      if (finalAmount > modalPromoLimit + 0.01) {
+        toast.error(`Discount cannot exceed the promotional limit of ${formatCurrency(modalPromoLimit, currency, exchangeRate)}`);
+        return;
+      }
+      finalAmount = Math.min(finalAmount, modalPromoLimit);
     }
 
     const policy = canApplyDiscount(hotel, profile, finalAmount, showDiscountModal.totalAmount);
@@ -1772,34 +1897,80 @@ export function FrontDesk() {
       setLoading(true);
       const res = showDiscountModal;
       
-      let finalAmount = discountData.amount;
-      if (discountData.type === 'percentage') {
-        finalAmount = (res.totalAmount * discountData.amount) / 100;
-      }
+      const discountDesc = modalAppliedPromo 
+        ? `Promo Discount [${modalAppliedPromo.code}] (${modalAppliedPromo.name}): ${discountData.reason || modalAppliedPromo.name}`
+        : `Discount (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Management Discount'}`;
       
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
         amount: finalAmount,
         type: 'credit',
-        category: 'service',
-        description: `Discount (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Management Discount'}`,
+        category: 'discount',
+        description: discountDesc,
         referenceId: res.id,
         postedBy: profile.uid
-      }, profile.uid);
+      }, profile.uid, res.corporateId);
+
+      // Record promotion redemption & update reservation if promo code was used
+      if (modalAppliedPromo) {
+        const isCorporate = Boolean(res.corporateId);
+        const selectedCorp = isCorporate && res.corporateId
+          ? corporateAccounts.find(c => c.id === res.corporateId)
+          : undefined;
+
+        await recordPromotionRedemption(
+          hotel.id,
+          modalAppliedPromo.id,
+          {
+            reservationId: res.id,
+            guestName: res.guestName,
+            roomNumber: res.roomNumber || '',
+            bookingSource: res.bookingSource || (res as any).source || defaultBookingSource?.name || 'Walk-in',
+            corporateId: isCorporate ? res.corporateId : undefined,
+            corporateName: isCorporate ? (selectedCorp?.name || 'Corporate Account') : undefined,
+            discountAmount: finalAmount,
+            originalAmount: res.totalAmount,
+            finalAmount: Math.max(0, res.totalAmount - finalAmount),
+            timestamp: new Date().toISOString(),
+            appliedBy: profile.uid,
+            appliedByName: profile.displayName || profile.name || profile.email
+          },
+          profile
+        );
+
+        const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
+        await database.safeUpdate(resRef, {
+          discountCode: modalAppliedPromo.code,
+          promotionId: modalAppliedPromo.id,
+          discountAmount: finalAmount,
+          totalDiscount: (res.totalDiscount || 0) + finalAmount,
+          discountReason: discountData.reason || `Promo Code [${modalAppliedPromo.code}]`
+        }, {
+          hotelId: hotel.id,
+          module: 'Front Desk',
+          action: 'APPLY_PROMO_DISCOUNT',
+          details: `Applied promo code "${modalAppliedPromo.code}" discount of ${formatCurrency(finalAmount, currency, exchangeRate)} to reservation ${res.id}`
+        });
+      }
 
       await logActivity(
         hotel.id,
         profile,
         'DISCOUNT_APPLIED',
         'Front Desk',
-        `Discount applied to reservation ${res.id}`,
+        `Discount applied to reservation ${res.id}${modalAppliedPromo ? ` with promo code ${modalAppliedPromo.code}` : ''}`,
         res.id,
         null,
-        { amount: finalAmount, reason: discountData.reason }
+        { 
+          amount: finalAmount, 
+          reason: discountData.reason,
+          promoCode: modalAppliedPromo?.code,
+          promoId: modalAppliedPromo?.id 
+        }
       );
 
-      toast.success('Discount applied successfully');
+      toast.success(modalAppliedPromo ? `Promotional code "${modalAppliedPromo.code}" discount applied!` : 'Discount applied successfully');
       setShowDiscountModal(null);
-      setDiscountData({ amount: 0, type: 'fixed', reason: '' });
+      handleClearModalPromo();
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/ledger`);
       toast.error('Failed to apply discount');
@@ -4839,7 +5010,7 @@ export function FrontDesk() {
                               {(hasPermission(profile, 'edit_reservations') || hasPermission(profile, 'post_charges') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
-                                  onClick={() => setShowDiscountModal(res)}
+                                  onClick={() => openDiscountModal(res)}
                                   className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90"
                                   title="Apply Discount"
                                 >
@@ -5477,29 +5648,158 @@ export function FrontDesk() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-md"
+            className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
           >
-            <h3 className="text-xl font-bold text-zinc-50 mb-2">Apply Discount</h3>
-            <p className="text-zinc-400 text-sm mb-6">Give a discount to {showDiscountModal.guestName}. This will be posted as a credit to their folio.</p>
-            
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
+                <Tag size={20} className="text-emerald-500" />
+                Apply Discount
+              </h3>
+              <button 
+                type="button"
+                onClick={() => { setShowDiscountModal(null); handleClearModalPromo(); }}
+                className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-zinc-400 text-sm mb-5">
+              Apply a promotional code or custom concession to <span className="text-zinc-200 font-semibold">{showDiscountModal.guestName}</span> (Room {showDiscountModal.roomNumber || 'Assigned'}). Posted as a folio credit.
+            </p>
+
+            {/* Quick Pick: Active Hotel Promotions */}
+            {availablePromotions.length > 0 && !modalAppliedPromo && (
+              <div className="mb-4 p-3 bg-zinc-950/80 border border-zinc-800/90 rounded-xl">
+                <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-amber-400" />
+                  Available Promotions ({availablePromotions.length})
+                </label>
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                  {availablePromotions.map((promo) => (
+                    <button
+                      key={promo.id}
+                      type="button"
+                      onClick={() => {
+                        setModalPromoCode(promo.code);
+                        handleValidateModalPromo(promo.code);
+                      }}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-zinc-800 hover:bg-emerald-500/20 hover:border-emerald-500/50 border border-zinc-700 text-zinc-200 hover:text-emerald-300 transition-all text-left flex items-center gap-1.5 active:scale-95"
+                    >
+                      <Tag size={11} className="text-emerald-400" />
+                      <span className="font-mono font-bold text-emerald-400">{promo.code}</span>
+                      <span className="text-zinc-400 text-[10px]">
+                        ({promo.discountType === 'percentage' ? `${promo.value}%` : formatCurrency(promo.value, currency, exchangeRate)})
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Promo Code Input & Validation */}
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
+                Promotional Code (Optional)
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={modalPromoCode}
+                    onChange={(e) => {
+                      setModalPromoCode(e.target.value.toUpperCase().replace(/\s+/g, ''));
+                      if (modalPromoFeedback.status !== 'idle') {
+                        setModalPromoFeedback({ status: 'idle' });
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleValidateModalPromo();
+                      }
+                    }}
+                    placeholder="e.g. GUEST"
+                    disabled={isValidatingModalPromo || !!modalAppliedPromo}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 font-mono text-zinc-50 focus:border-emerald-500 outline-none uppercase placeholder:font-sans placeholder:normal-case disabled:opacity-60"
+                  />
+                  {modalAppliedPromo && (
+                    <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500" />
+                  )}
+                </div>
+                {modalAppliedPromo ? (
+                  <button
+                    type="button"
+                    onClick={handleClearModalPromo}
+                    className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleValidateModalPromo()}
+                    disabled={isValidatingModalPromo || !modalPromoCode.trim()}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {isValidatingModalPromo ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
+                  </button>
+                )}
+              </div>
+
+              {/* Promo Applied Summary Card */}
+              {modalAppliedPromo && (
+                <div className="mt-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs">
+                  <div className="flex items-center justify-between font-bold text-emerald-400 mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles size={14} />
+                      Code "{modalAppliedPromo.code}" Applied: {modalAppliedPromo.name}
+                    </span>
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-zinc-300 text-[11px]">
+                    Discount Price Limit: <span className="font-bold text-emerald-300">{formatCurrency(modalPromoLimit || 0, currency, exchangeRate)}</span> {modalAppliedPromo.discountType === 'percentage' ? `(${modalAppliedPromo.value}%)` : '(Fixed Amount)'}
+                  </p>
+                  {modalAppliedPromo.appliesTo === 'room_only' && (
+                    <p className="text-[10px] text-zinc-400 mt-0.5">Applies to room charges only.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Validation Failure Card */}
+              {modalPromoFeedback.status === 'invalid' && (
+                <div className="mt-2 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-start gap-2">
+                  <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                  <span>{modalPromoFeedback.message}</span>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">Discount Type</label>
                 <div className="flex gap-2 p-1 bg-zinc-950 border border-zinc-800 rounded-xl">
                   <button
+                    type="button"
+                    disabled={!!modalAppliedPromo}
                     onClick={() => setDiscountData({ ...discountData, type: 'fixed' })}
                     className={cn(
                       "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
-                      discountData.type === 'fixed' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
+                      discountData.type === 'fixed' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400",
+                      modalAppliedPromo && "opacity-75 cursor-not-allowed"
                     )}
                   >
                     Fixed Amount
                   </button>
                   <button
+                    type="button"
+                    disabled={!!modalAppliedPromo}
                     onClick={() => setDiscountData({ ...discountData, type: 'percentage' })}
                     className={cn(
                       "flex-1 py-1.5 rounded-lg text-xs font-bold transition-all",
-                      discountData.type === 'percentage' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400"
+                      discountData.type === 'percentage' ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-400",
+                      modalAppliedPromo && "opacity-75 cursor-not-allowed"
                     )}
                   >
                     Percentage (%)
@@ -5508,22 +5808,48 @@ export function FrontDesk() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
-                  {discountData.type === 'fixed' ? `Discount Amount (${currency})` : 'Discount Percentage (%)'}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-zinc-500 uppercase">
+                    {discountData.type === 'fixed' ? `Discount Amount (${currency})` : 'Discount Percentage (%)'}
+                  </label>
+                  {modalAppliedPromo && modalPromoLimit !== null && (
+                    <span className="text-[10px] text-emerald-400 font-bold">
+                      Price Limit: {formatCurrency(modalPromoLimit, currency, exchangeRate)}
+                    </span>
+                  )}
+                </div>
                 <input 
                   type="number"
                   value={discountData.type === 'fixed' && currency === 'USD' ? (discountData.amount / exchangeRate) || '' : discountData.amount || ''}
                   onChange={(e) => {
-                    const val = parseFloat(e.target.value);
+                    const rawVal = parseFloat(e.target.value) || 0;
+                    let val = discountData.type === 'fixed' && currency === 'USD' ? rawVal * exchangeRate : rawVal;
+                    
+                    // Enforce price limit if promo is applied
+                    if (modalAppliedPromo && modalPromoLimit !== null && discountData.type === 'fixed') {
+                      if (val > modalPromoLimit) {
+                        toast.error(`Discount cannot exceed the promotional limit of ${formatCurrency(modalPromoLimit, currency, exchangeRate)}`);
+                        val = modalPromoLimit;
+                      }
+                    }
+                    
                     setDiscountData({ 
                       ...discountData, 
-                      amount: discountData.type === 'fixed' && currency === 'USD' ? val * exchangeRate : val 
+                      amount: val 
                     });
                   }}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                  readOnly={!!modalAppliedPromo && discountData.type === 'fixed'}
+                  className={cn(
+                    "w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none",
+                    modalAppliedPromo && discountData.type === 'fixed' && "bg-zinc-900/80 border-emerald-500/40 text-emerald-300 font-bold"
+                  )}
                   placeholder="0.00"
                 />
+                {modalAppliedPromo && (
+                  <p className="text-[10px] text-zinc-400 mt-1">
+                    🔒 Price locked to promotion limit of {formatCurrency(modalPromoLimit || 0, currency, exchangeRate)}.
+                  </p>
+                )}
                 {discountData.type === 'percentage' && discountData.amount > 0 && (
                   <p className="text-[10px] text-emerald-500 mt-1 font-bold">
                     Calculated Discount: {formatCurrency((showDiscountModal.totalAmount * discountData.amount) / 100, currency, exchangeRate)}
@@ -5535,20 +5861,22 @@ export function FrontDesk() {
                 <textarea 
                   value={discountData.reason}
                   onChange={(e) => setDiscountData({ ...discountData, reason: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none h-24 resize-none"
-                  placeholder="e.g. Compensation for noise, Management approval..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none h-20 resize-none text-sm"
+                  placeholder="e.g. Promo Code [GUEST], Compensation for noise..."
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 mt-8">
+            <div className="flex gap-3 mt-6">
               <button
-                onClick={() => setShowDiscountModal(null)}
+                type="button"
+                onClick={() => { setShowDiscountModal(null); handleClearModalPromo(); }}
                 className="flex-1 py-3 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-all"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleApplyDiscount}
                 disabled={loading || !discountData.amount || !discountData.reason}
                 className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50"
