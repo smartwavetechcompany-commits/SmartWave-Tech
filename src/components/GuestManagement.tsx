@@ -4,7 +4,7 @@ import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc,
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry } from '../types';
+import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry, GuestFeedbackNote } from '../types';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
@@ -35,7 +35,11 @@ import {
   TrendingUp,
   ArrowDownRight,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  MessageSquare,
+  Send,
+  ThumbsUp,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -188,6 +192,15 @@ export function GuestManagement() {
   const [prefInput, setPrefInput] = useState('');
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
 
+  // Guest History tab state
+  const [mainTab, setMainTab] = useState<'profiles' | 'history'>('profiles');
+  const [historyLookupQuery, setHistoryLookupQuery] = useState('');
+  const [selectedHistoryGuestId, setSelectedHistoryGuestId] = useState<string | null>(null);
+  const [feedbackNoteText, setFeedbackNoteText] = useState('');
+  const [feedbackCategory, setFeedbackCategory] = useState<'feedback' | 'preference' | 'complaint' | 'praise' | 'general'>('feedback');
+  const [feedbackRating, setFeedbackRating] = useState<number>(5);
+  const [isSavingFeedback, setIsSavingFeedback] = useState(false);
+
   const allExistingTags = useMemo(() => {
     const tags = new Set<string>();
     guests.forEach(g => (g.tags || []).forEach(t => tags.add(t)));
@@ -313,6 +326,83 @@ export function GuestManagement() {
       setHistLedgerDateFilter({ ...getDefaultDateFilter(), mode: 'all' });
     }
   }, [viewingHistory]);
+
+  const selectedHistoryGuest = useMemo(() => {
+    if (!selectedHistoryGuestId) return null;
+    return guests.find(g => g.id === selectedHistoryGuestId) || null;
+  }, [guests, selectedHistoryGuestId]);
+
+  const historySearchResults = useMemo(() => {
+    const q = historyLookupQuery.trim().toLowerCase();
+    if (!q) return [];
+    return guests.filter(g => 
+      (g.email && g.email.toLowerCase().includes(q)) ||
+      (g.phone && g.phone.toLowerCase().includes(q)) ||
+      (g.name && g.name.toLowerCase().includes(q))
+    ).slice(0, 8);
+  }, [guests, historyLookupQuery]);
+
+  const selectedGuestReservations = useMemo(() => {
+    if (!selectedHistoryGuest) return [];
+    const gEmail = selectedHistoryGuest.email?.toLowerCase().trim();
+    const gPhone = selectedHistoryGuest.phone?.trim();
+    const gId = selectedHistoryGuest.id;
+
+    return allReservations.filter(res => {
+      if (res.guestId && res.guestId === gId) return true;
+      if (gEmail && res.guestEmail && res.guestEmail.toLowerCase().trim() === gEmail) return true;
+      if (gPhone && res.guestPhone && res.guestPhone.trim() === gPhone) return true;
+      return false;
+    }).sort((a, b) => {
+      const tA = parseTimestampToDate(a.checkIn || a.createdAt).getTime();
+      const tB = parseTimestampToDate(b.checkIn || b.createdAt).getTime();
+      return tB - tA; // newest first
+    });
+  }, [selectedHistoryGuest, allReservations]);
+
+  const handleAddFeedbackNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !selectedHistoryGuest) return;
+    if (!feedbackNoteText.trim()) {
+      toast.error('Please enter a feedback note');
+      return;
+    }
+
+    setIsSavingFeedback(true);
+    try {
+      const newNote: GuestFeedbackNote = {
+        id: `fn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        note: feedbackNoteText.trim(),
+        category: feedbackCategory,
+        rating: feedbackRating,
+        authorName: profile.displayName || profile.name || profile.email || 'Staff',
+        authorRole: profile.role || 'Staff',
+        timestamp: new Date().toISOString(),
+      };
+
+      const existingNotes = selectedHistoryGuest.feedbackNotes || [];
+      const updatedNotes = [newNote, ...existingNotes];
+
+      await updateDoc(doc(db, 'hotels', hotel.id, 'guests', selectedHistoryGuest.id), {
+        feedbackNotes: updatedNotes
+      });
+
+      queryClient.setQueryData<Guest[]>(['guests', hotel.id], (old) => {
+        if (!old) return old;
+        return old.map(g => g.id === selectedHistoryGuest.id ? { ...g, feedbackNotes: updatedNotes } : g);
+      });
+
+      setFeedbackNoteText('');
+      setFeedbackRating(5);
+      setFeedbackCategory('feedback');
+      toast.success('Guest feedback note saved successfully');
+    } catch (err: any) {
+      console.error('Failed to save feedback note:', err);
+      toast.error('Failed to save feedback note');
+    } finally {
+      setIsSavingFeedback(false);
+    }
+  };
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -837,8 +927,48 @@ export function GuestManagement() {
       </div>
     </div>
 
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-emerald-500/30 transition-all shadow-md">
+    {/* Top Tab Navigation: Guest Profiles vs Guest History */}
+    <div className="flex items-center gap-2 border-b border-zinc-800 pb-3 mb-4">
+      <button
+        type="button"
+        onClick={() => setMainTab('profiles')}
+        className={cn(
+          "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all",
+          mainTab === 'profiles'
+            ? "bg-zinc-800 text-zinc-50 border border-zinc-700 shadow-sm"
+            : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+        )}
+      >
+        <Users size={14} />
+        <span>Guest Profiles</span>
+        <span className="ml-1 text-[10px] bg-zinc-900 text-zinc-400 px-1.5 py-0.5 rounded-full border border-zinc-800">
+          {guests.length}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setMainTab('history')}
+        className={cn(
+          "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all",
+          mainTab === 'history'
+            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-sm"
+            : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+        )}
+      >
+        <History size={14} />
+        <span>Guest History</span>
+        {selectedHistoryGuest && (
+          <span className="ml-1 text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+            {selectedHistoryGuest.name.split(' ')[0]}
+          </span>
+        )}
+      </button>
+    </div>
+
+    {mainTab === 'profiles' && (
+      <>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+          <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-emerald-500/30 transition-all shadow-md">
           <div className="flex items-center justify-between mb-2">
             <div className="p-1 sm:p-1.5 bg-zinc-800 rounded-lg text-zinc-400 group-hover:text-zinc-50 transition-colors">
               <Users size={14} />
@@ -1159,10 +1289,11 @@ export function GuestManagement() {
                               toast.error('Past stay history access is restricted to administrators.');
                               return;
                             }
-                            setViewingHistory(guest);
+                            setSelectedHistoryGuestId(guest.id);
+                            setMainTab('history');
                           }}
                           className="p-1.5 text-zinc-500 hover:text-emerald-500 rounded-lg transition-all"
-                          title="View History"
+                          title="View Guest History"
                         >
                           <History size={14} />
                         </button>
@@ -1356,6 +1487,609 @@ export function GuestManagement() {
           itemLabel="guests"
         />
       </div>
+      </>
+    )}
+
+    {/* Guest History Dedicated Tab */}
+    {mainTab === 'history' && (
+      <div className="space-y-6">
+        {/* Guest Lookup Bar */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-6 shadow-md">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            <div className="relative flex-1">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block mb-1.5">
+                Guest Lookup (Search by Email or Phone Number)
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                <input
+                  type="text"
+                  placeholder="Enter guest email (e.g. guest@example.com) or phone number (e.g. +234...)..."
+                  value={historyLookupQuery}
+                  onChange={(e) => setHistoryLookupQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && historySearchResults.length > 0) {
+                      setSelectedHistoryGuestId(historySearchResults[0].id);
+                      setHistoryLookupQuery('');
+                    }
+                  }}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-24 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 shadow-inner"
+                />
+                {historyLookupQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryLookupQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded bg-zinc-800"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Auto-suggest dropdown when typing query */}
+              {historyLookupQuery.trim() && historySearchResults.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 mt-2 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
+                  <div className="p-2.5 text-[10px] uppercase tracking-wider font-bold text-zinc-500 border-b border-zinc-800/80 bg-zinc-900/60 flex items-center justify-between">
+                    <span>Matching Guests ({historySearchResults.length})</span>
+                    <span className="text-[9px] text-zinc-400">Click to view complete history</span>
+                  </div>
+                  {historySearchResults.map(g => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedHistoryGuestId(g.id);
+                        setHistoryLookupQuery('');
+                      }}
+                      className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-zinc-900 transition-colors border-b border-zinc-900/60 last:border-b-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-emerald-400 font-bold text-xs border border-zinc-700">
+                          {g.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                            <span>{g.name}</span>
+                            {g.tags?.includes('VIP') && (
+                              <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
+                                VIP
+                              </span>
+                            )}
+                            {g.corporateId && (
+                              <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+                                Corporate
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 mt-0.5">
+                            <span className="flex items-center gap-1">
+                              <Mail size={11} className="text-zinc-500" />
+                              {g.email || 'No email'}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Phone size={11} className="text-zinc-500" />
+                              {g.phone || 'No phone'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+                        Select →
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Active Guest Info or Quick Pick List */}
+            {selectedHistoryGuest ? (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 pt-2 md:pt-5">
+                <span className="text-xs text-zinc-400">
+                  Active Guest: <strong className="text-emerald-400">{selectedHistoryGuest.name}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedHistoryGuestId(null)}
+                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-xl border border-zinc-700 transition-colors"
+                >
+                  Select Another Guest
+                </button>
+              </div>
+            ) : (
+              <div className="pt-2 md:pt-5">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+                  Quick Pick From Recent
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {guests.slice(0, 4).map(g => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setSelectedHistoryGuestId(g.id)}
+                      className="text-xs bg-zinc-950 hover:bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-800 transition-colors"
+                    >
+                      {g.name.split(' ')[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {selectedHistoryGuest ? (
+          <>
+            {/* Guest Profile Header Card */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-md">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start sm:items-center gap-4">
+                  <div className="w-14 h-14 bg-zinc-800 rounded-2xl flex items-center justify-center text-emerald-400 font-extrabold text-2xl border border-zinc-700 shadow-inner">
+                    {selectedHistoryGuest.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg sm:text-xl font-bold text-zinc-50">{selectedHistoryGuest.name}</h2>
+                      {(selectedHistoryGuest.tags || []).map(tag => (
+                        <span
+                          key={tag}
+                          className={cn(
+                            "px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider",
+                            tag === 'VIP' ? "bg-amber-500/10 text-amber-400 border border-amber-500/30" : "bg-zinc-800 text-zinc-400"
+                          )}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                      {selectedHistoryGuest.corporateId && (
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                          <Building2 size={10} />
+                          {corporateAccounts.find(c => c.id === selectedHistoryGuest.corporateId)?.name || 'Corporate Account'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-1 gap-x-4 text-xs text-zinc-400 mt-2">
+                      <span className="flex items-center gap-1.5">
+                        <Mail size={13} className="text-zinc-500 shrink-0" />
+                        <span className="truncate">{selectedHistoryGuest.email || 'No email registered'}</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Phone size={13} className="text-zinc-500 shrink-0" />
+                        <span>{selectedHistoryGuest.phone || 'No phone registered'}</span>
+                      </span>
+                      {selectedHistoryGuest.address && (
+                        <span className="flex items-center gap-1.5">
+                          <MapPin size={13} className="text-zinc-500 shrink-0" />
+                          <span className="truncate">{selectedHistoryGuest.address}</span>
+                        </span>
+                      )}
+                      {selectedHistoryGuest.idNumber && (
+                        <span className="flex items-center gap-1.5">
+                          <CreditCard size={13} className="text-zinc-500 shrink-0" />
+                          <span>{selectedHistoryGuest.idType || 'ID'}: {selectedHistoryGuest.idNumber}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Edit profile shortcut */}
+                <div className="flex items-center gap-2 self-start lg:self-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingGuest(selectedHistoryGuest);
+                      setNewGuest({
+                        name: selectedHistoryGuest.name,
+                        email: selectedHistoryGuest.email,
+                        phone: selectedHistoryGuest.phone,
+                        idType: selectedHistoryGuest.idType || 'Passport',
+                        idNumber: selectedHistoryGuest.idNumber || '',
+                        address: selectedHistoryGuest.address || '',
+                        notes: selectedHistoryGuest.notes || '',
+                        tags: selectedHistoryGuest.tags || [],
+                        preferences: selectedHistoryGuest.preferences || [],
+                        ledgerBalance: selectedHistoryGuest.ledgerBalance || 0,
+                        corporateId: selectedHistoryGuest.corporateId || '',
+                        totalStays: selectedHistoryGuest.totalStays || 0,
+                        totalSpent: selectedHistoryGuest.totalSpent || 0,
+                        bookingSource: selectedHistoryGuest.bookingSource || (selectedHistoryGuest as any).preferredBookingSource || 'Walk-in'
+                      });
+                      setShowAddModal(true);
+                    }}
+                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-zinc-700 transition-colors"
+                  >
+                    <Edit2 size={12} />
+                    <span>Edit Profile</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Preferences chips if any */}
+              {selectedHistoryGuest.preferences && selectedHistoryGuest.preferences.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Preferences:</span>
+                  {selectedHistoryGuest.preferences.map(pref => (
+                    <span key={pref} className="px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded-md text-xs font-medium border border-blue-500/20">
+                      {pref}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Financial & Stay KPI Metric Cards */}
+            {(() => {
+              const stats = guestStatsMap[selectedHistoryGuest.id] || {
+                visitsCount: 0,
+                calculatedDays: 0,
+                bookingNights: 0,
+                overstayNights: 0,
+                actualStayedNights: 0,
+                chargeableNights: 0,
+                totalSpentVal: 0,
+                totalRevenueVal: 0,
+                outstandingDebtVal: 0
+              };
+              const liveBalance = getGuestLiveBalance(selectedHistoryGuest);
+              const isDebt = liveBalance > 0.01;
+              const isCredit = liveBalance < -0.01;
+
+              return (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-md">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="p-1.5 bg-blue-500/10 rounded-lg text-blue-400">
+                        <DollarSign size={16} />
+                      </div>
+                      <div className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Payments</div>
+                    </div>
+                    <div className="text-zinc-400 text-[9px] font-bold uppercase tracking-widest mb-0.5">Total Spend Collected</div>
+                    <div className="text-lg sm:text-xl font-bold text-blue-400 font-mono tracking-tight">
+                      {formatCurrency(stats.totalSpentVal, currency, exchangeRate)}
+                    </div>
+                    <div className="text-[9px] text-zinc-500 mt-1">Net payments received across all stays</div>
+                  </div>
+
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-md">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-400">
+                        <TrendingUp size={16} />
+                      </div>
+                      <div className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Charges</div>
+                    </div>
+                    <div className="text-zinc-400 text-[9px] font-bold uppercase tracking-widest mb-0.5">Total Revenue Generated</div>
+                    <div className="text-lg sm:text-xl font-bold text-emerald-400 font-mono tracking-tight">
+                      {formatCurrency(stats.totalRevenueVal, currency, exchangeRate)}
+                    </div>
+                    <div className="text-[9px] text-zinc-500 mt-1">Room, F&B, services & taxes</div>
+                  </div>
+
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-md">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-400">
+                        <Clock size={16} />
+                      </div>
+                      <div className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Stay Activity</div>
+                    </div>
+                    <div className="text-zinc-400 text-[9px] font-bold uppercase tracking-widest mb-0.5">Total Stays & Nights</div>
+                    <div className="text-lg sm:text-xl font-bold text-zinc-50 font-mono tracking-tight">
+                      {stats.visitsCount} <span className="text-xs text-zinc-400 font-sans font-medium">stays</span> ({stats.bookingNights} <span className="text-xs text-zinc-400 font-sans font-medium">nights</span>)
+                    </div>
+                    <div className="text-[9px] text-zinc-500 mt-1">
+                      {stats.overstayNights > 0 ? `Includes +${stats.overstayNights} overstay nights` : 'Standard booked duration'}
+                    </div>
+                  </div>
+
+                  <div className={cn(
+                    "p-4 rounded-xl border shadow-md",
+                    isDebt ? "bg-red-950/20 border-red-500/40" : isCredit ? "bg-emerald-950/20 border-emerald-500/40" : "bg-zinc-900 border-zinc-800"
+                  )}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={cn(
+                        "p-1.5 rounded-lg",
+                        isDebt ? "bg-red-500/10 text-red-400" : isCredit ? "bg-emerald-500/10 text-emerald-400" : "bg-zinc-800 text-zinc-400"
+                      )}>
+                        <CreditCard size={16} />
+                      </div>
+                      <div className={cn(
+                        "text-[8px] font-bold uppercase tracking-widest",
+                        isDebt ? "text-red-400" : isCredit ? "text-emerald-400" : "text-zinc-500"
+                      )}>
+                        {isDebt ? "Action Required" : isCredit ? "Prepaid" : "Settled"}
+                      </div>
+                    </div>
+                    <div className="text-zinc-400 text-[9px] font-bold uppercase tracking-widest mb-0.5">
+                      {isDebt ? "Outstanding Debt Due" : isCredit ? "Credit / Prepayment" : "Account Balance"}
+                    </div>
+                    <div className={cn(
+                      "text-lg sm:text-xl font-bold font-mono tracking-tight",
+                      isDebt ? "text-red-400" : isCredit ? "text-emerald-400" : "text-zinc-400"
+                    )}>
+                      {formatCurrency(Math.abs(liveBalance), currency, exchangeRate)}
+                    </div>
+                    <div className="text-[9px] text-zinc-500 mt-1">
+                      {isDebt ? "Unsettled charges on guest folio" : isCredit ? "Available credit towards future stays" : "Fully balanced account"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Previous Bookings & Feedback Notes Sections */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              {/* Previous Bookings Table (2 Columns) */}
+              <div className="xl:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-md flex flex-col">
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800">
+                  <div>
+                    <h3 className="text-base font-bold text-zinc-100 flex items-center gap-2">
+                      <Calendar size={16} className="text-emerald-400" />
+                      Previous Bookings
+                    </h3>
+                    <p className="text-xs text-zinc-400">All historical and active reservations for this guest</p>
+                  </div>
+                  <span className="text-xs font-bold text-zinc-400 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
+                    {selectedGuestReservations.length} total
+                  </span>
+                </div>
+
+                {selectedGuestReservations.length === 0 ? (
+                  <div className="py-12 text-center text-zinc-500 bg-zinc-950/40 rounded-xl border border-dashed border-zinc-800/80 my-auto">
+                    <Calendar size={36} className="mx-auto text-zinc-600 mb-2" />
+                    <p className="text-sm">No reservations found linked to this guest's email or phone number</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                          <th className="pb-3 pr-4">Room & Type</th>
+                          <th className="pb-3 px-3">Stay Dates</th>
+                          <th className="pb-3 px-3">Nights</th>
+                          <th className="pb-3 px-3">Status</th>
+                          <th className="pb-3 px-3">Payment</th>
+                          <th className="pb-3 px-3 text-right">Total</th>
+                          <th className="pb-3 pl-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800/60">
+                        {selectedGuestReservations.map((res) => {
+                          const nights = calculateStayDuration(res.checkIn, res.checkOut).chargeableNights || res.nights || 1;
+                          const isPaid = res.paymentStatus === 'paid';
+                          const isPartial = res.paymentStatus === 'partial';
+
+                          return (
+                            <tr key={res.id} className="hover:bg-zinc-800/40 transition-colors">
+                              <td className="py-3 pr-4">
+                                <div className="font-bold text-zinc-100">Room {res.roomNumber || 'N/A'}</div>
+                                <div className="text-[10px] text-zinc-400">{(res as any).roomType || 'Standard'}</div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="text-zinc-200 font-medium">
+                                  {safeDateFormat(res.checkIn, 'MMM d, yyyy')}
+                                </div>
+                                <div className="text-[10px] text-zinc-500">
+                                  to {safeDateFormat(res.checkOut, 'MMM d, yyyy')}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="font-semibold text-zinc-300">{nights}</span>
+                                <span className="text-[10px] text-zinc-500 ml-1">n</span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                  res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                                  res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" :
+                                  res.status === 'cancelled' ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+                                  "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                                  )}>
+                                  {res.status ? res.status.replace('_', ' ') : 'confirmed'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider",
+                                  isPaid ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                                  isPartial ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+                                  "bg-zinc-800 text-zinc-400"
+                                )}>
+                                  {res.paymentStatus || 'unpaid'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-bold text-zinc-200">
+                                {formatCurrency(res.totalAmount || 0, currency, exchangeRate)}
+                              </td>
+                              <td className="py-3 pl-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowFolio(res)}
+                                    className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-[10px] font-bold border border-zinc-700 transition-colors"
+                                    title="View Full Folio"
+                                  >
+                                    Folio
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowReceipt({ res, type: 'comprehensive' })}
+                                    className="p-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg border border-zinc-700 transition-colors"
+                                    title="Print Receipt"
+                                  >
+                                    <Receipt size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Feedback Notes & Operational Remarks (1 Column) */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-md flex flex-col space-y-4">
+                <div className="pb-3 border-b border-zinc-800">
+                  <h3 className="text-base font-bold text-zinc-100 flex items-center gap-2">
+                    <MessageSquare size={16} className="text-blue-400" />
+                    Feedback Notes & Remarks
+                  </h3>
+                  <p className="text-xs text-zinc-400">Record guest feedback, preferences, or operational incidents</p>
+                </div>
+
+                {/* Add Feedback Note Form */}
+                <form onSubmit={handleAddFeedbackNote} className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Add New Note</span>
+                    {/* Star Rating Selector */}
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setFeedbackRating(star)}
+                          className="p-0.5 hover:scale-110 transition-transform"
+                        >
+                          <Star
+                            size={14}
+                            className={cn(
+                              star <= feedbackRating ? "text-amber-400 fill-amber-400" : "text-zinc-600"
+                            )}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {(['feedback', 'preference', 'praise', 'complaint', 'general'] as const).map(cat => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setFeedbackCategory(cat)}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-bold capitalize transition-colors border",
+                          feedbackCategory === cat
+                            ? cat === 'complaint'
+                              ? "bg-red-500/20 text-red-300 border-red-500/40"
+                              : cat === 'praise'
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                              : cat === 'preference'
+                              ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
+                              : "bg-blue-500/20 text-blue-300 border-blue-500/40"
+                            : "bg-zinc-900 text-zinc-400 border-zinc-800 hover:bg-zinc-800"
+                        )}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={feedbackNoteText}
+                    onChange={(e) => setFeedbackNoteText(e.target.value)}
+                    placeholder="Write guest remarks (e.g. requested quiet room, complimented breakfast, reported AC issue...)"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 resize-none"
+                  />
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSavingFeedback || !feedbackNoteText.trim()}
+                      className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-black text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all shadow-sm"
+                    >
+                      {isSavingFeedback ? (
+                        <>
+                          <span className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send size={12} />
+                          <span>Save Note</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Feedback Notes List */}
+                <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                  {(!selectedHistoryGuest.feedbackNotes || selectedHistoryGuest.feedbackNotes.length === 0) ? (
+                    <div className="py-8 text-center text-zinc-500 bg-zinc-950/40 rounded-xl border border-dashed border-zinc-800/80">
+                      <MessageSquare size={28} className="mx-auto text-zinc-600 mb-1.5" />
+                      <p className="text-xs">No feedback notes logged yet for this guest</p>
+                    </div>
+                  ) : (
+                    selectedHistoryGuest.feedbackNotes.map((note) => (
+                      <div key={note.id} className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider border",
+                              note.category === 'complaint' ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                              note.category === 'praise' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                              note.category === 'preference' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                              "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                            )}>
+                              {note.category || 'Feedback'}
+                            </span>
+                            {note.rating && (
+                              <div className="flex items-center gap-0.5">
+                                {Array.from({ length: note.rating }).map((_, i) => (
+                                  <Star key={i} size={10} className="text-amber-400 fill-amber-400" />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-zinc-500">
+                            {safeDateFormat(note.timestamp, 'MMM d, yyyy h:mm a')}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-200 leading-relaxed">{note.note}</p>
+                        <div className="text-[9px] text-zinc-500 pt-0.5 border-t border-zinc-900 flex items-center justify-between">
+                          <span>By: <strong className="text-zinc-400">{note.authorName}</strong></span>
+                          {note.authorRole && <span className="capitalize">{note.authorRole}</span>}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Empty selection state */
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center shadow-md">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mx-auto mb-4">
+              <Search size={28} />
+            </div>
+            <h3 className="text-lg font-bold text-zinc-100 mb-1">Select a Guest to View History</h3>
+            <p className="text-xs text-zinc-400 max-w-md mx-auto mb-6">
+              Type an email or phone number in the search bar above to look up their previous bookings, total spend, and feedback notes.
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 max-w-lg mx-auto">
+              {guests.slice(0, 6).map(g => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => setSelectedHistoryGuestId(g.id)}
+                  className="flex items-center gap-2 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 px-3 py-2 rounded-xl text-xs text-zinc-300 transition-colors"
+                >
+                  <div className="w-5 h-5 rounded-full bg-zinc-800 text-emerald-400 font-bold text-[10px] flex items-center justify-center">
+                    {g.name.charAt(0)}
+                  </div>
+                  <span>{g.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )}
 
       {/* History Modal */}
       {viewingHistory && (

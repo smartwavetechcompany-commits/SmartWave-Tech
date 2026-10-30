@@ -23,7 +23,8 @@ import {
   DollarSign,
   Activity,
   Download,
-  Receipt
+  Receipt,
+  AlertTriangle
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -81,6 +82,8 @@ export function Dashboard() {
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
   const [todayTransactionsCount, setTodayTransactionsCount] = useState<number>(0);
+  const [staffTodayCollections, setStaffTodayCollections] = useState<number>(0);
+  const [staffLedgerToday, setStaffLedgerToday] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
@@ -100,6 +103,7 @@ export function Dashboard() {
     let unsubBlockings = () => {};
     let unsubDebts = () => {};
     let unsubFinance = () => {};
+    let unsubStaffLedger = () => {};
 
     if (profile.role === 'superAdmin') {
       unsubHotels = onSnapshot(collection(db, 'hotels'), (snap) => {
@@ -170,23 +174,53 @@ export function Dashboard() {
           handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
         });
       } else {
-        // General staff: Listen solely for transaction events to calculate current day's transaction count.
-        // Do not store financial records or expose revenue figures in frontend state.
-        unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(100)), (snap) => {
+        // General staff: Listen for transaction events to calculate current day's transaction count,
+        // and calculate the exact collections made by this specific staff member for TODAY only.
+        // At midnight, isToday() naturally returns false for prior days, resetting it automatically.
+        unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(150)), (snap) => {
           let countToday = 0;
+          let myTodayTotal = 0;
           snap.docs.forEach(doc => {
             const data = doc.data();
             const dateStr = getRecordDateString(data.timestamp);
             if (dateStr && isToday(new Date(dateStr))) {
               countToday++;
+              const isMyRecord = data.postedBy === profile.uid || 
+                                 data.processedBy?.uid === profile.uid || 
+                                 data.userId === profile.uid;
+              if (isMyRecord && data.type === 'income') {
+                myTodayTotal += (Number(data.amount) || 0);
+              }
             }
           });
           setTodayTransactionsCount(countToday);
+          setStaffTodayCollections(myTodayTotal);
           setFinance([]);
           setRevenueChartData([]);
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
         });
+
+        // Also listen to ledger entries posted by this staff member today
+        unsubStaffLedger = onSnapshot(
+          query(
+            collection(db, 'hotels', hotel.id, 'ledger'), 
+            where('postedBy', '==', profile.uid),
+            limit(100)
+          ), 
+          (snap) => {
+            let myLedgerTotal = 0;
+            snap.docs.forEach(doc => {
+              const data = doc.data();
+              const dateStr = getRecordDateString(data.timestamp);
+              if (dateStr && isToday(new Date(dateStr)) && data.type === 'credit' && data.category === 'payment') {
+                myLedgerTotal += (Number(data.amount) || 0);
+              }
+            });
+            setStaffLedgerToday(myLedgerTotal);
+          },
+          () => {}
+        );
       }
     }
 
@@ -198,6 +232,7 @@ export function Dashboard() {
       unsubBlockings();
       unsubDebts();
       unsubFinance();
+      unsubStaffLedger();
     };
   }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError, canViewFinances]);
 
@@ -302,7 +337,15 @@ export function Dashboard() {
           },
         ].filter(s => !s.module || isModuleEnabled(hotel, s.module))
       : [
-          // General Staff Visibility: See today's total transactions and overall outstanding balance owing, WITHOUT seeing total revenue or total amount collected!
+          // General Staff Visibility: See the amount THEY made for the day!
+          // After that day it goes off and starts afresh at midnight (via isToday).
+          // Hotel Admin sees everything they need to see above.
+          { 
+            label: 'My Collections Today', 
+            value: formatCurrency(Math.max(staffTodayCollections, staffLedgerToday), currency, exchangeRate), 
+            icon: DollarSign, 
+            color: 'text-emerald-400' 
+          },
           { 
             label: 'Occupancy', 
             value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
@@ -334,6 +377,44 @@ export function Dashboard() {
             color: 'text-amber-500' 
           },
         ];
+
+  // Proactive Daily Revenue Threshold & Notification System
+  const dailyRevenueThreshold = Number(
+    hotel?.settings?.notifications?.dailyRevenueThreshold ??
+    (hotel?.settings?.financial as any)?.dailyRevenueAlertThreshold ??
+    0
+  );
+
+  const isDailyRevenueAlertEnabled = 
+    hotel?.settings?.notifications?.enableDailyRevenueAlert ??
+    (dailyRevenueThreshold > 0);
+
+  const hasRevenueShortfall = 
+    canViewFinances &&
+    isDailyRevenueAlertEnabled &&
+    dailyRevenueThreshold > 0 &&
+    todayRevenue < dailyRevenueThreshold;
+
+  const revenueShortfall = Math.max(0, dailyRevenueThreshold - todayRevenue);
+  const revenuePercentAchieved = dailyRevenueThreshold > 0 
+    ? Math.min(100, Math.round((todayRevenue / dailyRevenueThreshold) * 100))
+    : 100;
+
+  // Proactive alert notification trigger
+  useEffect(() => {
+    if (hasRevenueShortfall) {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const alertKey = `daily_rev_shortfall_${hotel?.id}_${todayStr}`;
+      const alerted = sessionStorage.getItem(alertKey);
+      if (!alerted) {
+        toast.warning(
+          `Daily Revenue Alert: Today's revenue (${formatCurrency(todayRevenue, currency, exchangeRate)}) is below your set target of ${formatCurrency(dailyRevenueThreshold, currency, exchangeRate)}. Deficit: ${formatCurrency(revenueShortfall, currency, exchangeRate)}.`,
+          { duration: 8000, id: 'daily-revenue-alert-toast' }
+        );
+        sessionStorage.setItem(alertKey, 'true');
+      }
+    }
+  }, [hasRevenueShortfall, todayRevenue, dailyRevenueThreshold, revenueShortfall, hotel?.id, currency, exchangeRate]);
 
   const handleExportTransactions = () => {
     if (!canViewFinances) {
@@ -387,6 +468,45 @@ export function Dashboard() {
           <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
         </button>
       </header>
+
+      {/* Proactive Daily Revenue Threshold Deficit Alert */}
+      {hasRevenueShortfall && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg backdrop-blur-sm">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl shrink-0 mt-0.5">
+              <AlertTriangle size={22} className="animate-pulse" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-bold text-amber-300">
+                  Daily Revenue Alert • Target Shortfall Detected
+                </h4>
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {revenuePercentAchieved}% of Target
+                </span>
+              </div>
+              <p className="text-xs text-zinc-300 mt-1">
+                Today's revenue is currently <span className="font-bold text-emerald-400">{formatCurrency(todayRevenue, currency, exchangeRate)}</span>, which is <span className="font-bold text-red-400">-{formatCurrency(revenueShortfall, currency, exchangeRate)}</span> below the admin threshold benchmark of <span className="font-bold text-zinc-100">{formatCurrency(dailyRevenueThreshold, currency, exchangeRate)}</span>.
+              </p>
+              {/* Progress Bar */}
+              <div className="w-full bg-zinc-800/80 rounded-full h-1.5 mt-2.5 overflow-hidden max-w-md">
+                <div 
+                  className="bg-amber-400 h-full rounded-full transition-all duration-500" 
+                  style={{ width: `${revenuePercentAchieved}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+            <Link 
+              to="/admin-settings" 
+              className="text-xs font-bold text-amber-400 hover:text-amber-300 hover:underline px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 transition-colors"
+            >
+              Adjust Threshold
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
         {loading ? (

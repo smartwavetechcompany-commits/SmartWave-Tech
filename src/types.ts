@@ -312,6 +312,8 @@ export interface HotelSettings {
     enableLowBalanceAlerts: boolean;
     lowBalanceAlertRoles: string[];
     lowBalanceAlertMinorDips: boolean;
+    enableDailyRevenueAlert?: boolean;
+    dailyRevenueThreshold?: number;
   };
   security: {
     require2FAForAdmins: boolean;
@@ -940,6 +942,17 @@ export interface Guest {
   bookingSource?: string;
   preferredBookingSource?: string;
   createdAt?: string;
+  feedbackNotes?: GuestFeedbackNote[];
+}
+
+export interface GuestFeedbackNote {
+  id: string;
+  note: string;
+  category?: 'feedback' | 'preference' | 'complaint' | 'praise' | 'general';
+  rating?: number;
+  authorName?: string;
+  authorRole?: string;
+  timestamp: string;
 }
 
 export interface LedgerEntry {

@@ -33,6 +33,7 @@ import {
   Edit2,
   Check,
   X,
+  TrendingUp,
   Star,
   Globe,
   Tag
@@ -941,6 +942,14 @@ export function AdminSettings() {
                     </div>
                   </div>
                 )}
+
+                <div className="h-px bg-zinc-800 my-4" />
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="text-amber-500" size={18} />
+                  <h4 className="text-sm font-bold text-zinc-100">Daily Revenue Target & Deficit Alerts</h4>
+                </div>
+                {renderToggle('notifications', 'enableDailyRevenueAlert', 'Daily Revenue Deficit Alerts', 'Trigger proactive alerts on the Dashboard when today\'s collected revenue falls below your minimum target threshold.')}
+                {renderInput('notifications', 'dailyRevenueThreshold', `Daily Revenue Target Threshold (${hotel?.defaultCurrency || 'NGN'})`, 'Minimum expected revenue per day. When daily collections are below this amount, a proactive alert and shortfall indicator will be highlighted on the Dashboard.')}
               </div>
             )}
 
