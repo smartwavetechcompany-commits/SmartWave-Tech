@@ -1208,6 +1208,8 @@ export function FandB() {
                   const totalAccounted = directPaid + roomCharged;
                   const balanceOwing = orderTotal - totalAccounted;
                   const weOweGuest = directPaid - orderTotal;
+                  const unsettledBalance = Math.max(0, orderTotal - directPaid);
+                  const isCompletelySettled = unsettledBalance <= 0.01;
 
                   return (
                     <motion.div
@@ -1323,15 +1325,40 @@ export function FandB() {
                                       <AlertCircle size={12} /> Owing / Balance Due
                                     </span>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-xs">{formatCurrency(balanceOwing, currency, exchangeRate)}</span>
+                                      <span className="text-xs">{formatCurrency(unsettledBalance, currency, exchangeRate)}</span>
                                       <button
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          openSettleModal(order, balanceOwing);
+                                          openSettleModal(order, unsettledBalance);
                                         }}
                                         className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black uppercase rounded-lg shadow transition-all active:scale-95 flex items-center gap-1"
                                         title="Settle directly in F&B"
+                                      >
+                                        <DollarSign size={11} /> Settle
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : roomCharged > 0 && !isCompletelySettled ? (
+                                  <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold">
+                                    <div className="flex flex-col">
+                                      <span className="text-[10px] uppercase tracking-wider flex items-center gap-1 font-bold text-amber-400">
+                                        <Clock size={12} /> Pending Settlement
+                                      </span>
+                                      <span className="text-[9px] text-zinc-400 font-normal">
+                                        {formatCurrency(unsettledBalance, currency, exchangeRate)} charged to room folio
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-black text-amber-300">{formatCurrency(unsettledBalance, currency, exchangeRate)}</span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openSettleModal(order, unsettledBalance);
+                                        }}
+                                        className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black uppercase rounded-lg shadow transition-all active:scale-95 flex items-center gap-1"
+                                        title="Settle remaining balance in F&B"
                                       >
                                         <DollarSign size={11} /> Settle
                                       </button>
@@ -1347,9 +1374,9 @@ export function FandB() {
                                 ) : (
                                   <div className="flex items-center justify-between p-1.5 mt-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                                     <span className="flex items-center gap-1">
-                                      <CheckCircle2 size={12} /> Settled
+                                      <CheckCircle2 size={12} /> Completely Settled
                                     </span>
-                                    <span>{directPaid >= orderTotal ? 'Fully Paid' : 'Posted to Folio'}</span>
+                                    <span>Fully Paid</span>
                                   </div>
                                 )}
                               </div>
@@ -1413,15 +1440,15 @@ export function FandB() {
                         </div>
                       )}
 
-                      {/* Direct settlement button for any order with balance due */}
-                      {balanceOwing > 0 && (
+                      {/* Direct settlement button: until it is completely settled, the settlement button should not go out */}
+                      {unsettledBalance > 0.01 && (
                         <button
                           type="button"
-                          onClick={() => openSettleModal(order, balanceOwing)}
-                          className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black py-2 rounded-xl text-xs font-black transition-all shadow-md active:scale-95"
+                          onClick={() => openSettleModal(order, unsettledBalance)}
+                          className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black py-2.5 rounded-xl text-xs font-black transition-all shadow-lg active:scale-95"
                         >
                           <DollarSign size={14} />
-                          Settle Payment ({formatCurrency(balanceOwing, currency, exchangeRate)})
+                          Settle Payment ({formatCurrency(unsettledBalance, currency, exchangeRate)})
                         </button>
                       )}
 
