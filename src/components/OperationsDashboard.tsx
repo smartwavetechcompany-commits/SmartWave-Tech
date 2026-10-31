@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, RoomBlocking, RoomType, OperationType } from '../types';
+import { Reservation, Room, RoomBlocking, RoomType, OperationType, LedgerEntry } from '../types';
 import { cn, formatCurrency } from '../utils';
 import { 
   Users, 
@@ -43,7 +43,7 @@ import { QuickCheckInModal } from './QuickCheckInModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import { toast } from 'sonner';
-import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance, calculateReservationAccount } from '../utils/billingEngine';
 import { 
   ResponsiveContainer, 
   AreaChart, 
@@ -60,6 +60,7 @@ export function OperationsDashboard() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [showQuickCheckIn, setShowQuickCheckIn] = useState(false);
   const [quickCheckInInitialRes, setQuickCheckInInitialRes] = useState<Reservation | null>(null);
   const [reservationViewFilter, setReservationViewFilter] = useState<'today' | 'upcoming' | 'checked_in' | 'confirmed' | 'cancelled' | 'all'>('today');
@@ -496,11 +497,16 @@ export function OperationsDashboard() {
       setRoomTypes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomType)));
     }, () => {});
 
+    const unsubLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
+      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+    }, () => {});
+
     return () => {
       unsubRes();
       unsubRooms();
       unsubBlockings();
       unsubTypes();
+      unsubLedger();
     };
   }, [hotel?.id]);
 
@@ -1938,11 +1944,14 @@ export function OperationsDashboard() {
                     </td>
                     <td className="px-6 py-4">
                       {(() => {
-                        const bal = getReservationLiveBalance(res, hotel);
+                        const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+                        const bal = getReservationLiveBalance(res, hotel, resLedger);
+                        const account = calculateReservationAccount(res, hotel, resLedger);
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
-                        const isOutstanding = bal > 0.01 && (res.paidAmount || 0) <= 0;
-                        const isPartial = bal > 0.01 && (res.paidAmount || 0) > 0;
+                        const totalSettled = account.totalPayments;
+                        const isOutstanding = bal > 0.01 && totalSettled <= 0;
+                        const isPartial = bal > 0.01 && totalSettled > 0;
 
                         let label = 'Outstanding';
                         let badgeStyle = "bg-red-500/10 text-red-400 border-red-500/20";
@@ -1961,7 +1970,7 @@ export function OperationsDashboard() {
                                 {label}
                               </span>
                               <span className="text-[10px] text-zinc-500 font-medium whitespace-nowrap">
-                                ({formatCurrency(res.paidAmount || 0, currency, exchangeRate)} paid)
+                                ({formatCurrency(totalSettled, currency, exchangeRate)} paid)
                               </span>
                             </div>
                             <div className={cn(
@@ -1984,35 +1993,43 @@ export function OperationsDashboard() {
                       })()}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {((reservationViewFilter === 'today' && activeTab === 'arrivals') || (res.checkIn === today && (res.status === 'pending' || res.status === 'confirmed'))) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setQuickCheckInInitialRes(res);
-                              setShowQuickCheckIn(true);
-                            }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-black transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-emerald-950/40 cursor-pointer"
-                            title="Quick check-in this arrival"
-                          >
-                            <LogIn size={13} className="stroke-[2.5]" />
-                            <span>Check In</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setSelectedFolioRes(res)}
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95",
-                            res.status === 'checked_in' && res.checkOut <= today
-                              ? "bg-amber-500 hover:bg-amber-400 text-black font-extrabold"
-                              : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
-                          )}
-                        >
-                          <Receipt size={13} className={res.status === 'checked_in' && res.checkOut <= today ? 'text-black' : 'text-emerald-400'} />
-                          <span>{res.status === 'checked_in' && res.checkOut <= today ? 'Settle & Check Out' : 'Folio'}</span>
-                        </button>
-                      </div>
+                      {(() => {
+                        const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+                        const bal = getReservationLiveBalance(res, hotel, resLedger);
+                        const isSettled = Math.abs(bal) <= 0.01;
+
+                        return (
+                          <div className="flex items-center justify-end gap-2">
+                            {((reservationViewFilter === 'today' && activeTab === 'arrivals') || (res.checkIn === today && (res.status === 'pending' || res.status === 'confirmed'))) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuickCheckInInitialRes(res);
+                                  setShowQuickCheckIn(true);
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-black transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-emerald-950/40 cursor-pointer"
+                                title="Quick check-in this arrival"
+                              >
+                                <LogIn size={13} className="stroke-[2.5]" />
+                                <span>Check In</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedFolioRes(res)}
+                              className={cn(
+                                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer",
+                                res.status === 'checked_in' && res.checkOut <= today
+                                  ? (isSettled ? "bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold" : "bg-amber-500 hover:bg-amber-400 text-black font-extrabold")
+                                  : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                              )}
+                            >
+                              <Receipt size={13} className={res.status === 'checked_in' && res.checkOut <= today ? 'text-black' : 'text-emerald-400'} />
+                              <span>{res.status === 'checked_in' && res.checkOut <= today ? (isSettled ? 'Check Out' : 'Settle & Check Out') : 'Folio'}</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </motion.tr>
                 ))

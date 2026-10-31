@@ -741,6 +741,11 @@ export function getReservationLiveBalance(
     return Number(res.ledgerBalance.toFixed(2));
   }
 
+  // If reservation is marked paid or credits cover the charges:
+  if (res.paymentStatus === 'paid' && account.outstandingBalance <= Math.max(0.01, res.totalDiscount || res.discountAmount || 0)) {
+    return 0;
+  }
+
   // Fallback to calculated reservation account (room charges + debits - payments)
   // Prevents uninitialized ledgerBalance (e.g. 0) on new/checked-in reservations from masquerading as settled
   return account.outstandingBalance;

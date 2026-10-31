@@ -3,7 +3,7 @@ import { Volume2, VolumeX, AlertTriangle, Clock, DollarSign, ChevronRight, X, Be
 import { useAuth } from '../contexts/AuthContext';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Reservation, KitchenOrder } from '../types';
+import { Reservation, KitchenOrder, LedgerEntry } from '../types';
 import { getGracePeriodInfo } from '../utils/dateUtils';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { soundAlertManager } from '../utils/audioAlerts';
@@ -17,6 +17,7 @@ export function AudioAlertWidget() {
 
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [kitchenOrders, setKitchenOrders] = useState<KitchenOrder[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [isMuted, setIsMuted] = useState(soundAlertManager.getIsMuted());
   const [isOpen, setIsOpen] = useState(false);
   const [now, setNow] = useState(new Date());
@@ -97,6 +98,21 @@ export function AudioAlertWidget() {
     return () => unsub();
   }, [hotel?.id]);
 
+  // Listen to ledger entries for live folio synchronization
+  useEffect(() => {
+    if (!hotel?.id) return;
+
+    const unsub = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'ledger'),
+      (snap) => {
+        setLedgerEntries(snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry)));
+      },
+      () => {}
+    );
+
+    return () => unsub();
+  }, [hotel?.id]);
+
   // Identify overdue stays
   const overdueStays = useMemo(() => {
     if (!hotel) return [];
@@ -114,14 +130,16 @@ export function AudioAlertWidget() {
     // 1. In-house checked_in with balance > 0
     const checkedInFolios = reservations.filter(res => {
       if (res.status !== 'checked_in') return false;
-      const balance = getReservationLiveBalance(res, hotel);
+      const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+      const balance = getReservationLiveBalance(res, hotel, resLedger);
       return balance > 0.01;
     });
 
     // 2. Departed / debtor with balance > 0
     const debtorFolios = reservations.filter(res => {
       if (res.status !== 'checked_out') return false;
-      const balance = getReservationLiveBalance(res, hotel);
+      const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+      const balance = getReservationLiveBalance(res, hotel, resLedger);
       return balance > 0.01;
     });
 
@@ -345,7 +363,8 @@ export function AudioAlertWidget() {
                   <div className="space-y-1.5">
                     {/* In-House Guests Owing */}
                     {pendingSettlements.checkedInFolios.slice(0, 3).map(res => {
-                      const bal = getReservationLiveBalance(res, hotel);
+                      const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+                      const bal = getReservationLiveBalance(res, hotel, resLedger);
                       return (
                         <div
                           key={res.id}
@@ -409,7 +428,8 @@ export function AudioAlertWidget() {
 
                     {/* Departed Debtors */}
                     {pendingSettlements.debtorFolios.slice(0, 2).map(res => {
-                      const bal = getReservationLiveBalance(res, hotel);
+                      const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+                      const bal = getReservationLiveBalance(res, hotel, resLedger);
                       return (
                         <div
                           key={res.id}

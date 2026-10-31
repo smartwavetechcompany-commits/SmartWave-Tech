@@ -82,6 +82,13 @@ export function calculateReservationAccount(
       }
     });
 
+    // If reservation has a recorded discount on its document that is not reflected in ledger credits:
+    const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || e.category === 'service'));
+    const unpostedDiscount = !hasDiscountInLedger ? Math.max(0, res.totalDiscount || res.discountAmount || 0) : 0;
+    if (unpostedDiscount > 0) {
+      totalPayments += unpostedDiscount;
+    }
+
     // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
     const roomDebitsPosted = resLedger.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
     if (!roomDebitsPosted && res.status === 'checked_in' && totalCharges === 0) {
@@ -98,7 +105,17 @@ export function calculateReservationAccount(
     totalRoomCharges = baseRoom;
     totalOverstayCharges = 0;
     totalServiceCharges = 0;
-    totalPayments = res.paidAmount || 0;
+    
+    // Explicitly include all legitimate credits: direct payments received + discounts granted (promo codes or management discounts)
+    const discountCredits = Math.max(0, res.totalDiscount || res.discountAmount || 0);
+    const directPayments = res.paidAmount || 0;
+    const totalCredits = directPayments + discountCredits;
+
+    if (res.paymentStatus === 'paid') {
+      totalPayments = Math.max(totalCharges, totalCredits);
+    } else {
+      totalPayments = totalCredits;
+    }
   }
 
   // Round all values to 2 decimal places to prevent float precision drift
