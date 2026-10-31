@@ -10,6 +10,7 @@ import { syncDailyCharges } from '../services/financeService';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { GuestFolio } from './GuestFolio';
 import { OutstandingGuestLedger } from './OutstandingGuestLedger';
+import { RevenueHeatmap } from './RevenueHeatmap';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -17,6 +18,7 @@ import {
   Plus,
   Search,
   Calendar,
+  Flame,
   Filter,
   Download,
   Wallet,
@@ -122,7 +124,7 @@ export function Finance() {
   });
 
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'ledger' | 'city_ledger' | 'debtors' | 'ar_debt_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'revenue_heatmap' | 'transactions' | 'ledger' | 'city_ledger' | 'debtors' | 'ar_debt_ledger' | 'suppliers' | 'accounts' | 'expenses' | 'pos' | 'commissions' | 'payments' | 'reports' | 'diagnostics'>('overview');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -226,6 +228,7 @@ export function Finance() {
 
   const navItems = [
     { id: 'overview', label: 'Overview', icon: PieChart },
+    { id: 'revenue_heatmap', label: 'Revenue Heatmap', icon: Flame },
     { id: 'transactions', label: 'Transactions', icon: RefreshCw },
     { id: 'ledger', label: 'Guest Accounts', icon: Users },
     { id: 'city_ledger', label: 'City Ledger', icon: Building2 },
@@ -1281,6 +1284,27 @@ export function Finance() {
                   </div>
                 </div>
               </div>
+
+              {/* D3.js Daily Room Revenue Heatmap */}
+              <RevenueHeatmap 
+                records={records}
+                reservations={reservations}
+                hotel={hotel}
+                currency={currency}
+                exchangeRate={exchangeRate}
+              />
+            </div>
+          )}
+
+          {activeTab === 'revenue_heatmap' && (
+            <div className="space-y-6">
+              <RevenueHeatmap 
+                records={records}
+                reservations={reservations}
+                hotel={hotel}
+                currency={currency}
+                exchangeRate={exchangeRate}
+              />
             </div>
           )}
 
