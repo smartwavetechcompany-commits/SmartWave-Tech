@@ -520,8 +520,10 @@ export const recalculateReservationAccountFromLedger = async (
     let paymentStatus: Reservation['paymentStatus'] = 'unpaid';
     if (ledgerBalance <= 0.01 && (totalPaid > 0 || totalCredits > 0 || totalDebits > 0)) {
       paymentStatus = 'paid';
-    } else if (totalPaid > 0 || totalCredits > 0) {
+    } else if (totalPaid > 0) {
       paymentStatus = 'partial';
+    } else {
+      paymentStatus = 'unpaid';
     }
 
     await database.safeUpdate(resRef, {
@@ -1008,7 +1010,7 @@ export const reconcileAndRepairReservationFinancials = async (
     nightlyRate,
     nights: bookedNights,
     overstayNights,
-    paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 || totalCredits > 0 ? 'partial' : 'unpaid'),
+    paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 ? 'partial' : 'unpaid'),
     financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
   }, {
     hotelId,

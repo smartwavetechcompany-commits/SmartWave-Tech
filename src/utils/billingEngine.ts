@@ -60,8 +60,10 @@ export interface BillingState {
   originalNights: number;      // Booked nights
   overstayCharge: number;      // Total overstay charge based on policy
   totalCharges: number;        // Total charges (stay + overstay + other debits)
-  totalPayments: number;       // Total credits / payments
-  outstandingBalance: number;  // totalCharges - totalPayments
+  totalPayments: number;       // Actual payments received from guest
+  totalDiscounts?: number;     // Total discounts applied (promotions, concessions)
+  totalCredits?: number;       // Total credits reducing debt (payments + discounts + transfers)
+  outstandingBalance: number;  // totalCharges - totalCredits
   isOverstaying: boolean;      // True if the guest is currently overstaying
   projectedRoomCharge: number; // Charges that are due but not yet posted
   unpostedPrepayment: number;  // Paid amount not yet reflected in ledger credits
@@ -703,6 +705,8 @@ export function calculateBilling(
     overstayCharge: account.totalOverstayCharges,
     totalCharges: account.totalCharges,
     totalPayments: account.totalPayments,
+    totalDiscounts: account.totalDiscounts,
+    totalCredits: account.totalCredits,
     outstandingBalance: account.outstandingBalance,
     isOverstaying: res.status === 'checked_in' && account.totalOverstayCharges > 0,
     projectedRoomCharge: 0,
@@ -742,7 +746,7 @@ export function getReservationLiveBalance(
   }
 
   // If reservation is marked paid or credits cover the charges:
-  if (res.paymentStatus === 'paid' && account.outstandingBalance <= Math.max(0.01, res.totalDiscount || res.discountAmount || 0)) {
+  if (res.paymentStatus === 'paid' && account.outstandingBalance <= 0.01) {
     return 0;
   }
 

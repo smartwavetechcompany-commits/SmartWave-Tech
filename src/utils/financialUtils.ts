@@ -7,7 +7,9 @@ export interface GuestAccountSummary {
   totalRoomCharges: number;
   totalOverstayCharges: number;
   totalServiceCharges: number;
-  totalPayments: number;
+  totalPayments: number; // Actual payments received from guest (cash, card, bank, etc.)
+  totalDiscounts: number; // Discounts / promotional concessions granted
+  totalCredits: number; // Total credits reducing debt (payments + discounts + transfers)
   totalRefunds: number;
   totalTransfers: number;
   outstandingBalance: number; // Positive = guest owes money (Debt), 0 = settled, Negative = credit balance (Overpaid)
@@ -45,7 +47,9 @@ export function calculateReservationAccount(
   let totalRoomCharges = 0;
   let totalOverstayCharges = 0;
   let totalServiceCharges = 0;
-  let totalPayments = 0;
+  let totalPayments = 0; // Actual payments received
+  let totalDiscounts = 0; // Applied discounts / concessions
+  let totalCredits = 0; // All credit entries reducing charges
   let totalRefunds = 0;
   let totalTransfers = 0;
 
@@ -66,27 +70,31 @@ export function calculateReservationAccount(
           }
         }
       } else if (e.type === 'credit') {
-        // ONLY real posted credits (payments, valid discounts, transfers)
-        if (e.category === 'payment') {
+        const cat = (e.category || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo');
+
+        totalCredits += e.amount;
+
+        if (cat === 'payment' && !isDiscount) {
           totalPayments += e.amount;
-        } else if (e.category === 'transfer') {
+        } else if (isDiscount) {
+          totalDiscounts += e.amount;
+        } else if (cat === 'transfer' || cat === 'city_ledger') {
           totalTransfers += e.amount;
-          totalPayments += e.amount;
-        } else if (e.category === 'city_ledger') {
-          // City ledger transfer credit reduces guest direct liability
-          totalPayments += e.amount;
         } else {
-          // Discounts or other valid ledger credits
+          // Other credit adjustment
           totalPayments += e.amount;
         }
       }
     });
 
     // If reservation has a recorded discount on its document that is not reflected in ledger credits:
-    const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || e.category === 'service'));
+    const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || (e.description || '').toLowerCase().includes('discount')));
     const unpostedDiscount = !hasDiscountInLedger ? Math.max(0, res.totalDiscount || res.discountAmount || 0) : 0;
     if (unpostedDiscount > 0) {
-      totalPayments += unpostedDiscount;
+      totalDiscounts += unpostedDiscount;
+      totalCredits += unpostedDiscount;
     }
 
     // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
@@ -106,15 +114,16 @@ export function calculateReservationAccount(
     totalOverstayCharges = 0;
     totalServiceCharges = 0;
     
-    // Explicitly include all legitimate credits: direct payments received + discounts granted (promo codes or management discounts)
+    // Explicitly track legitimate credits: direct payments received vs discounts granted
     const discountCredits = Math.max(0, res.totalDiscount || res.discountAmount || 0);
     const directPayments = res.paidAmount || 0;
-    const totalCredits = directPayments + discountCredits;
+    totalDiscounts = discountCredits;
+    totalPayments = directPayments;
+    totalCredits = directPayments + discountCredits;
 
     if (res.paymentStatus === 'paid') {
-      totalPayments = Math.max(totalCharges, totalCredits);
-    } else {
-      totalPayments = totalCredits;
+      totalCredits = Math.max(totalCharges, directPayments + discountCredits);
+      totalPayments = Math.max(0, totalCredits - discountCredits);
     }
   }
 
@@ -124,12 +133,14 @@ export function calculateReservationAccount(
   totalOverstayCharges = Number(totalOverstayCharges.toFixed(2));
   totalServiceCharges = Number(totalServiceCharges.toFixed(2));
   totalPayments = Number(totalPayments.toFixed(2));
+  totalDiscounts = Number(totalDiscounts.toFixed(2));
+  totalCredits = Number(totalCredits.toFixed(2));
   totalRefunds = Number(totalRefunds.toFixed(2));
   totalTransfers = Number(totalTransfers.toFixed(2));
 
-  // Outstanding balance: Total Charges - Net Payments (Payments Received minus Refunds)
-  const netPayments = Math.max(0, totalPayments - totalRefunds);
-  const rawBalance = totalCharges - netPayments;
+  // Outstanding balance: Total Charges - Net Credits (Payments + Discounts + Transfers minus Refunds)
+  const netCredits = Math.max(0, totalCredits - totalRefunds);
+  const rawBalance = totalCharges - netCredits;
   const outstandingBalance = Number(rawBalance.toFixed(2));
   const netAmountDue = Math.max(0, outstandingBalance);
   const creditBalance = Math.max(0, -outstandingBalance);
@@ -149,6 +160,8 @@ export function calculateReservationAccount(
     totalOverstayCharges,
     totalServiceCharges,
     totalPayments,
+    totalDiscounts,
+    totalCredits,
     totalRefunds,
     totalTransfers,
     outstandingBalance,
@@ -161,7 +174,7 @@ export function calculateReservationAccount(
     overstayNights: duration.overstayNights,
     actualStayedNights: duration.actualStayedNights,
     chargeableNights: duration.chargeableNights,
-    totalSpent: Number(netPayments.toFixed(2)),
+    totalSpent: Number(Math.max(0, totalPayments - totalRefunds).toFixed(2)),
     revenueGenerated: Number(totalCharges.toFixed(2))
   };
 }
@@ -182,6 +195,8 @@ export function calculateGuestAccount(
       totalOverstayCharges: 0,
       totalServiceCharges: 0,
       totalPayments: 0,
+      totalDiscounts: 0,
+      totalCredits: 0,
       totalRefunds: 0,
       totalTransfers: 0,
       outstandingBalance: 0,
@@ -215,6 +230,8 @@ export function calculateGuestAccount(
     let totalOverstayCharges = 0;
     let totalServiceCharges = 0;
     let totalPayments = 0;
+    let totalDiscounts = 0;
+    let totalCredits = 0;
     let totalRefunds = 0;
     let totalTransfers = 0;
     let totalDays = 0;
@@ -231,6 +248,8 @@ export function calculateGuestAccount(
       totalOverstayCharges += acc.totalOverstayCharges;
       totalServiceCharges += acc.totalServiceCharges;
       totalPayments += acc.totalPayments;
+      totalDiscounts += acc.totalDiscounts;
+      totalCredits += acc.totalCredits;
       totalRefunds += acc.totalRefunds;
       totalTransfers += acc.totalTransfers;
       totalDays += acc.totalDays;
@@ -246,10 +265,13 @@ export function calculateGuestAccount(
     totalOverstayCharges = Number(totalOverstayCharges.toFixed(2));
     totalServiceCharges = Number(totalServiceCharges.toFixed(2));
     totalPayments = Number(totalPayments.toFixed(2));
+    totalDiscounts = Number(totalDiscounts.toFixed(2));
+    totalCredits = Number(totalCredits.toFixed(2));
     totalRefunds = Number(totalRefunds.toFixed(2));
     totalTransfers = Number(totalTransfers.toFixed(2));
 
-    const rawBalance = totalCharges - totalPayments;
+    const netCredits = Math.max(0, totalCredits - totalRefunds);
+    const rawBalance = totalCharges - netCredits;
     const outstandingBalance = Number(rawBalance.toFixed(2));
     const netAmountDue = Math.max(0, outstandingBalance);
     const creditBalance = Math.max(0, -outstandingBalance);
@@ -269,6 +291,8 @@ export function calculateGuestAccount(
       totalOverstayCharges,
       totalServiceCharges,
       totalPayments,
+      totalDiscounts,
+      totalCredits,
       totalRefunds,
       totalTransfers,
       outstandingBalance,
@@ -292,6 +316,8 @@ export function calculateGuestAccount(
     if (guestEntries.length > 0) {
       let debits = 0;
       let credits = 0;
+      let directPayments = 0;
+      let discounts = 0;
       let roomCharges = 0;
       let overstayCharges = 0;
       let serviceCharges = 0;
@@ -307,13 +333,26 @@ export function calculateGuestAccount(
           else serviceCharges += e.amount;
         } else if (e.type === 'credit') {
           credits += e.amount;
-          if (e.category === 'transfer') transfers += e.amount;
+          const cat = (e.category || '').toLowerCase();
+          const desc = (e.description || '').toLowerCase();
+          if (cat === 'discount' || desc.includes('discount') || desc.includes('promo')) {
+            discounts += e.amount;
+          } else if (cat === 'payment') {
+            directPayments += e.amount;
+          } else if (cat === 'transfer') {
+            transfers += e.amount;
+          } else {
+            directPayments += e.amount;
+          }
         }
       });
 
       debits = Number(debits.toFixed(2));
       credits = Number(credits.toFixed(2));
-      const rawBal = debits - credits;
+      directPayments = Number(directPayments.toFixed(2));
+      discounts = Number(discounts.toFixed(2));
+      const netCredits = Math.max(0, credits - refunds);
+      const rawBal = debits - netCredits;
       const outstandingBalance = Number(rawBal.toFixed(2));
       const netAmountDue = Math.max(0, outstandingBalance);
       const creditBalance = Math.max(0, -outstandingBalance);
@@ -328,7 +367,9 @@ export function calculateGuestAccount(
         totalRoomCharges: roomCharges,
         totalOverstayCharges: overstayCharges,
         totalServiceCharges: serviceCharges,
-        totalPayments: credits,
+        totalPayments: directPayments,
+        totalDiscounts: discounts,
+        totalCredits: credits,
         totalRefunds: refunds,
         totalTransfers: transfers,
         outstandingBalance,
@@ -341,7 +382,7 @@ export function calculateGuestAccount(
         overstayNights: 0,
         actualStayedNights: 0,
         chargeableNights: 0,
-        totalSpent: Number(Math.max(0, credits - refunds).toFixed(2)),
+        totalSpent: Number(Math.max(0, directPayments - refunds).toFixed(2)),
         revenueGenerated: Number(debits.toFixed(2))
       };
     }
@@ -358,10 +399,12 @@ export function calculateGuestAccount(
 
   return {
     totalCharges: fallbackBal > 0 ? fallbackBal : 0,
-    totalRoomCharges: 0,
+    totalRoomCharges: fallbackBal > 0 ? fallbackBal : 0,
     totalOverstayCharges: 0,
     totalServiceCharges: 0,
     totalPayments: fallbackBal < 0 ? Math.abs(fallbackBal) : 0,
+    totalDiscounts: 0,
+    totalCredits: fallbackBal < 0 ? Math.abs(fallbackBal) : 0,
     totalRefunds: 0,
     totalTransfers: 0,
     outstandingBalance: fallbackBal,
