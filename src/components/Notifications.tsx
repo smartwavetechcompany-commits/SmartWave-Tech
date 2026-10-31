@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { OperationType } from '../types';
+import { useNavigate } from 'react-router-dom';
 import { 
   Bell, 
   Check, 
@@ -27,10 +28,13 @@ interface Notification {
   read: boolean;
   timestamp: string;
   userId?: string;
+  route?: string;
+  link?: string;
 }
 
 export function Notifications() {
   const { hotel, profile } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -89,6 +93,47 @@ export function Notifications() {
     }
   };
 
+  const getNotificationRoute = (n: Notification): string => {
+    if (n.route) return n.route;
+    if (n.link) return n.link;
+
+    const text = `${n.title} ${n.message}`.toLowerCase();
+    if (text.includes('f & b') || text.includes('f&b') || text.includes('food') || text.includes('order') || text.includes('kitchen') || text.includes('dish') || text.includes('bar')) {
+      return '/f-and-b';
+    }
+    if (text.includes('reservation') || text.includes('booking') || text.includes('check-in') || text.includes('check in') || text.includes('check-out') || text.includes('check out') || text.includes('overdue') || text.includes('grace period') || text.includes('stay')) {
+      return '/operations';
+    }
+    if (text.includes('clean') || text.includes('housekeep') || text.includes('maid') || text.includes('linen')) {
+      return '/housekeeping';
+    }
+    if (text.includes('maintenance') || text.includes('repair') || text.includes('fix') || text.includes('damage') || text.includes('leak')) {
+      return '/maintenance';
+    }
+    if (text.includes('payment') || text.includes('revenue') || text.includes('invoice') || text.includes('finance') || text.includes('transaction')) {
+      return '/finance';
+    }
+    if (text.includes('debt') || text.includes('debtor') || text.includes('ledger') || text.includes('owing') || text.includes('balance') || text.includes('settle')) {
+      return '/debt-ledger';
+    }
+    if (text.includes('room') && (text.includes('dirty') || text.includes('status') || text.includes('occupied'))) {
+      return '/room-status';
+    }
+    if (text.includes('inventory') || text.includes('stock')) {
+      return '/inventory';
+    }
+    return '/activity-logs';
+  };
+
+  const handleNotificationClick = async (notification: Notification) => {
+    if (!notification.read) {
+      await markAsRead(notification.id);
+    }
+    setIsOpen(false);
+    const targetRoute = getNotificationRoute(notification);
+    navigate(targetRoute);
+  };
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
@@ -96,7 +141,9 @@ export function Notifications() {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all active:scale-95"
+        className="relative p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all active:scale-95 cursor-pointer"
+        title="Notifications"
+        aria-label="View notifications"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
@@ -125,14 +172,14 @@ export function Notifications() {
                   <button 
                     type="button"
                     onClick={markAllAsRead}
-                    className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-wider"
+                    className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-wider cursor-pointer"
                   >
                     Mark all as read
                   </button>
                 )}
               </div>
 
-              <div className="max-h-[400px] overflow-y-auto">
+              <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
                 {notifications.length === 0 ? (
                   <div className="p-8 text-center text-zinc-500">
                     <Bell size={32} className="mx-auto mb-2 opacity-20" />
@@ -144,13 +191,13 @@ export function Notifications() {
                       <div 
                         key={notification.id}
                         className={cn(
-                          "p-4 transition-colors hover:bg-zinc-800/50 flex gap-3",
+                          "p-4 transition-colors hover:bg-zinc-800/50 flex gap-3 cursor-pointer group",
                           !notification.read && "bg-emerald-500/5"
                         )}
-                        onClick={() => !notification.read && markAsRead(notification.id)}
+                        onClick={() => handleNotificationClick(notification)}
                       >
                         <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                          "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform",
                           notification.type === 'info' ? "bg-blue-500/10 text-blue-500" :
                           notification.type === 'warning' ? "bg-amber-500/10 text-amber-500" :
                           notification.type === 'error' ? "bg-red-500/10 text-red-500" :
@@ -163,7 +210,9 @@ export function Notifications() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <h4 className="text-xs font-bold text-zinc-50 truncate">{notification.title}</h4>
+                            <h4 className="text-xs font-bold text-zinc-50 group-hover:text-emerald-400 transition-colors truncate">
+                              {notification.title}
+                            </h4>
                             <span className="text-[10px] text-zinc-500 whitespace-nowrap">
                               {safeFormatDate(notification.timestamp, 'HH:mm')}
                             </span>
@@ -184,8 +233,13 @@ export function Notifications() {
               <div className="p-3 bg-zinc-950/50 border-t border-zinc-800 text-center">
                 <button 
                   type="button"
-                  className="text-[10px] font-bold text-zinc-500 hover:text-zinc-50 uppercase tracking-wider">
-                  View all activity
+                  onClick={() => {
+                    setIsOpen(false);
+                    navigate('/activity-logs');
+                  }}
+                  className="text-[10px] font-bold text-zinc-400 hover:text-emerald-400 uppercase tracking-wider cursor-pointer transition-colors"
+                >
+                  View all activity →
                 </button>
               </div>
             </motion.div>

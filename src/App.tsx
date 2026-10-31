@@ -400,6 +400,15 @@ function AppContent() {
                 <Settings />
               </PermissionGuard>
             } />
+
+            {/* Alias & Friendly Redirect Routes */}
+            <Route path="/reservations" element={<Navigate to="/operations" replace />} />
+            <Route path="/food-beverage" element={<Navigate to="/f-and-b" replace />} />
+            <Route path="/food-and-beverage" element={<Navigate to="/f-and-b" replace />} />
+            <Route path="/kitchen" element={<Navigate to="/f-and-b" replace />} />
+            <Route path="/debtors" element={<Navigate to="/debt-ledger" replace />} />
+            <Route path="/guest-ledger" element={<Navigate to="/debt-ledger" replace />} />
+            <Route path="/audit-logs" element={<Navigate to="/activity-logs" replace />} />
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>
         </AnimatePresence>

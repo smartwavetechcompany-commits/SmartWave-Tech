@@ -315,9 +315,9 @@ export function AudioAlertWidget() {
                             type="button"
                             onClick={() => {
                               setIsOpen(false);
-                              navigate('/reservations');
+                              navigate('/operations');
                             }}
-                            className="px-2 py-1 rounded bg-red-500 hover:bg-red-400 text-black text-[10px] font-bold shrink-0 flex items-center gap-0.5"
+                            className="px-2 py-1 rounded bg-red-500 hover:bg-red-400 text-black text-[10px] font-bold shrink-0 flex items-center gap-0.5 cursor-pointer"
                           >
                             Action <ChevronRight size={10} />
                           </button>
@@ -363,9 +363,9 @@ export function AudioAlertWidget() {
                             type="button"
                             onClick={() => {
                               setIsOpen(false);
-                              navigate('/reservations');
+                              navigate('/operations');
                             }}
-                            className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 text-black text-[10px] font-bold shrink-0"
+                            className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 text-black text-[10px] font-bold shrink-0 cursor-pointer"
                           >
                             Settle
                           </button>
@@ -397,9 +397,9 @@ export function AudioAlertWidget() {
                             type="button"
                             onClick={() => {
                               setIsOpen(false);
-                              navigate('/food-beverage');
+                              navigate('/f-and-b');
                             }}
-                            className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] font-bold shrink-0"
+                            className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] font-bold shrink-0 cursor-pointer"
                           >
                             View Order
                           </button>
@@ -427,9 +427,9 @@ export function AudioAlertWidget() {
                             type="button"
                             onClick={() => {
                               setIsOpen(false);
-                              navigate('/reports');
+                              navigate('/debt-ledger');
                             }}
-                            className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold shrink-0"
+                            className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold shrink-0 cursor-pointer"
                           >
                             Debtors
                           </button>

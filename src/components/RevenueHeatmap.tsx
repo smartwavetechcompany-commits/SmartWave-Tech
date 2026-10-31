@@ -15,7 +15,8 @@ import {
 } from 'date-fns';
 import { FinanceRecord, Reservation, Hotel } from '../types';
 import { calculateBilling } from '../utils/billingEngine';
-import { formatCurrency, cn } from '../utils';
+import { formatCurrency, cn, exportToCSV } from '../utils';
+import { toast } from 'sonner';
 import { 
   Calendar as CalendarIcon, 
   TrendingUp, 
@@ -26,7 +27,8 @@ import {
   BedDouble, 
   BarChart3, 
   Layers,
-  Info
+  Info,
+  Download
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -69,6 +71,31 @@ export function RevenueHeatmap({
   const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
   const handleCurrentMonth = () => setCurrentMonth(startOfMonth(new Date()));
+
+  // Export raw daily revenue data for current heatmap month
+  const handleDownloadCSV = () => {
+    if (!monthDaysData || monthDaysData.length === 0) {
+      toast.info('No data available to export for this month');
+      return;
+    }
+
+    const filename = `daily_room_revenue_heatmap_${format(currentMonth, 'yyyy_MM')}.csv`;
+
+    const dataToExport = monthDaysData.map(d => ({
+      'Date': d.dateStr,
+      'Day of Week': format(d.date, 'EEEE'),
+      'Day Number': d.dayOfMonth,
+      'Week Number': d.weekIndex + 1,
+      'Room Revenue': d.revenue,
+      'Formatted Revenue': formatCurrency(d.revenue, currency, exchangeRate),
+      'Active Bookings': d.bookingCount,
+      'Peak Period': d.isPeak ? 'YES' : 'NO',
+      'Currency': currency
+    }));
+
+    exportToCSV(dataToExport, filename);
+    toast.success(`Exported raw daily revenue data for ${format(currentMonth, 'MMMM yyyy')} (${monthDaysData.length} days)`);
+  };
 
   // Aggregate daily room revenue for the selected month
   const monthDaysData = useMemo(() => {
@@ -430,7 +457,7 @@ export function RevenueHeatmap({
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
               title="Previous Month"
             >
               <ChevronLeft size={16} />
@@ -438,7 +465,7 @@ export function RevenueHeatmap({
             <button
               type="button"
               onClick={handleCurrentMonth}
-              className="px-2.5 py-1 text-xs font-bold text-zinc-200 hover:text-emerald-400 transition-colors"
+              className="px-2.5 py-1 text-xs font-bold text-zinc-200 hover:text-emerald-400 transition-colors cursor-pointer"
               title="Jump to Current Month"
             >
               {format(currentMonth, 'MMM yyyy')}
@@ -446,12 +473,23 @@ export function RevenueHeatmap({
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
               title="Next Month"
             >
               <ChevronRight size={16} />
             </button>
           </div>
+
+          {/* Download CSV Button */}
+          <button
+            type="button"
+            onClick={handleDownloadCSV}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 hover:bg-zinc-850 border border-zinc-800 hover:border-emerald-500/50 rounded-xl text-xs font-bold text-zinc-200 hover:text-emerald-400 transition-all active:scale-95 shadow-sm cursor-pointer"
+            title={`Download CSV of raw daily revenue data for ${format(currentMonth, 'MMMM yyyy')}`}
+          >
+            <Download size={14} className="text-emerald-400" />
+            <span>Download CSV</span>
+          </button>
         </div>
       </div>
 

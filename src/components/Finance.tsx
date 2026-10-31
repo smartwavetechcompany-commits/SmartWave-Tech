@@ -48,7 +48,7 @@ import {
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { exportTableToPDF } from '../utils/pdfExport';
 import { fuzzySearch } from '../utils/searchUtils';
-import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay, differenceInDays, isAfter, parseISO } from 'date-fns';
+import { format, isToday, isValid, startOfMonth, endOfMonth, isWithinInterval, subMonths, startOfDay, addDays, endOfDay, differenceInDays, isAfter, parseISO, eachDayOfInterval } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
@@ -953,6 +953,53 @@ export function Finance() {
       toast.error('Exporting financial reports is disabled by hotel configuration.');
       return;
     }
+
+    if (activeTab === 'revenue_heatmap') {
+      const monthStart = startOfMonth(new Date());
+      const monthEnd = endOfMonth(new Date());
+      const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+
+      const heatmapData = daysInMonth.map(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const directIncome = records
+          .filter(r => r.type === 'income' && 
+            (r.category === 'Room Revenue' || r.category?.toLowerCase() === 'room' || r.description?.toLowerCase().includes('room')) &&
+            format(new Date(r.timestamp), 'yyyy-MM-dd') === dateStr
+          )
+          .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+        const activeBookings = reservations.filter(res => {
+          if (['cancelled', 'no_show'].includes(res.status)) return false;
+          if (!res.checkIn || !res.checkOut) return false;
+          const cinStr = format(new Date(res.checkIn), 'yyyy-MM-dd');
+          const coutStr = format(new Date(res.checkOut), 'yyyy-MM-dd');
+          return cinStr <= dateStr && dateStr < coutStr;
+        });
+
+        const bookingDailyRev = activeBookings.reduce((sum, res) => {
+          const billing = calculateBilling(res, hotel);
+          const nights = Math.max(1, billing.nightsCount || differenceInDays(new Date(res.checkOut), new Date(res.checkIn)) || 1);
+          const dailyRate = billing.nightlyRate > 0 ? billing.nightlyRate : ((res.totalAmount || 0) / nights);
+          return sum + dailyRate;
+        }, 0);
+
+        const rev = Math.max(directIncome, bookingDailyRev);
+
+        return {
+          Date: dateStr,
+          'Day of Week': format(d, 'EEEE'),
+          'Room Revenue': rev,
+          'Formatted Revenue': formatCurrency(rev, currency, exchangeRate),
+          'Active Bookings': activeBookings.length,
+          Currency: currency
+        };
+      });
+
+      exportToCSV(heatmapData, `daily_revenue_heatmap_${format(new Date(), 'yyyy_MM')}.csv`);
+      toast.success('Revenue Heatmap CSV exported successfully');
+      return;
+    }
+
     const dataToExport = activeTab === 'transactions' ? filteredRecords : filteredLedger;
     const filename = activeTab === 'transactions' ? `transactions_${format(new Date(), 'yyyy-MM-dd')}.csv` : `ledger_${format(new Date(), 'yyyy-MM-dd')}.csv`;
     
