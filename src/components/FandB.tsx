@@ -38,7 +38,8 @@ import {
   AlertTriangle,
   ClipboardList,
   Lock,
-  CreditCard
+  CreditCard,
+  Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
@@ -79,7 +80,7 @@ export function FandB() {
     notes: '',
     category: 'all' as string,
     price: 0,
-    payments: [{ amount: 0, method: 'cash' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room' }[],
+    payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room'; settlementSource?: 'Front Desk' | 'F&B Outlet' }[],
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
@@ -88,6 +89,7 @@ export function FandB() {
   const [settleOrderModal, setSettleOrderModal] = useState<KitchenOrder | null>(null);
   const [settleAmount, setSettleAmount] = useState<number>(0);
   const [settleMethod, setSettleMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
+  const [settleSource, setSettleSource] = useState<'F&B Outlet' | 'Front Desk'>('F&B Outlet');
   const [settleNotes, setSettleNotes] = useState<string>('');
   const [isSettling, setIsSettling] = useState(false);
 
@@ -350,15 +352,17 @@ export function FandB() {
       // Post payments to ledger/finance
       for (const pay of newOrder.payments) {
         if (pay.amount > 0) {
+          const source = pay.settlementSource || 'F&B Outlet';
           if (isRoomOrder && res && guestId && pay.method !== 'room') {
             await postToLedger(hotel.id, guestId, res.id, {
               amount: pay.amount,
               type: 'credit',
               category: 'payment',
-              description: `F & B Payment (${pay.method.toUpperCase()}): ${newOrder.items}`,
+              description: `F & B Payment [${source}] (${pay.method.toUpperCase()}): ${newOrder.items}`,
               referenceId: orderRef.id,
               postedBy: profile.uid,
-              paymentMethod: pay.method as any
+              paymentMethod: pay.method as any,
+              settlementSource: source
             }, profile.uid, res.corporateId, pay.method as any, {
               uid: profile?.uid,
               email: profile?.email,
@@ -370,32 +374,44 @@ export function FandB() {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
-              description: `F & B Order ${orderRef.id} (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
+              description: `F & B Order ${orderRef.id} [${source}] (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
               timestamp: new Date().toISOString(),
               paymentMethod: pay.method,
+              settlementSource: source,
               referenceId: orderRef.id,
-              postedBy: profile.uid
+              postedBy: profile.uid,
+              processedBy: {
+                uid: profile.uid,
+                name: profile.displayName || (profile as any)?.name || 'Staff',
+                role: profile.role || 'staff'
+              }
             }, {
               hotelId: hotel.id,
               module: 'Finance',
               action: 'F&B_INCOME_RECORD',
-              details: `Recorded F&B income from Room ${newOrder.roomNumber}`
+              details: `Recorded F&B income from Room ${newOrder.roomNumber} [${source}]`
             }).catch(() => {});
           } else if (pay.method !== 'room') {
             database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
               amount: pay.amount,
               category: 'F & B Revenue',
-              description: `F & B Order ${orderRef.id} (Walk-in) - ${pay.method.toUpperCase()}`,
+              description: `F & B Order ${orderRef.id} [${source}] (Walk-in) - ${pay.method.toUpperCase()}`,
               timestamp: new Date().toISOString(),
               paymentMethod: pay.method,
+              settlementSource: source,
               referenceId: orderRef.id,
-              postedBy: profile.uid
+              postedBy: profile.uid,
+              processedBy: {
+                uid: profile.uid,
+                name: profile.displayName || (profile as any)?.name || 'Staff',
+                role: profile.role || 'staff'
+              }
             }, {
               hotelId: hotel.id,
               module: 'Finance',
               action: 'F&B_INCOME_RECORD',
-              details: `Recorded walk-in F&B income`
+              details: `Recorded walk-in F&B income [${source}]`
             }).catch(() => {});
           }
         }
@@ -430,7 +446,7 @@ export function FandB() {
         notes: '', 
         category: 'all', 
         price: 0, 
-        payments: [{ amount: 0, method: 'cash' }],
+        payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }],
         discount: 0,
         discountType: 'fixed'
       });
@@ -547,6 +563,7 @@ export function FandB() {
     setSettleOrderModal(order);
     setSettleAmount(remaining);
     setSettleMethod('cash');
+    setSettleSource('F&B Outlet');
     setSettleNotes('');
   };
 
@@ -588,7 +605,13 @@ export function FandB() {
         amount: settleAmount,
         method: settleMethod,
         date: new Date().toISOString(),
-        reference: settleNotes || `F&B Direct Settlement (${settleMethod.toUpperCase()})`
+        reference: settleNotes || `F&B Direct Settlement [${settleSource}] (${settleMethod.toUpperCase()})`,
+        settlementSource: settleSource,
+        processedBy: {
+          uid: profile.uid,
+          name: profile.displayName || (profile as any)?.name || 'Staff',
+          role: profile.role || 'staff'
+        }
       };
 
       const updatedPayments = [...currentPayments, newPaymentRecord];
@@ -607,12 +630,13 @@ export function FandB() {
       await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', settleOrderModal.id), {
         payments: updatedPayments,
         paidAmount: newDirectPaid,
+        settlementSource: settleSource,
         lastPaymentAt: new Date().toISOString()
       }, {
         hotelId: hotel.id,
         module: 'F & B',
         action: 'SETTLE_ORDER_PAYMENT',
-        details: `Settled ${formatCurrency(settleAmount, currency, exchangeRate)} via ${settleMethod} for Order ${settleOrderModal.id}`
+        details: `Settled ${formatCurrency(settleAmount, currency, exchangeRate)} [${settleSource}] via ${settleMethod} for Order ${settleOrderModal.id}`
       });
 
       // 2. Post to Hotel Finance Collection as Income
@@ -620,16 +644,22 @@ export function FandB() {
         type: 'income',
         amount: settleAmount,
         category: 'F & B Revenue',
-        description: `F & B Direct Payment (${settleMethod.toUpperCase()}) - Room ${settleOrderModal.roomNumber || 'Walk-in'} (Order ${settleOrderModal.id.slice(-6)})${settleNotes ? `: ${settleNotes}` : ''}`,
+        description: `F & B Direct Payment [${settleSource}] (${settleMethod.toUpperCase()}) - Room ${settleOrderModal.roomNumber || 'Walk-in'} (Order ${settleOrderModal.id.slice(-6)})${settleNotes ? `: ${settleNotes}` : ''}`,
         timestamp: new Date().toISOString(),
         paymentMethod: settleMethod,
+        settlementSource: settleSource,
         referenceId: settleOrderModal.id,
-        postedBy: profile.uid
+        postedBy: profile.uid,
+        processedBy: {
+          uid: profile.uid,
+          name: profile.displayName || (profile as any)?.name || 'Staff',
+          role: profile.role || 'staff'
+        }
       }, {
         hotelId: hotel.id,
         module: 'Finance',
         action: 'F&B_INCOME_RECORD',
-        details: `Recorded F&B direct payment of ${settleAmount}`
+        details: `Recorded F&B direct payment of ${settleAmount} [${settleSource}]`
       });
 
       // 3. If linked to an in-house room reservation, credit the guest ledger so room folio stays synchronized
@@ -638,10 +668,11 @@ export function FandB() {
           amount: settleAmount,
           type: 'credit',
           category: 'payment',
-          description: `F & B Direct Payment (${settleMethod.toUpperCase()}): ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`,
+          description: `F & B Direct Payment [${settleSource}] (${settleMethod.toUpperCase()}): ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`,
           referenceId: `${settleOrderModal.id}_PAY_${Date.now()}`,
           postedBy: profile.uid,
-          paymentMethod: settleMethod as any
+          paymentMethod: settleMethod as any,
+          settlementSource: settleSource
         }, profile.uid, res.corporateId, settleMethod as any, {
           uid: profile?.uid,
           email: profile?.email,
@@ -981,16 +1012,27 @@ export function FandB() {
         const matchesType = reportFilter.type === 'all' || order.category === reportFilter.type;
         return matchesDate && matchesType;
       })
-      .map(order => ({
-        Timestamp: new Date(order.timestamp).toLocaleString(),
-        Room: order.roomNumber,
-        Items: order.items,
-        Category: order.category,
-        Status: order.status,
-        Price: order.price,
-        Payment: order.paymentMethod,
-        Notes: order.notes || ''
-      }));
+      .map(order => {
+        const directPaid = (order.payments || [])
+          .filter(p => p.method !== 'room')
+          .reduce((sum, p) => sum + (p.amount || 0), 0) || (order.paidAmount || 0);
+        const sources = Array.from(new Set((order.payments || []).map(p => p.settlementSource).filter(Boolean)));
+        const settlementSourceStr = sources.length > 0 ? sources.join(', ') : (order.settlementSource || 'F&B Outlet');
+
+        return {
+          Timestamp: new Date(order.timestamp).toLocaleString(),
+          Room: order.roomNumber,
+          Items: order.items,
+          Category: order.category,
+          Status: order.status,
+          Price: order.price,
+          'Total Amount': order.totalAmount || order.price,
+          'Amount Paid': directPaid,
+          Payment: order.paymentMethod,
+          'Settlement Source': settlementSourceStr,
+          Notes: order.notes || ''
+        };
+      });
 
     if (dataToExport.length === 0) {
       toast.info('No data found for the selected filters');
@@ -1298,16 +1340,25 @@ export function FandB() {
                                   <span className="text-sm font-black text-emerald-400">{formatCurrency(orderTotal, currency, exchangeRate)}</span>
                                 </div>
 
-                                <div className="flex items-center justify-between text-zinc-400">
-                                  <span className="text-[10px] font-semibold uppercase tracking-wider">Amount Paid</span>
-                                  <span className={cn("font-bold text-xs", directPaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
-                                    {formatCurrency(directPaid, currency, exchangeRate)}
-                                    {paymentsList.filter(p => p.method !== 'room').length > 0 && (
-                                      <span className="ml-1 text-[9px] text-zinc-500 font-normal">
-                                        ({paymentsList.filter(p => p.method !== 'room').map(p => p.method).join(', ')})
-                                      </span>
-                                    )}
-                                  </span>
+                                <div className="text-zinc-400">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider">Amount Paid</span>
+                                    <span className={cn("font-bold text-xs", directPaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
+                                      {formatCurrency(directPaid, currency, exchangeRate)}
+                                    </span>
+                                  </div>
+                                  {paymentsList.filter(p => p.method !== 'room').length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1 justify-end">
+                                      {paymentsList.filter(p => p.method !== 'room').map((p: any, idx: number) => (
+                                        <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-300 border border-zinc-750">
+                                          <span className="capitalize">{p.method}</span>
+                                          <span className="text-[8px] font-bold px-1 rounded bg-zinc-700 text-emerald-400">
+                                            {p.settlementSource || 'F&B Outlet'}
+                                          </span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {roomCharged > 0 && (
@@ -2316,6 +2367,34 @@ export function FandB() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Settlement Source Selector */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                      Settlement Source
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(['F&B Outlet', 'Front Desk'] as const).map((source) => (
+                        <button
+                          key={source}
+                          type="button"
+                          onClick={() => setSettleSource(source)}
+                          className={cn(
+                            "py-2.5 px-3 rounded-xl border text-xs font-bold tracking-wider transition-all flex items-center justify-center gap-2",
+                            settleSource === source
+                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 ring-1 ring-emerald-500/30"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                          )}
+                        >
+                          {source === 'F&B Outlet' ? <Utensils size={14} /> : <Building2 size={14} />}
+                          <span>{source}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-zinc-500 mt-1">
+                      Explicitly tags whether revenue is received at the F&B Outlet POS or Front Desk counter for staff earnings attribution.
+                    </p>
                   </div>
 
                   {/* Notes / Reference */}

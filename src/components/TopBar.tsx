@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { CurrencyToggle } from './CurrencyToggle';
 import { Notifications } from './Notifications';
 import { UIScaleControl } from './UIScaleControl';
+import { AudioAlertWidget } from './AudioAlertWidget';
 import { User, Building2, WifiOff, XCircle, LogOut, Search, Bed, Users, Calendar, ArrowRight, Loader2, ShieldAlert, CheckCircle2, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, or } from 'firebase/firestore';
@@ -356,6 +357,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           </button>
           <UIScaleControl />
           <CurrencyToggle />
+          <AudioAlertWidget />
           <Notifications />
         </div>
         

@@ -250,14 +250,14 @@ export function Reports() {
         case 'reservations': return ['Res #', 'Guest Name', 'Phone', 'Room', 'Arrival', 'Departure', 'Stay Duration', 'Status', 'Total Charges', 'Total Paid', 'Balance'];
         case 'daily_sales': return ['Date', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Taxes', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
         case 'monthly_sales': return ['Month', 'Expected Room Rev', 'Expected F & B', 'Expected Other', 'Taxes', 'Total Expected', 'Actual Paid Collected', 'Outstanding Balance'];
-        case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
-        case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Transaction ID'];
+        case 'payments': return ['Date', 'Guest', 'Room', 'Method', 'Settlement Source', 'Reference', 'Amount', 'Recorded By', 'User Role', 'Transaction ID'];
+        case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Settlement Source', 'Transaction ID'];
         case 'balance': return ['Guest Name', 'Room', 'Status', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Expected Revenue', 'Paid Revenue', 'Outstanding Balance', 'Occupancy Count'];
         case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Visits', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
-        case 'staff_sales': return ['Staff Name', 'Module', 'Total Sales', 'Count'];
+        case 'staff_sales': return ['Staff Name', 'Module', 'Settlement Source', 'Total Sales', 'Count'];
         case 'taxation': return ['Date', 'Tax Type', 'Description', 'Amount', 'Reservation #', 'Guest Name', 'Recorded By'];
         case 'source': return ['Booking Source', 'Total Bookings', 'Total Nights', 'Total Revenue', 'Avg Booking Value'];
         case 'countries': return ['Country / Nationality', 'Total Guests', 'Completed Stays', 'Active Stays', 'Total Spent'];
@@ -440,11 +440,13 @@ export function Reports() {
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
+            const source = e.settlementSource || (e.description?.includes('[F&B Outlet]') || e.description?.includes('F & B') ? 'F&B Outlet' : 'Front Desk');
             return {
               Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
               Guest: res?.guestName || 'Unknown',
               Room: res?.roomNumber || 'N/A',
-              Method: e.description.split('via ')[1] || 'Cash',
+              Method: e.description.split('via ')[1] || e.paymentMethod?.toUpperCase() || 'Cash',
+              'Settlement Source': source,
               Reference: (res?.id || '').slice(-6).toUpperCase(),
               Amount: e.amount,
               'Recorded By': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
@@ -462,6 +464,7 @@ export function Reports() {
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
+            const source = e.settlementSource || (e.description?.includes('[F&B Outlet]') || e.description?.includes('F & B') ? 'F&B Outlet' : 'Front Desk');
             return {
               'Staff Name': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
               'User Role': staffMember?.role || 'Staff',
@@ -469,7 +472,8 @@ export function Reports() {
               Guest: res?.guestName || 'Unknown',
               Room: res?.roomNumber || 'N/A',
               Amount: e.amount,
-              Method: e.description.split('via ')[1] || 'Cash',
+              Method: e.description.split('via ')[1] || e.paymentMethod?.toUpperCase() || 'Cash',
+              'Settlement Source': source,
               'Transaction ID': e.id,
             };
           });
@@ -577,13 +581,14 @@ export function Reports() {
           }));
       }
       case 'staff_sales': {
-        const staffSales: Record<string, { name: string; module: string; total: number; count: number }> = {};
+        const staffSales: Record<string, { name: string; module: string; settlementSource: string; total: number; count: number }> = {};
         ledgerEntries.filter(e => e.type === 'debit').forEach(e => {
           const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
           const staffName = staffMember?.name || staffMember?.displayName || e.postedBy || 'System';
-          const key = `${e.postedBy}_${e.category}`;
+          const source = e.settlementSource || (e.category === 'F & B' || e.description?.includes('F & B') ? 'F&B Outlet' : 'Front Desk');
+          const key = `${e.postedBy}_${e.category}_${source}`;
           if (!staffSales[key]) {
-            staffSales[key] = { name: staffName, module: e.category, total: 0, count: 0 };
+            staffSales[key] = { name: staffName, module: e.category, settlementSource: source, total: 0, count: 0 };
           }
           staffSales[key].total += e.amount;
           staffSales[key].count += 1;
@@ -591,6 +596,7 @@ export function Reports() {
         return Object.values(staffSales).map(s => ({
           'Staff Name': s.name,
           Module: s.module.toUpperCase(),
+          'Settlement Source': s.settlementSource,
           'Total Sales': s.total,
           Count: s.count
         }));

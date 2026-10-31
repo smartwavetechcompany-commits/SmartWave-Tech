@@ -356,6 +356,7 @@ export const postToLedger = async (
       description: p.description,
       timestamp,
       paymentMethod,
+      settlementSource: p.settlementSource || (p.description?.includes('[F&B Outlet]') ? 'F&B Outlet' : (p.description?.includes('[Front Desk]') ? 'Front Desk' : undefined)),
       guestId,
       corporateId: p.corporateId || null,
       referenceId: postedIds[entries.indexOf(p)],
@@ -618,7 +619,8 @@ export const settleLedger = async (
   corporateId?: string,
   referenceCode?: string,
   proofUrl?: string,
-  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
+  settlementSource?: 'Front Desk' | 'F&B Outlet'
 ) => {
   return postToLedger(hotelId, guestId, reservationId, {
     amount,
@@ -628,7 +630,8 @@ export const settleLedger = async (
     referenceId: reservationId,
     postedBy,
     referenceCode,
-    proofUrl
+    proofUrl,
+    settlementSource: settlementSource || 'Front Desk'
   } as any, postedBy, corporateId, paymentMethod, userContext);
 };
 
