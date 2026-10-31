@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,7 +32,8 @@ import {
   Zap,
   Filter,
   XCircle,
-  RotateCcw
+  RotateCcw,
+  GripVertical
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
@@ -78,6 +79,26 @@ export function OperationsDashboard() {
     const saved = localStorage.getItem('dismissed_occupancy_alerts');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // Floatable & Draggable Quick Check-in button states
+  const isFabDraggingRef = useRef(false);
+  const [dragBounds, setDragBounds] = useState({ top: -600, bottom: 20, left: -800, right: 20 });
+
+  useEffect(() => {
+    const updateBounds = () => {
+      if (typeof window !== 'undefined') {
+        setDragBounds({
+          top: -(window.innerHeight - 100),
+          bottom: 20,
+          left: -(window.innerWidth - 180),
+          right: 20
+        });
+      }
+    };
+    updateBounds();
+    window.addEventListener('resize', updateBounds);
+    return () => window.removeEventListener('resize', updateBounds);
+  }, []);
 
   const dismissAlert = (alertKey: string) => {
     const nextDismissed = [...dismissedAlerts, alertKey];
@@ -2010,20 +2031,43 @@ export function OperationsDashboard() {
         />
       )}
 
-      {/* Quick Check-in Floating Action Button (FAB) */}
-      <div className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-40 pb-[env(safe-area-inset-bottom,0px)]">
+      {/* Quick Check-in Floating Action Button (FAB) - Draggable & Floatable */}
+      <motion.div
+        drag
+        dragMomentum={false}
+        dragElastic={0.08}
+        dragConstraints={dragBounds}
+        whileDrag={{ scale: 1.05, cursor: 'grabbing', zIndex: 60 }}
+        whileHover={{ scale: 1.02 }}
+        onDragStart={() => {
+          isFabDraggingRef.current = true;
+        }}
+        onDragEnd={() => {
+          setTimeout(() => {
+            isFabDraggingRef.current = false;
+          }, 120);
+        }}
+        className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-40 touch-none select-none pb-[env(safe-area-inset-bottom,0px)]"
+      >
         <button
           type="button"
           onClick={() => {
+            if (isFabDraggingRef.current) return;
             setQuickCheckInInitialRes(null);
             setShowQuickCheckIn(true);
           }}
-          className="flex items-center gap-2 sm:gap-2.5 px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px] rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black shadow-2xl shadow-emerald-950/70 hover:shadow-emerald-500/25 border border-emerald-300/40 transition-all duration-200 active:scale-95 group tracking-tight cursor-pointer"
-          title="Quick Check-in: Process expected arrivals & express walk-ins"
-          aria-label="Quick Check-in"
+          className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 sm:py-3 min-h-[46px] rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black shadow-2xl shadow-emerald-950/80 hover:shadow-emerald-500/30 border border-emerald-300/50 transition-shadow duration-150 active:scale-95 group tracking-tight cursor-grab active:cursor-grabbing"
+          title="Quick Check-in: Click to open, or drag anywhere to reposition"
+          aria-label="Quick Check-in (Draggable)"
         >
+          <div 
+            className="flex items-center text-zinc-950/40 group-hover:text-zinc-950/80 transition-colors -ml-1 pr-0.5 cursor-grab active:cursor-grabbing"
+            title="Drag to reposition"
+          >
+            <GripVertical size={16} className="stroke-[2.5]" />
+          </div>
           <div className="p-1 rounded-full bg-zinc-950/15 group-hover:bg-zinc-950/25 transition-colors">
-            <LogIn size={18} className="text-zinc-950 stroke-[2.5]" />
+            <LogIn size={16} className="text-zinc-950 stroke-[2.5]" />
           </div>
           <span className="text-xs sm:text-sm font-black uppercase tracking-wider">Quick Check-in</span>
           {arrivals.length > 0 && (
@@ -2032,7 +2076,7 @@ export function OperationsDashboard() {
             </span>
           )}
         </button>
-      </div>
+      </motion.div>
 
       {showQuickCheckIn && (
         <QuickCheckInModal
