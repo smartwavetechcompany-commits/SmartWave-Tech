@@ -1511,7 +1511,7 @@ export function PromotionsManagement() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-3xl bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl z-10 max-h-[85vh] flex flex-col"
+              className="relative w-full max-w-5xl bg-zinc-950 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl z-10 max-h-[85vh] flex flex-col"
             >
               {/* Header */}
               <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/60">
@@ -1551,7 +1551,7 @@ export function PromotionsManagement() {
                         exportToCSV(rows, `promo_${selectedPromoForHistory.code}_redemptions.csv`);
                         toast.success('Redemption history exported to CSV.');
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-xs text-zinc-300 rounded-xl border border-zinc-800"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-xs text-zinc-300 rounded-xl border border-zinc-800 transition-colors"
                     >
                       <Download size={13} />
                       Export
@@ -1559,7 +1559,7 @@ export function PromotionsManagement() {
                   )}
                   <button
                     onClick={() => setSelectedPromoForHistory(null)}
-                    className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded-lg"
+                    className="p-1.5 text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-zinc-900 transition-colors"
                   >
                     <X size={18} />
                   </button>
@@ -1567,65 +1567,67 @@ export function PromotionsManagement() {
               </div>
 
               {/* Table Body */}
-              <div className="p-5 overflow-y-auto flex-1">
+              <div className="p-5 overflow-y-auto flex-1 flex flex-col">
                 {(!selectedPromoForHistory.redemptions || selectedPromoForHistory.redemptions.length === 0) ? (
                   <div className="p-12 text-center text-zinc-500 text-xs">
                     No bookings have redeemed this promotion code yet.
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                  <div className="overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-900/20">
+                    <table className="w-full min-w-[880px] text-left text-xs border-collapse">
                       <thead>
-                        <tr className="border-b border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                          <th className="pb-2.5">Guest & Booking</th>
-                          <th className="pb-2.5">Account / Entity</th>
-                          <th className="pb-2.5">Room</th>
-                          <th className="pb-2.5">Channel</th>
-                          <th className="pb-2.5 text-right">Original</th>
-                          <th className="pb-2.5 text-right">Discount</th>
-                          <th className="pb-2.5 text-right">Final Amount</th>
-                          <th className="pb-2.5">Applied Timestamp</th>
-                          <th className="pb-2.5">Staff</th>
+                        <tr className="border-b border-zinc-800 bg-zinc-900/80 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                          <th className="py-3 px-4 whitespace-nowrap">Guest & Booking</th>
+                          <th className="py-3 px-3 whitespace-nowrap">Account / Entity</th>
+                          <th className="py-3 px-3 whitespace-nowrap">Room</th>
+                          <th className="py-3 px-3 whitespace-nowrap">Channel</th>
+                          <th className="py-3 px-3 text-right whitespace-nowrap">Original</th>
+                          <th className="py-3 px-3 text-right whitespace-nowrap">Discount</th>
+                          <th className="py-3 px-3 text-right whitespace-nowrap">Final Amount</th>
+                          <th className="py-3 px-4 whitespace-nowrap">Applied Timestamp</th>
+                          <th className="py-3 px-4 whitespace-nowrap">Staff</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-zinc-900">
+                      <tbody className="divide-y divide-zinc-800/60">
                         {paginatedRedemptions.map((redemption, idx) => (
-                          <tr key={idx} className="hover:bg-zinc-900/40">
-                            <td className="py-2.5 font-semibold text-zinc-100">
+                          <tr key={idx} className="hover:bg-zinc-850/40 transition-colors">
+                            <td className="py-3 px-4 whitespace-nowrap font-semibold text-zinc-100">
                               {redemption.guestName}
-                              <div className="text-[10px] text-zinc-400 font-mono">
+                              <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
                                 Ref: {redemption.reservationId.slice(-6).toUpperCase()}
                               </div>
                             </td>
-                            <td className="py-2.5">
+                            <td className="py-3 px-3 whitespace-nowrap">
                               {redemption.corporateName || redemption.corporateId ? (
-                                <div className="flex items-center gap-1 text-cyan-400 font-medium">
-                                  <Building2 size={11} className="shrink-0" />
-                                  <span className="truncate max-w-[130px]">{redemption.corporateName || 'Corporate'}</span>
+                                <div className="flex items-center gap-1.5 text-cyan-400 font-medium">
+                                  <Building2 size={12} className="shrink-0" />
+                                  <span className="truncate max-w-[140px]">{redemption.corporateName || 'Corporate'}</span>
                                 </div>
                               ) : (
                                 <span className="text-zinc-500">Individual</span>
                               )}
                             </td>
-                            <td className="py-2.5 text-zinc-300">
-                              {redemption.roomNumber || '—'}
+                            <td className="py-3 px-3 whitespace-nowrap text-zinc-300 font-medium">
+                              {redemption.roomNumber ? `Room ${redemption.roomNumber}` : '—'}
                             </td>
-                            <td className="py-2.5 text-zinc-400">
-                              {redemption.bookingSource || 'Direct'}
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-zinc-800 text-zinc-300 border border-zinc-700/60">
+                                {redemption.bookingSource || 'Direct'}
+                              </span>
                             </td>
-                            <td className="py-2.5 text-right font-mono text-zinc-400">
+                            <td className="py-3 px-3 text-right font-mono text-zinc-400 whitespace-nowrap">
                               {formatCurrency(redemption.originalAmount, currency, exchangeRate)}
                             </td>
-                            <td className="py-2.5 text-right font-mono text-emerald-400 font-bold">
+                            <td className="py-3 px-3 text-right font-mono text-emerald-400 font-bold whitespace-nowrap">
                               -{formatCurrency(redemption.discountAmount, currency, exchangeRate)}
                             </td>
-                            <td className="py-2.5 text-right font-mono text-zinc-100 font-bold">
+                            <td className="py-3 px-3 text-right font-mono text-zinc-100 font-bold whitespace-nowrap">
                               {formatCurrency(redemption.finalAmount, currency, exchangeRate)}
                             </td>
-                            <td className="py-2.5 text-zinc-400 text-[11px]">
+                            <td className="py-3 px-4 text-zinc-400 text-[11px] whitespace-nowrap font-mono">
                               {redemption.timestamp ? format(parseISO(redemption.timestamp), 'MMM dd, yyyy HH:mm') : '—'}
                             </td>
-                            <td className="py-2.5 text-zinc-400">
+                            <td className="py-3 px-4 text-zinc-300 whitespace-nowrap">
                               {redemption.appliedByName || 'Staff'}
                             </td>
                           </tr>
@@ -1635,15 +1637,17 @@ export function PromotionsManagement() {
                   </div>
                 )}
                 {selectedPromoForHistory.redemptions && selectedPromoForHistory.redemptions.length > 0 && (
-                  <Pagination
-                    currentPage={historyPage}
-                    totalItems={selectedPromoForHistory.redemptions.length}
-                    pageSize={historyPageSize}
-                    onPageChange={setHistoryPage}
-                    onPageSizeChange={setHistoryPageSize}
-                    pageSizeOptions={[10, 25, 50]}
-                    itemLabel="redemptions"
-                  />
+                  <div className="mt-4 pt-3 border-t border-zinc-800/80">
+                    <Pagination
+                      currentPage={historyPage}
+                      totalItems={selectedPromoForHistory.redemptions.length}
+                      pageSize={historyPageSize}
+                      onPageChange={setHistoryPage}
+                      onPageSizeChange={setHistoryPageSize}
+                      pageSizeOptions={[10, 25, 50]}
+                      itemLabel="redemptions"
+                    />
+                  </div>
                 )}
               </div>
             </motion.div>
