@@ -437,3 +437,50 @@ export {
   validateLedgerTransaction
 } from '../services/financialService';
 
+/**
+ * Sanitizes and cleans up ledger/receipt transaction descriptions to eliminate
+ * redundant or duplicated labels (e.g. 'Promo Discount [CODE] (Name): Promo Code [CODE]: Name').
+ */
+export function cleanLedgerDescription(description: any): string {
+  if (!description) return '';
+  const str = (typeof description === 'string' 
+    ? description 
+    : (description && typeof description === 'object' ? (description.name || description.text || description.description || JSON.stringify(description)) : String(description))).trim();
+
+  // Pattern 1: Promo discount duplication:
+  // e.g. "Promo Discount [CODE] (NAME): Promo Code [CODE]: NAME"
+  // or "Promo Discount [CODE] (NAME): Promo Code [CODE]"
+  // or "Promo Discount [CODE]: Promo Code [CODE]: NAME"
+  const promoPattern = /^Promo Discount\s*\[([^\]]+)\](?:\s*\(([^)]+)\))?:\s*(?:Promo Code|Promo Discount)\s*\[\1\](?::\s*(.*))?$/i;
+  const match = str.match(promoPattern);
+  if (match) {
+    const code = match[1]?.trim();
+    const nameInParens = match[2]?.trim();
+    const nameInSuffix = match[3]?.trim();
+    
+    let promoName = nameInSuffix || nameInParens || '';
+    if (nameInSuffix && nameInParens && nameInSuffix.toLowerCase() === nameInParens.toLowerCase()) {
+      promoName = nameInParens;
+    }
+
+    const hasCustomNote = Boolean(nameInSuffix && nameInParens && nameInSuffix.toLowerCase() !== nameInParens.toLowerCase());
+    
+    if (hasCustomNote) {
+      return `Promo Discount [${code}] (${nameInParens}): ${nameInSuffix}`;
+    }
+    return promoName ? `Promo Discount [${code}]: ${promoName}` : `Promo Discount [${code}]`;
+  }
+
+  // Pattern 2: Duplicated text separated by colon: "X: X"
+  const colonIndex = str.indexOf(': ');
+  if (colonIndex !== -1) {
+    const left = str.slice(0, colonIndex).trim();
+    const right = str.slice(colonIndex + 2).trim();
+    if (left.toLowerCase() === right.toLowerCase()) {
+      return left;
+    }
+  }
+
+  return str;
+}
+

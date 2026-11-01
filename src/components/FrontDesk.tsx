@@ -66,7 +66,7 @@ import { toast } from 'sonner';
 import { useSearchParams } from 'react-router-dom';
 import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGracePeriodInfo, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
-import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
+import { calculateGuestAccount, calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
@@ -6368,7 +6368,7 @@ export function FrontDesk() {
                                   </span>
                                 </td>
                                 <td className="px-4 py-2.5 text-zinc-200">
-                                  {entry.description}
+                                  {cleanLedgerDescription(entry.description)}
                                   {entry.referenceCode && (
                                     <span className="block text-[9px] text-zinc-500 font-mono">Ref: {entry.referenceCode}</span>
                                   )}

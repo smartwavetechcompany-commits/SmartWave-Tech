@@ -5,7 +5,7 @@ import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateReservationAccount } from '../utils/financialUtils';
+import { calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -145,8 +145,27 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
-  const totalPayments = credits.filter(e => getSafeStr(e.category).toLowerCase() === 'payment').reduce((acc, e) => acc + e.amount, 0);
-  const totalOtherCredits = totalCredits - totalPayments;
+  
+  const totalDiscounts = credits.filter(e => {
+    const cat = getSafeStr(e.category).toLowerCase();
+    const desc = getSafeStr(e.description).toLowerCase();
+    return cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
+  }).reduce((acc, e) => acc + e.amount, 0);
+
+  const totalTransfers = credits.filter(e => {
+    const cat = getSafeStr(e.category).toLowerCase();
+    const desc = getSafeStr(e.description).toLowerCase();
+    const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
+    return !isDiscount && (cat === 'transfer' || desc.includes('transfer'));
+  }).reduce((acc, e) => acc + e.amount, 0);
+
+  const totalPayments = credits.filter(e => {
+    const cat = getSafeStr(e.category).toLowerCase();
+    const desc = getSafeStr(e.description).toLowerCase();
+    const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
+    const isTransfer = cat === 'transfer' || desc.includes('transfer');
+    return !isDiscount && !isTransfer && (cat === 'payment' || e.type === 'credit');
+  }).reduce((acc, e) => acc + e.amount, 0);
   
   const totalTaxDebits = processedEntries.filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   let otherTaxAmount = 0;
@@ -622,7 +641,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             {credits.map(e => (
               <div key={e.id} className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="text-sm font-bold text-emerald-600">{getSafeStr(e.description)}</p>
+                  <p className="text-sm font-bold text-emerald-600">{cleanLedgerDescription(getSafeStr(e.description))}</p>
                   <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
                 </div>
                 <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -668,10 +687,16 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <span className="font-bold uppercase tracking-widest">Payments Received</span>
               <span className="font-bold">{formatCurrency(totalPayments, currency, exchangeRate)}</span>
             </div>
-            {totalOtherCredits > 0 && (
+            {totalDiscounts > 0 && (
               <div className="flex justify-between items-center text-emerald-600 text-[10px]">
-                <span className="font-bold uppercase tracking-widest">Discounts & Transfers</span>
-                <span className="font-bold">{formatCurrency(totalOtherCredits, currency, exchangeRate)}</span>
+                <span className="font-bold uppercase tracking-widest">Discounts</span>
+                <span className="font-bold">{formatCurrency(totalDiscounts, currency, exchangeRate)}</span>
+              </div>
+            )}
+            {totalTransfers > 0 && (
+              <div className="flex justify-between items-center text-emerald-600 text-[10px]">
+                <span className="font-bold uppercase tracking-widest">Transfers</span>
+                <span className="font-bold">{formatCurrency(totalTransfers, currency, exchangeRate)}</span>
               </div>
             )}
             <div className="border-t border-zinc-200 pt-2 flex justify-between items-center">

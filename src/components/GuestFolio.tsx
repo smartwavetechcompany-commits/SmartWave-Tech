@@ -50,7 +50,7 @@ import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from
 import { toast } from 'sonner';
 import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTimestampToDate, safeFormatDate, getGracePeriodInfo } from '../utils/dateUtils';
-import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
+import { calculateGuestAccount, calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { printDocument, generatePdfExport } from '../utils/printUtils';
 
@@ -292,8 +292,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setIsSaving(true);
       const res = currentReservation;
 
+      const isDefaultPromoReason = !discountData.reason || 
+        discountData.reason.trim() === modalAppliedPromo?.name.trim() ||
+        discountData.reason.trim() === `Promo Code [${modalAppliedPromo?.code}]: ${modalAppliedPromo?.name}`.trim();
+
       const discountDesc = modalAppliedPromo
-        ? `Promo Discount [${modalAppliedPromo.code}] (${modalAppliedPromo.name}): ${discountData.reason || modalAppliedPromo.name}`
+        ? (isDefaultPromoReason 
+            ? `Promo Discount [${modalAppliedPromo.code}]: ${modalAppliedPromo.name}` 
+            : `Promo Discount [${modalAppliedPromo.code}] (${modalAppliedPromo.name}): ${discountData.reason}`)
         : `Discount (${discountData.type === 'percentage' ? discountData.amount + '%' : formatCurrency(discountData.amount, currency, exchangeRate)}): ${discountData.reason || 'Management Discount'}`;
 
       await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
@@ -2672,9 +2678,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
                               <div className="text-sm font-medium text-zinc-50">
-                                {typeof entry.description === 'string' 
+                                {cleanLedgerDescription(typeof entry.description === 'string' 
                                   ? entry.description 
-                                  : (entry.description && typeof entry.description === 'object' ? ((entry.description as any).name || (entry.description as any).text || JSON.stringify(entry.description)) : '')}
+                                  : (entry.description && typeof entry.description === 'object' ? ((entry.description as any).name || (entry.description as any).text || JSON.stringify(entry.description)) : ''))}
                               </div>
                               {String(entry.category).toLowerCase() === 'refund' && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
