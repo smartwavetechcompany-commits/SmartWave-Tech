@@ -39,6 +39,7 @@ import { hasPermission } from '../utils/permissions';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import { printDocument } from '../utils/printUtils';
+import { Pagination } from './Pagination';
 
 interface OutstandingGuestLedgerProps {
   hotel: any;
@@ -213,6 +214,18 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       return true;
     });
   }, [debts, searchTerm, selectedFilter]);
+
+  const [debtsPage, setDebtsPage] = useState<number>(1);
+  const [debtsPageSize, setDebtsPageSize] = useState<number>(15);
+
+  useEffect(() => {
+    setDebtsPage(1);
+  }, [searchTerm, selectedFilter]);
+
+  const paginatedDebts = useMemo(() => {
+    const startIndex = (debtsPage - 1) * debtsPageSize;
+    return filteredDebts.slice(startIndex, startIndex + debtsPageSize);
+  }, [filteredDebts, debtsPage, debtsPageSize]);
 
   // Export CSV / Excel
   const handleExportCSV = () => {
@@ -691,7 +704,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60">
-                {filteredDebts.map((debt) => {
+                {paginatedDebts.map((debt) => {
                   const aging = debt.agingDays || 0;
                   const isOverdue90 = aging > 90;
                   const isOverdue60 = aging > 60 && aging <= 90;
@@ -864,6 +877,20 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {filteredDebts.length > 0 && (
+          <div className="p-4 border-t border-zinc-800 bg-zinc-950/60 print:hidden">
+            <Pagination
+              currentPage={debtsPage}
+              totalItems={filteredDebts.length}
+              pageSize={debtsPageSize}
+              onPageChange={setDebtsPage}
+              onPageSizeChange={setDebtsPageSize}
+              pageSizeOptions={[10, 15, 25, 50]}
+              itemLabel="debt records"
+            />
           </div>
         )}
       </div>

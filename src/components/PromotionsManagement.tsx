@@ -57,6 +57,7 @@ import { format, parseISO, isAfter, isBefore } from 'date-fns';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { DEFAULT_BOOKING_SOURCES } from '../constants';
+import { Pagination } from './Pagination';
 
 type TabFilter = 'all' | 'active' | 'corporate' | 'scheduled' | 'paused' | 'expired' | 'exhausted';
 
@@ -73,6 +74,12 @@ export function PromotionsManagement() {
   const [selectedPromoForHistory, setSelectedPromoForHistory] = useState<Promotion | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(9);
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyPageSize, setHistoryPageSize] = useState<number>(10);
 
   const isAuthorized = useMemo(() => canManagePromotions(profile), [profile]);
 
@@ -196,6 +203,27 @@ export function PromotionsManagement() {
       return true;
     });
   }, [promotions, searchQuery, activeTab]);
+
+  // Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, activeTab]);
+
+  const paginatedPromotions = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredPromotions.slice(startIndex, startIndex + pageSize);
+  }, [filteredPromotions, currentPage, pageSize]);
+
+  // Reset history page when selected promo changes
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [selectedPromoForHistory?.id]);
+
+  const paginatedRedemptions = useMemo(() => {
+    const list = selectedPromoForHistory?.redemptions || [];
+    const startIndex = (historyPage - 1) * historyPageSize;
+    return list.slice(startIndex, startIndex + historyPageSize);
+  }, [selectedPromoForHistory?.redemptions, historyPage, historyPageSize]);
 
   // Overall Performance & Corporate Metrics
   const metrics = useMemo(() => {
@@ -662,8 +690,9 @@ export function PromotionsManagement() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredPromotions.map((promo) => {
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {paginatedPromotions.map((promo) => {
             const todayStr = format(new Date(), 'yyyy-MM-dd');
             const isExhausted = promo.maxUses && promo.maxUses > 0 && promo.usedCount >= promo.maxUses;
             const isExpired = promo.status === 'expired' || todayStr > promo.expiryDate;
@@ -895,6 +924,16 @@ export function PromotionsManagement() {
               </div>
             );
           })}
+          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredPromotions.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[6, 9, 18, 36]}
+            itemLabel="promotions"
+          />
         </div>
       )}
 
@@ -1550,7 +1589,7 @@ export function PromotionsManagement() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-900">
-                        {selectedPromoForHistory.redemptions.map((redemption, idx) => (
+                        {paginatedRedemptions.map((redemption, idx) => (
                           <tr key={idx} className="hover:bg-zinc-900/40">
                             <td className="py-2.5 font-semibold text-zinc-100">
                               {redemption.guestName}
@@ -1594,6 +1633,17 @@ export function PromotionsManagement() {
                       </tbody>
                     </table>
                   </div>
+                )}
+                {selectedPromoForHistory.redemptions && selectedPromoForHistory.redemptions.length > 0 && (
+                  <Pagination
+                    currentPage={historyPage}
+                    totalItems={selectedPromoForHistory.redemptions.length}
+                    pageSize={historyPageSize}
+                    onPageChange={setHistoryPage}
+                    onPageSizeChange={setHistoryPageSize}
+                    pageSizeOptions={[10, 25, 50]}
+                    itemLabel="redemptions"
+                  />
                 )}
               </div>
             </motion.div>

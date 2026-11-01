@@ -41,6 +41,7 @@ import { useSettings } from '../hooks/useSettings';
 
 import { CorporateFolio } from './CorporateFolio';
 import { ConfirmModal } from './ConfirmModal';
+import { Pagination } from './Pagination';
 
 export function CorporateManagement() {
   const { hotel, profile, currency, exchangeRate, hasPermission: authHasPermission } = useAuth();
@@ -133,6 +134,12 @@ export function CorporateManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'contactPerson' | 'creditLimit' | 'currentBalance'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [accountsPage, setAccountsPage] = useState<number>(1);
+  const [accountsPageSize, setAccountsPageSize] = useState<number>(10);
+
+  useEffect(() => {
+    setAccountsPage(1);
+  }, [searchQuery, sortBy, sortOrder]);
   const [editingRate, setEditingRate] = useState<CorporateRate | null>(null);
   const [newAccount, setNewAccount] = useState({
     name: '',
@@ -704,6 +711,11 @@ export function CorporateManagement() {
       return 0;
     });
 
+  const paginatedAccounts = React.useMemo(() => {
+    const startIndex = (accountsPage - 1) * accountsPageSize;
+    return filteredAccounts.slice(startIndex, startIndex + accountsPageSize);
+  }, [filteredAccounts, accountsPage, accountsPageSize]);
+
   const handleExport = () => {
     const dataToExport = filteredAccounts.map(acc => ({
       Name: acc.name,
@@ -951,7 +963,7 @@ export function CorporateManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredAccounts.map(account => (
+              {paginatedAccounts.map(account => (
                 <tr key={account.id} className="hover:bg-zinc-800/50 transition-colors">
                   <td className="px-6 py-4 w-12 text-center">
                     {(account.currentBalance || 0) > 0 ? (
@@ -1095,6 +1107,15 @@ export function CorporateManagement() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={accountsPage}
+          totalItems={filteredAccounts.length}
+          pageSize={accountsPageSize}
+          onPageChange={setAccountsPage}
+          onPageSizeChange={setAccountsPageSize}
+          pageSizeOptions={[10, 25, 50]}
+          itemLabel="corporate accounts"
+        />
       </div>
 
       {/* Adjustment Modal */}

@@ -41,6 +41,7 @@ import { DSSGuestReport } from './DSSGuestReport';
 import { RoomStatusDashboard } from './RoomStatusDashboard';
 import { GuestFolio } from './GuestFolio';
 import { QuickCheckInModal } from './QuickCheckInModal';
+import { Pagination } from './Pagination';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import { toast } from 'sonner';
@@ -77,6 +78,14 @@ export function OperationsDashboard() {
     return saved !== 'false';
   });
   const [showAllAlerts, setShowAllAlerts] = useState(false);
+
+  // Operations Table Pagination
+  const [opsPage, setOpsPage] = useState<number>(1);
+  const [opsPageSize, setOpsPageSize] = useState<number>(25);
+
+  useEffect(() => {
+    setOpsPage(1);
+  }, [reservationViewFilter, dateFilter, searchTerm, activeTab]);
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>(() => {
     const saved = localStorage.getItem('dismissed_occupancy_alerts');
     return saved ? JSON.parse(saved) : [];
@@ -1846,7 +1855,11 @@ export function OperationsDashboard() {
                   </td>
                 </tr>
               ) : (
-                filteredData().map((res) => (
+                (() => {
+                  const allData = filteredData();
+                  const startIndex = (opsPage - 1) * opsPageSize;
+                  const paginatedData = allData.slice(startIndex, startIndex + opsPageSize);
+                  return paginatedData.map((res) => (
                   <motion.tr
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -2040,12 +2053,22 @@ export function OperationsDashboard() {
                       })()}
                     </td>
                   </motion.tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ));
+              })()
+            )}
+          </tbody>
+        </table>
       </div>
+      <Pagination
+        currentPage={opsPage}
+        totalItems={filteredData().length}
+        pageSize={opsPageSize}
+        onPageChange={setOpsPage}
+        onPageSizeChange={setOpsPageSize}
+        pageSizeOptions={[10, 25, 50, 100]}
+        itemLabel="reservations"
+      />
+    </div>
         </>
       )}
 

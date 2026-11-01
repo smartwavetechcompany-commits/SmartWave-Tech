@@ -70,6 +70,7 @@ import { calculateGuestAccount, calculateReservationAccount, cleanLedgerDescript
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
+import { Pagination } from './Pagination';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -616,6 +617,30 @@ export function FrontDesk() {
     sortBy,
     sortOrder
   ]);
+
+  // Front Desk Reservations Pagination
+  const [reservationsPage, setReservationsPage] = useState<number>(1);
+  const [reservationsPageSize, setReservationsPageSize] = useState<number>(25);
+
+  useEffect(() => {
+    setReservationsPage(1);
+  }, [
+    activeTab,
+    searchTerm,
+    historyPeriod,
+    dateRange,
+    statusFilter,
+    paymentStatusFilter,
+    roomTypeFilter,
+    staffFilter,
+    sortBy,
+    sortOrder
+  ]);
+
+  const paginatedReservations = React.useMemo(() => {
+    const startIndex = (reservationsPage - 1) * reservationsPageSize;
+    return filteredReservations.slice(startIndex, startIndex + reservationsPageSize);
+  }, [filteredReservations, reservationsPage, reservationsPageSize]);
 
   const roomStats = {
     total: rooms.length,
@@ -4656,7 +4681,7 @@ export function FrontDesk() {
                   </td>
                 </tr>
               ) : (
-                filteredReservations.map(res => {
+                paginatedReservations.map(res => {
                   const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
                   const billing = calculateBilling(res, hotel, resLedger);
                   const bal = getReservationLiveBalance(res, hotel, resLedger);
@@ -5347,6 +5372,15 @@ export function FrontDesk() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={reservationsPage}
+          totalItems={filteredReservations.length}
+          pageSize={reservationsPageSize}
+          onPageChange={setReservationsPage}
+          onPageSizeChange={setReservationsPageSize}
+          pageSizeOptions={[10, 25, 50, 100]}
+          itemLabel="reservations"
+        />
       </div>
 
       {/* Edit Reservation Modal */}

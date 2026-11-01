@@ -46,6 +46,7 @@ import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { hasPermission } from '../utils/permissions';
+import { Pagination } from './Pagination';
 
 export function FandB() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -902,6 +903,19 @@ export function FandB() {
     return matchesFilter && matchesCategory && matchesSearch;
   });
 
+  // F&B Orders Pagination
+  const [ordersPage, setOrdersPage] = useState<number>(1);
+  const [ordersPageSize, setOrdersPageSize] = useState<number>(12);
+
+  useEffect(() => {
+    setOrdersPage(1);
+  }, [filter, categoryFilter, searchQuery]);
+
+  const paginatedOrders = React.useMemo(() => {
+    const startIndex = (ordersPage - 1) * ordersPageSize;
+    return filteredOrders.slice(startIndex, startIndex + ordersPageSize);
+  }, [filteredOrders, ordersPage, ordersPageSize]);
+
   const activeOrdersCount = orders.filter(o => o.status !== 'delivered').length;
 
   const stats = [
@@ -1223,7 +1237,7 @@ export function FandB() {
                   <p>No orders found</p>
                 </div>
               ) : (
-                filteredOrders.map((order) => {
+                paginatedOrders.map((order) => {
                   const orderTotal = order.totalAmount || order.price || 0;
                   
                   // Gather payments
@@ -1517,6 +1531,15 @@ export function FandB() {
               )}
             </AnimatePresence>
           </div>
+          <Pagination
+            currentPage={ordersPage}
+            totalItems={filteredOrders.length}
+            pageSize={ordersPageSize}
+            onPageChange={setOrdersPage}
+            onPageSizeChange={setOrdersPageSize}
+            pageSizeOptions={[6, 12, 24, 48]}
+            itemLabel="orders"
+          />
         </>
       ) : (
         <div className="space-y-6">
