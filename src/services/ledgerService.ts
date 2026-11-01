@@ -1211,26 +1211,17 @@ export const processAutomatedBillingForReservation = async (
         const hoursPastPeriod = Math.min(24, (currentTime.getTime() - Start.getTime()) / (1000 * 60 * 60));
         let targetAmount = 0;
 
-        if (policy === 'grace') {
-          if (hoursPastPeriod > graceHours) {
-            targetAmount = nightlyRate;
-          }
-        } else if (policy === 'partial') {
+        // Immediately once the grace period runs out (graceInfo.isOverstay === true),
+        // post the extra charges instantly instead of introducing delay
+        if (policy === 'partial') {
           if (hoursPastPeriod > fullHours) {
             targetAmount = nightlyRate;
-          } else if (hoursPastPeriod > partialHours) {
+          } else {
             targetAmount = nightlyRate * (partialPercentage / 100);
           }
-        } else if (policy === 'full') {
-          if (hoursPastPeriod > fullHours) {
-            targetAmount = nightlyRate;
-          }
-        } else if (policy === 'full_night' || policy === 'immediate_full') {
-          targetAmount = nightlyRate;
         } else {
-          if (hoursPastPeriod > graceHours) {
-            targetAmount = nightlyRate;
-          }
+          // Standard / grace / full / immediate policy: charge immediately once grace period has elapsed
+          targetAmount = nightlyRate;
         }
 
         if (targetAmount > 0) {

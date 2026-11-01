@@ -297,9 +297,17 @@ export function FrontDesk() {
     
     const timer = setTimeout(() => {
       checkAndChargeActiveOverstays();
-    }, 1500);
+    }, 1000);
 
-    return () => clearTimeout(timer);
+    // Active watcher: check periodically so expired grace periods post charges instantly
+    const interval = setInterval(() => {
+      checkAndChargeActiveOverstays();
+    }, 15000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, [hotel?.id, profile?.uid, reservations.length, isFetching]);
 
   // Keep modals in sync with real-time reservation updates

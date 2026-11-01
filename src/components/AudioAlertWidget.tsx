@@ -7,12 +7,13 @@ import { Reservation, KitchenOrder, LedgerEntry } from '../types';
 import { getGracePeriodInfo } from '../utils/dateUtils';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { soundAlertManager } from '../utils/audioAlerts';
+import { processAutomatedBillingForReservation } from '../services/ledgerService';
 import { useNavigate } from 'react-router-dom';
 import { cn, formatCurrency } from '../utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function AudioAlertWidget() {
-  const { hotel, currency, exchangeRate } = useAuth();
+  const { hotel, currency, exchangeRate, profile } = useAuth();
   const navigate = useNavigate();
 
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -122,6 +123,29 @@ export function AudioAlertWidget() {
       return info.isOverstay === true;
     });
   }, [reservations, hotel, now]);
+
+  // Immediately process overstay charge once grace period has elapsed
+  useEffect(() => {
+    if (!hotel?.id || overdueStays.length === 0) return;
+
+    const chargeOverdue = async () => {
+      for (const res of overdueStays) {
+        if (res.autoNightDeduction === false) continue;
+        try {
+          await processAutomatedBillingForReservation(
+            hotel,
+            res,
+            profile?.uid || 'system',
+            now
+          );
+        } catch (err) {
+          console.warn('Auto-charge overstay error:', err);
+        }
+      }
+    };
+
+    chargeOverdue();
+  }, [overdueStays, hotel, profile?.uid, now]);
 
   // Identify pending settlements
   const pendingSettlements = useMemo(() => {

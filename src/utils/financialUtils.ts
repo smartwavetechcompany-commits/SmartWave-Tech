@@ -105,13 +105,32 @@ export function calculateReservationAccount(
       totalCharges += baseRoom;
       totalRoomCharges += baseRoom;
     }
+
+    // Immediately reflect elapsed overstay charges if grace period has expired and charges are not yet persisted to ledger
+    const postedOverstayDebitsCount = resLedger.filter(e => 
+      e.type === 'debit' && (e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay'))
+    ).length;
+
+    if (res.status === 'checked_in' && res.autoNightDeduction !== false && duration.overstayNights > postedOverstayDebitsCount) {
+      const unpostedOverstayNights = duration.overstayNights - postedOverstayDebitsCount;
+      const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+      const unpostedOverstayAmount = unpostedOverstayNights * nightly;
+      totalCharges += unpostedOverstayAmount;
+      totalOverstayCharges += unpostedOverstayAmount;
+      totalRoomCharges += unpostedOverstayAmount;
+    }
   } else {
-    // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown without unposted overstay projections
+    // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown
     const nightly = BillingEngine.getNightlyRate(res, hotel);
-    const baseRoom = nightly * duration.totalNights;
-    totalCharges = (res.totalAmount && res.totalAmount > 0) ? res.totalAmount : baseRoom;
-    totalRoomCharges = baseRoom;
-    totalOverstayCharges = 0;
+    const baseRoom = nightly * (duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1));
+    const overstayAmount = (res.autoNightDeduction !== false && duration.overstayNights > 0) 
+      ? nightly * duration.overstayNights 
+      : 0;
+    totalOverstayCharges = overstayAmount;
+    totalRoomCharges = baseRoom + overstayAmount;
+    totalCharges = (res.totalAmount && res.totalAmount > 0 && duration.overstayNights === 0) 
+      ? res.totalAmount 
+      : ((res.totalAmount && res.totalAmount > 0) ? res.totalAmount + overstayAmount : totalRoomCharges);
     totalServiceCharges = 0;
     
     // Explicitly track legitimate credits: direct payments received vs discounts granted
