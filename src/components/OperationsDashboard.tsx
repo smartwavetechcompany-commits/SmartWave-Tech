@@ -33,7 +33,8 @@ import {
   Filter,
   XCircle,
   RotateCcw,
-  GripVertical
+  GripVertical,
+  Tag
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
@@ -1950,6 +1951,7 @@ export function OperationsDashboard() {
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const totalSettled = account.totalPayments;
+                        const totalDiscount = account.totalDiscounts || 0;
                         const isOutstanding = bal > 0.01 && totalSettled <= 0;
                         const isPartial = bal > 0.01 && totalSettled > 0;
 
@@ -1970,9 +1972,15 @@ export function OperationsDashboard() {
                                 {label}
                               </span>
                               <span className="text-[10px] text-zinc-500 font-medium whitespace-nowrap">
-                                ({formatCurrency(totalSettled, currency, exchangeRate)} paid)
+                                {totalSettled > 0 ? `(${formatCurrency(totalSettled, currency, exchangeRate)} paid)` : '(Unpaid)'}
                               </span>
                             </div>
+                            {totalDiscount > 0 && (
+                              <div className="text-[9px] text-emerald-400 font-medium flex items-center gap-1">
+                                <Tag size={10} className="text-emerald-400 shrink-0" />
+                                <span>Discount: -{formatCurrency(totalDiscount, currency, exchangeRate)}</span>
+                              </div>
+                            )}
                             <div className={cn(
                               "text-[10px] font-mono px-1.5 py-0.5 rounded border w-fit whitespace-nowrap",
                               isCredit 

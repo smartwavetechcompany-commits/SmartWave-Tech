@@ -496,9 +496,10 @@ export function FrontDesk() {
         if (paymentStatusFilter !== 'all') {
           const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
           const bal = getReservationLiveBalance(res, hotel, resLedger);
-          const isPaid = res.paymentStatus === 'paid' || Math.abs(bal) <= 0.01;
-          const isUnpaid = (res.paymentStatus === 'unpaid' || (res.paidAmount || 0) <= 0) && bal > 0.01;
-          const isPartial = res.paymentStatus === 'partial' || ((res.paidAmount || 0) > 0 && bal > 0.01);
+          const acc = calculateReservationAccount(res, hotel, resLedger);
+          const isPaid = Math.abs(bal) <= 0.01;
+          const isPartial = bal > 0.01 && acc.totalPayments > 0;
+          const isUnpaid = bal > 0.01 && acc.totalPayments <= 0;
           if (paymentStatusFilter === 'paid' && !isPaid) return false;
           if (paymentStatusFilter === 'unpaid' && !isUnpaid) return false;
           if (paymentStatusFilter === 'partial' && !isPartial) return false;
@@ -532,9 +533,10 @@ export function FrontDesk() {
       if (paymentStatusFilter !== 'all') {
         const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
         const bal = getReservationLiveBalance(res, hotel, resLedger);
-        const isPaid = res.paymentStatus === 'paid' || Math.abs(bal) <= 0.01;
-        const isUnpaid = (res.paymentStatus === 'unpaid' || (res.paidAmount || 0) <= 0) && bal > 0.01;
-        const isPartial = res.paymentStatus === 'partial' || ((res.paidAmount || 0) > 0 && bal > 0.01);
+        const acc = calculateReservationAccount(res, hotel, resLedger);
+        const isPaid = Math.abs(bal) <= 0.01;
+        const isPartial = bal > 0.01 && acc.totalPayments > 0;
+        const isUnpaid = bal > 0.01 && acc.totalPayments <= 0;
         if (paymentStatusFilter === 'paid' && !isPaid) return false;
         if (paymentStatusFilter === 'unpaid' && !isUnpaid) return false;
         if (paymentStatusFilter === 'partial' && !isPartial) return false;
@@ -4910,6 +4912,7 @@ export function FrontDesk() {
                     <div className="flex flex-col gap-1.5 mt-2.5">
                       {(() => {
                         const totalPaid = billing.totalPayments;
+                        const totalDiscount = billing.totalDiscounts || 0;
                         const isSettled = Math.abs(bal) <= 0.01;
                         const isCredit = bal < -0.01;
                         const isPartial = bal > 0.01 && totalPaid > 0;
@@ -4930,14 +4933,26 @@ export function FrontDesk() {
 
                         return (
                           <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className={cn("px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border", badgeStyle)}>
                                 {label}
                               </span>
-                              <span className="text-[10px] text-zinc-500 font-medium">
-                                ({formatCurrency(totalPaid, currency, exchangeRate)} paid)
-                              </span>
+                              {totalPaid > 0 ? (
+                                <span className="text-[10px] text-zinc-500 font-medium">
+                                  ({formatCurrency(totalPaid, currency, exchangeRate)} paid)
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-zinc-500 font-medium">
+                                  (Unpaid)
+                                </span>
+                              )}
                             </div>
+                            {totalDiscount > 0 && (
+                              <div className="text-[9px] text-emerald-400 font-medium flex items-center gap-1">
+                                <Tag size={10} className="text-emerald-400 shrink-0" />
+                                <span>Discount: -{formatCurrency(totalDiscount, currency, exchangeRate)}</span>
+                              </div>
+                            )}
                             <div className={cn(
                               "text-[10px] font-mono px-1.5 py-0.5 rounded border w-fit font-bold",
                               isCredit 

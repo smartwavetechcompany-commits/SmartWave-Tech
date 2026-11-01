@@ -1544,7 +1544,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       )}>
                         {balance <= 0.01 ? 'SETTLED' :
                          (currentReservation.operationalStatus || currentReservation.status) === 'checked_out' ? 'DEBTOR' :
-                         (currentReservation.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING'}
+                         resAccount.totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING'}
                       </span>
                     </div>
                   </div>
@@ -1772,6 +1772,25 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         -{formatCurrency(totalCredits, currency, exchangeRate)}
                       </span>
                     </div>
+
+                    {resAccount.totalDiscounts > 0 && (
+                      <div className="flex justify-between text-emerald-400/80 text-[11px] pl-2">
+                        <span className="flex items-center gap-1">
+                          <Tag size={10} /> Applied Discounts / Concessions
+                        </span>
+                        <span className="font-mono">
+                          -{formatCurrency(resAccount.totalDiscounts, currency, exchangeRate)}
+                        </span>
+                      </div>
+                    )}
+                    {resAccount.totalPayments > 0 && resAccount.totalDiscounts > 0 && (
+                      <div className="flex justify-between text-emerald-400/80 text-[11px] pl-2">
+                        <span>Actual Payments Received</span>
+                        <span className="font-mono">
+                          -{formatCurrency(resAccount.totalPayments, currency, exchangeRate)}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-2 border-t border-zinc-800 flex justify-between items-center">
