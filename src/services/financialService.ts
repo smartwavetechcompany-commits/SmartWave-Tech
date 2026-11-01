@@ -10,6 +10,8 @@ export interface GuestAccountSummary {
   totalOverstayCharges: number;
   totalServiceCharges: number;
   totalPayments: number;
+  totalDiscounts: number;
+  totalCredits: number;
   totalRefunds: number;
   totalTransfers: number;
   outstandingBalance: number; // Positive = guest owes money (Debt), 0 = settled, Negative = credit balance (Overpaid)
@@ -107,6 +109,8 @@ export function calculateGuestFinancialPosition(
       totalOverstayCharges: 0,
       totalServiceCharges: 0,
       totalPayments: 0,
+      totalDiscounts: 0,
+      totalCredits: 0,
       totalRefunds: 0,
       totalTransfers: 0,
       outstandingBalance: 0,
@@ -153,6 +157,8 @@ export function calculateGuestFinancialPosition(
   let totalOverstayCharges = 0;
   let totalServiceCharges = 0;
   let totalPayments = 0;
+  let totalDiscounts = 0;
+  let totalCredits = 0;
   let totalRefunds = 0;
   let totalTransfers = 0;
   let totalDays = 0;
@@ -194,6 +200,8 @@ export function calculateGuestFinancialPosition(
       totalOverstayCharges += resAccount.totalOverstayCharges;
       totalServiceCharges += resAccount.totalServiceCharges;
       totalPayments += resAccount.totalPayments;
+      totalDiscounts += (resAccount.totalDiscounts || 0);
+      totalCredits += (resAccount.totalCredits || (resAccount.totalPayments + (resAccount.totalDiscounts || 0) + (resAccount.totalTransfers || 0)));
       totalRefunds += resAccount.totalRefunds;
       totalTransfers += resAccount.totalTransfers;
     });
@@ -217,9 +225,20 @@ export function calculateGuestFinancialPosition(
             }
           }
         } else if (e.type === 'credit') {
-          totalPayments += e.amount;
-          if (e.category === 'transfer') {
+          const cat = (e.category || '').toLowerCase();
+          const desc = (e.description || '').toLowerCase();
+          const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo');
+
+          totalCredits += e.amount;
+
+          if (cat === 'payment' && !isDiscount) {
+            totalPayments += e.amount;
+          } else if (isDiscount) {
+            totalDiscounts += e.amount;
+          } else if (cat === 'transfer' || cat === 'city_ledger') {
             totalTransfers += e.amount;
+          } else {
+            totalPayments += e.amount;
           }
         }
       });
@@ -242,11 +261,19 @@ export function calculateGuestFinancialPosition(
         }
       } else if (e.type === 'credit') {
         const cat = (e.category || '').toLowerCase();
-        if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
+        const desc = (e.description || '').toLowerCase();
+        const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo');
+
+        totalCredits += e.amount;
+
+        if (cat === 'payment' && !isDiscount) {
           totalPayments += e.amount;
-          if (cat === 'transfer') {
-            totalTransfers += e.amount;
-          }
+        } else if (isDiscount) {
+          totalDiscounts += e.amount;
+        } else if (cat === 'transfer' || cat === 'city_ledger') {
+          totalTransfers += e.amount;
+        } else {
+          totalPayments += e.amount;
         }
       }
     });
@@ -254,7 +281,10 @@ export function calculateGuestFinancialPosition(
     // Fallback for guest object with stored ledgerBalance
     const fallbackBal = typeof guestOrId === 'object' && guestOrId !== null ? (guestOrId.ledgerBalance || 0) : 0;
     if (fallbackBal > 0) totalCharges = fallbackBal;
-    else if (fallbackBal < 0) totalPayments = Math.abs(fallbackBal);
+    else if (fallbackBal < 0) {
+      totalPayments = Math.abs(fallbackBal);
+      totalCredits = Math.abs(fallbackBal);
+    }
   }
 
   totalCharges = Number(totalCharges.toFixed(2));
@@ -262,11 +292,14 @@ export function calculateGuestFinancialPosition(
   totalOverstayCharges = Number(totalOverstayCharges.toFixed(2));
   totalServiceCharges = Number(totalServiceCharges.toFixed(2));
   totalPayments = Number(totalPayments.toFixed(2));
+  totalDiscounts = Number(totalDiscounts.toFixed(2));
+  totalCredits = Number(totalCredits.toFixed(2));
   totalRefunds = Number(totalRefunds.toFixed(2));
   totalTransfers = Number(totalTransfers.toFixed(2));
 
-  const netPayments = Math.max(0, totalPayments - totalRefunds);
-  const rawBalance = totalCharges - netPayments;
+  // Outstanding balance: Total Charges - Net Credits (Payments + Discounts + Transfers minus Refunds)
+  const netCredits = Math.max(0, totalCredits - totalRefunds);
+  const rawBalance = totalCharges - netCredits;
   const outstandingBalance = Number(rawBalance.toFixed(2));
   const netAmountDue = Math.max(0, outstandingBalance);
   const creditBalance = Math.max(0, -outstandingBalance);
@@ -286,6 +319,8 @@ export function calculateGuestFinancialPosition(
     totalOverstayCharges,
     totalServiceCharges,
     totalPayments,
+    totalDiscounts,
+    totalCredits,
     totalRefunds,
     totalTransfers,
     outstandingBalance,
@@ -298,7 +333,7 @@ export function calculateGuestFinancialPosition(
     overstayNights: totalOverstayNights,
     actualStayedNights: totalActualStayedNights,
     chargeableNights: totalChargeableNights,
-    totalSpent: Number(netPayments.toFixed(2)),
+    totalSpent: Number(Math.max(0, totalPayments - totalRefunds).toFixed(2)),
     revenueGenerated: Number(totalCharges.toFixed(2))
   };
 }

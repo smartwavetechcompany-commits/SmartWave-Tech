@@ -242,6 +242,7 @@ export function GuestManagement() {
       chargeableNights: number;
       totalSpentVal: number; 
       totalRevenueVal: number; 
+      totalDiscountsVal?: number;
       outstandingDebtVal: number; 
     }> = {};
     if (!guests.length) return statsMap;
@@ -291,6 +292,7 @@ export function GuestManagement() {
       const totalSpentVal = Math.max(0, position.totalPayments - position.totalRefunds);
       // Revenue Generated = All posted charges (Room charges + Service charges + Taxes + Overstay)
       const totalRevenueVal = position.totalCharges;
+      const totalDiscountsVal = position.totalDiscounts || 0;
       const outstandingDebtVal = position.netAmountDue;
 
       statsMap[g.id] = {
@@ -302,6 +304,7 @@ export function GuestManagement() {
         chargeableNights,
         totalSpentVal,
         totalRevenueVal,
+        totalDiscountsVal,
         outstandingDebtVal
       };
     });
@@ -1228,6 +1231,7 @@ export function GuestManagement() {
                 chargeableNights: (guest as any).totalNights || 0, 
                 totalSpentVal: 0, 
                 totalRevenueVal: 0, 
+                totalDiscountsVal: 0,
                 outstandingDebtVal: 0 
               };
               const visitsCount = stats.visitsCount;
@@ -1414,8 +1418,11 @@ export function GuestManagement() {
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Total Spent</div>
                         <div className="text-sm font-bold text-blue-500 shrink-0">{formatCurrency(totalSpentVal, currency, exchangeRate)}</div>
                         {stats.totalRevenueVal !== undefined && (
-                          <div className="text-[7px] text-zinc-500 font-medium truncate mt-0.5" title="Total Revenue Generated (All Charges)">
+                          <div className="text-[7px] text-zinc-500 font-medium truncate mt-0.5" title={`Total Charges: ${formatCurrency(stats.totalRevenueVal, currency, exchangeRate)}${stats.totalDiscountsVal ? ` | Discount: -${formatCurrency(stats.totalDiscountsVal, currency, exchangeRate)}` : ''}`}>
                             Rev: {formatCurrency(stats.totalRevenueVal, currency, exchangeRate)}
+                            {stats.totalDiscountsVal ? (
+                              <span className="text-emerald-400 font-semibold"> • Disc: -{formatCurrency(stats.totalDiscountsVal, currency, exchangeRate)}</span>
+                            ) : null}
                           </div>
                         )}
                       </div>
@@ -1729,6 +1736,7 @@ export function GuestManagement() {
                 chargeableNights: 0,
                 totalSpentVal: 0,
                 totalRevenueVal: 0,
+                totalDiscountsVal: 0,
                 outstandingDebtVal: 0
               };
               const liveBalance = getGuestLiveBalance(selectedHistoryGuest);
