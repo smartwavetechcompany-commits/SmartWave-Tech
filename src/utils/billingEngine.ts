@@ -289,12 +289,16 @@ export class BillingEngine {
         return desc.includes('[inclusive]') || activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
       }).reduce((sum, t) => sum + t.amount, 0);
 
-      exclusiveTaxTotal = taxDebits.filter(t => {
+      const isTaxInclusive = activeTaxes.some(tax => tax.isInclusive) || (hotel as any)?.taxInclusive !== false;
+      exclusiveTaxTotal = isTaxInclusive ? 0 : taxDebits.filter(t => {
         const desc = (t.description || '').toLowerCase();
         return !desc.includes('[inclusive]') && !activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
       }).reduce((sum, t) => sum + t.amount, 0);
 
-      const effectiveRoomChargesGross = (stayDuration.bookedNights + stayDuration.overstayNights) * nightlyRate;
+      const postedOverstayDebits = roomDebits.filter(e => e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay'));
+      const effectiveOverstayNights = postedOverstayDebits.length > 0 ? postedOverstayDebits.length : stayDuration.overstayNights;
+      const effectiveRoomChargesGross = (stayDuration.bookedNights + effectiveOverstayNights) * nightlyRate;
+
       const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
       inclusiveTaxTotal = incRate > 0 
         ? effectiveRoomChargesGross - (effectiveRoomChargesGross / (1 + incRate / 100))

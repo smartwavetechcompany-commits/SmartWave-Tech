@@ -132,15 +132,24 @@ export function calculateReservationAccount(
     // Overstay: overstayNights * nightly (1 * ₦180,000 = ₦180,000 once grace period expires)
     // Total Room: (bookedNights + overstayNights) * nightly (2 * ₦180,000 = ₦360,000)
     const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
-    const overstayNights = Math.max(0, duration.overstayNights || 0);
+    const postedOverstayDebits = roomDebits.filter(e => e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay'));
+    const overstayNights = postedOverstayDebits.length > 0 
+      ? postedOverstayDebits.length 
+      : Math.max(0, duration.overstayNights || 0);
+
     const baseRoom = bookedNights * nightly;
     const overstayAmount = (res.status === 'checked_in' && res.autoNightDeduction !== false && overstayNights > 0)
       ? overstayNights * nightly
       : (overstayNights > 0 ? overstayNights * nightly : 0);
 
+    // In tax inclusive setups, taxes are inherent within room and service charges (gross pricing).
+    // Separate tax debits must never be added on top of charges as extra guest debt.
+    const isHotelTaxInclusive = activeInclusiveTaxes.length > 0 || (hotel as any)?.taxInclusive !== false;
+    const applicableExclusiveTaxes = isHotelTaxInclusive ? 0 : exclusiveTaxDebitsSum;
+
     totalOverstayCharges = overstayAmount;
     totalRoomCharges = baseRoom + overstayAmount;
-    totalServiceCharges = ancillarySum + exclusiveTaxDebitsSum;
+    totalServiceCharges = ancillarySum + applicableExclusiveTaxes;
     totalCharges = totalRoomCharges + totalServiceCharges;
 
     // If reservation has a recorded discount on its document that is not reflected in ledger credits:

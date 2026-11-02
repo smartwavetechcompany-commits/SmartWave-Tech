@@ -986,6 +986,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     return entry;
   });
 
+  // In tax-inclusive setups, separate tax debits do not exist on customer folios
+  if (hotel?.taxes?.some(t => t.isInclusive) || (hotel as any)?.taxInclusive !== false) {
+    displayedEntries = displayedEntries.filter(entry => !(entry.type === 'debit' && entry.category === 'tax'));
+  }
+
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
   const folioBreakdown = BillingEngine.calculateFolioBreakdown(currentReservation, hotel, processedDisplayedEntries);
