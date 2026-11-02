@@ -61,10 +61,11 @@ export function calculateReservationAccount(
           totalRefunds += e.amount;
         } else {
           totalCharges += e.amount;
-          if (e.category === 'room' || e.chargeType === 'room_rate') {
-            totalRoomCharges += e.amount;
-          } else if (e.chargeType === 'overstay') {
+          if (e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay')) {
             totalOverstayCharges += e.amount;
+            totalRoomCharges += e.amount;
+          } else if (e.category === 'room' || e.chargeType === 'room_rate') {
+            totalRoomCharges += e.amount;
           } else {
             totalServiceCharges += e.amount;
           }

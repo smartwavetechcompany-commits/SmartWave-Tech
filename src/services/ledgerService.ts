@@ -182,6 +182,10 @@ export const postToLedger = async (
 
       if (taxAlreadyPosted) {
         console.log(`[postToLedger] Skipping duplicate tax ${taxDesc} for: ${initialDescription}`);
+        if (tax.isInclusive) {
+          const taxAmount = baseAmount - (baseAmount / (1 + (tax.percentage / 100)));
+          totalInclusiveTax += taxAmount;
+        }
         continue;
       }
 
@@ -941,6 +945,43 @@ export const reconcileAndRepairReservationFinancials = async (
       }
     });
   }
+
+  // Identify redundant inclusive tax entries:
+  // In hotels with inclusive taxes (e.g. 7.5% VAT), room charges represent the full inclusive stay rate.
+  // If a room charge is posted at the full gross rate (>= nightlyRate - 1), any separate tax debit
+  // marked '[Inclusive]' or corresponding to an active inclusive tax is redundant and inflates the bill
+  // (e.g. 180k room + 12.5k tax = 192.5k instead of 180k).
+  const activeInclusiveTaxes = (hotel?.taxes || []).filter(t => t.isInclusive);
+  const taxDebits = ledgerEntries.filter(e => e.type === 'debit' && e.category === 'tax');
+
+  taxDebits.forEach(taxEntry => {
+    const desc = (taxEntry.description || '').toLowerCase();
+    const isInclusiveTax = desc.includes('[inclusive]') || 
+      activeInclusiveTaxes.some(t => desc.includes((t.name || '').toLowerCase()));
+    
+    if (isInclusiveTax) {
+      const matchingRoomCharge = retainedRoomCharges.find(r => {
+        if (!r.description) return false;
+        if (taxEntry.description && taxEntry.description.includes(r.description)) return true;
+        if (r.id && taxEntry.description && taxEntry.description.includes(r.id)) return true;
+        const match = r.description.match(/(?:Night of|Nightly room charge -|Period \d+ past checkout).*?([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/i);
+        if (match && taxEntry.description && taxEntry.description.includes(match[1])) return true;
+        return false;
+      }) || retainedRoomCharges.find(r => Math.abs(new Date(r.timestamp || 0).getTime() - new Date(taxEntry.timestamp || 0).getTime()) < 10000);
+
+      const totalRetainedRoomSum = retainedRoomCharges.reduce((sum, r) => sum + r.amount, 0);
+      const isRedundant = matchingRoomCharge 
+        ? matchingRoomCharge.amount >= (nightlyRate - 1)
+        : totalRetainedRoomSum >= (legitimateTotalNights * nightlyRate) - 1;
+
+      if (isRedundant) {
+        const tId = (taxEntry as any).firestoreId || taxEntry.id;
+        if (tId && !duplicateIds.includes(tId)) {
+          duplicateIds.push(tId);
+        }
+      }
+    }
+  });
 
   // Identify any attached tax entries for the purged duplicate charges
   if (duplicateIds.length > 0) {

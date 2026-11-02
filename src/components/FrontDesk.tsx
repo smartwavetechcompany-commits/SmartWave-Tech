@@ -2098,6 +2098,7 @@ export function FrontDesk() {
       let totalAmountCharged = 0;
 
       for (const res of activeCheckedInRes) {
+        await reconcileAndRepairReservationFinancials(hotel.id, res.id);
         const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
         if (result.chargedCount > 0) {
           chargedCount += result.chargedCount;
