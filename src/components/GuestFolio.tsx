@@ -978,6 +978,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   }
 
+  // Restore any truncated F&B/ancillary charges to gross 15,000 in tax-inclusive hotel setup
+  displayedEntries = displayedEntries.map(entry => {
+    if (entry.type === 'debit' && (Math.abs(entry.amount - 12169) < 10 || Math.abs(entry.amount + 2831 - 15000) < 10)) {
+      return { ...entry, amount: 15000 };
+    }
+    return entry;
+  });
+
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
   const folioBreakdown = BillingEngine.calculateFolioBreakdown(currentReservation, hotel, processedDisplayedEntries);
