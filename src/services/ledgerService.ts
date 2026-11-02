@@ -936,17 +936,24 @@ export const reconcileAndRepairReservationFinancials = async (
   const taxDebits = ledgerEntries.filter(e => e.type === 'debit' && e.category === 'tax');
   const totalRetainedRoomSum = retainedRoomCharges.reduce((sum, r) => sum + r.amount, 0);
 
-  const isHotelTaxInclusive = activeInclusiveTaxes.length > 0 || (hotel as any)?.taxInclusive !== false;
-
   taxDebits.forEach(taxEntry => {
     const desc = (taxEntry.description || '').toLowerCase();
-    const isInclusiveTax = isHotelTaxInclusive || desc.includes('[inclusive]') || 
+    const isInclusiveTax = desc.includes('[inclusive]') || 
       activeInclusiveTaxes.some(t => desc.includes((t.name || '').toLowerCase()));
     
     if (isInclusiveTax) {
-      const tId = (taxEntry as any).firestoreId || taxEntry.id;
-      if (tId && !duplicateIds.includes(tId)) {
-        duplicateIds.push(tId);
+      const isRedundant = totalRetainedRoomSum >= maxLegitimateGrossRoom - 1 ||
+        retainedRoomCharges.some(r => r.amount >= nightlyRate - 1 && (
+          (taxEntry.description && r.description && taxEntry.description.includes(r.description)) ||
+          (r.id && taxEntry.description && taxEntry.description.includes(r.id)) ||
+          Math.abs(new Date(r.timestamp || 0).getTime() - new Date(taxEntry.timestamp || 0).getTime()) < 10000
+        ));
+
+      if (isRedundant) {
+        const tId = (taxEntry as any).firestoreId || taxEntry.id;
+        if (tId && !duplicateIds.includes(tId)) {
+          duplicateIds.push(tId);
+        }
       }
     }
   });
@@ -1259,10 +1266,7 @@ export const processAutomatedBillingForReservation = async (
       const Start = addDays(checkOutDateTime, j - 1);
       const End = addDays(checkOutDateTime, j);
 
-      const graceMs = (graceInfo.totalGraceMinutes !== undefined ? graceInfo.totalGraceMinutes : 120) * 60 * 1000;
-      const deadlineForPeriodJ = new Date(Start.getTime() + graceMs);
-
-      if (currentTime > deadlineForPeriodJ) {
+      if (currentTime >= Start) {
         const startStr = Start.toISOString();
         const endStr = End.toISOString();
 
