@@ -118,32 +118,22 @@ export function calculateReservationAccount(
       }
     });
 
-    // Inclusive tax is an embedded breakdown of the gross charge, NOT an additive surcharge.
-    // If posted room charges already represent the full gross rate (>= maxLegitimateGrossRoom - 1),
-    // any separate inclusive tax debit is redundant/informational and must not inflate totalCharges.
-    // If room charges were posted as net pre-tax base, add inclusive tax up to the gross cap.
-    let legitimateRoomTotal = postedRoomSum;
-    if (postedRoomSum >= maxLegitimateGrossRoom - 1) {
-      legitimateRoomTotal = Math.min(postedRoomSum, maxLegitimateGrossRoom);
-    } else {
-      legitimateRoomTotal = Math.min(postedRoomSum + inclusiveTaxDebitsSum, maxLegitimateGrossRoom);
-    }
+    // Authoritative calculation of room revenue and overstay:
+    // Rate: nightly (₦180,000 / night)
+    // Booked stay: bookedNights * nightly (1 * ₦180,000 = ₦180,000)
+    // Overstay: overstayNights * nightly (1 * ₦180,000 = ₦180,000 once grace period expires)
+    // Total Room: (bookedNights + overstayNights) * nightly (2 * ₦180,000 = ₦360,000)
+    const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
+    const overstayNights = Math.max(0, duration.overstayNights || 0);
+    const baseRoom = bookedNights * nightly;
+    const overstayAmount = (res.status === 'checked_in' && res.autoNightDeduction !== false && overstayNights > 0)
+      ? overstayNights * nightly
+      : (overstayNights > 0 ? overstayNights * nightly : 0);
 
-    // Overstay breakdown:
-    const overstayDebits = roomDebits.filter(e => e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay'));
-    const postedOverstaySum = overstayDebits.reduce((sum, e) => sum + e.amount, 0);
-    const maxAllowedOverstay = duration.overstayNights * nightly;
-    totalOverstayCharges = Math.min(postedOverstaySum, maxAllowedOverstay);
-
-    // If overstay has elapsed but not yet posted in ledger:
-    if (duration.overstayNights > 0 && overstayDebits.length === 0 && res.status === 'checked_in' && res.autoNightDeduction !== false) {
-      totalOverstayCharges = maxAllowedOverstay;
-      legitimateRoomTotal = Math.max(legitimateRoomTotal, (duration.bookedNights * nightly) + totalOverstayCharges);
-    }
-
-    totalRoomCharges = legitimateRoomTotal;
+    totalOverstayCharges = overstayAmount;
+    totalRoomCharges = baseRoom + overstayAmount;
     totalServiceCharges = ancillarySum + exclusiveTaxDebitsSum;
-    totalCharges = legitimateRoomTotal + totalServiceCharges;
+    totalCharges = totalRoomCharges + totalServiceCharges;
 
     // If reservation has a recorded discount on its document that is not reflected in ledger credits:
     const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || (e.description || '').toLowerCase().includes('discount')));

@@ -286,21 +286,12 @@ export class BillingEngine {
         return !desc.includes('[inclusive]') && !activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
       }).reduce((sum, t) => sum + t.amount, 0);
 
-      let effectiveRoomChargesGross = 0;
-      if (postedRoomChargesSum >= maxLegitimateGrossRoom - 1) {
-        // Room debits were posted at full gross rate (or more)
-        effectiveRoomChargesGross = Math.min(postedRoomChargesSum, maxLegitimateGrossRoom);
-        const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
-        inclusiveTaxTotal = incRate > 0 
-          ? effectiveRoomChargesGross - (effectiveRoomChargesGross / (1 + incRate / 100))
-          : inclusiveTaxDebitsSum;
-        baseRoomGross = effectiveRoomChargesGross - inclusiveTaxTotal;
-      } else {
-        // Room debits were posted as pre-tax net base
-        baseRoomGross = postedRoomChargesSum;
-        inclusiveTaxTotal = Math.min(inclusiveTaxDebitsSum, Math.max(0, maxLegitimateGrossRoom - postedRoomChargesSum));
-        effectiveRoomChargesGross = baseRoomGross + inclusiveTaxTotal;
-      }
+      const effectiveRoomChargesGross = (stayDuration.bookedNights + stayDuration.overstayNights) * nightlyRate;
+      const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
+      inclusiveTaxTotal = incRate > 0 
+        ? effectiveRoomChargesGross - (effectiveRoomChargesGross / (1 + incRate / 100))
+        : 0;
+      baseRoomGross = effectiveRoomChargesGross - inclusiveTaxTotal;
 
       totalCharges = effectiveRoomChargesGross + ancillaryTotal + exclusiveTaxTotal;
 
@@ -700,12 +691,12 @@ export function calculateBilling(
   ledgerEntries?: LedgerEntry[]
 ): BillingState {
   const account = calculateReservationAccount(res, hotel, ledgerEntries);
-  const nightlyRate = res.nightlyRate || (account.totalNights > 0 ? account.totalRoomCharges / account.totalNights : 0);
-  const duration = calculateStayDuration(res.checkIn, res.checkOut);
+  const nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res });
   const originalNights = duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1);
   return {
     nightsCount: account.totalNights,
-    extraNights: 0,
+    extraNights: account.overstayNights,
     nightlyRate,
     originalNights,
     overstayCharge: account.totalOverstayCharges,
@@ -714,7 +705,7 @@ export function calculateBilling(
     totalDiscounts: account.totalDiscounts,
     totalCredits: account.totalCredits,
     outstandingBalance: account.outstandingBalance,
-    isOverstaying: res.status === 'checked_in' && account.totalOverstayCharges > 0,
+    isOverstaying: res.status === 'checked_in' && account.overstayNights > 0,
     projectedRoomCharge: 0,
     unpostedPrepayment: 0,
     unpostedIncidentals: 0

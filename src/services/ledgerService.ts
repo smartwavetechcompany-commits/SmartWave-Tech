@@ -163,10 +163,14 @@ export const postToLedger = async (
     
     const baseAmount = entry.amount;
     const initialDescription = entry.description;
-    let totalInclusiveTax = 0;
-    const inclusiveTaxEntries: Omit<LedgerEntry, 'id'>[] = [];
 
     for (const tax of activeTaxes) {
+      // Inclusive taxes are already an inherent component of the gross charge amount (e.g. 180,000).
+      // They do NOT alter the primary debit amount and do NOT post additional debt to the guest folio.
+      if (tax.isInclusive) {
+        continue;
+      }
+
       const taxName = tax.name || 'Tax';
       const taxDesc = `${taxName} (${tax.percentage}%)`;
 
@@ -181,54 +185,25 @@ export const postToLedger = async (
       });
 
       if (taxAlreadyPosted) {
-        console.log(`[postToLedger] Skipping duplicate tax ${taxDesc} for: ${initialDescription}`);
-        if (tax.isInclusive) {
-          const taxAmount = baseAmount - (baseAmount / (1 + (tax.percentage / 100)));
-          totalInclusiveTax += taxAmount;
-        }
         continue;
       }
 
-      const taxAmount = tax.isInclusive 
-        ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
-        : baseAmount * (tax.percentage / 100);
-      
-      if (tax.isInclusive) {
-        totalInclusiveTax += taxAmount;
-        const taxEntry: Omit<LedgerEntry, 'id'> = {
-          timestamp,
-          hotelId,
-          guestId,
-          reservationId,
-          corporateId: finalCorporateId,
-          type: 'debit',
-          amount: taxAmount,
-          description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
-          category: 'tax',
-          postedBy
-        };
-        inclusiveTaxEntries.push(taxEntry);
-      } else {
-        const taxEntry: Omit<LedgerEntry, 'id'> = {
-          timestamp,
-          hotelId,
-          guestId,
-          reservationId,
-          corporateId: finalCorporateId,
-          type: 'debit',
-          amount: taxAmount,
-          description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
-          category: 'tax',
-          postedBy
-        };
-        entries.push(taxEntry);
-      }
+      // Exclusive tax: added on top of base amount
+      const taxAmount = baseAmount * (tax.percentage / 100);
+      const taxEntry: Omit<LedgerEntry, 'id'> = {
+        timestamp,
+        hotelId,
+        guestId,
+        reservationId,
+        corporateId: finalCorporateId,
+        type: 'debit',
+        amount: taxAmount,
+        description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
+        category: 'tax',
+        postedBy
+      };
+      entries.push(taxEntry);
     }
-
-    // Adjust the primary entry amount for inclusive taxes
-    entries[0].amount = baseAmount - totalInclusiveTax;
-    // Also add the inclusive tax entries to the main entries list
-    entries.push(...inclusiveTaxEntries);
   }
 
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
@@ -1006,6 +981,30 @@ export const reconcileAndRepairReservationFinancials = async (
 
   // Remaining clean ledger entries
   const cleanEntries = ledgerEntries.filter(e => !duplicateIds.includes((e as any).firestoreId || e.id));
+
+  // Repair any room charges that were previously truncated by inclusive tax splitting (e.g. 167,441.86 instead of 180,000)
+  for (const entry of cleanEntries) {
+    if (entry.type === 'debit' && (entry.category === 'room' || entry.chargeType === 'room_rate' || entry.chargeType === 'overstay')) {
+      if (entry.amount < nightlyRate - 1) {
+        const docId = (entry as any).firestoreId || entry.id;
+        if (docId) {
+          try {
+            await database.safeUpdate(doc(db, 'hotels', hotelId, 'ledger', docId), {
+              amount: nightlyRate
+            }, {
+              hotelId,
+              module: 'Ledger',
+              action: 'RESTORE_FULL_ROOM_RATE',
+              details: `Restored room charge ${docId} from ${entry.amount} to full nightly rate of ${nightlyRate}`
+            });
+            entry.amount = nightlyRate;
+          } catch (rErr) {
+            console.error("Failed to restore room debit amount:", rErr);
+          }
+        }
+      }
+    }
+  }
 
   // Calculate authoritative balances from unified single engine
   const account = calculateReservationAccount(res, hotel, cleanEntries);
