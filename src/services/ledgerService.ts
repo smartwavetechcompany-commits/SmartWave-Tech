@@ -5,7 +5,7 @@ import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
 import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
-
+import { calculateReservationAccount } from '../utils/financialUtils';
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
 export const postToLedger = async (
@@ -944,15 +944,18 @@ export const reconcileAndRepairReservationFinancials = async (
         duplicateIds.push(excessId);
       }
     });
+    retainedRoomCharges.splice(legitimateTotalNights);
   }
 
   // Identify redundant inclusive tax entries:
   // In hotels with inclusive taxes (e.g. 7.5% VAT), room charges represent the full inclusive stay rate.
-  // If a room charge is posted at the full gross rate (>= nightlyRate - 1), any separate tax debit
-  // marked '[Inclusive]' or corresponding to an active inclusive tax is redundant and inflates the bill
-  // (e.g. 180k room + 12.5k tax = 192.5k instead of 180k).
+  // If room charges are posted at full gross rate (>= nightlyRate - 1 or sum >= legitimateTotalNights * nightlyRate - 1),
+  // any separate tax debit marked '[Inclusive]' or corresponding to an active inclusive tax is redundant
+  // and must be purged to avoid double charging the guest.
+  const maxLegitimateGrossRoom = legitimateTotalNights * nightlyRate;
   const activeInclusiveTaxes = (hotel?.taxes || []).filter(t => t.isInclusive);
   const taxDebits = ledgerEntries.filter(e => e.type === 'debit' && e.category === 'tax');
+  const totalRetainedRoomSum = retainedRoomCharges.reduce((sum, r) => sum + r.amount, 0);
 
   taxDebits.forEach(taxEntry => {
     const desc = (taxEntry.description || '').toLowerCase();
@@ -960,19 +963,12 @@ export const reconcileAndRepairReservationFinancials = async (
       activeInclusiveTaxes.some(t => desc.includes((t.name || '').toLowerCase()));
     
     if (isInclusiveTax) {
-      const matchingRoomCharge = retainedRoomCharges.find(r => {
-        if (!r.description) return false;
-        if (taxEntry.description && taxEntry.description.includes(r.description)) return true;
-        if (r.id && taxEntry.description && taxEntry.description.includes(r.id)) return true;
-        const match = r.description.match(/(?:Night of|Nightly room charge -|Period \d+ past checkout).*?([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/i);
-        if (match && taxEntry.description && taxEntry.description.includes(match[1])) return true;
-        return false;
-      }) || retainedRoomCharges.find(r => Math.abs(new Date(r.timestamp || 0).getTime() - new Date(taxEntry.timestamp || 0).getTime()) < 10000);
-
-      const totalRetainedRoomSum = retainedRoomCharges.reduce((sum, r) => sum + r.amount, 0);
-      const isRedundant = matchingRoomCharge 
-        ? matchingRoomCharge.amount >= (nightlyRate - 1)
-        : totalRetainedRoomSum >= (legitimateTotalNights * nightlyRate) - 1;
+      const isRedundant = totalRetainedRoomSum >= maxLegitimateGrossRoom - 1 ||
+        retainedRoomCharges.some(r => r.amount >= nightlyRate - 1 && (
+          (taxEntry.description && r.description && taxEntry.description.includes(r.description)) ||
+          (r.id && taxEntry.description && taxEntry.description.includes(r.id)) ||
+          Math.abs(new Date(r.timestamp || 0).getTime() - new Date(taxEntry.timestamp || 0).getTime()) < 10000
+        ));
 
       if (isRedundant) {
         const tId = (taxEntry as any).firestoreId || taxEntry.id;
@@ -1011,35 +1007,12 @@ export const reconcileAndRepairReservationFinancials = async (
   // Remaining clean ledger entries
   const cleanEntries = ledgerEntries.filter(e => !duplicateIds.includes((e as any).firestoreId || e.id));
 
-  // Calculate authoritative balances according to RULE 2:
-  // Expected Balance = SUM(All Charges) - SUM(All Payments) - SUM(All Credits)
-  let totalCharges = 0;
-  let totalPayments = 0;
-  let totalCredits = 0;
-  let totalPaid = 0;
-
-  cleanEntries.forEach(e => {
-    if (e.type === 'debit') {
-      if (e.category === 'refund') {
-        totalPaid -= e.amount;
-      } else {
-        totalCharges += e.amount;
-      }
-    } else if (e.type === 'credit') {
-      const cat = (e.category || '').toLowerCase();
-      if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
-        totalCredits += e.amount;
-        if (cat === 'payment') {
-          totalPaid += e.amount;
-        }
-      }
-    }
-  });
-
-  totalCharges = Number(totalCharges.toFixed(2));
-  totalCredits = Number(totalCredits.toFixed(2));
-  totalPayments = Math.max(0, Number(totalPaid.toFixed(2)));
-  const expectedBalance = Number((totalCharges - totalCredits).toFixed(2));
+  // Calculate authoritative balances from unified single engine
+  const account = calculateReservationAccount(res, hotel, cleanEntries);
+  const totalCharges = account.totalCharges;
+  const totalCredits = account.totalCredits;
+  const totalPayments = account.totalPayments;
+  const expectedBalance = account.outstandingBalance;
   const previousStoredBalance = res.ledgerBalance || 0;
   const discrepancy = Number((previousStoredBalance - expectedBalance).toFixed(2));
 

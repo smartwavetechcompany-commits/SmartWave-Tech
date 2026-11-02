@@ -54,21 +54,30 @@ export function calculateReservationAccount(
   let totalTransfers = 0;
 
   if (resLedger && resLedger.length > 0) {
-    // 1. Authoritative computation directly from Posted Ledger Entries
+    const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+    const legitimateNights = Math.max(1, duration.totalNights);
+    const maxLegitimateGrossRoom = legitimateNights * nightly;
+
+    // Separate debits by category and charge type
+    const refundDebits: LedgerEntry[] = [];
+    const roomDebits: LedgerEntry[] = [];
+    const taxDebits: LedgerEntry[] = [];
+    const ancillaryDebits: LedgerEntry[] = [];
+
     resLedger.forEach(e => {
       if (e.type === 'debit') {
-        if (e.category === 'refund') {
-          totalRefunds += e.amount;
+        const cat = (e.category || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        const chargeType = (e.chargeType || '').toLowerCase();
+
+        if (cat === 'refund') {
+          refundDebits.push(e);
+        } else if (cat === 'room' || chargeType === 'room_rate' || chargeType === 'overstay' || desc.includes('overstay') || desc.includes('room charge')) {
+          roomDebits.push(e);
+        } else if (cat === 'tax') {
+          taxDebits.push(e);
         } else {
-          totalCharges += e.amount;
-          if (e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay')) {
-            totalOverstayCharges += e.amount;
-            totalRoomCharges += e.amount;
-          } else if (e.category === 'room' || e.chargeType === 'room_rate') {
-            totalRoomCharges += e.amount;
-          } else {
-            totalServiceCharges += e.amount;
-          }
+          ancillaryDebits.push(e);
         }
       } else if (e.type === 'credit') {
         const cat = (e.category || '').toLowerCase();
@@ -84,11 +93,57 @@ export function calculateReservationAccount(
         } else if (cat === 'transfer' || cat === 'city_ledger') {
           totalTransfers += e.amount;
         } else {
-          // Other credit adjustment
           totalPayments += e.amount;
         }
       }
     });
+
+    totalRefunds = refundDebits.reduce((sum, e) => sum + e.amount, 0);
+    const postedRoomSum = roomDebits.reduce((sum, e) => sum + e.amount, 0);
+    const ancillarySum = ancillaryDebits.reduce((sum, e) => sum + e.amount, 0);
+
+    // Identify active inclusive taxes from hotel settings
+    const activeInclusiveTaxes = (hotel?.taxes || []).filter(t => t.isInclusive);
+    let inclusiveTaxDebitsSum = 0;
+    let exclusiveTaxDebitsSum = 0;
+
+    taxDebits.forEach(t => {
+      const desc = (t.description || '').toLowerCase();
+      const isInclusive = desc.includes('[inclusive]') || 
+        activeInclusiveTaxes.some(tax => desc.includes((tax.name || '').toLowerCase()));
+      if (isInclusive) {
+        inclusiveTaxDebitsSum += t.amount;
+      } else {
+        exclusiveTaxDebitsSum += t.amount;
+      }
+    });
+
+    // Inclusive tax is an embedded breakdown of the gross charge, NOT an additive surcharge.
+    // If posted room charges already represent the full gross rate (>= maxLegitimateGrossRoom - 1),
+    // any separate inclusive tax debit is redundant/informational and must not inflate totalCharges.
+    // If room charges were posted as net pre-tax base, add inclusive tax up to the gross cap.
+    let legitimateRoomTotal = postedRoomSum;
+    if (postedRoomSum >= maxLegitimateGrossRoom - 1) {
+      legitimateRoomTotal = Math.min(postedRoomSum, maxLegitimateGrossRoom);
+    } else {
+      legitimateRoomTotal = Math.min(postedRoomSum + inclusiveTaxDebitsSum, maxLegitimateGrossRoom);
+    }
+
+    // Overstay breakdown:
+    const overstayDebits = roomDebits.filter(e => e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay'));
+    const postedOverstaySum = overstayDebits.reduce((sum, e) => sum + e.amount, 0);
+    const maxAllowedOverstay = duration.overstayNights * nightly;
+    totalOverstayCharges = Math.min(postedOverstaySum, maxAllowedOverstay);
+
+    // If overstay has elapsed but not yet posted in ledger:
+    if (duration.overstayNights > 0 && overstayDebits.length === 0 && res.status === 'checked_in' && res.autoNightDeduction !== false) {
+      totalOverstayCharges = maxAllowedOverstay;
+      legitimateRoomTotal = Math.max(legitimateRoomTotal, (duration.bookedNights * nightly) + totalOverstayCharges);
+    }
+
+    totalRoomCharges = legitimateRoomTotal;
+    totalServiceCharges = ancillarySum + exclusiveTaxDebitsSum;
+    totalCharges = legitimateRoomTotal + totalServiceCharges;
 
     // If reservation has a recorded discount on its document that is not reflected in ledger credits:
     const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || (e.description || '').toLowerCase().includes('discount')));
@@ -99,26 +154,11 @@ export function calculateReservationAccount(
     }
 
     // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
-    const roomDebitsPosted = resLedger.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
+    const roomDebitsPosted = roomDebits.length > 0;
     if (!roomDebitsPosted && res.status === 'checked_in' && totalCharges === 0) {
-      const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
       const baseRoom = nightly * duration.totalNights;
       totalCharges += baseRoom;
       totalRoomCharges += baseRoom;
-    }
-
-    // Immediately reflect elapsed overstay charges if grace period has expired and charges are not yet persisted to ledger
-    const postedOverstayDebitsCount = resLedger.filter(e => 
-      e.type === 'debit' && (e.chargeType === 'overstay' || (e.description || '').toLowerCase().includes('overstay'))
-    ).length;
-
-    if (res.status === 'checked_in' && res.autoNightDeduction !== false && duration.overstayNights > postedOverstayDebitsCount) {
-      const unpostedOverstayNights = duration.overstayNights - postedOverstayDebitsCount;
-      const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
-      const unpostedOverstayAmount = unpostedOverstayNights * nightly;
-      totalCharges += unpostedOverstayAmount;
-      totalOverstayCharges += unpostedOverstayAmount;
-      totalRoomCharges += unpostedOverstayAmount;
     }
   } else {
     // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown

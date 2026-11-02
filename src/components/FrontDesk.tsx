@@ -2089,7 +2089,7 @@ export function FrontDesk() {
 
     try {
       const activeCheckedInRes = reservations.filter(res => {
-        return res.status === 'checked_in' && res.autoNightDeduction && res.guestId;
+        return res.status === 'checked_in' && res.autoNightDeduction !== false;
       });
 
       if (activeCheckedInRes.length === 0) return;

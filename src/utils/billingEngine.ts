@@ -272,34 +272,40 @@ export class BillingEngine {
       totalPayments = creditEntries.reduce((sum, e) => sum + e.amount, 0);
       totalRefunds = refundDebits.reduce((sum, e) => sum + e.amount, 0);
 
-      // Ledger debits total
-      totalCharges = resLedger.filter(e => e.type === 'debit' && e.category !== 'refund').reduce((sum, e) => sum + e.amount, 0);
-
+      const maxLegitimateGrossRoom = stayDuration.totalNights * nightlyRate;
       const postedRoomChargesSum = roomDebits.reduce((sum, e) => sum + e.amount, 0);
-      const postedTaxChargesSum = taxDebits.reduce((sum, e) => sum + e.amount, 0);
 
-      // Determine how taxes and base gross are structured in ledger
-      const hasInclusiveTaxDebits = taxDebits.some(t => t.description?.toLowerCase().includes('[inclusive]'));
-      if (hasInclusiveTaxDebits) {
-        // Room debits were posted as pre-tax base, and taxes as separate entries
-        baseRoomGross = postedRoomChargesSum;
-        inclusiveTaxTotal = taxDebits.filter(t => t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
-        exclusiveTaxTotal = taxDebits.filter(t => !t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
-      } else if (activeTaxes.some(t => t.isInclusive)) {
-        // Room debits represent gross inclusive stay; extract base and tax
-        const totalRoomStay = postedRoomChargesSum;
+      // Distinguish inclusive tax debits from exclusive tax debits
+      const inclusiveTaxDebitsSum = taxDebits.filter(t => {
+        const desc = (t.description || '').toLowerCase();
+        return desc.includes('[inclusive]') || activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
+      }).reduce((sum, t) => sum + t.amount, 0);
+
+      exclusiveTaxTotal = taxDebits.filter(t => {
+        const desc = (t.description || '').toLowerCase();
+        return !desc.includes('[inclusive]') && !activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
+      }).reduce((sum, t) => sum + t.amount, 0);
+
+      let effectiveRoomChargesGross = 0;
+      if (postedRoomChargesSum >= maxLegitimateGrossRoom - 1) {
+        // Room debits were posted at full gross rate (or more)
+        effectiveRoomChargesGross = Math.min(postedRoomChargesSum, maxLegitimateGrossRoom);
         const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
-        inclusiveTaxTotal = totalRoomStay - (totalRoomStay / (1 + incRate / 100));
-        baseRoomGross = totalRoomStay - inclusiveTaxTotal;
-        exclusiveTaxTotal = postedTaxChargesSum;
+        inclusiveTaxTotal = incRate > 0 
+          ? effectiveRoomChargesGross - (effectiveRoomChargesGross / (1 + incRate / 100))
+          : inclusiveTaxDebitsSum;
+        baseRoomGross = effectiveRoomChargesGross - inclusiveTaxTotal;
       } else {
+        // Room debits were posted as pre-tax net base
         baseRoomGross = postedRoomChargesSum;
-        inclusiveTaxTotal = 0;
-        exclusiveTaxTotal = postedTaxChargesSum;
+        inclusiveTaxTotal = Math.min(inclusiveTaxDebitsSum, Math.max(0, maxLegitimateGrossRoom - postedRoomChargesSum));
+        effectiveRoomChargesGross = baseRoomGross + inclusiveTaxTotal;
       }
 
+      totalCharges = effectiveRoomChargesGross + ancillaryTotal + exclusiveTaxTotal;
+
       // Generate clean itemized tax rows calculated exactly once
-      const staySubjectAmount = baseRoomGross + inclusiveTaxTotal;
+      const staySubjectAmount = effectiveRoomChargesGross;
       folioTaxes = activeTaxes.map(tax => {
         const amt = tax.isInclusive 
           ? staySubjectAmount - (staySubjectAmount / (1 + tax.percentage / 100))
