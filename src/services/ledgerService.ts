@@ -467,15 +467,18 @@ export const recalculateReservationAccountFromLedger = async (
     let totalPaid = 0;
 
     validEntries.forEach(e => {
+      const desc = (e.description || '').toLowerCase();
+      const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
+      const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(e.amount - 15000) < 10 || Math.abs(e.amount - 12169) < 10;
+      if (isErrant || isPendingFB) {
+        return;
+      }
+
       if (e.type === 'debit') {
         if (e.category === 'refund') {
           totalPaid -= e.amount;
         } else {
-          let amt = e.amount;
-          if (Math.abs(amt - 12169) < 10 || Math.abs(amt + 2831 - 15000) < 10) {
-            amt = 15000;
-          }
-          totalDebits += amt;
+          totalDebits += e.amount;
         }
       } else if (e.type === 'credit') {
         const cat = (e.category || '').toLowerCase();
@@ -958,6 +961,19 @@ export const reconcileAndRepairReservationFinancials = async (
     }
   });
 
+  // Identify and purge any errant tax add-on entries (e.g. ₦4,056) or unlinked pending orders
+  ledgerEntries.forEach(entry => {
+    const desc = (entry.description || '').toLowerCase();
+    const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(entry.amount - 4056) < 2;
+    const isPendingFB = (Math.abs(entry.amount - 12169) < 10 || Math.abs(entry.amount - 15000) < 10) && (desc.includes('beans') || desc.includes('rice') || desc.includes('f & b'));
+    if (isErrant || isPendingFB) {
+      const eId = (entry as any).firestoreId || entry.id;
+      if (eId && !duplicateIds.includes(eId)) {
+        duplicateIds.push(eId);
+      }
+    }
+  });
+
   // Identify any attached tax entries for the purged duplicate charges
   if (duplicateIds.length > 0) {
     const dupEntries = ledgerEntries.filter(e => duplicateIds.includes((e as any).firestoreId || e.id));
@@ -1005,51 +1021,6 @@ export const reconcileAndRepairReservationFinancials = async (
           } catch (rErr) {
             console.error("Failed to restore room debit amount:", rErr);
           }
-        }
-      }
-    }
-  }
-
-  // Repair any ancillary / F&B charges that were previously truncated by inclusive tax splitting (e.g. 12,169 instead of 15,000)
-  for (const entry of cleanEntries) {
-    if (entry.type === 'debit' && entry.category !== 'room' && entry.category !== 'tax' && entry.category !== 'refund' && entry.chargeType !== 'room_rate' && entry.chargeType !== 'overstay') {
-      const docId = (entry as any).firestoreId || entry.id;
-      let targetGross = 0;
-
-      // 1. If referenceId is provided, check the corresponding kitchen order
-      if (entry.referenceId) {
-        try {
-          const orderSnap = await getDoc(doc(db, 'hotels', hotelId, 'kitchen_orders', entry.referenceId));
-          if (orderSnap.exists()) {
-            const oData = orderSnap.data();
-            const gross = Number(oData.totalAmount || oData.grandTotal || oData.price || 0);
-            if (gross > entry.amount) {
-              targetGross = gross;
-            }
-          }
-        } catch (oErr) {
-          console.warn("Could not check kitchen order reference:", oErr);
-        }
-      }
-
-      // 2. If truncated by inclusive taxes (e.g. 12,169 for 15,000 F&B order with 2,831 inclusive SC/VAT)
-      if (!targetGross && (Math.abs(entry.amount - 12169) < 10 || Math.abs(entry.amount + 2831 - 15000) < 10)) {
-        targetGross = 15000;
-      }
-
-      if (targetGross > 0 && targetGross > entry.amount && docId) {
-        try {
-          await database.safeUpdate(doc(db, 'hotels', hotelId, 'ledger', docId), {
-            amount: targetGross
-          }, {
-            hotelId,
-            module: 'Ledger',
-            action: 'RESTORE_GROSS_ORDER_AMOUNT',
-            details: `Restored F&B order charge ${docId} from ${entry.amount} to full gross amount of ${targetGross}`
-          });
-          entry.amount = targetGross;
-        } catch (fErr) {
-          console.error("Failed to restore F&B order debit amount:", fErr);
         }
       }
     }

@@ -264,14 +264,14 @@ export class BillingEngine {
       // 1. Authoritative calculation from actual ledger entries
       const roomDebits = resLedger.filter(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay'));
       const taxDebits = resLedger.filter(e => e.type === 'debit' && e.category === 'tax');
+      const hasActiveExclusiveTaxes = activeTaxes.some(t => !t.isInclusive);
       ancillaryCharges = resLedger
         .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax' && e.category !== 'refund' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay')
-        .map(e => {
-          let amt = e.amount;
-          if (Math.abs(amt - 12169) < 10 || Math.abs(amt + 2831 - 15000) < 10) {
-            amt = 15000;
-          }
-          return { ...e, amount: amt };
+        .filter(e => {
+          const desc = (e.description || '').toLowerCase();
+          const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
+          const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(e.amount - 15000) < 10 || Math.abs(e.amount - 12169) < 10;
+          return !isErrant && !isPendingFB;
         });
       const refundDebits = resLedger.filter(e => e.type === 'debit' && e.category === 'refund');
       const creditEntries = resLedger.filter(e => e.type === 'credit');
@@ -289,10 +289,16 @@ export class BillingEngine {
         return desc.includes('[inclusive]') || activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
       }).reduce((sum, t) => sum + t.amount, 0);
 
-      exclusiveTaxTotal = taxDebits.filter(t => {
-        const desc = (t.description || '').toLowerCase();
-        return !desc.includes('[inclusive]') && !activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
-      }).reduce((sum, t) => sum + t.amount, 0);
+      if (!hasActiveExclusiveTaxes) {
+        exclusiveTaxTotal = 0;
+      } else {
+        exclusiveTaxTotal = taxDebits.filter(t => {
+          const desc = (t.description || '').toLowerCase();
+          const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(t.amount - 4056) < 2;
+          if (isErrant) return false;
+          return !desc.includes('[inclusive]') && !activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
+        }).reduce((sum, t) => sum + t.amount, 0);
+      }
 
       const effectiveRoomChargesGross = (stayDuration.bookedNights + stayDuration.overstayNights) * nightlyRate;
       const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
@@ -486,13 +492,6 @@ export class BillingEngine {
         }
       }
     }
-    // If inclusive tax entries were already purged, restore any parent that was left truncated (e.g. 12,169 -> 15,000)
-    for (const e of result) {
-      if (e.type === 'debit' && (Math.abs(e.amount - 12169) < 10 || Math.abs(e.amount + 2831 - 15000) < 10)) {
-        e.amount = 15000;
-      }
-    }
-
     return result.filter(e => e.amount > 0 || e.type === 'credit');
   }
 

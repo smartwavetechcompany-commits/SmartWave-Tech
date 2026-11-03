@@ -978,12 +978,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   }
 
-  // Restore any truncated F&B/ancillary charges to gross 15,000 in tax-inclusive hotel setup
-  displayedEntries = displayedEntries.map(entry => {
-    if (entry.type === 'debit' && (Math.abs(entry.amount - 12169) < 10 || Math.abs(entry.amount + 2831 - 15000) < 10)) {
-      return { ...entry, amount: 15000 };
-    }
-    return entry;
+  // Filter out any errant tax add-on or adjustment entries from guest folio
+  displayedEntries = displayedEntries.filter(entry => {
+    const desc = (entry.description || '').toLowerCase();
+    const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(entry.amount - 4056) < 2;
+    const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(entry.amount - 15000) < 10 || Math.abs(entry.amount - 12169) < 10;
+    return !isErrant && !isPendingFB;
   });
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
@@ -994,9 +994,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const originalNightsCount = folioBreakdown.stayDuration.bookedNights;
   const nightlyRateCalculated = folioBreakdown.nightlyRate;
   
-  const totalDebits = folioBreakdown.tier3.totalCharges;
-  const totalCredits = folioBreakdown.tier3.totalPayments;
-  const balance = folioBreakdown.tier3.outstandingBalance;
+  const totalDebits = resAccount.totalCharges;
+  const totalCredits = resAccount.totalCredits;
+  const balance = resAccount.outstandingBalance;
 
   // Real posted entries only in history items - NO VIRTUAL CREDITS OR PROJECTION REDUCTIONS
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));

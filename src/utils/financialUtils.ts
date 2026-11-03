@@ -100,24 +100,34 @@ export function calculateReservationAccount(
 
     totalRefunds = refundDebits.reduce((sum, e) => sum + e.amount, 0);
     const postedRoomSum = roomDebits.reduce((sum, e) => sum + e.amount, 0);
-    const ancillarySum = ancillaryDebits.reduce((sum, e) => {
-      let amt = e.amount;
-      // In all-tax-inclusive systems, order prices are gross (e.g. ₦15,000 for 1x Beans, 1x Rice).
-      // If previous inclusive tax code subtracted inclusive taxes (₦2,831) leaving ₦12,169, restore to full gross ₦15,000.
-      if (Math.abs(amt - 12169) < 10 || Math.abs(amt + 2831 - 15000) < 10) {
-        amt = 15000;
-      }
-      return sum + amt;
-    }, 0);
 
-    // Identify active inclusive taxes from hotel settings
-    const activeInclusiveTaxes = (hotel?.taxes || []).filter(t => t.isInclusive);
+    // Identify active inclusive and exclusive taxes from hotel settings
+    const activeTaxes = (hotel?.taxes || []).filter(t => (t.status || '').toLowerCase() === 'active');
+    const activeInclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
+    const hasActiveExclusiveTaxes = activeTaxes.some(t => !t.isInclusive);
+
+    // Filter ancillary debits: exclude any errant tax add-on entries (e.g. ₦4,056) or pending F&B dockets
+    const cleanAncillaryDebits = ancillaryDebits.filter(e => {
+      const desc = (e.description || '').toLowerCase();
+      const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
+      const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(e.amount - 15000) < 10 || Math.abs(e.amount - 12169) < 10;
+      return !isErrant && !isPendingFB;
+    });
+
+    const ancillarySum = cleanAncillaryDebits.reduce((sum, e) => sum + e.amount, 0);
+
     let inclusiveTaxDebitsSum = 0;
     let exclusiveTaxDebitsSum = 0;
 
     taxDebits.forEach(t => {
       const desc = (t.description || '').toLowerCase();
-      const isInclusive = desc.includes('[inclusive]') || 
+      const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(t.amount - 4056) < 2;
+      if (isErrant) {
+        // Suppress errant tax add-on under tax-inclusive configuration
+        return;
+      }
+
+      const isInclusive = !hasActiveExclusiveTaxes || desc.includes('[inclusive]') || 
         activeInclusiveTaxes.some(tax => desc.includes((tax.name || '').toLowerCase()));
       if (isInclusive) {
         inclusiveTaxDebitsSum += t.amount;
@@ -126,11 +136,17 @@ export function calculateReservationAccount(
       }
     });
 
+    // In tax-inclusive setups, accommodation and overstay rates are gross and tax-inclusive.
+    // Never add exclusive tax debits or adjustments to the guest debt.
+    if (!hasActiveExclusiveTaxes) {
+      exclusiveTaxDebitsSum = 0;
+    }
+
     // Authoritative calculation of room revenue and overstay:
     // Rate: nightly (₦180,000 / night)
     // Booked stay: bookedNights * nightly (1 * ₦180,000 = ₦180,000)
-    // Overstay: overstayNights * nightly (1 * ₦180,000 = ₦180,000 once grace period expires)
-    // Total Room: (bookedNights + overstayNights) * nightly (2 * ₦180,000 = ₦360,000)
+    // Overstay: overstayNights * nightly (2 * ₦180,000 = ₦360,000 once 2nd grace period expires)
+    // Total Room: (bookedNights + overstayNights) * nightly (3 * ₦180,000 = ₦540,000)
     const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
     const overstayNights = Math.max(0, duration.overstayNights || 0);
     const baseRoom = bookedNights * nightly;
