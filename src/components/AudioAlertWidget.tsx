@@ -147,14 +147,42 @@ export function AudioAlertWidget() {
     const fbOrders = kitchenOrders.filter(order => {
       const orderTotal = order.totalAmount || order.price || 0;
       let directPaid = 0;
+      let roomCharged = 0;
       if (Array.isArray(order.payments) && order.payments.length > 0) {
         directPaid = order.payments
           .filter(p => p.method !== 'room')
           .reduce((sum, p) => sum + (p.amount || 0), 0);
-      } else if (order.paidAmount !== undefined && order.paidAmount > 0 && order.paymentMethod !== 'room') {
-        directPaid = order.paidAmount;
+        roomCharged = order.payments
+          .filter(p => p.method === 'room')
+          .reduce((sum, p) => sum + (p.amount || 0), 0);
+      } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
+        if (order.paymentMethod === 'room') {
+          roomCharged = order.paidAmount;
+        } else {
+          directPaid = order.paidAmount;
+        }
       }
-      const remaining = orderTotal - directPaid;
+
+      let roomPaidAtFrontDesk = 0;
+      if (roomCharged > 0 && order.roomNumber && order.roomNumber !== 'Walk-in') {
+        const res = reservations.find(r => 
+          (r.id === (order as any).reservationId) || 
+          (r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out'))
+        );
+        if (res) {
+          const resTotal = res.totalAmount || 0;
+          const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
+          const resOwed = Math.max(0, resTotal - resPaid);
+          if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
+            roomPaidAtFrontDesk = roomCharged;
+          } else if (resPaid > 0) {
+            const unpaidPortion = Math.min(roomCharged, resOwed);
+            roomPaidAtFrontDesk = Math.max(0, roomCharged - unpaidPortion);
+          }
+        }
+      }
+
+      const remaining = Math.max(0, orderTotal - directPaid - roomPaidAtFrontDesk);
       return remaining > 0.01;
     });
 
@@ -398,7 +426,28 @@ export function AudioAlertWidget() {
                       const directPaid = (order.payments || [])
                         .filter(p => p.method !== 'room')
                         .reduce((sum, p) => sum + (p.amount || 0), 0);
-                      const due = orderTotal - directPaid;
+                      const roomCharged = (order.payments || [])
+                        .filter(p => p.method === 'room')
+                        .reduce((sum, p) => sum + (p.amount || 0), 0);
+                      let roomPaidAtFrontDesk = 0;
+                      if (roomCharged > 0 && order.roomNumber && order.roomNumber !== 'Walk-in') {
+                        const res = reservations.find(r => 
+                          (r.id === (order as any).reservationId) || 
+                          (r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out'))
+                        );
+                        if (res) {
+                          const resTotal = res.totalAmount || 0;
+                          const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
+                          const resOwed = Math.max(0, resTotal - resPaid);
+                          if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
+                            roomPaidAtFrontDesk = roomCharged;
+                          } else if (resPaid > 0) {
+                            const unpaidPortion = Math.min(roomCharged, resOwed);
+                            roomPaidAtFrontDesk = Math.max(0, roomCharged - unpaidPortion);
+                          }
+                        }
+                      }
+                      const due = Math.max(0, orderTotal - directPaid - roomPaidAtFrontDesk);
                       return (
                         <div
                           key={order.id}

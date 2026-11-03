@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
-import { postToLedger } from '../services/ledgerService';
+import { postToLedger, syncReservationPaymentsToKitchenOrders } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -128,7 +128,7 @@ export function FandB() {
     );
 
     const unsubReservations = onSnapshot(
-      query(collection(db, 'hotels', hotel.id, 'reservations'), where('status', '==', 'checked_in')),
+      collection(db, 'hotels', hotel.id, 'reservations'),
       (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       },
@@ -186,6 +186,33 @@ export function FandB() {
       unsubTables();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
+
+  // Auto-sync room-charged orders whose room folios have been settled or paid at Front Desk
+  useEffect(() => {
+    if (!hotel?.id || orders.length === 0 || reservations.length === 0) return;
+    const unsettledRoomOrders = orders.filter(order => {
+      const roomCharged = (order.payments || []).filter(p => p.method === 'room').reduce((s, p) => s + (p.amount || 0), 0);
+      if (roomCharged <= 0) return false;
+      const alreadyFD = (order.payments || []).filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
+      return alreadyFD < roomCharged - 0.01;
+    });
+
+    for (const order of unsettledRoomOrders) {
+      const res = reservations.find(r => 
+        (r.id === (order as any).reservationId) ||
+        (r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out')) ||
+        (r.roomNumber === order.roomNumber)
+      );
+      if (res) {
+        const resTotal = res.totalAmount || 0;
+        const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
+        const resOwed = Math.max(0, resTotal - resPaid);
+        if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
+          syncReservationPaymentsToKitchenOrders(hotel.id, res.id).catch(() => {});
+        }
+      }
+    }
+  }, [hotel?.id, orders.length, reservations]);
 
   const [customItem, setCustomItem] = useState({ name: '', price: 0 });
 
@@ -287,6 +314,8 @@ export function FandB() {
       const orderData = {
         ...newOrder,
         itemsList: cart,
+        reservationId: res?.id || '',
+        roomId: res?.roomId || '',
         guestName: res?.guestName || guests.find(g => g.id === newOrder.guestId)?.name || 'Walk-in',
         hotelId: hotel.id,
         status: 'pending',
@@ -549,8 +578,13 @@ export function FandB() {
 
   // Direct Settlement in F&B Handlers
   const openSettleModal = (order: KitchenOrder, currentBalance: number) => {
+    if (currentBalance <= 0.01) {
+      toast.info('This order has already been completely settled.');
+      return;
+    }
+
     const orderTotal = order.totalAmount || order.price || 0;
-    let paymentsList: { amount: number; method: string }[] = [];
+    let paymentsList: { amount: number; method: string; settlementSource?: string }[] = [];
     if (Array.isArray(order.payments) && order.payments.length > 0) {
       paymentsList = order.payments;
     } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
@@ -560,9 +594,45 @@ export function FandB() {
       .filter(p => p.method !== 'room')
       .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-    const remaining = Math.max(0, currentBalance > 0 ? currentBalance : (orderTotal - directPaid));
+    const roomCharged = paymentsList
+      .filter(p => p.method === 'room')
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    // Cross-check linked reservation
+    const isRoomOrder = order.roomNumber && order.roomNumber !== 'Walk-in';
+    const linkedRes = isRoomOrder 
+      ? (reservations.find(r => r.id === (order as any).reservationId)
+         || reservations.find(r => r.roomNumber === order.roomNumber && r.status === 'checked_in')
+         || reservations.find(r => r.roomNumber === order.roomNumber)
+         || reservations.find(r => r.guestId && r.guestId === order.guestId))
+      : undefined;
+
+    let frontDeskPaid = 0;
+    let remainingUnpaidRoomCharge = roomCharged;
+    if (roomCharged > 0 && linkedRes) {
+      const resTotal = linkedRes.totalAmount || 0;
+      const resPaid = (linkedRes.paidAmount || 0) + (linkedRes.totalDiscount || 0);
+      const resOwed = Math.max(0, resTotal - resPaid);
+      const isSettled = linkedRes.paymentStatus === 'paid' || resOwed <= 0.01;
+      const alreadyFD = paymentsList.filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
+      const netNeeded = Math.max(0, roomCharged - alreadyFD);
+      if (isSettled) {
+        frontDeskPaid = netNeeded;
+        remainingUnpaidRoomCharge = 0;
+      } else if (resPaid > 0) {
+        remainingUnpaidRoomCharge = Math.min(netNeeded, resOwed);
+        frontDeskPaid = Math.max(0, netNeeded - remainingUnpaidRoomCharge);
+      }
+    }
+
+    const effectiveUnsettled = Math.max(0, currentBalance > 0 ? currentBalance : (orderTotal - directPaid - frontDeskPaid));
+    if (effectiveUnsettled <= 0.01) {
+      toast.info('This order has already been completely settled through Front Desk room folio.');
+      return;
+    }
+
     setSettleOrderModal(order);
-    setSettleAmount(remaining);
+    setSettleAmount(effectiveUnsettled);
     setSettleMethod('cash');
     setSettleSource('F&B Outlet');
     setSettleNotes('');
@@ -579,6 +649,26 @@ export function FandB() {
 
     const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
 
+    // Guard against duplicate settlement if room folio was already settled
+    const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
+    const res = isRoomOrder 
+      ? (reservations.find(r => r.id === (settleOrderModal as any).reservationId) 
+         || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') 
+         || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber) 
+         || reservations.find(r => r.id === settleOrderModal.guestId))
+      : undefined;
+
+    if (res) {
+      const resTotal = res.totalAmount || 0;
+      const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
+      const resOwed = Math.max(0, resTotal - resPaid);
+      if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
+        toast.info('This order has already been fully settled at Front Desk. Duplicate payment avoided.');
+        setSettleOrderModal(null);
+        return;
+      }
+    }
+
     // Calculate existing direct paid
     let currentPayments: { amount: number; method: string; date?: string; reference?: string }[] = [];
     if (Array.isArray(settleOrderModal.payments) && settleOrderModal.payments.length > 0) {
@@ -593,11 +683,6 @@ export function FandB() {
 
     const prevDirectPaid = currentPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
     const newDirectPaid = prevDirectPaid + settleAmount;
-
-    const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
-    const res = isRoomOrder 
-      ? (reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') || reservations.find(r => r.id === settleOrderModal.guestId))
-      : undefined;
     const guestId = settleOrderModal.guestId || res?.guestId;
 
     setIsSettling(true);
@@ -1241,11 +1326,15 @@ export function FandB() {
                   const orderTotal = order.totalAmount || order.price || 0;
                   
                   // Gather payments
-                  let paymentsList: { amount: number; method: string }[] = [];
+                  let paymentsList: { amount: number; method: string; settlementSource?: string; reference?: string }[] = [];
                   if (Array.isArray(order.payments) && order.payments.length > 0) {
-                    paymentsList = order.payments;
+                    paymentsList = [...order.payments];
                   } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
-                    paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
+                    paymentsList = [{
+                      amount: order.paidAmount,
+                      method: order.paymentMethod || 'cash',
+                      settlementSource: order.settlementSource || 'F&B Outlet'
+                    }];
                     if (order.paymentMethod === 'room' && order.paidAmount < orderTotal) {
                       paymentsList.push({ amount: orderTotal - order.paidAmount, method: 'room' });
                     }
@@ -1261,10 +1350,52 @@ export function FandB() {
                     .filter(p => p.method === 'room')
                     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-                  const totalAccounted = directPaid + roomCharged;
-                  const balanceOwing = orderTotal - totalAccounted;
-                  const weOweGuest = directPaid - orderTotal;
-                  const unsettledBalance = Math.max(0, orderTotal - directPaid);
+                  // Link to reservation to evaluate room folio settlement status
+                  const isRoomOrder = order.roomNumber && order.roomNumber !== 'Walk-in';
+                  const linkedRes = isRoomOrder 
+                    ? (reservations.find(r => r.id === (order as any).reservationId) 
+                       || reservations.find(r => r.roomNumber === order.roomNumber && r.status === 'checked_in') 
+                       || reservations.find(r => r.roomNumber === order.roomNumber && r.guestName === order.guestName) 
+                       || reservations.find(r => r.roomNumber === order.roomNumber) 
+                       || reservations.find(r => r.guestId && r.guestId === order.guestId))
+                    : undefined;
+
+                  let frontDeskSettledAmount = 0;
+                  let remainingUnpaidRoomCharge = roomCharged;
+                  let isRoomFolioSettled = false;
+
+                  if (roomCharged > 0 && linkedRes) {
+                    const resTotal = linkedRes.totalAmount || 0;
+                    const resPaid = (linkedRes.paidAmount || 0) + (linkedRes.totalDiscount || 0);
+                    const resOwed = Math.max(0, resTotal - resPaid);
+                    isRoomFolioSettled = linkedRes.paymentStatus === 'paid' || resOwed <= 0.01;
+
+                    // Check if a Front Desk payment is already recorded in directPaid
+                    const alreadyFD = paymentsList
+                      .filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room')
+                      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                    if (alreadyFD >= roomCharged - 0.01) {
+                      frontDeskSettledAmount = 0;
+                      remainingUnpaidRoomCharge = 0;
+                    } else {
+                      const netNeeded = roomCharged - alreadyFD;
+                      if (isRoomFolioSettled) {
+                        frontDeskSettledAmount = netNeeded;
+                        remainingUnpaidRoomCharge = 0;
+                      } else if (resPaid > 0) {
+                        // Folio is partially paid: calculate remaining unpaid room charge
+                        remainingUnpaidRoomCharge = Math.min(netNeeded, resOwed);
+                        frontDeskSettledAmount = Math.max(0, netNeeded - remainingUnpaidRoomCharge);
+                      }
+                    }
+                  }
+
+                  const totalEffectivePaid = directPaid + frontDeskSettledAmount;
+                  const totalAccounted = totalEffectivePaid + remainingUnpaidRoomCharge;
+                  const balanceOwing = Math.max(0, orderTotal - totalAccounted);
+                  const weOweGuest = totalEffectivePaid - orderTotal;
+                  const unsettledBalance = Math.max(0, remainingUnpaidRoomCharge + balanceOwing);
                   const isCompletelySettled = unsettledBalance <= 0.01;
 
                   return (
@@ -1357,11 +1488,11 @@ export function FandB() {
                                 <div className="text-zinc-400">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-semibold uppercase tracking-wider">Amount Paid</span>
-                                    <span className={cn("font-bold text-xs", directPaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
-                                      {formatCurrency(directPaid, currency, exchangeRate)}
+                                    <span className={cn("font-bold text-xs", totalEffectivePaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
+                                      {formatCurrency(totalEffectivePaid, currency, exchangeRate)}
                                     </span>
                                   </div>
-                                  {paymentsList.filter(p => p.method !== 'room').length > 0 && (
+                                  {(paymentsList.filter(p => p.method !== 'room').length > 0 || frontDeskSettledAmount > 0) && (
                                     <div className="flex flex-wrap gap-1 mt-1 justify-end">
                                       {paymentsList.filter(p => p.method !== 'room').map((p: any, idx: number) => (
                                         <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-300 border border-zinc-750">
@@ -1371,6 +1502,14 @@ export function FandB() {
                                           </span>
                                         </span>
                                       ))}
+                                      {frontDeskSettledAmount > 0 && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-950/70 text-[9px] text-blue-300 border border-blue-800">
+                                          <span>{formatCurrency(frontDeskSettledAmount, currency, exchangeRate)}</span>
+                                          <span className="text-[8px] font-bold px-1 rounded bg-blue-900 text-emerald-300">
+                                            Front Desk Settled
+                                          </span>
+                                        </span>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -1378,8 +1517,13 @@ export function FandB() {
                                 {roomCharged > 0 && (
                                   <div className="flex items-center justify-between text-zinc-400">
                                     <span className="text-[10px] font-semibold uppercase tracking-wider">Charged to Room</span>
-                                    <span className="font-bold text-xs text-blue-400">
-                                      {formatCurrency(roomCharged, currency, exchangeRate)}
+                                    <span className="font-bold text-xs text-blue-400 flex items-center gap-1">
+                                      <span>{formatCurrency(roomCharged, currency, exchangeRate)}</span>
+                                      {frontDeskSettledAmount > 0 && (
+                                        <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/20">
+                                          ({formatCurrency(frontDeskSettledAmount, currency, exchangeRate)} paid at Front Desk)
+                                        </span>
+                                      )}
                                     </span>
                                   </div>
                                 )}
@@ -1404,14 +1548,14 @@ export function FandB() {
                                       </button>
                                     </div>
                                   </div>
-                                ) : roomCharged > 0 && !isCompletelySettled ? (
+                                ) : remainingUnpaidRoomCharge > 0 && !isCompletelySettled ? (
                                   <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold">
                                     <div className="flex flex-col">
                                       <span className="text-[10px] uppercase tracking-wider flex items-center gap-1 font-bold text-amber-400">
                                         <Clock size={12} /> Pending Settlement
                                       </span>
                                       <span className="text-[9px] text-zinc-400 font-normal">
-                                        {formatCurrency(unsettledBalance, currency, exchangeRate)} charged to room folio
+                                        {formatCurrency(unsettledBalance, currency, exchangeRate)} remaining on room folio
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -1441,7 +1585,7 @@ export function FandB() {
                                     <span className="flex items-center gap-1">
                                       <CheckCircle2 size={12} /> Completely Settled
                                     </span>
-                                    <span>Fully Paid</span>
+                                    <span>{frontDeskSettledAmount > 0 || (order.settlementSource === 'Front Desk') ? 'Front Desk Settled' : 'Fully Paid'}</span>
                                   </div>
                                 )}
                               </div>
@@ -2291,14 +2435,48 @@ export function FandB() {
 
             {(() => {
               const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
-              let paymentsList: { amount: number; method: string }[] = [];
+              let paymentsList: { amount: number; method: string; settlementSource?: string }[] = [];
               if (Array.isArray(settleOrderModal.payments) && settleOrderModal.payments.length > 0) {
-                paymentsList = settleOrderModal.payments.filter(p => (p.amount || 0) > 0 && p.method !== 'room');
-              } else if (settleOrderModal.paidAmount !== undefined && settleOrderModal.paidAmount > 0 && settleOrderModal.paymentMethod !== 'room') {
+                paymentsList = settleOrderModal.payments;
+              } else if (settleOrderModal.paidAmount !== undefined && settleOrderModal.paidAmount > 0) {
                 paymentsList = [{ amount: settleOrderModal.paidAmount, method: settleOrderModal.paymentMethod || 'cash' }];
               }
-              const currentDirectPaid = paymentsList.reduce((sum, p) => sum + p.amount, 0);
-              const remainingDue = Math.max(0, orderTotal - currentDirectPaid);
+              const currentDirectPaid = paymentsList
+                .filter(p => (p.amount || 0) > 0 && p.method !== 'room')
+                .reduce((sum, p) => sum + p.amount, 0);
+
+              const roomCharged = paymentsList
+                .filter(p => p.method === 'room')
+                .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+              // Check linked reservation
+              const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
+              const linkedRes = isRoomOrder 
+                ? (reservations.find(r => r.id === (settleOrderModal as any).reservationId) 
+                   || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') 
+                   || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber) 
+                   || reservations.find(r => r.id === settleOrderModal.guestId))
+                : undefined;
+
+              let frontDeskSettled = 0;
+              let remainingRoomCharge = roomCharged;
+              if (roomCharged > 0 && linkedRes) {
+                const resTotal = linkedRes.totalAmount || 0;
+                const resPaid = (linkedRes.paidAmount || 0) + (linkedRes.totalDiscount || 0);
+                const resOwed = Math.max(0, resTotal - resPaid);
+                const isSettled = linkedRes.paymentStatus === 'paid' || resOwed <= 0.01;
+                const alreadyFD = paymentsList.filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
+                const netNeeded = Math.max(0, roomCharged - alreadyFD);
+                if (isSettled) {
+                  frontDeskSettled = netNeeded;
+                  remainingRoomCharge = 0;
+                } else if (resPaid > 0) {
+                  remainingRoomCharge = Math.min(netNeeded, resOwed);
+                  frontDeskSettled = Math.max(0, netNeeded - remainingRoomCharge);
+                }
+              }
+
+              const remainingDue = Math.max(0, orderTotal - currentDirectPaid - frontDeskSettled);
 
               return (
                 <form onSubmit={handleSettleOrderPayment} className="p-6 space-y-5">
@@ -2312,6 +2490,12 @@ export function FandB() {
                       <span className="text-zinc-400">Directly Paid to F&B</span>
                       <span className="font-bold text-emerald-400">{formatCurrency(currentDirectPaid, currency, exchangeRate)}</span>
                     </div>
+                    {frontDeskSettled > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-zinc-400">Front Desk Folio Settled</span>
+                        <span className="font-bold text-blue-400">{formatCurrency(frontDeskSettled, currency, exchangeRate)}</span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between text-xs pt-2 border-t border-zinc-800 font-bold">
                       <span className="text-red-400">Outstanding Balance Due</span>
                       <span className="text-sm font-black text-red-400">{formatCurrency(remainingDue, currency, exchangeRate)}</span>
