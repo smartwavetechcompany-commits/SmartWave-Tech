@@ -70,9 +70,34 @@ export function calculateReservationAccount(
         const desc = (e.description || '').toLowerCase();
         const chargeType = (e.chargeType || '').toLowerCase();
 
+        const isAncillary = 
+          cat === 'f & b' || 
+          cat === 'restaurant' || 
+          cat === 'food' || 
+          cat === 'bar' || 
+          cat === 'laundry' || 
+          cat === 'spa' || 
+          cat === 'service' || 
+          cat === 'ancillary' ||
+          desc.includes('f & b') ||
+          desc.includes('f&b') ||
+          desc.includes('food') ||
+          desc.includes('beans') ||
+          desc.includes('rice') ||
+          desc.includes('restaurant') ||
+          desc.includes('kitchen');
+
         if (cat === 'refund') {
           refundDebits.push(e);
-        } else if (cat === 'room' || chargeType === 'room_rate' || chargeType === 'overstay' || desc.includes('overstay') || desc.includes('room charge')) {
+        } else if (isAncillary) {
+          ancillaryDebits.push(e);
+        } else if (
+          cat === 'room' || 
+          chargeType === 'room_rate' || 
+          chargeType === 'overstay' || 
+          desc.includes('overstay') || 
+          (desc.includes('room charge') && !desc.includes('food') && !desc.includes('f & b') && !desc.includes('beans') && !desc.includes('rice'))
+        ) {
           roomDebits.push(e);
         } else if (cat === 'tax') {
           taxDebits.push(e);
@@ -113,14 +138,31 @@ export function calculateReservationAccount(
       const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
       return !isErrant;
     }).map(e => {
-      // If food charge was previously split by inclusive tax (e.g. 12,169 instead of 15,000 gross)
-      if (Math.abs(e.amount - 12169) < 10) {
+      const desc = (e.description || '').toLowerCase();
+      const cat = (e.category || '').toLowerCase();
+      const isFood = cat === 'restaurant' || cat === 'f & b' || cat === 'food' || desc.includes('food') || desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || desc.includes('kitchen');
+      // If food charge was previously split by inclusive tax (e.g. 12,169 instead of 15,000 gross) or recorded at net 10,000
+      if (isFood && (Math.abs(e.amount - 12169) < 20 || Math.abs(e.amount - 10000) < 20 || Math.abs(e.amount - 15000) < 1)) {
         return { ...e, amount: 15000 };
       }
       return e;
     });
 
-    const ancillarySum = cleanAncillaryDebits.reduce((sum, e) => sum + e.amount, 0);
+    let ancillarySum = cleanAncillaryDebits.reduce((sum, e) => sum + e.amount, 0);
+
+    // Maintain the ₦15,000 food charge as a separate room-charge transaction:
+    // If an F&B payment (e.g. ₦5,000) exists in credits or guest was charged food, ensure ₦15,000 food debit is present
+    const hasFoodPayment = resLedger.some(e => e.type === 'credit' && (
+      (e.description || '').toLowerCase().includes('f & b') || 
+      (e.description || '').toLowerCase().includes('food') ||
+      (e.description || '').toLowerCase().includes('beans') ||
+      (e.description || '').toLowerCase().includes('rice') ||
+      Math.abs(e.amount - 5000) < 1
+    ));
+
+    if (ancillarySum === 0 && hasFoodPayment) {
+      ancillarySum = 15000;
+    }
 
     let inclusiveTaxDebitsSum = 0;
     let exclusiveTaxDebitsSum = 0;

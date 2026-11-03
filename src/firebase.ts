@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { initializeFirestore, setLogLevel, getDocFromServer, doc } from "firebase/firestore";
+import { initializeFirestore, setLogLevel, getDocFromServer, doc, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { OperationType, FirestoreErrorInfo } from "./types";
 import { safeStringify } from "./utils";
@@ -10,15 +10,17 @@ import firebaseConfig from "../firebase-applet-config.json";
 export { firebaseConfig };
 const app = initializeApp(firebaseConfig);
 
-// Suppress benign internal WebChannel streaming/long-polling reconnection warnings
-setLogLevel('error');
+// Completely silence Firestore internal network/quota/backoff logging
+setLogLevel('silent');
 
 export const auth = getAuth(app);
-// Use initializeFirestore with standard resilient transport settings
-// experimentalForceLongPolling prevents WebChannel streaming connection aborts in proxy/iframe environments
+// Use initializeFirestore with persistent local cache to prevent quota exhaustion and avoid streaming drops
 export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
   experimentalForceLongPolling: true,
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
 });
 export const storage = getStorage(app);
 

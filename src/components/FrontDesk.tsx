@@ -292,24 +292,25 @@ export function FrontDesk() {
   const [rateConfigs, setRateConfigs] = useState<any[]>([]);
 
   const lastOverstayCheckRef = useRef<number>(0);
+  const processedAutomationsRef = useRef<Set<string>>(new Set());
 
-  // Dynamic automatic overstay charges based on current time & settings (throttled to 60s)
+  // Dynamic automatic overstay charges based on current time & settings (throttled to 5 minutes)
   useEffect(() => {
     if (!hotel?.id || !profile || isFetching || reservations.length === 0) return;
     
     const now = Date.now();
-    if (now - lastOverstayCheckRef.current < 60000) return;
+    if (now - lastOverstayCheckRef.current < 300000) return;
 
     const timer = setTimeout(() => {
       lastOverstayCheckRef.current = Date.now();
       checkAndChargeActiveOverstays();
     }, 2000);
 
-    // Active watcher: check periodically (every 60s)
+    // Active watcher: check periodically (every 5 mins)
     const interval = setInterval(() => {
       lastOverstayCheckRef.current = Date.now();
       checkAndChargeActiveOverstays();
-    }, 60000);
+    }, 300000);
 
     return () => {
       clearTimeout(timer);
@@ -761,20 +762,24 @@ export function FrontDesk() {
         rules.autoCancelUnpaidTimeMinutes &&
         rules.autoCancelUnpaidTimeMinutes > 0
       ) {
-        const createdDate = new Date(res.createdAt);
-        const minutesDiff = (now.getTime() - createdDate.getTime()) / (1000 * 60);
-        if (minutesDiff > rules.autoCancelUnpaidTimeMinutes) {
-          const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
-            status: 'cancelled',
-            notes: (res.notes || '') + `\n[System Policy] Automatically cancelled due to unpaid buffer timeout of ${rules.autoCancelUnpaidTimeMinutes} mins.`,
-            updatedAt: now.toISOString()
-          }, {
-            hotelId: hotel.id,
-            module: 'Reservation Automation',
-            action: 'AUTO_CANCEL_UNPAID',
-            details: `Auto-cancelled unpaid reservation ${res.id} after buffer expiry`
-          });
-          batchUpdates.push(p);
+        const cancelKey = `cancel_${res.id}`;
+        if (!processedAutomationsRef.current.has(cancelKey)) {
+          const createdDate = new Date(res.createdAt);
+          const minutesDiff = (now.getTime() - createdDate.getTime()) / (1000 * 60);
+          if (minutesDiff > rules.autoCancelUnpaidTimeMinutes) {
+            processedAutomationsRef.current.add(cancelKey);
+            const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+              status: 'cancelled',
+              notes: (res.notes || '') + `\n[System Policy] Automatically cancelled due to unpaid buffer timeout of ${rules.autoCancelUnpaidTimeMinutes} mins.`,
+              updatedAt: now.toISOString()
+            }, {
+              hotelId: hotel.id,
+              module: 'Reservation Automation',
+              action: 'AUTO_CANCEL_UNPAID',
+              details: `Auto-cancelled unpaid reservation ${res.id} after buffer expiry`
+            });
+            batchUpdates.push(p);
+          }
         }
       }
 
@@ -783,20 +788,24 @@ export function FrontDesk() {
         (res.status === 'pending' || res.status === 'confirmed') &&
         rules.autoReleaseNoShow
       ) {
-        const resCheckInStr = res.checkIn.split('T')[0];
-        const todayStr = now.toISOString().split('T')[0];
-        if (resCheckInStr < todayStr) {
-          const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
-            status: 'no_show',
-            notes: (res.notes || '') + '\n[System Policy] Automatically marked as No-Show due to failure to check-in on scheduled arrival date.',
-            updatedAt: now.toISOString()
-          }, {
-            hotelId: hotel.id,
-            module: 'Reservation Automation',
-            action: 'AUTO_NO_SHOW',
-            details: `Auto-marked reservation ${res.id} as No-Show`
-          });
-          batchUpdates.push(p);
+        const noShowKey = `noshow_${res.id}`;
+        if (!processedAutomationsRef.current.has(noShowKey)) {
+          const resCheckInStr = res.checkIn.split('T')[0];
+          const todayStr = now.toISOString().split('T')[0];
+          if (resCheckInStr < todayStr) {
+            processedAutomationsRef.current.add(noShowKey);
+            const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+              status: 'no_show',
+              notes: (res.notes || '') + '\n[System Policy] Automatically marked as No-Show due to failure to check-in on scheduled arrival date.',
+              updatedAt: now.toISOString()
+            }, {
+              hotelId: hotel.id,
+              module: 'Reservation Automation',
+              action: 'AUTO_NO_SHOW',
+              details: `Auto-marked reservation ${res.id} as No-Show`
+            });
+            batchUpdates.push(p);
+          }
         }
       }
     });
@@ -4945,6 +4954,12 @@ export function FrontDesk() {
                           <div className="text-red-400 font-semibold flex items-center gap-1 flex-wrap">
                             <span>Overstay (+{billing.extraNights} {billing.extraNights === 1 ? 'night' : 'nights'}):</span>
                             <span>{formatCurrency(billing.overstayCharge, currency, exchangeRate)}</span>
+                          </div>
+                        )}
+                        {billing.totalCharges > ((billing.originalNights * billing.nightlyRate) + billing.overstayCharge) && (
+                          <div className="text-zinc-400 font-semibold flex items-center gap-1 flex-wrap">
+                            <span>Services / F&B:</span>
+                            <span>{formatCurrency(billing.totalCharges - ((billing.originalNights * billing.nightlyRate) + billing.overstayCharge), currency, exchangeRate)}</span>
                           </div>
                         )}
                       </div>
