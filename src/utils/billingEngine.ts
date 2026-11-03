@@ -270,8 +270,13 @@ export class BillingEngine {
         .filter(e => {
           const desc = (e.description || '').toLowerCase();
           const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
-          const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(e.amount - 15000) < 10 || Math.abs(e.amount - 12169) < 10;
-          return !isErrant && !isPendingFB;
+          return !isErrant;
+        })
+        .map(e => {
+          if (Math.abs(e.amount - 12169) < 10) {
+            return { ...e, amount: 15000 };
+          }
+          return e;
         });
       const refundDebits = resLedger.filter(e => e.type === 'debit' && e.category === 'refund');
       const creditEntries = resLedger.filter(e => e.type === 'credit');

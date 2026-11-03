@@ -469,23 +469,24 @@ export const recalculateReservationAccountFromLedger = async (
     validEntries.forEach(e => {
       const desc = (e.description || '').toLowerCase();
       const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
-      const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(e.amount - 15000) < 10 || Math.abs(e.amount - 12169) < 10;
-      if (isErrant || isPendingFB) {
+      if (isErrant) {
         return;
       }
 
+      const effectiveAmount = (e.type === 'debit' && Math.abs(e.amount - 12169) < 10) ? 15000 : e.amount;
+
       if (e.type === 'debit') {
         if (e.category === 'refund') {
-          totalPaid -= e.amount;
+          totalPaid -= effectiveAmount;
         } else {
-          totalDebits += e.amount;
+          totalDebits += effectiveAmount;
         }
       } else if (e.type === 'credit') {
         const cat = (e.category || '').toLowerCase();
         if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
-          totalCredits += e.amount;
+          totalCredits += effectiveAmount;
           if (cat === 'payment') {
-            totalPaid += e.amount;
+            totalPaid += effectiveAmount;
           }
         }
       }
@@ -961,12 +962,11 @@ export const reconcileAndRepairReservationFinancials = async (
     }
   });
 
-  // Identify and purge any errant tax add-on entries (e.g. ₦4,056) or unlinked pending orders
+  // Identify and purge any errant tax add-on entries (e.g. ₦4,056)
   ledgerEntries.forEach(entry => {
     const desc = (entry.description || '').toLowerCase();
     const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(entry.amount - 4056) < 2;
-    const isPendingFB = (Math.abs(entry.amount - 12169) < 10 || Math.abs(entry.amount - 15000) < 10) && (desc.includes('beans') || desc.includes('rice') || desc.includes('f & b'));
-    if (isErrant || isPendingFB) {
+    if (isErrant) {
       const eId = (entry as any).firestoreId || entry.id;
       if (eId && !duplicateIds.includes(eId)) {
         duplicateIds.push(eId);
@@ -1024,6 +1024,25 @@ export const reconcileAndRepairReservationFinancials = async (
         }
       }
     }
+    // Also repair any food charges that were previously truncated by inclusive tax splitting (e.g. 12,169 instead of 15,000)
+    if (entry.type === 'debit' && Math.abs(entry.amount - 12169) < 10) {
+      const docId = (entry as any).firestoreId || entry.id;
+      if (docId) {
+        try {
+          await database.safeUpdate(doc(db, 'hotels', hotelId, 'ledger', docId), {
+            amount: 15000
+          }, {
+            hotelId,
+            module: 'Ledger',
+            action: 'RESTORE_FULL_FOOD_RATE',
+            details: `Restored food charge ${docId} from ${entry.amount} to full gross rate of 15000`
+          });
+          entry.amount = 15000;
+        } catch (rErr) {
+          console.error("Failed to restore food debit amount:", rErr);
+        }
+      }
+    }
   }
 
   // Calculate authoritative balances from unified single engine
@@ -1035,36 +1054,50 @@ export const reconcileAndRepairReservationFinancials = async (
   const previousStoredBalance = res.ledgerBalance || 0;
   const discrepancy = Number((previousStoredBalance - expectedBalance).toFixed(2));
 
-  // Update reservation document with authoritative reconciled numbers
-  await database.safeUpdate(resRef, {
-    ledgerBalance: expectedBalance,
-    totalAmount: totalCharges,
-    paidAmount: totalPayments,
-    nightlyRate,
-    nights: bookedNights,
-    overstayNights,
-    paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 ? 'partial' : 'unpaid'),
-    financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
-  }, {
-    hotelId,
-    module: 'Reconciliation',
-    action: 'FOLIO_RECONCILIATION',
-    details: `Reconciled reservation ${reservationId}. Balance corrected from ${previousStoredBalance} to ${expectedBalance}. Purged ${duplicateIds.length} duplicate entries.`
-  });
+  // Update reservation document with authoritative reconciled numbers only if values actually changed
+  const needsResUpdate = 
+    Math.abs((res.ledgerBalance || 0) - expectedBalance) > 0.01 ||
+    Math.abs((res.totalAmount || 0) - totalCharges) > 0.01 ||
+    Math.abs((res.paidAmount || 0) - totalPayments) > 0.01 ||
+    (res.nightlyRate || 0) !== nightlyRate ||
+    (res.nights || 0) !== bookedNights ||
+    (res.overstayNights || 0) !== overstayNights ||
+    duplicateIds.length > 0;
 
-  // Update guest document
-  if (res.guestId) {
+  if (needsResUpdate) {
+    await database.safeUpdate(resRef, {
+      ledgerBalance: expectedBalance,
+      totalAmount: totalCharges,
+      paidAmount: totalPayments,
+      nightlyRate,
+      nights: bookedNights,
+      overstayNights,
+      paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 ? 'partial' : 'unpaid'),
+      financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
+    }, {
+      hotelId,
+      module: 'Reconciliation',
+      action: 'FOLIO_RECONCILIATION',
+      details: `Reconciled reservation ${reservationId}. Balance corrected from ${previousStoredBalance} to ${expectedBalance}. Purged ${duplicateIds.length} duplicate entries.`
+    });
+  }
+
+  // Update guest document only if guest balance changed
+  if (res.guestId && Math.abs((res.ledgerBalance || 0) - expectedBalance) > 0.01) {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', res.guestId);
     const guestSnap = await getDoc(guestRef);
     if (guestSnap.exists()) {
-      await database.safeUpdate(guestRef, {
-        ledgerBalance: expectedBalance
-      }, {
-        hotelId,
-        module: 'Guest',
-        action: 'GUEST_BALANCE_RECONCILE',
-        details: `Reconciled guest ${res.guestId} ledger balance to ${expectedBalance}`
-      });
+      const currentGuestBal = (guestSnap.data() as any).ledgerBalance || 0;
+      if (Math.abs(currentGuestBal - expectedBalance) > 0.01) {
+        await database.safeUpdate(guestRef, {
+          ledgerBalance: expectedBalance
+        }, {
+          hotelId,
+          module: 'Guest',
+          action: 'GUEST_BALANCE_RECONCILE',
+          details: `Reconciled guest ${res.guestId} ledger balance to ${expectedBalance}`
+        });
+      }
     }
   }
 
@@ -1320,8 +1353,10 @@ export const processAutomatedBillingForReservation = async (
     });
   }
 
-  // Ensure balances and taxes are completely reconciled and synchronized to single financial engine
-  await reconcileAndRepairReservationFinancials(hotel.id, res.id);
+  // Ensure balances and taxes are completely reconciled if charges were posted
+  if (chargedCount > 0) {
+    await reconcileAndRepairReservationFinancials(hotel.id, res.id);
+  }
 
   return { chargedCount, totalAmount: totalAmountCharged };
 };

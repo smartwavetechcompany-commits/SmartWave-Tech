@@ -46,7 +46,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { format, parseISO, differenceInDays, startOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance, calculateReservationAccount } from '../utils/billingEngine';
-import { processAutomatedBillingForReservation } from '../services/ledgerService';
 import { 
   ResponsiveContainer, 
   AreaChart, 
@@ -522,37 +521,7 @@ export function OperationsDashboard() {
   }, [hotel?.id]);
 
   // Dynamic automatic overstay charges based on current time & settings
-  useEffect(() => {
-    if (!hotel?.id || !profile || reservations.length === 0) return;
 
-    const checkAndChargeActiveOverstays = async () => {
-      try {
-        const activeCheckedInRes = reservations.filter(res => 
-          res.status === 'checked_in' && res.autoNightDeduction !== false && res.guestId
-        );
-        if (activeCheckedInRes.length === 0) return;
-
-        for (const res of activeCheckedInRes) {
-          await processAutomatedBillingForReservation(hotel, res, profile.uid || 'system', new Date());
-        }
-      } catch (err) {
-        console.warn("Error auto-charging active stays in Operations:", err);
-      }
-    };
-
-    const timer = setTimeout(() => {
-      checkAndChargeActiveOverstays();
-    }, 1000);
-
-    const interval = setInterval(() => {
-      checkAndChargeActiveOverstays();
-    }, 15000);
-
-    return () => {
-      clearTimeout(timer);
-      clearInterval(interval);
-    };
-  }, [hotel?.id, profile?.uid, reservations]);
 
   const today = format(new Date(), 'yyyy-MM-dd');
 

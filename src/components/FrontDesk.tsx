@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -291,18 +291,25 @@ export function FrontDesk() {
   const [customRateAmount, setCustomRateAmount] = useState<number>(0);
   const [rateConfigs, setRateConfigs] = useState<any[]>([]);
 
-  // Dynamic automatic overstay charges based on current time & settings
+  const lastOverstayCheckRef = useRef<number>(0);
+
+  // Dynamic automatic overstay charges based on current time & settings (throttled to 60s)
   useEffect(() => {
     if (!hotel?.id || !profile || isFetching || reservations.length === 0) return;
     
-    const timer = setTimeout(() => {
-      checkAndChargeActiveOverstays();
-    }, 1000);
+    const now = Date.now();
+    if (now - lastOverstayCheckRef.current < 60000) return;
 
-    // Active watcher: check periodically so expired grace periods post charges instantly
-    const interval = setInterval(() => {
+    const timer = setTimeout(() => {
+      lastOverstayCheckRef.current = Date.now();
       checkAndChargeActiveOverstays();
-    }, 15000);
+    }, 2000);
+
+    // Active watcher: check periodically (every 60s)
+    const interval = setInterval(() => {
+      lastOverstayCheckRef.current = Date.now();
+      checkAndChargeActiveOverstays();
+    }, 60000);
 
     return () => {
       clearTimeout(timer);
@@ -2098,7 +2105,6 @@ export function FrontDesk() {
       let totalAmountCharged = 0;
 
       for (const res of activeCheckedInRes) {
-        await reconcileAndRepairReservationFinancials(hotel.id, res.id);
         const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
         if (result.chargedCount > 0) {
           chargedCount += result.chargedCount;

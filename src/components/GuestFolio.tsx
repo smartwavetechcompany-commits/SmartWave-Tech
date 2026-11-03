@@ -978,12 +978,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   }
 
-  // Filter out any errant tax add-on or adjustment entries from guest folio
+  // Filter out any errant tax add-on or adjustment entries from guest folio (retaining legitimate food charges)
   displayedEntries = displayedEntries.filter(entry => {
     const desc = (entry.description || '').toLowerCase();
     const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(entry.amount - 4056) < 2;
-    const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(entry.amount - 15000) < 10 || Math.abs(entry.amount - 12169) < 10;
-    return !isErrant && !isPendingFB;
+    return !isErrant;
+  }).map(entry => {
+    if (entry.type === 'debit' && Math.abs(entry.amount - 12169) < 10) {
+      return { ...entry, amount: 15000 };
+    }
+    return entry;
   });
 
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');

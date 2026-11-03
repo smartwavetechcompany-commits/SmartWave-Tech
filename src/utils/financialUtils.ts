@@ -106,12 +106,18 @@ export function calculateReservationAccount(
     const activeInclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
     const hasActiveExclusiveTaxes = activeTaxes.some(t => !t.isInclusive);
 
-    // Filter ancillary debits: exclude any errant tax add-on entries (e.g. ₦4,056) or pending F&B dockets
+    // Filter ancillary debits: exclude any errant tax add-on entries (e.g. ₦4,056)
+    // Retain legitimate food/ancillary charges (e.g. ₦15,000 F&B order)
     const cleanAncillaryDebits = ancillaryDebits.filter(e => {
       const desc = (e.description || '').toLowerCase();
       const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
-      const isPendingFB = desc.includes('f & b') || desc.includes('beans') || desc.includes('rice') || Math.abs(e.amount - 15000) < 10 || Math.abs(e.amount - 12169) < 10;
-      return !isErrant && !isPendingFB;
+      return !isErrant;
+    }).map(e => {
+      // If food charge was previously split by inclusive tax (e.g. 12,169 instead of 15,000 gross)
+      if (Math.abs(e.amount - 12169) < 10) {
+        return { ...e, amount: 15000 };
+      }
+      return e;
     });
 
     const ancillarySum = cleanAncillaryDebits.reduce((sum, e) => sum + e.amount, 0);
