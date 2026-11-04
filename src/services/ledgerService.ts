@@ -1575,82 +1575,100 @@ export const syncReservationPaymentsToKitchenOrders = async (
 
       if (!matches) continue;
 
+      const orderTotal = order.totalAmount || order.price || 0;
       const payments = Array.isArray(order.payments) ? [...order.payments] : [];
+
+      // Direct payments made at F&B outlet (cash, POS card, etc., not room and not Front Desk)
       const directPaid = payments
         .filter((p: any) => p.method !== 'room' && p.settlementSource !== 'Front Desk')
         .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
 
-      const roomCharged = payments
-        .filter((p: any) => p.method === 'room')
-        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+      // Check whether this order is charged to room or Front Desk
+      const isRoomChargeOrder = 
+        order.paymentMethod === 'room' ||
+        order.settlementSource === 'Front Desk' ||
+        payments.some((p: any) => p.method === 'room' || p.settlementSource === 'Front Desk') ||
+        (order.roomNumber && order.roomNumber !== 'Walk-in');
 
-      if (roomCharged <= 0) continue;
+      if (!isRoomChargeOrder) continue;
 
-      // Check if Front Desk settlement is already recorded
-      const alreadyFDPaid = payments
+      const roomChargedPortion = Math.max(0, orderTotal - directPaid);
+      if (roomChargedPortion <= 0) continue;
+
+      // Current Front Desk payments recorded on this order
+      const currentFDPaid = payments
         .filter((p: any) => p.settlementSource === 'Front Desk' && p.method !== 'room')
         .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
 
-      let frontDeskPaid = 0;
-      let remainingRoomCharged = roomCharged;
+      const hasRoomChargeEntry = payments.some((p: any) => p.method === 'room');
 
-      if (alreadyFDPaid >= roomCharged - 0.01) {
-        // Already fully recorded
-        continue;
-      }
+      let targetFDPaid = 0;
+      let remainingRoomCharged = 0;
 
-      const netNeeded = roomCharged - alreadyFDPaid;
       if (isSettled) {
-        frontDeskPaid = netNeeded;
+        // Room folio is completely settled and owed ₦0!
+        // Full remaining room-charged amount is settled by Front Desk.
+        targetFDPaid = roomChargedPortion;
         remainingRoomCharged = 0;
       } else if (resPaid > 0) {
-        remainingRoomCharged = Math.min(netNeeded, resOwed);
-        frontDeskPaid = Math.max(0, netNeeded - remainingRoomCharged);
+        // Folio partially paid: compute allocated portion
+        remainingRoomCharged = Math.min(roomChargedPortion, resOwed);
+        targetFDPaid = Math.max(0, roomChargedPortion - remainingRoomCharged);
       } else {
-        // Room folio is completely unpaid, remains pending
+        // Room folio is completely unpaid
+        remainingRoomCharged = roomChargedPortion;
+        targetFDPaid = 0;
+      }
+
+      // Check if update is needed
+      const paidAmountMatches = Math.abs((order.paidAmount || 0) - (directPaid + targetFDPaid)) <= 0.01;
+      const fdPaidMatches = Math.abs(currentFDPaid - targetFDPaid) <= 0.01;
+      const roomChargeMatches = isSettled ? !hasRoomChargeEntry : true;
+
+      if (paidAmountMatches && fdPaidMatches && roomChargeMatches) {
         continue;
       }
 
-      if (frontDeskPaid > 0) {
-        const nonRoomPayments = payments.filter((p: any) => p.method !== 'room');
-        const newPayments: any[] = [
-          ...nonRoomPayments,
-          {
-            amount: frontDeskPaid,
-            method: paymentDetails?.method || 'transfer',
-            date: new Date().toISOString(),
-            reference: 'Front Desk Folio Settlement',
-            settlementSource: 'Front Desk',
-            processedBy: {
-              uid: 'front_desk_sync',
-              name: 'Front Desk',
-              role: 'front_desk'
-            }
-          }
-        ];
+      // Reconstruct payments cleanly
+      const nonFDPayments = payments.filter((p: any) => p.method !== 'room' && p.settlementSource !== 'Front Desk');
+      const newPayments: any[] = [...nonFDPayments];
 
-        if (remainingRoomCharged > 0) {
-          newPayments.push({
-            amount: remainingRoomCharged,
-            method: 'room',
-            reference: 'Charged to Room Folio'
-          });
-        }
-
-        const newPaidAmount = directPaid + alreadyFDPaid + frontDeskPaid;
-
-        await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', order.id), {
-          payments: newPayments,
-          paidAmount: newPaidAmount,
+      if (targetFDPaid > 0) {
+        newPayments.push({
+          amount: targetFDPaid,
+          method: paymentDetails?.method || (payments.find((p: any) => p.settlementSource === 'Front Desk')?.method) || 'transfer',
+          date: new Date().toISOString(),
+          reference: 'Front Desk Folio Settlement',
           settlementSource: 'Front Desk',
-          lastPaymentAt: new Date().toISOString()
-        }, {
-          hotelId,
-          module: 'F & B',
-          action: 'SYNC_FRONT_DESK_PAYMENT',
-          details: `Synchronized Front Desk payment of ${frontDeskPaid} for Order ${order.id} (Room ${order.roomNumber})`
-        }).catch(err => console.error('Error syncing order to Firestore:', err));
+          processedBy: {
+            uid: 'front_desk_sync',
+            name: 'Front Desk',
+            role: 'front_desk'
+          }
+        });
       }
+
+      if (remainingRoomCharged > 0) {
+        newPayments.push({
+          amount: remainingRoomCharged,
+          method: 'room',
+          reference: 'Charged to Room Folio'
+        });
+      }
+
+      const newPaidAmount = directPaid + targetFDPaid;
+
+      await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', order.id), {
+        payments: newPayments,
+        paidAmount: newPaidAmount,
+        settlementSource: 'Front Desk',
+        lastPaymentAt: new Date().toISOString()
+      }, {
+        hotelId,
+        module: 'F & B',
+        action: 'SYNC_FRONT_DESK_PAYMENT',
+        details: `Synchronized Front Desk payment of ${targetFDPaid} for Order ${order.id} (Room ${order.roomNumber}) - Status: ${isSettled ? 'COMPLETELY SETTLED' : 'PARTIAL'}`
+      }).catch(err => console.error('Error syncing order to Firestore:', err));
     }
   } catch (err) {
     console.error('Failed to sync reservation payments to kitchen orders:', err);
