@@ -421,28 +421,6 @@ export function FandB() {
               role: profile?.role || 'staff',
               displayName: profile?.displayName || (profile as any)?.name || 'Staff'
             });
-
-            database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
-              type: 'income',
-              amount: pay.amount,
-              category: 'F & B Revenue',
-              description: `F & B Order ${orderRef.id} [${source}] (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
-              timestamp: new Date().toISOString(),
-              paymentMethod: pay.method,
-              settlementSource: source,
-              referenceId: orderRef.id,
-              postedBy: profile.uid,
-              processedBy: {
-                uid: profile.uid,
-                name: profile.displayName || (profile as any)?.name || 'Staff',
-                role: profile.role || 'staff'
-              }
-            }, {
-              hotelId: hotel.id,
-              module: 'Finance',
-              action: 'F&B_INCOME_RECORD',
-              details: `Recorded F&B income from Room ${newOrder.roomNumber} [${source}]`
-            }).catch(() => {});
           } else if (pay.method !== 'room') {
             database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',

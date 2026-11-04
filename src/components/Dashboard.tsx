@@ -184,13 +184,29 @@ export function Dashboard() {
     setHasPermissionError(false);
   }, [profile?.uid, hotel?.id]);
 
-  // Helper to determine if a timestamp corresponds to today
+  // Robust helper to determine if a timestamp or record corresponds to today
   const isRecordToday = (ts: any): boolean => {
     if (!ts) return false;
-    const dateStr = getRecordDateString(ts);
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    return isValid(d) && isToday(d);
+    let d: Date | null = null;
+    if (typeof ts?.toDate === 'function') {
+      try { d = ts.toDate(); } catch {}
+    } else if (typeof ts?.seconds === 'number') {
+      d = new Date(ts.seconds * 1000);
+    } else if (typeof (ts as any)?._seconds === 'number') {
+      d = new Date((ts as any)._seconds * 1000);
+    } else if (ts instanceof Date) {
+      d = ts;
+    } else if (typeof ts === 'string') {
+      d = new Date(ts);
+    }
+    if (!d || !isValid(d)) return false;
+
+    const todayLocal = format(new Date(), 'yyyy-MM-dd');
+    const todayUTC = new Date().toISOString().slice(0, 10);
+    const dLocal = format(d, 'yyyy-MM-dd');
+    const dUTC = d.toISOString().slice(0, 10);
+
+    return isToday(d) || dLocal === todayLocal || dUTC === todayUTC || dLocal === todayUTC || dUTC === todayLocal;
   };
 
   // Active in-house reservations (actual guests checked in)
@@ -228,10 +244,38 @@ export function Dashboard() {
 
   const totalOutstandingOwing = inHouseOutstanding + debtorOutstanding;
 
-  // Total Collected / Revenue & Today's Revenue calculation
-  // Synchronized across finance collection and ledger payments
+  // Total Collected: Authoritative verified money collected across hotel operations
   const totalRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
+
+    // 1. All verified payments collected across reservations (room folios, stay payments, settled charges)
+    const reservationCollections = reservations.reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
+
+    // 2. Standalone walk-in income in finance that is NOT linked to any reservation or room folio
+    const standaloneFinanceIncome = finance
+      .filter(f => {
+        if (f.type !== 'income') return false;
+        if ((f as any).reservationId) return false;
+        if (f.referenceId && reservations.some(r => r.id === f.referenceId)) return false;
+        const desc = (f.description || '').toLowerCase();
+        if (reservations.some(r => r.roomNumber && desc.includes(`room ${r.roomNumber.toLowerCase()}`))) return false;
+        return true;
+      })
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    // 3. Standalone walk-in ledger payments not associated with any reservation
+    const standaloneLedgerPayments = ledgerEntries
+      .filter(e => {
+        if (e.type !== 'credit' || e.category !== 'payment') return false;
+        if (e.reservationId) return false;
+        return true;
+      })
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    if (reservations.length > 0) {
+      return reservationCollections + Math.max(standaloneFinanceIncome, standaloneLedgerPayments);
+    }
+
     const finTotal = finance
       .filter(f => f.type === 'income')
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
@@ -239,7 +283,7 @@ export function Dashboard() {
       .filter(e => e.type === 'credit' && e.category === 'payment')
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     return Math.max(finTotal, ledgTotal);
-  }, [canViewFinances, finance, ledgerEntries]);
+  }, [canViewFinances, reservations, finance, ledgerEntries]);
 
   const todayRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
@@ -251,6 +295,17 @@ export function Dashboard() {
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     return Math.max(finToday, ledgToday);
   }, [canViewFinances, finance, ledgerEntries]);
+
+  // Total transactions recorded across all hotel operations (ledger entries, finance records, and bill activities)
+  const totalTransactionsCount = useMemo(() => {
+    const resLedgerCount = ledgerEntries.length;
+    const finCount = finance.length;
+    const reservationBillActivities = reservations.reduce((acc, r) => {
+      const entries = ledgerEntries.filter(e => e.reservationId === r.id);
+      return acc + Math.max(entries.length, (r as any).billActivitiesCount || 0);
+    }, 0);
+    return Math.max(resLedgerCount, finCount, reservationBillActivities);
+  }, [ledgerEntries, finance, reservations]);
 
   // Count of transactions that occurred today across all departments
   const todayTransactionsCount = useMemo(() => {
@@ -369,8 +424,8 @@ export function Dashboard() {
             module: 'finance'
           },
           { 
-            label: 'Today Transactions', 
-            value: todayTransactionsCount, 
+            label: 'Total Transactions', 
+            value: totalTransactionsCount, 
             icon: Receipt, 
             color: 'text-cyan-400',
             module: 'frontDesk'
@@ -410,8 +465,8 @@ export function Dashboard() {
             color: 'text-emerald-500' 
           },
           { 
-            label: "Today's Transactions", 
-            value: todayTransactionsCount, 
+            label: 'Total Transactions', 
+            value: totalTransactionsCount, 
             icon: Receipt, 
             color: 'text-cyan-400' 
           },
