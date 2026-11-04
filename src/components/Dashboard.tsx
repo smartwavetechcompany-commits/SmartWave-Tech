@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking, OutstandingDebt } from '../types';
+import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking, OutstandingDebt, LedgerEntry } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
 import { getReservationLiveBalance } from '../utils/billingEngine';
@@ -80,14 +80,11 @@ export function Dashboard() {
   const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
   const [debts, setDebts] = useState<OutstandingDebt[]>([]);
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
-  const [todayTransactionsCount, setTodayTransactionsCount] = useState<number>(0);
-  const [staffTodayCollections, setStaffTodayCollections] = useState<number>(0);
-  const [staffLedgerToday, setStaffLedgerToday] = useState<number>(0);
 
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
-  const [revenueChartData, setRevenueChartData] = useState<{ name: string; amount: number }[]>([]);
 
   // RBAC: Determine if current user has Finance or Hotel Admin permissions
   const canViewFinances = hasFinancialVisibility(profile, customRoles);
@@ -99,13 +96,12 @@ export function Dashboard() {
     let unsubHotels = () => {};
     let unsubRooms = () => {};
     let unsubRes = () => {};
-    let unsubActiveRes = () => {};
     let unsubBlockings = () => {};
     let unsubDebts = () => {};
     let unsubFinance = () => {};
-    let unsubStaffLedger = () => {};
+    let unsubLedger = () => {};
 
-    if (profile.role === 'superAdmin') {
+    if (profile.role === 'superAdmin' && !hotel?.id) {
       unsubHotels = onSnapshot(collection(db, 'hotels'), (snap) => {
         setAllHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hotel)));
         setLoading(false);
@@ -114,144 +110,117 @@ export function Dashboard() {
         if (err.code === 'permission-denied') setHasPermissionError(true);
       });
     } else if (hotel?.id) {
+      // Live listener for rooms
       unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
         setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
         setLoading(false);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+        setLoading(false);
       });
- 
-      unsubRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), orderBy('createdAt', 'desc'), limit(5)), (snap) => {
-        setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+
+      // Live listener for reservations (client-side sorted)
+      unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
+        const allRes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+        allRes.sort((a, b) => {
+          const tA = new Date(a.checkIn || a.createdAt || 0).getTime();
+          const tB = new Date(b.checkIn || b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+        setReservations(allRes);
+        const active = allRes.filter(r => ['confirmed', 'checked_in'].includes(r.status));
+        setActiveReservations(active);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
       });
 
-      unsubActiveRes = onSnapshot(query(collection(db, 'hotels', hotel.id, 'reservations'), where('status', 'in', ['confirmed', 'checked_in'])), (snap) => {
-        setActiveReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
-      });
-
+      // Live listener for room blockings
       unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {
         setBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
-      });
+      }, () => {});
 
       // Live listener for outstanding debts across the property (AR / Guest Debtors)
       unsubDebts = onSnapshot(collection(db, 'hotels', hotel.id, 'outstanding_debt_ledger'), (snap) => {
         setDebts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as OutstandingDebt)));
       }, () => {});
- 
-      // Live listener for transactions: restricted by role to avoid exposing monetary totals to unauthorized users
-      if (canViewFinances) {
-        unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(150)), (snap) => {
-          const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
-          setFinance(records);
 
-          // Calculate daily transaction count for today
-          const countToday = records.filter(r => {
-            const dateStr = getRecordDateString(r.timestamp);
-            return dateStr && isToday(new Date(dateStr));
-          }).length;
-          setTodayTransactionsCount(countToday);
- 
-          // Process revenue chart data for last 7 days
-          const last7Days = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            return d.toISOString().split('T')[0];
-          }).reverse();
- 
-          const chartData = last7Days.map(date => {
-            const dayRevenue = records
-              .filter(r => r.type === 'income' && getRecordDateString(r.timestamp).startsWith(date))
-              .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-            return {
-              name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
-              amount: dayRevenue
-            };
-          });
-          setRevenueChartData(chartData);
-        }, (err) => {
-          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
+      // Live listener for finance records (income, expenses, etc.)
+      unsubFinance = onSnapshot(collection(db, 'hotels', hotel.id, 'finance'), (snap) => {
+        const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
+        records.sort((a, b) => {
+          const tA = new Date(getRecordDateString(a.timestamp || (a as any).createdAt) || 0).getTime();
+          const tB = new Date(getRecordDateString(b.timestamp || (b as any).createdAt) || 0).getTime();
+          return tB - tA;
         });
-      } else {
-        // General staff: Listen for transaction events to calculate current day's transaction count,
-        // and calculate the exact collections made by this specific staff member for TODAY only.
-        // At midnight, isToday() naturally returns false for prior days, resetting it automatically.
-        unsubFinance = onSnapshot(query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'), limit(150)), (snap) => {
-          let countToday = 0;
-          let myTodayTotal = 0;
-          snap.docs.forEach(doc => {
-            const data = doc.data();
-            const dateStr = getRecordDateString(data.timestamp);
-            if (dateStr && isToday(new Date(dateStr))) {
-              countToday++;
-              const isMyRecord = data.postedBy === profile.uid || 
-                                 data.processedBy?.uid === profile.uid || 
-                                 data.userId === profile.uid;
-              if (isMyRecord && data.type === 'income') {
-                myTodayTotal += (Number(data.amount) || 0);
-              }
-            }
-          });
-          setTodayTransactionsCount(countToday);
-          setStaffTodayCollections(myTodayTotal);
-          setFinance([]);
-          setRevenueChartData([]);
-        }, (err) => {
-          handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
-        });
+        setFinance(records);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
+      });
 
-        // Also listen to ledger entries posted by this staff member today
-        unsubStaffLedger = onSnapshot(
-          query(
-            collection(db, 'hotels', hotel.id, 'ledger'), 
-            where('postedBy', '==', profile.uid),
-            limit(100)
-          ), 
-          (snap) => {
-            let myLedgerTotal = 0;
-            snap.docs.forEach(doc => {
-              const data = doc.data();
-              const dateStr = getRecordDateString(data.timestamp);
-              if (dateStr && isToday(new Date(dateStr)) && data.type === 'credit' && data.category === 'payment') {
-                myLedgerTotal += (Number(data.amount) || 0);
-              }
-            });
-            setStaffLedgerToday(myLedgerTotal);
-          },
-          () => {}
-        );
-      }
+      // Live listener for ledger entries (Front Desk payments, room charges, F&B settlements)
+      unsubLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
+        const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+        entries.sort((a, b) => {
+          const tA = new Date(getRecordDateString(a.timestamp || (a as any).createdAt) || 0).getTime();
+          const tB = new Date(getRecordDateString(b.timestamp || (b as any).createdAt) || 0).getTime();
+          return tB - tA;
+        });
+        setLedgerEntries(entries);
+      }, () => {});
     }
 
     return () => {
       unsubHotels();
       unsubRooms();
       unsubRes();
-      unsubActiveRes();
       unsubBlockings();
       unsubDebts();
       unsubFinance();
-      unsubStaffLedger();
+      unsubLedger();
     };
-  }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError, canViewFinances]);
+  }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError]);
 
   useEffect(() => {
     setHasPermissionError(false);
   }, [profile?.uid, hotel?.id]);
 
+  // Helper to determine if a timestamp corresponds to today
+  const isRecordToday = (ts: any): boolean => {
+    if (!ts) return false;
+    const dateStr = getRecordDateString(ts);
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return isValid(d) && isToday(d);
+  };
+
+  // Active in-house reservations (actual guests checked in)
+  const inHouseReservations = useMemo(() => {
+    return activeReservations.filter(r => r.status === 'checked_in');
+  }, [activeReservations]);
+
+  // Exact Active Guests count: 1 guest checked in = 1 active guest
+  const activeGuestsCount = inHouseReservations.length;
+
+  // Actual occupied rooms: rooms that currently hold an in-house checked-in guest
+  const occupiedRoomsCount = useMemo(() => {
+    return rooms.filter(r => inHouseReservations.some(res => res.roomId === r.id)).length;
+  }, [rooms, inHouseReservations]);
+
+  const occupancyRate = rooms.length > 0 ? Math.round((occupiedRoomsCount / rooms.length) * 100) : 0;
+
+  // Dirty rooms: vacant rooms that need cleaning
+  const dirtyRoomsCount = useMemo(() => {
+    return rooms.filter(r => {
+      if (inHouseReservations.some(res => res.roomId === r.id)) return false;
+      return getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty' || r.status === 'dirty';
+    }).length;
+  }, [rooms, inHouseReservations, activeReservations, blockings]);
+
   // LIVE CALCULATION: Overall outstanding amount owing across the hotel
-  // Combines current in-house checked-in guest balances and unsettled debtor ledger balances
-  const inHouseOutstanding = rooms
-    .filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied')
-    .reduce((acc, r) => {
-      const res = activeReservations.find(res => res.roomId === r.id && res.status === 'checked_in');
-      if (res) {
-        const balance = getReservationLiveBalance(res, hotel);
-        return acc + Math.max(0, balance);
-      }
-      return acc;
-    }, 0);
+  const inHouseOutstanding = inHouseReservations.reduce((acc, res) => {
+    const balance = getReservationLiveBalance(res, hotel);
+    return acc + Math.max(0, balance);
+  }, 0);
 
   const debtorOutstanding = debts
     .filter(d => d.status === 'outstanding' || d.status === 'partially_paid')
@@ -259,27 +228,111 @@ export function Dashboard() {
 
   const totalOutstandingOwing = inHouseOutstanding + debtorOutstanding;
 
-  // Complete financial summary calculations (strictly for Finance and Hotel Admin)
-  const totalRevenue = canViewFinances
-    ? finance.filter(f => f.type === 'income').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
-    : 0;
+  // Total Collected / Revenue & Today's Revenue calculation
+  // Synchronized across finance collection and ledger payments
+  const totalRevenue = useMemo(() => {
+    if (!canViewFinances) return 0;
+    const finTotal = finance
+      .filter(f => f.type === 'income')
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const ledgTotal = ledgerEntries
+      .filter(e => e.type === 'credit' && e.category === 'payment')
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    return Math.max(finTotal, ledgTotal);
+  }, [canViewFinances, finance, ledgerEntries]);
 
-  const todayRevenue = canViewFinances
-    ? finance
-        .filter(f => f.type === 'income' && f.timestamp && isToday(new Date(getRecordDateString(f.timestamp))))
-        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
-    : 0;
+  const todayRevenue = useMemo(() => {
+    if (!canViewFinances) return 0;
+    const finToday = finance
+      .filter(f => f.type === 'income' && isRecordToday(f.timestamp || (f as any).createdAt))
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const ledgToday = ledgerEntries
+      .filter(e => e.type === 'credit' && e.category === 'payment' && isRecordToday(e.timestamp || (e as any).createdAt))
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    return Math.max(finToday, ledgToday);
+  }, [canViewFinances, finance, ledgerEntries]);
 
-  const previousRevenue = canViewFinances
-    ? finance
-        .filter(f => f.type === 'income' && !getRecordDateString(f.timestamp).startsWith(new Date().toISOString().split('T')[0]))
-        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
-    : 0;
+  // Count of transactions that occurred today across all departments
+  const todayTransactionsCount = useMemo(() => {
+    const finTodayCount = finance.filter(f => isRecordToday(f.timestamp || (f as any).createdAt)).length;
+    const ledgTodayCount = ledgerEntries.filter(e => isRecordToday(e.timestamp || (e as any).createdAt)).length;
+    return Math.max(finTodayCount, ledgTodayCount);
+  }, [finance, ledgerEntries]);
+
+  // Staff individual collections for today
+  const myCollectionsToday = useMemo(() => {
+    if (!profile?.uid) return 0;
+    const ledgMy = ledgerEntries
+      .filter(e => {
+        const isMine = e.postedBy === profile.uid || (e as any).userId === profile.uid;
+        return isMine && e.type === 'credit' && e.category === 'payment' && isRecordToday(e.timestamp || (e as any).createdAt);
+      })
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    const finMy = finance
+      .filter(f => {
+        const isMine = (f as any).postedBy === profile.uid || (f as any).userId === profile.uid;
+        return isMine && f.type === 'income' && isRecordToday(f.timestamp || (f as any).createdAt);
+      })
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    return Math.max(ledgMy, finMy);
+  }, [profile?.uid, ledgerEntries, finance]);
+
+  // Process revenue chart data for last 7 days
+  const revenueChartData = useMemo(() => {
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      return d.toISOString().split('T')[0];
+    }).reverse();
+
+    return last7Days.map(date => {
+      const finDay = finance
+        .filter(r => r.type === 'income' && getRecordDateString(r.timestamp || (r as any).createdAt).startsWith(date))
+        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+      const ledgDay = ledgerEntries
+        .filter(r => r.type === 'credit' && r.category === 'payment' && getRecordDateString(r.timestamp || (r as any).createdAt).startsWith(date))
+        .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+      return {
+        name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
+        amount: Math.max(finDay, ledgDay)
+      };
+    });
+  }, [finance, ledgerEntries]);
+
+  const previousRevenue = useMemo(() => {
+    if (!canViewFinances) return 0;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const finPrev = finance
+      .filter(f => f.type === 'income' && !getRecordDateString(f.timestamp || (f as any).createdAt).startsWith(todayStr))
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const ledgPrev = ledgerEntries
+      .filter(e => e.type === 'credit' && e.category === 'payment' && !getRecordDateString(e.timestamp || (e as any).createdAt).startsWith(todayStr))
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    return Math.max(finPrev, ledgPrev);
+  }, [canViewFinances, finance, ledgerEntries]);
 
   const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
+  // Combined recent transactions for dashboard feed
+  const recentTransactionsFeed = useMemo(() => {
+    if (finance.length > 0) return finance.slice(0, 5);
+    return ledgerEntries
+      .filter(e => e.type === 'credit' && e.category === 'payment')
+      .slice(0, 5)
+      .map(e => ({
+        id: e.id,
+        description: e.description || 'Guest Payment',
+        category: e.category === 'payment' ? 'Room Revenue' : (e.category || 'Payment'),
+        type: 'income' as const,
+        amount: e.amount,
+        timestamp: e.timestamp
+      }));
+  }, [finance, ledgerEntries]);
+
   // Role-Based Dashboard Stats Card Definition
-  const stats = profile?.role === 'superAdmin' 
+  const stats = (profile?.role === 'superAdmin' && !hotel?.id)
     ? [
         { label: 'Total Hotels', value: allHotels.length, icon: BedDouble, color: 'text-blue-500' },
         { label: 'Active Subscriptions', value: allHotels.filter(h => h.subscriptionStatus === 'active').length, icon: CheckCircle2, color: 'text-emerald-500' },
@@ -291,13 +344,13 @@ export function Dashboard() {
           // Finance & Hotel Admin Visibility: Complete Financial Summary
           { 
             label: 'Occupancy', 
-            value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
+            value: `${occupancyRate}%`, 
             icon: BedDouble, 
             color: 'text-blue-500' 
           },
           { 
             label: 'Active Guests', 
-            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, 
+            value: activeGuestsCount, 
             icon: Users, 
             color: 'text-emerald-500' 
           },
@@ -331,30 +384,28 @@ export function Dashboard() {
           },
           { 
             label: 'Dirty Rooms', 
-            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, 
+            value: dirtyRoomsCount, 
             icon: AlertCircle, 
             color: 'text-amber-500' 
           },
         ].filter(s => !s.module || isModuleEnabled(hotel, s.module))
       : [
-          // General Staff Visibility: See the amount THEY made for the day!
-          // After that day it goes off and starts afresh at midnight (via isToday).
-          // Hotel Admin sees everything they need to see above.
+          // General Staff Visibility
           { 
             label: 'My Collections Today', 
-            value: formatCurrency(Math.max(staffTodayCollections, staffLedgerToday), currency, exchangeRate), 
+            value: formatCurrency(myCollectionsToday, currency, exchangeRate), 
             icon: DollarSign, 
             color: 'text-emerald-400' 
           },
           { 
             label: 'Occupancy', 
-            value: `${rooms.length ? Math.round((rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length / rooms.length) * 100) : 0}%`, 
+            value: `${occupancyRate}%`, 
             icon: BedDouble, 
             color: 'text-blue-500' 
           },
           { 
             label: 'Active Guests', 
-            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, 
+            value: activeGuestsCount, 
             icon: Users, 
             color: 'text-emerald-500' 
           },
@@ -372,7 +423,7 @@ export function Dashboard() {
           },
           { 
             label: 'Dirty Rooms', 
-            value: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, 
+            value: dirtyRoomsCount, 
             icon: AlertCircle, 
             color: 'text-amber-500' 
           },
@@ -456,7 +507,7 @@ export function Dashboard() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Overview</h1>
           <p className="text-sm text-zinc-400">
-            {profile?.role === 'superAdmin' ? 'System-wide analytics and control' : `Welcome back to ${hotel?.name}`}
+            {profile?.role === 'superAdmin' && !hotel?.id ? 'System-wide analytics and control' : `Welcome back to ${hotel?.name || 'Hotel'}`}
           </p>
         </div>
         <button 
@@ -657,10 +708,10 @@ export function Dashboard() {
                       <div className="w-12 h-3 bg-zinc-800 rounded" />
                     </div>
                   ))
-                ) : finance.length === 0 ? (
+                ) : recentTransactionsFeed.length === 0 ? (
                   <div className="p-6 sm:p-8 text-center text-zinc-500 text-xs">No recent transactions</div>
                 ) : (
-                  (finance || []).slice(0, 5).map(record => (
+                  (recentTransactionsFeed || []).slice(0, 5).map(record => (
                     <div key={record.id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
                       <div className="flex items-center gap-3 sm:gap-4">
                         <div className={cn(

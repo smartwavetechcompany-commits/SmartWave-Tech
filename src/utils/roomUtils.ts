@@ -43,6 +43,12 @@ export const getRoomDisplayStatus = (
   if (hasReservation) return 'reserved';
 
   // 4. Return physical status (Clean/Dirty/Maintenance)
+  // If a room still has a legacy or leftover 'occupied' status in the database but no active reservation
+  // is checked in today, treat the room as dirty (awaiting housekeeping cleaning) rather than occupied.
+  if (room.status === 'occupied') {
+    return 'dirty';
+  }
+
   return room.status;
 };
 
