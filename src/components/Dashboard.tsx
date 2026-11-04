@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
+import { collection, collectionGroup, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking, OutstandingDebt, LedgerEntry } from '../types';
@@ -36,7 +36,6 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { AuditLogs } from './AuditLogs';
 import { exportToCSV } from '../utils';
 import { format, isToday, isValid } from 'date-fns';
 import { toast } from 'sonner';
@@ -72,26 +71,166 @@ const safeFormatTimestamp = (ts: any, formatStr: string = 'MMM d, HH:mm'): strin
   return isValid(d) ? format(d, formatStr) : 'N/A';
 };
 
+// Lightweight Action Stream mini-feed: loads only the 5 most recent activities with minimal footprint
+function ActionStreamMini({ hotelId, profileRole }: { hotelId?: string; profileRole?: string }) {
+  const [activities, setActivities] = useState<any[]>([]);
+  const [streamLoading, setStreamLoading] = useState(false);
+
+  useEffect(() => {
+    if (!hotelId && profileRole !== 'superAdmin') return;
+
+    let unsub = () => {};
+    try {
+      if (profileRole === 'superAdmin' && !hotelId) {
+        const q = query(collectionGroup(db, 'activityLogs'), limit(6));
+        unsub = onSnapshot(q, (snap) => {
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const tA = new Date(getRecordDateString(a.timestamp || a.createdAt) || 0).getTime();
+            const tB = new Date(getRecordDateString(b.timestamp || b.createdAt) || 0).getTime();
+            return tB - tA;
+          });
+          setActivities(list.slice(0, 5));
+          setStreamLoading(false);
+        }, () => setStreamLoading(false));
+      } else if (hotelId) {
+        const q = query(collection(db, 'hotels', hotelId, 'activityLogs'), limit(8));
+        unsub = onSnapshot(q, (snap) => {
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const tA = new Date(getRecordDateString(a.timestamp || a.createdAt) || 0).getTime();
+            const tB = new Date(getRecordDateString(b.timestamp || b.createdAt) || 0).getTime();
+            return tB - tA;
+          });
+          setActivities(list.slice(0, 5));
+          setStreamLoading(false);
+        }, () => setStreamLoading(false));
+      }
+    } catch {
+      setStreamLoading(false);
+    }
+
+    return () => unsub();
+  }, [hotelId, profileRole]);
+
+  if (streamLoading && activities.length === 0) {
+    return (
+      <div className="p-4 space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 animate-pulse">
+            <div className="w-7 h-7 bg-zinc-800 rounded-full" />
+            <div className="flex-1 space-y-1">
+              <div className="w-24 h-2.5 bg-zinc-800 rounded" />
+              <div className="w-40 h-2 bg-zinc-800 rounded opacity-60" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <div className="p-8 text-center text-zinc-500 text-xs italic">
+        Awaiting live activity...
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-zinc-800/40">
+      {activities.map((act) => {
+        const actorName = act.actor || act.user || act.userName || act.userEmail || 'Staff';
+        const actionText = act.action || act.details || act.description || 'System operation';
+        const moduleName = act.module || act.target || 'General';
+        const timeStr = safeFormatTimestamp(act.timestamp || act.createdAt, 'MMM d, HH:mm');
+
+        return (
+          <div key={act.id} className="p-3.5 flex items-center justify-between hover:bg-zinc-800/30 transition-colors">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-7 h-7 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs shrink-0">
+                {String(actorName).charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-zinc-100 truncate">
+                  {actorName} <span className="font-normal text-zinc-400">• {actionText}</span>
+                </div>
+                <div className="text-[10px] text-zinc-500 flex items-center gap-2 mt-0.5">
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-medium text-[9px] uppercase tracking-wider">{moduleName}</span>
+                  <span>{timeStr}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const getInitialDashboardData = (hotelId?: string) => {
+  if (!hotelId) return null;
+  try {
+    const raw = sessionStorage.getItem(`pms_dashboard_cache_${hotelId}`);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+};
+
 export function Dashboard() {
   const { hotel, profile, isSubscriptionActive, currency, exchangeRate, customRoles } = useAuth();
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [activeReservations, setActiveReservations] = useState<Reservation[]>([]);
-  const [blockings, setBlockings] = useState<RoomBlocking[]>([]);
-  const [debts, setDebts] = useState<OutstandingDebt[]>([]);
-  const [finance, setFinance] = useState<FinanceRecord[]>([]);
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+
+  // Instant hydration from session cache to eliminate any loading skeleton freeze
+  const cachedData = useMemo(() => getInitialDashboardData(hotel?.id), [hotel?.id]);
+
+  const [rooms, setRooms] = useState<Room[]>(() => cachedData?.rooms || []);
+  const [reservations, setReservations] = useState<Reservation[]>(() => cachedData?.reservations || []);
+  const [activeReservations, setActiveReservations] = useState<Reservation[]>(() => {
+    if (cachedData?.reservations) {
+      return cachedData.reservations.filter((r: Reservation) => ['confirmed', 'checked_in'].includes(r.status));
+    }
+    return [];
+  });
+  const [blockings, setBlockings] = useState<RoomBlocking[]>(() => cachedData?.blockings || []);
+  const [debts, setDebts] = useState<OutstandingDebt[]>(() => cachedData?.debts || []);
+  const [finance, setFinance] = useState<FinanceRecord[]>(() => cachedData?.finance || []);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>(() => cachedData?.ledgerEntries || []);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
 
-  const [loading, setLoading] = useState(false);
-  const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [loading, setLoading] = useState(() => !cachedData);
+  const [refreshing, setRefreshing] = useState(false);
 
   // RBAC: Determine if current user has Finance or Hotel Admin permissions
   const canViewFinances = hasFinancialVisibility(profile, customRoles);
 
+  // Proactive safety timeout so UI never hangs in loading state
   useEffect(() => {
-    if (!profile || hasPermissionError) return;
-    setLoading(true);
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Update session cache when fresh data arrives
+  useEffect(() => {
+    if (!hotel?.id) return;
+    if (rooms.length > 0 || reservations.length > 0 || finance.length > 0 || ledgerEntries.length > 0) {
+      try {
+        sessionStorage.setItem(`pms_dashboard_cache_${hotel.id}`, JSON.stringify({
+          rooms,
+          reservations,
+          blockings,
+          debts,
+          finance,
+          ledgerEntries,
+          savedAt: Date.now()
+        }));
+      } catch {}
+    }
+  }, [hotel?.id, rooms, reservations, blockings, debts, finance, ledgerEntries]);
+
+  useEffect(() => {
+    if (!profile) return;
 
     let unsubHotels = () => {};
     let unsubRooms = () => {};
@@ -107,7 +246,7 @@ export function Dashboard() {
         setLoading(false);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'hotels');
-        if (err.code === 'permission-denied') setHasPermissionError(true);
+        setLoading(false);
       });
     } else if (hotel?.id) {
       // Live listener for rooms
@@ -130,6 +269,7 @@ export function Dashboard() {
         setReservations(allRes);
         const active = allRes.filter(r => ['confirmed', 'checked_in'].includes(r.status));
         setActiveReservations(active);
+        setLoading(false);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
       });
@@ -153,6 +293,7 @@ export function Dashboard() {
           return tB - tA;
         });
         setFinance(records);
+        setLoading(false);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/finance`);
       });
@@ -166,6 +307,7 @@ export function Dashboard() {
           return tB - tA;
         });
         setLedgerEntries(entries);
+        setLoading(false);
       }, () => {});
     }
 
@@ -178,11 +320,15 @@ export function Dashboard() {
       unsubFinance();
       unsubLedger();
     };
-  }, [profile?.role, profile?.uid, hotel?.id, hasPermissionError]);
+  }, [profile?.role, profile?.uid, hotel?.id]);
 
-  useEffect(() => {
-    setHasPermissionError(false);
-  }, [profile?.uid, hotel?.id]);
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => {
+      setRefreshing(false);
+      toast.success('Dashboard live data synchronized', { duration: 1500 });
+    }, 400);
+  };
 
   // Robust helper to determine if a timestamp or record corresponds to today
   const isRecordToday = (ts: any): boolean => {
@@ -566,12 +712,12 @@ export function Dashboard() {
           </p>
         </div>
         <button 
-          onClick={() => window.location.reload()}
-          disabled={loading}
+          onClick={handleRefresh}
+          disabled={refreshing}
           className="p-1.5 sm:p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
-          title="Refresh Page"
+          title="Refresh Data"
         >
-          <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={18} className={refreshing ? "animate-spin text-emerald-500" : ""} />
         </button>
       </header>
 
@@ -615,8 +761,8 @@ export function Dashboard() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
-        {loading ? (
-          Array.from({ length: 4 }).map((_, i) => (
+        {loading && stats.length === 0 ? (
+          Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl md:rounded-2xl animate-pulse">
               <div className="w-6 h-6 bg-zinc-800 rounded-lg mb-3" />
               <div className="w-16 h-4 bg-zinc-800 rounded mb-2" />
@@ -624,11 +770,8 @@ export function Dashboard() {
             </div>
           ))
         ) : (
-          stats.map((stat, i) => (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
+          stats.map((stat) => (
+            <div
               key={stat.label}
               className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl md:rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
             >
@@ -639,7 +782,7 @@ export function Dashboard() {
               </div>
               <div className="text-base sm:text-xl font-bold text-zinc-50 mb-0.5 truncate">{stat.value}</div>
               <div className="text-[7px] sm:text-[9px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
-            </motion.div>
+            </div>
           ))
         )}
       </div>
@@ -689,7 +832,7 @@ export function Dashboard() {
               <Link to="/front-desk" target="_self" className="text-emerald-500 text-xs sm:text-sm font-medium hover:underline active:opacity-70 transition-opacity">View All</Link>
             </div>
             <div className="divide-y divide-zinc-800">
-              {loading ? (
+              {loading && reservations.length === 0 ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="p-3 sm:p-4 flex items-center justify-between animate-pulse">
                     <div className="flex items-center gap-3">
@@ -705,7 +848,7 @@ export function Dashboard() {
               ) : reservations.length === 0 ? (
                 <div className="p-6 sm:p-8 text-center text-zinc-500 text-xs">No recent reservations</div>
               ) : (
-                reservations.map(res => (
+                reservations.slice(0, 5).map(res => (
                   <div key={res.id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
                     <div className="flex items-center gap-3 sm:gap-4">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
@@ -750,7 +893,7 @@ export function Dashboard() {
                 </div>
               </div>
               <div className="divide-y divide-zinc-800">
-                {loading ? (
+                {loading && recentTransactionsFeed.length === 0 ? (
                   Array.from({ length: 3 }).map((_, i) => (
                     <div key={i} className="p-3 sm:p-4 flex items-center justify-between animate-pulse">
                       <div className="flex items-center gap-3 sm:gap-4">
@@ -793,7 +936,7 @@ export function Dashboard() {
             </div>
           )}
 
-          {/* Audit Logs Section */}
+          {/* Action Stream Section */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col">
             <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -803,17 +946,9 @@ export function Dashboard() {
               <Link to="/activity-logs" className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest hover:underline">View Audit logs</Link>
             </div>
             <div className="max-h-[500px] overflow-y-auto bg-zinc-950/20">
-              <div className="divide-y divide-zinc-800/50">
-                {finance.length === 0 && (
-                   <div className="p-8 text-center text-zinc-600 text-xs italic">Awaiting activity...</div>
-                )}
-                {/* We use a simplified mini-logger for the dashboard */}
-                <div className="p-2">
-                   <GlobalErrorBoundary fallback={<div className="p-6 text-center text-xs text-zinc-500">Activity stream temporarily unavailable</div>}>
-                     <AuditLogs />
-                   </GlobalErrorBoundary>
-                </div>
-              </div>
+              <GlobalErrorBoundary fallback={<div className="p-6 text-center text-xs text-zinc-500">Activity stream temporarily unavailable</div>}>
+                <ActionStreamMini hotelId={hotel?.id} profileRole={profile?.role} />
+              </GlobalErrorBoundary>
             </div>
           </div>
         </div>

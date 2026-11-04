@@ -238,18 +238,32 @@ export const canUpdateRoomStatus = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   room: Room,
-  newStatus: Room['status']
+  newStatus: Room['status'],
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
+  // Hotel Admin & Super Admin always have full authority
+  const isAdmin = profile.role === 'hotelAdmin' || profile.role === 'superAdmin' || profile.staffRole === 'admin';
+  if (!isAdmin) {
+    // Granular Action Permission Check: Must have explicit 'change_room_status' permission
+    const hasStatusChangePerm = hasPermission(profile, 'change_room_status', customRoles);
+    if (!hasStatusChangePerm) {
+      return { 
+        allowed: false, 
+        message: 'Permission denied: You do not have permission to change room status (e.g., from clean to dirty). Please contact your Hotel Administrator to grant this permission.' 
+      };
+    }
+  }
+
   const settings = hotel.settings?.housekeeping;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowStatusUpdates && !hasPermission(profile, 'manage_rooms')) {
+  if (!settings.allowStatusUpdates && !hasPermission(profile, 'manage_rooms', customRoles) && !isAdmin) {
     return { allowed: false, message: 'Room status updates are currently disabled by administrator.' };
   }
 
-  if (settings.preventOccupiedOverride && room.status === 'occupied' && !hasPermission(profile, 'manage_rooms')) {
+  if (settings.preventOccupiedOverride && room.status === 'occupied' && !hasPermission(profile, 'manage_rooms', customRoles) && !isAdmin) {
     return { allowed: false, message: 'Cannot change the status of an occupied room from here.' };
   }
 
