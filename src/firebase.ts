@@ -17,7 +17,7 @@ export const auth = getAuth(app);
 // Use initializeFirestore with persistent local cache to prevent quota exhaustion and avoid streaming drops
 export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
-  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: true,
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
   })

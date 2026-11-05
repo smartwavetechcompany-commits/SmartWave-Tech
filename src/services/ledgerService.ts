@@ -1540,6 +1540,8 @@ export const syncReservationPaymentsToKitchenOrders = async (
 
     for (const orderDoc of ordersSnap.docs) {
       const order = { id: orderDoc.id, ...orderDoc.data() } as any;
+      if (order.isDeleted === true || order.status === 'cancelled') continue;
+
       const matches = 
         order.reservationId === reservationId ||
         (order.roomNumber && order.roomNumber === resData.roomNumber && (order.guestId === resData.guestId || !order.guestId || order.guestName === resData.guestName));
@@ -1673,6 +1675,7 @@ export const syncKitchenOrderPaymentsToLedger = async (
       const matchingOrders = ordersSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as any))
         .filter(o => {
+          if (o.isDeleted === true || o.status === 'cancelled') return false;
           const oResId = o.reservationId;
           const oRoom = String(o.roomNumber || '').trim().toLowerCase();
           return (oResId && oResId === res.id) || (oRoom && oRoom === resNormRoom);

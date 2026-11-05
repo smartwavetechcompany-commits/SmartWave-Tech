@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, getDocs, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, getDocs, writeBatch, onSnapshot, deleteDoc, getDocsFromServer } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +47,7 @@ import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { hasPermission } from '../utils/permissions';
 import { Pagination } from './Pagination';
+import { ConfirmModal } from './ConfirmModal';
 
 export function FandB() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -105,6 +106,10 @@ export function FandB() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
 
+  // Delete Order Confirmation Modal State
+  const [orderToDelete, setOrderToDelete] = useState<{ id: string; roomNumber: string; items: string; totalAmount?: number } | null>(null);
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
@@ -117,7 +122,10 @@ export function FandB() {
     const unsubOrders = onSnapshot(
       query(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderBy('timestamp', 'desc')),
       (snap) => {
-        setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder)));
+        const liveOrders = snap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder))
+          .filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled');
+        setOrders(liveOrders);
       },
       (error: any) => {
         console.warn('Kitchen orders snapshot notice:', error?.message || error);
@@ -528,7 +536,7 @@ export function FandB() {
     }
   };
 
-  const handleDeleteOrder = async (orderId: string, roomNumber: string) => {
+  const handleDeleteOrder = (orderId: string, roomNumber: string) => {
     if (!hotel?.id || !profile) return;
 
     if (!hasPermission(profile, 'delete_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && (profile as any)?.role !== 'admin' && profile?.role !== 'superAdmin') {
@@ -536,9 +544,18 @@ export function FandB() {
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to delete order for Room ${roomNumber}? This will also remove any associated charges from the room folio.`)) {
-      return;
-    }
+    const target = orders.find(o => o.id === orderId);
+    setOrderToDelete({
+      id: orderId,
+      roomNumber,
+      items: target?.items || 'F&B Order',
+      totalAmount: target?.totalAmount || target?.price || 0
+    });
+  };
+
+  const executeDeleteOrder = async (orderId: string, roomNumber: string) => {
+    if (!hotel?.id || !profile) return;
+    setIsDeletingOrder(true);
 
     try {
       // 1. Locate the order from state or fetch from Firestore if needed
@@ -581,7 +598,18 @@ export function FandB() {
         }
       }
 
-      // 3. Delete Kitchen Order document from Firestore
+      // 3. Mark document as deleted & cancelled first for instantaneous broadcast to all real-time listeners
+      await updateDoc(orderDocRef, {
+        isDeleted: true,
+        status: 'cancelled',
+        deletedAt: new Date().toISOString(),
+        deletedBy: profile.uid,
+        deletedByEmail: profile.email || ''
+      }).catch((err) => {
+        console.warn('Soft delete tag notice:', err);
+      });
+
+      // 4. Delete Kitchen Order document permanently from Firestore
       await deleteDoc(orderDocRef);
       await database.safeDelete(orderDocRef, {
         hotelId: hotel.id,
@@ -590,24 +618,24 @@ export function FandB() {
         details: `Deleted order ${orderId} for room ${roomNumber}`
       }).catch(() => {});
 
-      // 4. Find and delete all ledger entries associated with this order
+      // 5. Find and delete all ledger entries associated with this order
       const ledgerColRef = collection(db, 'hotels', hotel.id, 'ledger');
       const [ledgerSnapByRef, ledgerSnapByRes] = await Promise.all([
-        getDocs(query(ledgerColRef, where('referenceId', '==', orderId))),
-        reservationId ? getDocs(query(ledgerColRef, where('reservationId', '==', reservationId))) : Promise.resolve(null)
+        getDocs(query(ledgerColRef, where('referenceId', '==', orderId))).catch(() => null),
+        reservationId ? getDocs(query(ledgerColRef, where('reservationId', '==', reservationId))).catch(() => null) : Promise.resolve(null)
       ]);
 
       const entriesToDelete = new Set<string>();
-      ledgerSnapByRef.docs.forEach(d => entriesToDelete.add(d.id));
+      if (ledgerSnapByRef) {
+        ledgerSnapByRef.docs.forEach(d => entriesToDelete.add(d.id));
+      }
 
       if (ledgerSnapByRes) {
         ledgerSnapByRes.docs.forEach(d => {
           const data = d.data() as LedgerEntry;
-          // Match reference ID containing orderId
           if (data.referenceId && (data.referenceId === orderId || data.referenceId.startsWith(`${orderId}_`) || data.referenceId.includes(orderId))) {
             entriesToDelete.add(d.id);
           }
-          // Or description referencing this order
           if (data.description && data.description.includes(orderId)) {
             entriesToDelete.add(d.id);
           }
@@ -622,22 +650,23 @@ export function FandB() {
         await batch.commit().catch(() => {});
       }
 
-      // 5. Delete finance records associated with this order
+      // 6. Delete finance records associated with this order
       const financeColRef = collection(db, 'hotels', hotel.id, 'finance');
-      const financeSnap = await getDocs(query(financeColRef, where('referenceId', '==', orderId)));
-      if (!financeSnap.empty) {
+      const financeSnap = await getDocs(query(financeColRef, where('referenceId', '==', orderId))).catch(() => null);
+      if (financeSnap && !financeSnap.empty) {
         const fBatch = writeBatch(db);
         financeSnap.docs.forEach(d => fBatch.delete(d.ref));
         await fBatch.commit().catch(() => {});
       }
 
-      // 6. Recalculate reservation account from the updated ledger
+      // 7. Recalculate reservation account from the updated ledger
       if (reservationId) {
         await recalculateReservationAccountFromLedger(hotel.id, reservationId);
         await syncReservationPaymentsToKitchenOrders(hotel.id, reservationId);
+        await syncKitchenOrderPaymentsToLedger(hotel.id, reservationId);
       }
 
-      // 7. Reset table status if assigned
+      // 8. Reset table status if assigned
       if (targetOrder?.tableId) {
         const table = tables.find(t => t.id === targetOrder.tableId);
         if (table && table.currentOrderId === orderId) {
@@ -656,7 +685,7 @@ export function FandB() {
         }
       }
 
-      // 8. Log activity
+      // 9. Log activity
       database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
@@ -673,13 +702,16 @@ export function FandB() {
         details: 'F&B order deletion activity'
       }).catch(() => {});
 
-      // 9. Update local state immediately for instant feedback
+      // 10. Update local state immediately for instant feedback
       setOrders(prev => prev.filter(o => o.id !== orderId));
+      setOrderToDelete(null);
 
-      toast.success('Order and linked room folio charges deleted successfully');
+      toast.success('Order and linked room folio charges deleted permanently');
     } catch (err: any) {
       console.error('Error deleting order:', err);
       toast.error('Failed to delete order: ' + (err.message || 'Permission denied'));
+    } finally {
+      setIsDeletingOrder(false);
     }
   };
 
@@ -1177,6 +1209,7 @@ export function FandB() {
   };
 
   const filteredOrders = orders.filter(o => {
+    if ((o as any).isDeleted === true || o.status === 'cancelled') return false;
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
     const matchesSearch = (o.roomNumber || '').includes(searchQuery) || (o.items?.toLowerCase() || '').includes(searchQuery.toLowerCase());
@@ -1196,12 +1229,12 @@ export function FandB() {
     return filteredOrders.slice(startIndex, startIndex + ordersPageSize);
   }, [filteredOrders, ordersPage, ordersPageSize]);
 
-  const activeOrdersCount = orders.filter(o => o.status !== 'delivered').length;
+  const activeOrdersCount = orders.filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled' && o.status !== 'delivered').length;
 
   const stats = [
     { label: 'Active Orders', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
-    { label: 'Preparing', count: orders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
-    { label: 'Ready for Pickup', count: orders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
+    { label: 'Preparing', count: orders.filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled' && o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
+    { label: 'Ready for Pickup', count: orders.filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled' && o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
   ];
 
   const getWaitTime = (timestamp: string) => {
@@ -1487,16 +1520,30 @@ export function FandB() {
                   if (!hotel?.id) return;
                   setIsRefreshing(true);
                   try {
+                    // Force server-authoritative fetch bypassing local IndexedDB cache
+                    const freshOrdersSnap = await getDocsFromServer(
+                      query(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderBy('timestamp', 'desc'))
+                    ).catch(async () => {
+                      return await getDocsFromServer(collection(db, 'hotels', hotel.id, 'kitchen_orders'));
+                    });
+
+                    const freshOrders = freshOrdersSnap.docs
+                      .map(d => ({ id: d.id, ...d.data() } as KitchenOrder))
+                      .filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled')
+                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                    setOrders(freshOrders);
                     await syncKitchenOrderPaymentsToLedger(hotel.id);
-                    toast.success('Orders and folio balances synchronized live.');
-                  } catch (e) {
-                    console.error(e);
+                    toast.success('Live orders and room balances synchronized with server');
+                  } catch (e: any) {
+                    console.error('Error refreshing live orders:', e);
+                    toast.error('Sync error: ' + (e?.message || 'Network issue'));
                   } finally {
                     setIsRefreshing(false);
                   }
                 }}
                 disabled={isRefreshing}
-                title="Sync and Refresh Orders"
+                title="Sync and Refresh Orders from Server"
                 className="p-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-100 rounded-xl transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 text-xs font-semibold shrink-0"
               >
                 <RefreshCw size={15} className={cn(isRefreshing && "animate-spin text-emerald-400")} />
@@ -1710,9 +1757,9 @@ export function FandB() {
                                       {formatCurrency(totalEffectivePaid, currency, exchangeRate)}
                                     </span>
                                   </div>
-                                  {(paymentsList.filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk').length > 0 || frontDeskSettledAmount > 0) && (
+                                  {(paymentsList.filter(p => (p.amount || 0) > 0 && p.method !== 'room' && p.settlementSource !== 'Front Desk').length > 0 || frontDeskSettledAmount > 0) && (
                                     <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                                      {paymentsList.filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk').map((p: any, idx: number) => (
+                                      {paymentsList.filter(p => (p.amount || 0) > 0 && p.method !== 'room' && p.settlementSource !== 'Front Desk').map((p: any, idx: number) => (
                                         <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-300 border border-zinc-750">
                                           <span className="capitalize">{p.method}</span>
                                           <span className="text-[8px] font-bold px-1 rounded bg-zinc-700 text-emerald-400">
@@ -1727,7 +1774,7 @@ export function FandB() {
                                             Front Desk Settled
                                           </span>
                                         </span>
-                                      ) : paymentsList.filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').map((p: any, idx: number) => (
+                                      ) : paymentsList.filter(p => (p.amount || 0) > 0 && p.settlementSource === 'Front Desk' && p.method !== 'room').map((p: any, idx: number) => (
                                         <span key={`fd-${idx}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-950/70 text-[9px] text-blue-300 border border-blue-800">
                                           <span className="capitalize">{p.method}</span>
                                           <span className="text-[8px] font-bold px-1 rounded bg-blue-900 text-emerald-300">
@@ -3209,6 +3256,24 @@ export function FandB() {
           </motion.div>
         </div>
       )}
+
+      {/* Delete Order Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!orderToDelete}
+        title="Delete F&B Order"
+        message={`Are you sure you want to permanently delete the order for ${orderToDelete?.roomNumber === 'Walk-in' ? 'Walk-in' : `Room ${orderToDelete?.roomNumber}`} (${orderToDelete?.items})? This will immediately remove it from all staff views and remove any associated charges from the room folio.`}
+        confirmText={isDeletingOrder ? 'Deleting...' : 'Delete Permanently'}
+        cancelText="Cancel"
+        type="danger"
+        isLoading={isDeletingOrder}
+        onConfirm={async () => {
+          if (!orderToDelete) return;
+          await executeDeleteOrder(orderToDelete.id, orderToDelete.roomNumber);
+        }}
+        onCancel={() => {
+          if (!isDeletingOrder) setOrderToDelete(null);
+        }}
+      />
     </div>
   );
 }

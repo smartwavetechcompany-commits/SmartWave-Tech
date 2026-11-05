@@ -643,7 +643,8 @@ export interface KitchenOrder {
   guestName?: string;
   items: string;
   itemsList?: { id: string; name: string; price: number; quantity: number }[];
-  status: 'pending' | 'preparing' | 'ready' | 'delivered';
+  status: 'pending' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
+  isDeleted?: boolean;
   timestamp: string;
   category: 'food' | 'drink' | 'other';
   notes?: string;
