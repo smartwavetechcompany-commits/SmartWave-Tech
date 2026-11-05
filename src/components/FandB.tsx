@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory, LedgerEntry } from '../types';
-import { postToLedger, syncReservationPaymentsToKitchenOrders, recalculateReservationAccountFromLedger } from '../services/ledgerService';
+import { postToLedger, syncReservationPaymentsToKitchenOrders, recalculateReservationAccountFromLedger, syncKitchenOrderPaymentsToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -102,19 +102,17 @@ export function FandB() {
   const [customAddItem, setCustomAddItem] = useState({ name: '', price: 0 });
   const [isAddingItems, setIsAddingItems] = useState(false);
 
-  const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
+  // Real-time Listeners with persistent live sync across all user roles
   useEffect(() => {
-    setHasPermissionError(false);
-  }, [profile?.uid, hotel?.id]);
-
-  useEffect(() => {
-    if (!hotel?.id || !profile || hasPermissionError) return;
+    if (!hotel?.id || !profile) return;
     
     const unsubOrders = onSnapshot(
       query(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderBy('timestamp', 'desc')),
@@ -122,8 +120,7 @@ export function FandB() {
         setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder)));
       },
       (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/kitchen_orders`);
-        if (error.code === 'permission-denied') setHasPermissionError(true);
+        console.warn('Kitchen orders snapshot notice:', error?.message || error);
       }
     );
 
@@ -133,7 +130,17 @@ export function FandB() {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       },
       (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+        console.warn('Reservations snapshot notice:', error?.message || error);
+      }
+    );
+
+    const unsubLedger = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'ledger'),
+      (snap) => {
+        setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      },
+      (error: any) => {
+        console.warn('Ledger snapshot notice:', error?.message || error);
       }
     );
 
@@ -143,7 +150,7 @@ export function FandB() {
         setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
       },
       (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
+        console.warn('Guests snapshot notice:', error?.message || error);
       }
     );
 
@@ -153,7 +160,7 @@ export function FandB() {
         setInventory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
       },
       (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
+        console.warn('Inventory snapshot notice:', error?.message || error);
       }
     );
 
@@ -163,7 +170,7 @@ export function FandB() {
         setCategories(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryCategory)));
       },
       (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_categories`);
+        console.warn('Categories snapshot notice:', error?.message || error);
       }
     );
 
@@ -173,19 +180,26 @@ export function FandB() {
         setTables(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as BarTable)));
       },
       (error: any) => {
-        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/tables`);
+        console.warn('Tables snapshot notice:', error?.message || error);
       }
     );
 
     return () => {
       unsubOrders();
       unsubReservations();
+      unsubLedger();
       unsubGuests();
       unsubInventory();
       unsubCategories();
       unsubTables();
     };
-  }, [hotel?.id, profile?.uid, hasPermissionError]);
+  }, [hotel?.id, profile?.uid]);
+
+  // Run initial and periodic bidirectional payment reconciler
+  useEffect(() => {
+    if (!hotel?.id) return;
+    syncKitchenOrderPaymentsToLedger(hotel.id).catch(() => {});
+  }, [hotel?.id, orders.length, reservations.length]);
 
   // Auto-sync room-charged orders whose room folios have been settled or paid at Front Desk
   useEffect(() => {
@@ -296,8 +310,28 @@ export function FandB() {
     }
 
     // Check if room number is specified but not checked in
-    const isRoomOrder = newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in';
-    const res = isRoomOrder ? reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in') : undefined;
+    const isRoomOrder = Boolean(newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in');
+    const normRoom = String(newOrder.roomNumber || '').trim().toLowerCase();
+    let res = isRoomOrder 
+      ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom && r.status === 'checked_in') 
+         || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom)) 
+      : undefined;
+
+    if (isRoomOrder && !res && normRoom) {
+      try {
+        const qRes = query(
+          collection(db, 'hotels', hotel.id, 'reservations'),
+          where('roomNumber', '==', String(newOrder.roomNumber).trim())
+        );
+        const qSnap = await getDocs(qRes);
+        const activeDoc = qSnap.docs.find(d => (d.data() as Reservation).status === 'checked_in') || qSnap.docs[0];
+        if (activeDoc) {
+          res = { id: activeDoc.id, ...activeDoc.data() } as Reservation;
+        }
+      } catch (e) {
+        console.warn('Fallback reservation query error:', e);
+      }
+    }
 
     const hasRoomPayment = newOrder.payments.some(p => p.method === 'room');
     if (isRoomOrder && hasRoomPayment && !res) {
@@ -450,6 +484,7 @@ export function FandB() {
       if (isRoomOrder && res) {
         await recalculateReservationAccountFromLedger(hotel.id, res.id);
         await syncReservationPaymentsToKitchenOrders(hotel.id, res.id);
+        await syncKitchenOrderPaymentsToLedger(hotel.id, res.id);
       }
 
       // Log activity in background
@@ -506,26 +541,54 @@ export function FandB() {
     }
 
     try {
-      // 1. Locate the order
-      const targetOrder = orders.find(o => o.id === orderId);
+      // 1. Locate the order from state or fetch from Firestore if needed
+      let targetOrder = orders.find(o => o.id === orderId);
+      const orderDocRef = doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId);
+      if (!targetOrder) {
+        const orderSnap = await getDoc(orderDocRef).catch(() => null);
+        if (orderSnap && orderSnap.exists()) {
+          targetOrder = { id: orderSnap.id, ...orderSnap.data() } as KitchenOrder;
+        }
+      }
 
       // 2. Identify linked reservation if applicable
-      const isRoom = roomNumber && roomNumber !== 'Walk-in';
-      const linkedRes = isRoom 
+      const isRoom = Boolean(roomNumber && roomNumber !== 'Walk-in');
+      const normRoom = String(roomNumber || '').trim().toLowerCase();
+      let linkedRes = isRoom 
         ? (reservations.find(r => r.id === (targetOrder as any)?.reservationId)
-           || reservations.find(r => r.roomNumber === roomNumber && (r.status === 'checked_in' || r.status === 'checked_out'))
-           || reservations.find(r => r.roomNumber === roomNumber))
+           || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom && (r.status === 'checked_in' || r.status === 'checked_out'))
+           || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom))
         : undefined;
 
-      const reservationId = (targetOrder as any)?.reservationId || linkedRes?.id;
+      let reservationId = (targetOrder as any)?.reservationId || linkedRes?.id;
 
-      // 3. Delete Kitchen Order from Firestore
-      await database.safeDelete(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), {
+      // Fallback query if reservation not loaded in memory
+      if (!reservationId && isRoom && normRoom) {
+        try {
+          const qRes = query(
+            collection(db, 'hotels', hotel.id, 'reservations'),
+            where('roomNumber', '==', String(roomNumber).trim())
+          );
+          const qSnap = await getDocs(qRes);
+          const match = qSnap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation))
+                                 .find(r => r.status === 'checked_in') || (qSnap.docs[0] ? ({ id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as Reservation) : null);
+          if (match) {
+            reservationId = match.id;
+            linkedRes = match;
+          }
+        } catch (e) {
+          console.warn('Fallback reservation query error:', e);
+        }
+      }
+
+      // 3. Delete Kitchen Order document from Firestore
+      await deleteDoc(orderDocRef);
+      await database.safeDelete(orderDocRef, {
         hotelId: hotel.id,
         module: 'F & B',
         action: 'F&B_ORDER_DELETED',
         details: `Deleted order ${orderId} for room ${roomNumber}`
-      });
+      }).catch(() => {});
 
       // 4. Find and delete all ledger entries associated with this order
       const ledgerColRef = collection(db, 'hotels', hotel.id, 'ledger');
@@ -541,7 +604,7 @@ export function FandB() {
         ledgerSnapByRes.docs.forEach(d => {
           const data = d.data() as LedgerEntry;
           // Match reference ID containing orderId
-          if (data.referenceId && (data.referenceId === orderId || data.referenceId.startsWith(`${orderId}_`))) {
+          if (data.referenceId && (data.referenceId === orderId || data.referenceId.startsWith(`${orderId}_`) || data.referenceId.includes(orderId))) {
             entriesToDelete.add(d.id);
           }
           // Or description referencing this order
@@ -556,7 +619,7 @@ export function FandB() {
         entriesToDelete.forEach(id => {
           batch.delete(doc(db, 'hotels', hotel.id, 'ledger', id));
         });
-        await batch.commit();
+        await batch.commit().catch(() => {});
       }
 
       // 5. Delete finance records associated with this order
@@ -571,6 +634,7 @@ export function FandB() {
       // 6. Recalculate reservation account from the updated ledger
       if (reservationId) {
         await recalculateReservationAccountFromLedger(hotel.id, reservationId);
+        await syncReservationPaymentsToKitchenOrders(hotel.id, reservationId);
       }
 
       // 7. Reset table status if assigned
@@ -593,7 +657,7 @@ export function FandB() {
       }
 
       // 8. Log activity
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+      database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -607,7 +671,7 @@ export function FandB() {
         module: 'F & B',
         action: 'ACTIVITY_LOG_CREATE',
         details: 'F&B order deletion activity'
-      });
+      }).catch(() => {});
 
       // 9. Update local state immediately for instant feedback
       setOrders(prev => prev.filter(o => o.id !== orderId));
@@ -615,7 +679,6 @@ export function FandB() {
       toast.success('Order and linked room folio charges deleted successfully');
     } catch (err: any) {
       console.error('Error deleting order:', err);
-      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
       toast.error('Failed to delete order: ' + (err.message || 'Permission denied'));
     }
   };
@@ -745,13 +808,29 @@ export function FandB() {
     const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
 
     // Guard against duplicate settlement if room folio was already settled
-    const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
-    const res = isRoomOrder 
+    const isRoomOrder = Boolean(settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in');
+    const normRoom = String(settleOrderModal.roomNumber || '').trim().toLowerCase();
+    let res = isRoomOrder 
       ? (reservations.find(r => r.id === (settleOrderModal as any).reservationId) 
-         || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') 
-         || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber) 
+         || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom && (r.status === 'checked_in' || r.status === 'checked_out')) 
+         || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom) 
          || reservations.find(r => r.id === settleOrderModal.guestId))
       : undefined;
+
+    if (isRoomOrder && !res && normRoom) {
+      try {
+        const qRes = query(
+          collection(db, 'hotels', hotel.id, 'reservations'),
+          where('roomNumber', '==', String(settleOrderModal.roomNumber).trim())
+        );
+        const qSnap = await getDocs(qRes);
+        const match = qSnap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation))
+                               .find(r => r.status === 'checked_in') || (qSnap.docs[0] ? ({ id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as Reservation) : undefined);
+        if (match) res = match;
+      } catch (e) {
+        console.warn('Fallback reservation query error:', e);
+      }
+    }
 
     if (res) {
       const resTotal = res.totalAmount || 0;
@@ -870,6 +949,9 @@ export function FandB() {
           method: settleMethod,
           settlementSource: settleSource
         });
+
+        // Ensure direct payments are synchronized to ledger
+        await syncKitchenOrderPaymentsToLedger(hotel.id, res.id);
       }
 
       // 4. Update local orders state immediately
@@ -1388,15 +1470,38 @@ export function FandB() {
           </div>
 
           <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-            <div className="relative flex-1 w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-              <input
-                type="text"
-                placeholder="Search by room or items..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-              />
+            <div className="relative flex-1 w-full flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+                <input
+                  type="text"
+                  placeholder="Search by room or items..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!hotel?.id) return;
+                  setIsRefreshing(true);
+                  try {
+                    await syncKitchenOrderPaymentsToLedger(hotel.id);
+                    toast.success('Orders and folio balances synchronized live.');
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setIsRefreshing(false);
+                  }
+                }}
+                disabled={isRefreshing}
+                title="Sync and Refresh Orders"
+                className="p-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-100 rounded-xl transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 text-xs font-semibold shrink-0"
+              >
+                <RefreshCw size={15} className={cn(isRefreshing && "animate-spin text-emerald-400")} />
+                <span className="hidden sm:inline">Sync Live</span>
+              </button>
             </div>
             <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
               {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((f) => (

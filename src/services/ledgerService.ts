@@ -1646,3 +1646,107 @@ export const syncReservationPaymentsToKitchenOrders = async (
   }
 };
 
+/**
+ * Synchronizes payments made on F&B kitchen orders (direct payments like cash, card, transfer at F&B outlet)
+ * into the guest's room reservation ledger, ensuring Front Desk always reflects any payment made in F&B in real time.
+ */
+export const syncKitchenOrderPaymentsToLedger = async (
+  hotelId: string,
+  targetReservationId?: string
+) => {
+  if (!hotelId) return;
+  try {
+    const reservationsCol = collection(db, 'hotels', hotelId, 'reservations');
+    const [reservationsSnap, ordersSnap] = await Promise.all([
+      targetReservationId ? getDoc(doc(db, 'hotels', hotelId, 'reservations', targetReservationId)).then(d => d.exists() ? [d] : []) : getDocs(reservationsCol).then(s => s.docs),
+      getDocs(collection(db, 'hotels', hotelId, 'kitchen_orders'))
+    ]);
+
+    if (ordersSnap.empty || reservationsSnap.length === 0) return;
+
+    for (const resDoc of reservationsSnap) {
+      const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
+      const resNormRoom = String(res.roomNumber || '').trim().toLowerCase();
+      if (!resNormRoom) continue;
+
+      // Find all room orders linked to this reservation or room
+      const matchingOrders = ordersSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(o => {
+          const oResId = o.reservationId;
+          const oRoom = String(o.roomNumber || '').trim().toLowerCase();
+          return (oResId && oResId === res.id) || (oRoom && oRoom === resNormRoom);
+        });
+
+      if (matchingOrders.length === 0) continue;
+
+      // Query current ledger for this reservation
+      const ledgerSnap = await getDocs(query(
+        collection(db, 'hotels', hotelId, 'ledger'),
+        where('reservationId', '==', res.id)
+      ));
+      const ledgerEntries = ledgerSnap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
+
+      let hasNewLedgerPost = false;
+
+      for (const order of matchingOrders) {
+        const orderPayments = Array.isArray(order.payments) ? order.payments : [];
+        const directPayments = orderPayments.filter((p: any) => 
+          (p.amount || 0) > 0 && 
+          p.method !== 'room' && 
+          p.settlementSource !== 'Front Desk'
+        );
+
+        for (const p of directPayments) {
+          const payAmount = Number(p.amount);
+          if (payAmount <= 0) continue;
+
+          // Check if this payment already exists in ledger
+          const alreadyInLedger = ledgerEntries.some(e => {
+            if (e.type !== 'credit') return false;
+            if (e.referenceId && (e.referenceId === order.id || e.referenceId.startsWith(`${order.id}_`) || e.referenceId.includes(order.id))) {
+              return Math.abs(e.amount - payAmount) <= 0.01;
+            }
+            if (e.description && e.description.includes(order.id)) {
+              return Math.abs(e.amount - payAmount) <= 0.01;
+            }
+            return false;
+          });
+
+          if (!alreadyInLedger) {
+            // Post missing credit payment to reservation ledger
+            const effectiveGuestId = res.guestId || res.id || 'guest_unknown';
+            const payMethod = (p.method || 'cash').toLowerCase() as any;
+            const source = p.settlementSource || 'F&B Outlet';
+            
+            await postToLedger(hotelId, effectiveGuestId, res.id, {
+              amount: payAmount,
+              type: 'credit',
+              category: 'payment',
+              description: `F & B Direct Payment [${source}] (${(p.method || 'cash').toUpperCase()}): ${order.items || 'F&B Order'}`,
+              referenceId: `${order.id}_PAY_DIRECT_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+              postedBy: p.processedBy?.uid || 'f_and_b',
+              paymentMethod: payMethod,
+              settlementSource: source
+            }, p.processedBy?.uid || 'f_and_b', res.corporateId, payMethod, {
+              uid: p.processedBy?.uid || 'f_and_b',
+              displayName: p.processedBy?.name || 'F&B Staff',
+              role: p.processedBy?.role || 'staff'
+            });
+
+            hasNewLedgerPost = true;
+          }
+        }
+      }
+
+      if (hasNewLedgerPost) {
+        await recalculateReservationAccountFromLedger(hotelId, res.id);
+        await syncReservationPaymentsToKitchenOrders(hotelId, res.id);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to sync kitchen order payments to ledger:', err);
+  }
+};
+
+

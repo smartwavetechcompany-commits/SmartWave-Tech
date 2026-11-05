@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, wr
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
-import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials, syncKitchenOrderPaymentsToLedger } from '../services/ledgerService';
 import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -746,6 +746,12 @@ export function FrontDesk() {
       unsubPromo();
     };
   }, [hotel?.id, profile?.uid]);
+
+  // Synchronize any F&B direct outlet payments to ledger automatically
+  useEffect(() => {
+    if (!hotel?.id) return;
+    syncKitchenOrderPaymentsToLedger(hotel.id).catch(() => {});
+  }, [hotel?.id, reservations.length]);
 
   // Evaluate Live Automated Policies (auto-release, auto-cancel)
   useEffect(() => {
