@@ -216,9 +216,6 @@ export function calculateGuestFinancialPosition(
             totalRefunds += e.amount;
           } else {
             let amt = e.amount;
-            if (Math.abs(amt - 12169) < 10 || Math.abs(amt + 2831 - 15000) < 10) {
-              amt = 15000;
-            }
             totalCharges += amt;
             if (e.category === 'room' || e.chargeType === 'room_rate') {
               totalRoomCharges += amt;

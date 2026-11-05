@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, getDocs, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
-import { postToLedger, syncReservationPaymentsToKitchenOrders } from '../services/ledgerService';
+import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory, LedgerEntry } from '../types';
+import { postToLedger, syncReservationPaymentsToKitchenOrders, recalculateReservationAccountFromLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -382,11 +382,11 @@ export function FandB() {
         userId: 'all'
       }).catch(() => {});
 
-      const guestId = newOrder.guestId || (res?.guestId);
+      const effectiveGuestId = newOrder.guestId || res?.guestId || res?.id || 'guest_unknown';
 
       // Post charge to room ledger if applicable
-      if (isRoomOrder && res && guestId) {
-        await postToLedger(hotel.id, guestId, res.id, {
+      if (isRoomOrder && res) {
+        await postToLedger(hotel.id, effectiveGuestId, res.id, {
           amount: finalPrice,
           type: 'debit',
           category: 'F & B',
@@ -405,13 +405,13 @@ export function FandB() {
       for (const pay of newOrder.payments) {
         if (pay.amount > 0) {
           const source = pay.settlementSource || 'F&B Outlet';
-          if (isRoomOrder && res && guestId && pay.method !== 'room') {
-            await postToLedger(hotel.id, guestId, res.id, {
+          if (isRoomOrder && res && pay.method !== 'room') {
+            await postToLedger(hotel.id, effectiveGuestId, res.id, {
               amount: pay.amount,
               type: 'credit',
               category: 'payment',
               description: `F & B Payment [${source}] (${pay.method.toUpperCase()}): ${newOrder.items}`,
-              referenceId: orderRef.id,
+              referenceId: `${orderRef.id}_PAY_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
               postedBy: profile.uid,
               paymentMethod: pay.method as any,
               settlementSource: source
@@ -445,6 +445,11 @@ export function FandB() {
             }).catch(() => {});
           }
         }
+      }
+
+      if (isRoomOrder && res) {
+        await recalculateReservationAccountFromLedger(hotel.id, res.id);
+        await syncReservationPaymentsToKitchenOrders(hotel.id, res.id);
       }
 
       // Log activity in background
@@ -491,24 +496,103 @@ export function FandB() {
   const handleDeleteOrder = async (orderId: string, roomNumber: string) => {
     if (!hotel?.id || !profile) return;
 
-    if (!hasPermission(profile, 'delete_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+    if (!hasPermission(profile, 'delete_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && (profile as any)?.role !== 'admin' && profile?.role !== 'superAdmin') {
       toast.error('Permission denied: You do not have permission to delete orders.');
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to delete order for Room ${roomNumber}? This action cannot be undone.`)) {
+    if (!window.confirm(`Are you sure you want to delete order for Room ${roomNumber}? This will also remove any associated charges from the room folio.`)) {
       return;
     }
 
     try {
+      // 1. Locate the order
+      const targetOrder = orders.find(o => o.id === orderId);
+
+      // 2. Identify linked reservation if applicable
+      const isRoom = roomNumber && roomNumber !== 'Walk-in';
+      const linkedRes = isRoom 
+        ? (reservations.find(r => r.id === (targetOrder as any)?.reservationId)
+           || reservations.find(r => r.roomNumber === roomNumber && (r.status === 'checked_in' || r.status === 'checked_out'))
+           || reservations.find(r => r.roomNumber === roomNumber))
+        : undefined;
+
+      const reservationId = (targetOrder as any)?.reservationId || linkedRes?.id;
+
+      // 3. Delete Kitchen Order from Firestore
       await database.safeDelete(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), {
         hotelId: hotel.id,
         module: 'F & B',
         action: 'F&B_ORDER_DELETED',
-        details: `Deleted order for room ${roomNumber}`
+        details: `Deleted order ${orderId} for room ${roomNumber}`
       });
-      
-      // Log action
+
+      // 4. Find and delete all ledger entries associated with this order
+      const ledgerColRef = collection(db, 'hotels', hotel.id, 'ledger');
+      const [ledgerSnapByRef, ledgerSnapByRes] = await Promise.all([
+        getDocs(query(ledgerColRef, where('referenceId', '==', orderId))),
+        reservationId ? getDocs(query(ledgerColRef, where('reservationId', '==', reservationId))) : Promise.resolve(null)
+      ]);
+
+      const entriesToDelete = new Set<string>();
+      ledgerSnapByRef.docs.forEach(d => entriesToDelete.add(d.id));
+
+      if (ledgerSnapByRes) {
+        ledgerSnapByRes.docs.forEach(d => {
+          const data = d.data() as LedgerEntry;
+          // Match reference ID containing orderId
+          if (data.referenceId && (data.referenceId === orderId || data.referenceId.startsWith(`${orderId}_`))) {
+            entriesToDelete.add(d.id);
+          }
+          // Or description referencing this order
+          if (data.description && data.description.includes(orderId)) {
+            entriesToDelete.add(d.id);
+          }
+        });
+      }
+
+      if (entriesToDelete.size > 0) {
+        const batch = writeBatch(db);
+        entriesToDelete.forEach(id => {
+          batch.delete(doc(db, 'hotels', hotel.id, 'ledger', id));
+        });
+        await batch.commit();
+      }
+
+      // 5. Delete finance records associated with this order
+      const financeColRef = collection(db, 'hotels', hotel.id, 'finance');
+      const financeSnap = await getDocs(query(financeColRef, where('referenceId', '==', orderId)));
+      if (!financeSnap.empty) {
+        const fBatch = writeBatch(db);
+        financeSnap.docs.forEach(d => fBatch.delete(d.ref));
+        await fBatch.commit().catch(() => {});
+      }
+
+      // 6. Recalculate reservation account from the updated ledger
+      if (reservationId) {
+        await recalculateReservationAccountFromLedger(hotel.id, reservationId);
+      }
+
+      // 7. Reset table status if assigned
+      if (targetOrder?.tableId) {
+        const table = tables.find(t => t.id === targetOrder.tableId);
+        if (table && table.currentOrderId === orderId) {
+          database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', table.id), {
+            status: 'available',
+            currentOrderId: '',
+            currentGuestName: '',
+            currentGuestId: '',
+            lastUpdated: new Date().toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'F & B',
+            action: 'UPDATE_TABLE_STATUS',
+            details: `Table ${table.tableNumber} status reset to available after order deletion`
+          }).catch(() => {});
+        }
+      }
+
+      // 8. Log activity
       await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
@@ -524,11 +608,15 @@ export function FandB() {
         action: 'ACTIVITY_LOG_CREATE',
         details: 'F&B order deletion activity'
       });
-      
-      toast.success('Order deleted successfully');
-    } catch (err) {
+
+      // 9. Update local state immediately for instant feedback
+      setOrders(prev => prev.filter(o => o.id !== orderId));
+
+      toast.success('Order and linked room folio charges deleted successfully');
+    } catch (err: any) {
+      console.error('Error deleting order:', err);
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
-      toast.error('Failed to delete order');
+      toast.error('Failed to delete order: ' + (err.message || 'Permission denied'));
     }
   };
 
@@ -690,7 +778,7 @@ export function FandB() {
 
     const prevDirectPaid = currentPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
     const newDirectPaid = prevDirectPaid + settleAmount;
-    const guestId = settleOrderModal.guestId || res?.guestId;
+    const effectiveGuestId = settleOrderModal.guestId || res?.guestId || res?.id || 'guest_unknown';
 
     setIsSettling(true);
     try {
@@ -756,8 +844,8 @@ export function FandB() {
       });
 
       // 3. If linked to an in-house room reservation, credit the guest ledger so room folio stays synchronized
-      if (isRoomOrder && res && guestId) {
-        await postToLedger(hotel.id, guestId, res.id, {
+      if (isRoomOrder && res) {
+        await postToLedger(hotel.id, effectiveGuestId, res.id, {
           amount: settleAmount,
           type: 'credit',
           category: 'payment',
@@ -772,9 +860,27 @@ export function FandB() {
           role: profile?.role || 'staff',
           displayName: profile?.displayName || (profile as any)?.name || 'Staff'
         });
+
+        // Recalculate reservation document in Firestore so room folio updates live for all users
+        await recalculateReservationAccountFromLedger(hotel.id, res.id);
+        
+        // Sync kitchen orders with updated reservation
+        await syncReservationPaymentsToKitchenOrders(hotel.id, res.id, {
+          amount: settleAmount,
+          method: settleMethod,
+          settlementSource: settleSource
+        });
       }
 
-      // 4. Log Activity
+      // 4. Update local orders state immediately
+      setOrders(prev => prev.map(o => o.id === settleOrderModal.id ? {
+        ...o,
+        payments: updatedPayments,
+        paidAmount: newDirectPaid,
+        settlementSource: settleSource
+      } : o));
+
+      // 5. Log Activity
       await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
@@ -791,7 +897,7 @@ export function FandB() {
         details: 'Recorded F&B order direct settlement'
       });
 
-      toast.success(`Payment of ${formatCurrency(settleAmount, currency, exchangeRate)} recorded successfully.`);
+      toast.success(`Payment of ${formatCurrency(settleAmount, currency, exchangeRate)} recorded and synced to room folio.`);
       setSettleOrderModal(null);
     } catch (err: any) {
       console.error('Error settling F&B order payment:', err);

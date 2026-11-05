@@ -207,7 +207,7 @@ export const postToLedger = async (
   }
 
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-  const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
+  const guestRef = guestId && guestId.trim() !== '' ? doc(db, 'hotels', hotelId, 'guests', guestId) : null;
   const batch = writeBatch(db);
   
   // 3. Post entries to ledger (append-only) using batch
@@ -236,7 +236,7 @@ export const postToLedger = async (
 
   const nightCountAdj = guestEntries.filter(e => e.type === 'debit' && e.category === 'room').length;
 
-  if (guestBalanceAdj !== 0 || nightCountAdj > 0) {
+  if (guestRef && (guestBalanceAdj !== 0 || nightCountAdj > 0)) {
     const spentCredit = guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0);
     const spentRefund = guestEntries.filter(e => e.type === 'debit' && e.category === 'refund').reduce((acc, e) => acc + e.amount, 0);
     const spentAdj = spentCredit - spentRefund;
@@ -482,8 +482,7 @@ export const recalculateReservationAccountFromLedger = async (
       }
 
       const cat = (e.category || '').toLowerCase();
-      const isFood = cat === 'restaurant' || cat === 'f & b' || cat === 'food' || desc.includes('food') || desc.includes('f & b') || desc.includes('beans') || desc.includes('rice');
-      const effectiveAmount = (e.type === 'debit' && isFood && (Math.abs(e.amount - 12169) < 20 || Math.abs(e.amount - 10000) < 20 || Math.abs(e.amount - 15000) < 1)) ? 15000 : e.amount;
+      const effectiveAmount = e.amount;
 
       if (e.type === 'debit') {
         if (e.category === 'refund') {
@@ -500,12 +499,6 @@ export const recalculateReservationAccountFromLedger = async (
         }
       }
     });
-
-    const hasFoodDebit = validEntries.some(e => e.type === 'debit' && ((e.category || '').toLowerCase().includes('food') || (e.category || '').toLowerCase().includes('f & b') || (e.description || '').toLowerCase().includes('beans')));
-    const hasFoodCredit = validEntries.some(e => e.type === 'credit' && ((e.description || '').toLowerCase().includes('food') || (e.description || '').toLowerCase().includes('f & b') || (e.description || '').toLowerCase().includes('beans') || Math.abs(e.amount - 5000) < 1));
-    if (!hasFoodDebit && hasFoodCredit) {
-      totalDebits += 15000;
-    }
 
     totalDebits = Number(totalDebits.toFixed(2));
     totalCredits = Number(totalCredits.toFixed(2));
@@ -1048,28 +1041,6 @@ export const reconcileAndRepairReservationFinancials = async (
           } catch (rErr) {
             console.error("Failed to restore room debit amount:", rErr);
           }
-        }
-      }
-    }
-    // Also repair any food charges that were previously truncated by inclusive tax splitting (e.g. 12,169 instead of 15,000) or net 10,000
-    const desc = (entry.description || '').toLowerCase();
-    const cat = (entry.category || '').toLowerCase();
-    const isFood = cat === 'restaurant' || cat === 'f & b' || cat === 'food' || desc.includes('food') || desc.includes('f & b') || desc.includes('beans') || desc.includes('rice');
-    if (entry.type === 'debit' && isFood && (Math.abs(entry.amount - 12169) < 20 || Math.abs(entry.amount - 10000) < 20)) {
-      const docId = (entry as any).firestoreId || entry.id;
-      if (docId) {
-        try {
-          await database.safeUpdate(doc(db, 'hotels', hotelId, 'ledger', docId), {
-            amount: 15000
-          }, {
-            hotelId,
-            module: 'Ledger',
-            action: 'RESTORE_FULL_FOOD_RATE',
-            details: `Restored food charge ${docId} from ${entry.amount} to full gross rate of 15000`
-          });
-          entry.amount = 15000;
-        } catch (rErr) {
-          console.error("Failed to restore food debit amount:", rErr);
         }
       }
     }

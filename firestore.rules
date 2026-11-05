@@ -47,7 +47,13 @@ service cloud.firestore {
 
     function isHotelAdmin() {
       let data = getUserData();
-      return data != null && (data.role == "hotelAdmin" || isSuperAdmin());
+      return data != null && (
+        data.role == "hotelAdmin" || 
+        data.role == "admin" || 
+        data.role == "hotel_admin" ||
+        (data.roles != null && data.roles is list && data.roles.hasAny(['hotelAdmin', 'admin', 'manager'])) ||
+        isSuperAdmin()
+      );
     }
 
     function hasStaffManagementPermission() {
@@ -229,7 +235,7 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (request.auth.uid == userId || isHotelAdmin() || hasStaffManagementPermission()));
       }
 
-      // Ledger entries are immutable and append-only audit logs.
+      // Ledger entries are immutable audit records, but voidable/deletable by hotel admins and superadmins
       match /ledger/{entryId} {
         allow read: if isSuperAdmin() || 
                        isStaffOf(hotelId) || 
@@ -244,22 +250,22 @@ service cloud.firestore {
           request.resource.data.category is string &&
           request.resource.data.timestamp != null
         );
-        allow update: if isSuperAdmin();
-        allow delete: if isSuperAdmin();
+        allow update: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
       }
 
       // Outstanding Debt Ledger (AR) and guest balances
       match /outstanding_debt_ledger/{debtId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
         allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
       }
 
       // Financial transaction records & summaries
       match /finance/{docId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
         allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) || isAuthenticated();
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
       }
 
       // Staff account activation and password reset tokens for this property
@@ -275,9 +281,9 @@ service cloud.firestore {
       // Promotional campaigns and discount codes
       match /promotions/{promoId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
-        allow create, delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow create, delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin()));
         allow update: if isSuperAdmin() || 
-                         (sameHotel(hotelId) && isHotelAdmin()) ||
+                         (sameHotel(hotelId) && (isHotelAdmin() || isAdmin())) ||
                          (sameHotel(hotelId) && isStaffOf(hotelId) && 
                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount', 'redemptions', 'updatedAt', 'updatedBy']));
       }
@@ -291,7 +297,7 @@ service cloud.firestore {
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId)));
       }
     }
 
