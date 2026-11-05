@@ -227,22 +227,13 @@ export function getOverstayNightsFromSettings(
     return 0;
   }
 
-  // Each overstay night k corresponds to remaining past (scheduledCheckoutDateTime + (k-1)*24h + totalGraceMinutes)
-  const scheduledMs = graceInfo.scheduledCheckoutDateTime.getTime();
-  const graceMs = graceInfo.totalGraceMinutes * 60 * 1000;
-  const nowMs = now.getTime();
+  // Once Grace Period expires, calculate overstay nights strictly past the effective deadline
+  const msOverstay = now.getTime() - graceInfo.effectiveDeadlineDateTime.getTime();
+  if (msOverstay <= 0) return 0;
 
-  let overstayCount = 0;
-  for (let k = 1; k <= 365; k++) {
-    const deadlineForNightK = scheduledMs + (k - 1) * 24 * 60 * 60 * 1000 + graceMs;
-    if (nowMs > deadlineForNightK) {
-      overstayCount = k;
-    } else {
-      break;
-    }
-  }
-
-  return Math.min(365, Math.max(1, overstayCount));
+  // Day 1 overstay starts immediately after grace period deadline
+  const daysOverstay = Math.floor(msOverstay / (24 * 60 * 60 * 1000)) + 1;
+  return Math.min(365, Math.max(1, daysOverstay));
 }
 
 /**

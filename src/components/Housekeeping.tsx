@@ -133,7 +133,7 @@ type HousekeepingTab =
 
 export function Housekeeping() {
   const navigate = useNavigate();
-  const { hotel, profile, customRoles } = useAuth();
+  const { hotel, profile } = useAuth();
 
   // Navigation Tab State
   const [activeTab, setActiveTab] = useState<HousekeepingTab>('overview');
@@ -333,19 +333,9 @@ export function Housekeeping() {
   }, [hotel?.id, profile?.uid]);
 
   // --- PERMISSIONS ---
-  const canEditTasks = hasPermission(profile, 'edit_housekeeping_tasks', customRoles) || hasPermission(profile, 'manage_rooms', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
-  const canAssignTasks = hasPermission(profile, 'assign_housekeeping_tasks', customRoles) || hasPermission(profile, 'manage_rooms', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
-  const canCloseTasks = hasPermission(profile, 'close_housekeeping_tasks', customRoles) || hasPermission(profile, 'manage_rooms', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
-
-  // Granular Room Status Change Access: Hotel Admin can assign 'change_room_status'
-  const canChangeRoomStatus = Boolean(
-    profile && (
-      profile.role === 'hotelAdmin' || 
-      profile.role === 'superAdmin' || 
-      profile.staffRole === 'admin' ||
-      hasPermission(profile, 'change_room_status', customRoles)
-    )
-  );
+  const canEditTasks = hasPermission(profile, 'edit_housekeeping_tasks') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+  const canAssignTasks = hasPermission(profile, 'assign_housekeeping_tasks') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+  const canCloseTasks = hasPermission(profile, 'close_housekeeping_tasks') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
 
   // --- METRICS COMPUTATION ---
   const metrics = useMemo(() => {
@@ -418,14 +408,14 @@ export function Housekeeping() {
     }
 
     if (status !== room.status) {
-      if (!canEditTasks && !canCloseTasks && !canChangeRoomStatus) {
+      if (!canEditTasks && !canCloseTasks) {
         toast.error('Access denied: You do not have permission to change room housekeeping status.');
         return;
       }
     }
 
     // Policy check for status updates
-    const policy = canUpdateRoomStatus(hotel, profile, room, status, customRoles);
+    const policy = canUpdateRoomStatus(hotel, profile, room, status);
     if (!policy.allowed) {
       toast.error(policy.message || 'Action denied by hotel policy');
       return;
@@ -553,10 +543,6 @@ export function Housekeeping() {
 
   const handleCancelCleaning = async (room: Room, reason?: string) => {
     if (!hotel?.id || !profile) return;
-    if (!canChangeRoomStatus) {
-      toast.error('Permission denied: You do not have permission to change room status. Please contact your Hotel Administrator.');
-      return;
-    }
     const now = new Date().toISOString();
     try {
       await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', room.id), {

@@ -264,14 +264,7 @@ export class BillingEngine {
       // 1. Authoritative calculation from actual ledger entries
       const roomDebits = resLedger.filter(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay'));
       const taxDebits = resLedger.filter(e => e.type === 'debit' && e.category === 'tax');
-      const hasActiveExclusiveTaxes = activeTaxes.some(t => !t.isInclusive);
-      ancillaryCharges = resLedger
-        .filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax' && e.category !== 'refund' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay')
-        .filter(e => {
-          const desc = (e.description || '').toLowerCase();
-          const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
-          return !isErrant;
-        });
+      ancillaryCharges = resLedger.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax' && e.category !== 'refund' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay');
       const refundDebits = resLedger.filter(e => e.type === 'debit' && e.category === 'refund');
       const creditEntries = resLedger.filter(e => e.type === 'credit');
 
@@ -279,37 +272,34 @@ export class BillingEngine {
       totalPayments = creditEntries.reduce((sum, e) => sum + e.amount, 0);
       totalRefunds = refundDebits.reduce((sum, e) => sum + e.amount, 0);
 
-      const maxLegitimateGrossRoom = stayDuration.totalNights * nightlyRate;
+      // Ledger debits total
+      totalCharges = resLedger.filter(e => e.type === 'debit' && e.category !== 'refund').reduce((sum, e) => sum + e.amount, 0);
+
       const postedRoomChargesSum = roomDebits.reduce((sum, e) => sum + e.amount, 0);
+      const postedTaxChargesSum = taxDebits.reduce((sum, e) => sum + e.amount, 0);
 
-      // Distinguish inclusive tax debits from exclusive tax debits
-      const inclusiveTaxDebitsSum = taxDebits.filter(t => {
-        const desc = (t.description || '').toLowerCase();
-        return desc.includes('[inclusive]') || activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
-      }).reduce((sum, t) => sum + t.amount, 0);
-
-      if (!hasActiveExclusiveTaxes) {
-        exclusiveTaxTotal = 0;
+      // Determine how taxes and base gross are structured in ledger
+      const hasInclusiveTaxDebits = taxDebits.some(t => t.description?.toLowerCase().includes('[inclusive]'));
+      if (hasInclusiveTaxDebits) {
+        // Room debits were posted as pre-tax base, and taxes as separate entries
+        baseRoomGross = postedRoomChargesSum;
+        inclusiveTaxTotal = taxDebits.filter(t => t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
+        exclusiveTaxTotal = taxDebits.filter(t => !t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
+      } else if (activeTaxes.some(t => t.isInclusive)) {
+        // Room debits represent gross inclusive stay; extract base and tax
+        const totalRoomStay = postedRoomChargesSum;
+        const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
+        inclusiveTaxTotal = totalRoomStay - (totalRoomStay / (1 + incRate / 100));
+        baseRoomGross = totalRoomStay - inclusiveTaxTotal;
+        exclusiveTaxTotal = postedTaxChargesSum;
       } else {
-        exclusiveTaxTotal = taxDebits.filter(t => {
-          const desc = (t.description || '').toLowerCase();
-          const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(t.amount - 4056) < 2;
-          if (isErrant) return false;
-          return !desc.includes('[inclusive]') && !activeTaxes.some(tax => tax.isInclusive && desc.includes((tax.name || '').toLowerCase()));
-        }).reduce((sum, t) => sum + t.amount, 0);
+        baseRoomGross = postedRoomChargesSum;
+        inclusiveTaxTotal = 0;
+        exclusiveTaxTotal = postedTaxChargesSum;
       }
 
-      const effectiveRoomChargesGross = (stayDuration.bookedNights + stayDuration.overstayNights) * nightlyRate;
-      const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
-      inclusiveTaxTotal = incRate > 0 
-        ? effectiveRoomChargesGross - (effectiveRoomChargesGross / (1 + incRate / 100))
-        : 0;
-      baseRoomGross = effectiveRoomChargesGross - inclusiveTaxTotal;
-
-      totalCharges = effectiveRoomChargesGross + ancillaryTotal + exclusiveTaxTotal;
-
       // Generate clean itemized tax rows calculated exactly once
-      const staySubjectAmount = effectiveRoomChargesGross;
+      const staySubjectAmount = baseRoomGross + inclusiveTaxTotal;
       folioTaxes = activeTaxes.map(tax => {
         const amt = tax.isInclusive 
           ? staySubjectAmount - (staySubjectAmount / (1 + tax.percentage / 100))
@@ -491,6 +481,7 @@ export class BillingEngine {
         }
       }
     }
+    
     return result.filter(e => e.amount > 0 || e.type === 'credit');
   }
 
@@ -703,12 +694,12 @@ export function calculateBilling(
   ledgerEntries?: LedgerEntry[]
 ): BillingState {
   const account = calculateReservationAccount(res, hotel, ledgerEntries);
-  const nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
-  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res });
+  const nightlyRate = res.nightlyRate || (account.totalNights > 0 ? account.totalRoomCharges / account.totalNights : 0);
+  const duration = calculateStayDuration(res.checkIn, res.checkOut);
   const originalNights = duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1);
   return {
     nightsCount: account.totalNights,
-    extraNights: account.overstayNights,
+    extraNights: 0,
     nightlyRate,
     originalNights,
     overstayCharge: account.totalOverstayCharges,
@@ -717,7 +708,7 @@ export function calculateBilling(
     totalDiscounts: account.totalDiscounts,
     totalCredits: account.totalCredits,
     outstandingBalance: account.outstandingBalance,
-    isOverstaying: res.status === 'checked_in' && account.overstayNights > 0,
+    isOverstaying: res.status === 'checked_in' && account.totalOverstayCharges > 0,
     projectedRoomCharge: 0,
     unpostedPrepayment: 0,
     unpostedIncidentals: 0
@@ -749,11 +740,6 @@ export function getReservationLiveBalance(
   }
 
   // 3. For active stays (checked_in, pending, etc.):
-  // Live calculation reflects real-time overstay and charges
-  if (res.status === 'checked_in') {
-    return account.outstandingBalance;
-  }
-
   // If res.ledgerBalance is set to a non-zero value, use it if explicit; otherwise use account.outstandingBalance
   if (res.ledgerBalance !== undefined && Math.abs(res.ledgerBalance) > 0.01) {
     return Number(res.ledgerBalance.toFixed(2));

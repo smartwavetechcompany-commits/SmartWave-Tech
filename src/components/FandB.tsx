@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, getDocs, writeBatch, onSnapshot, deleteDoc, getDocsFromServer } from 'firebase/firestore';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory, LedgerEntry } from '../types';
-import { postToLedger, syncReservationPaymentsToKitchenOrders, recalculateReservationAccountFromLedger, syncKitchenOrderPaymentsToLedger } from '../services/ledgerService';
+import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
+import { postToLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -47,7 +47,6 @@ import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { hasPermission } from '../utils/permissions';
 import { Pagination } from './Pagination';
-import { ConfirmModal } from './ConfirmModal';
 
 export function FandB() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -103,52 +102,38 @@ export function FandB() {
   const [customAddItem, setCustomAddItem] = useState({ name: '', price: 0 });
   const [isAddingItems, setIsAddingItems] = useState(false);
 
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
-
-  // Delete Order Confirmation Modal State
-  const [orderToDelete, setOrderToDelete] = useState<{ id: string; roomNumber: string; items: string; totalAmount?: number } | null>(null);
-  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [hasPermissionError, setHasPermissionError] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
-  // Real-time Listeners with persistent live sync across all user roles
   useEffect(() => {
-    if (!hotel?.id || !profile) return;
+    setHasPermissionError(false);
+  }, [profile?.uid, hotel?.id]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile || hasPermissionError) return;
     
     const unsubOrders = onSnapshot(
       query(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderBy('timestamp', 'desc')),
       (snap) => {
-        const liveOrders = snap.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder))
-          .filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled');
-        setOrders(liveOrders);
+        setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as KitchenOrder)));
       },
       (error: any) => {
-        console.warn('Kitchen orders snapshot notice:', error?.message || error);
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/kitchen_orders`);
+        if (error.code === 'permission-denied') setHasPermissionError(true);
       }
     );
 
     const unsubReservations = onSnapshot(
-      collection(db, 'hotels', hotel.id, 'reservations'),
+      query(collection(db, 'hotels', hotel.id, 'reservations'), where('status', '==', 'checked_in')),
       (snap) => {
         setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       },
       (error: any) => {
-        console.warn('Reservations snapshot notice:', error?.message || error);
-      }
-    );
-
-    const unsubLedger = onSnapshot(
-      collection(db, 'hotels', hotel.id, 'ledger'),
-      (snap) => {
-        setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
-      },
-      (error: any) => {
-        console.warn('Ledger snapshot notice:', error?.message || error);
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/reservations`);
       }
     );
 
@@ -158,7 +143,7 @@ export function FandB() {
         setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
       },
       (error: any) => {
-        console.warn('Guests snapshot notice:', error?.message || error);
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/guests`);
       }
     );
 
@@ -168,7 +153,7 @@ export function FandB() {
         setInventory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
       },
       (error: any) => {
-        console.warn('Inventory snapshot notice:', error?.message || error);
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory`);
       }
     );
 
@@ -178,7 +163,7 @@ export function FandB() {
         setCategories(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryCategory)));
       },
       (error: any) => {
-        console.warn('Categories snapshot notice:', error?.message || error);
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/inventory_categories`);
       }
     );
 
@@ -188,75 +173,19 @@ export function FandB() {
         setTables(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as BarTable)));
       },
       (error: any) => {
-        console.warn('Tables snapshot notice:', error?.message || error);
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/tables`);
       }
     );
 
     return () => {
       unsubOrders();
       unsubReservations();
-      unsubLedger();
       unsubGuests();
       unsubInventory();
       unsubCategories();
       unsubTables();
     };
-  }, [hotel?.id, profile?.uid]);
-
-  // Run initial and periodic bidirectional payment reconciler
-  useEffect(() => {
-    if (!hotel?.id) return;
-    syncKitchenOrderPaymentsToLedger(hotel.id).catch(() => {});
-  }, [hotel?.id, orders.length, reservations.length]);
-
-  // Auto-sync room-charged orders whose room folios have been settled or paid at Front Desk
-  useEffect(() => {
-    if (!hotel?.id || orders.length === 0 || reservations.length === 0) return;
-    const roomOrdersToSync = orders.filter(order => {
-      const orderTotal = order.totalAmount || order.price || 0;
-      const isRoom = order.roomNumber && order.roomNumber !== 'Walk-in';
-      const isRoomPayment = order.paymentMethod === 'room' || order.settlementSource === 'Front Desk' || (order.payments || []).some(p => p.method === 'room' || p.settlementSource === 'Front Desk');
-      if (!isRoom && !isRoomPayment) return false;
-
-      const directFBOnyPaid = (order.payments || []).filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk').reduce((s, p) => s + (p.amount || 0), 0);
-      const roomChargedPortion = Math.max(0, orderTotal - directFBOnyPaid);
-      if (roomChargedPortion <= 0) return false;
-
-      const currentFDPaid = (order.payments || []).filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
-      const hasRoomChargeEntry = (order.payments || []).some(p => p.method === 'room');
-
-      const res = reservations.find(r => 
-        (r.id === (order as any).reservationId) ||
-        (r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out')) ||
-        (r.roomNumber === order.roomNumber)
-      );
-      if (!res) return false;
-
-      const resTotal = res.totalAmount || 0;
-      const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
-      const resOwed = Math.max(0, resTotal - resPaid);
-      const isSettled = res.paymentStatus === 'paid' || resOwed <= 0.01;
-
-      if (isSettled) {
-        return currentFDPaid < roomChargedPortion - 0.01 || (order.paidAmount || 0) < orderTotal - 0.01 || hasRoomChargeEntry;
-      } else {
-        const targetRemaining = Math.min(roomChargedPortion, resOwed);
-        const targetFDPaid = Math.max(0, roomChargedPortion - targetRemaining);
-        return Math.abs(currentFDPaid - targetFDPaid) > 0.01;
-      }
-    });
-
-    for (const order of roomOrdersToSync) {
-      const res = reservations.find(r => 
-        (r.id === (order as any).reservationId) ||
-        (r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out')) ||
-        (r.roomNumber === order.roomNumber)
-      );
-      if (res) {
-        syncReservationPaymentsToKitchenOrders(hotel.id, res.id).catch(() => {});
-      }
-    }
-  }, [hotel?.id, orders, reservations]);
+  }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   const [customItem, setCustomItem] = useState({ name: '', price: 0 });
 
@@ -318,28 +247,8 @@ export function FandB() {
     }
 
     // Check if room number is specified but not checked in
-    const isRoomOrder = Boolean(newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in');
-    const normRoom = String(newOrder.roomNumber || '').trim().toLowerCase();
-    let res = isRoomOrder 
-      ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom && r.status === 'checked_in') 
-         || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom)) 
-      : undefined;
-
-    if (isRoomOrder && !res && normRoom) {
-      try {
-        const qRes = query(
-          collection(db, 'hotels', hotel.id, 'reservations'),
-          where('roomNumber', '==', String(newOrder.roomNumber).trim())
-        );
-        const qSnap = await getDocs(qRes);
-        const activeDoc = qSnap.docs.find(d => (d.data() as Reservation).status === 'checked_in') || qSnap.docs[0];
-        if (activeDoc) {
-          res = { id: activeDoc.id, ...activeDoc.data() } as Reservation;
-        }
-      } catch (e) {
-        console.warn('Fallback reservation query error:', e);
-      }
-    }
+    const isRoomOrder = newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in';
+    const res = isRoomOrder ? reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in') : undefined;
 
     const hasRoomPayment = newOrder.payments.some(p => p.method === 'room');
     if (isRoomOrder && hasRoomPayment && !res) {
@@ -378,8 +287,6 @@ export function FandB() {
       const orderData = {
         ...newOrder,
         itemsList: cart,
-        reservationId: res?.id || '',
-        roomId: res?.roomId || '',
         guestName: res?.guestName || guests.find(g => g.id === newOrder.guestId)?.name || 'Walk-in',
         hotelId: hotel.id,
         status: 'pending',
@@ -424,11 +331,11 @@ export function FandB() {
         userId: 'all'
       }).catch(() => {});
 
-      const effectiveGuestId = newOrder.guestId || res?.guestId || res?.id || 'guest_unknown';
+      const guestId = newOrder.guestId || (res?.guestId);
 
       // Post charge to room ledger if applicable
-      if (isRoomOrder && res) {
-        await postToLedger(hotel.id, effectiveGuestId, res.id, {
+      if (isRoomOrder && res && guestId) {
+        await postToLedger(hotel.id, guestId, res.id, {
           amount: finalPrice,
           type: 'debit',
           category: 'F & B',
@@ -447,13 +354,13 @@ export function FandB() {
       for (const pay of newOrder.payments) {
         if (pay.amount > 0) {
           const source = pay.settlementSource || 'F&B Outlet';
-          if (isRoomOrder && res && pay.method !== 'room') {
-            await postToLedger(hotel.id, effectiveGuestId, res.id, {
+          if (isRoomOrder && res && guestId && pay.method !== 'room') {
+            await postToLedger(hotel.id, guestId, res.id, {
               amount: pay.amount,
               type: 'credit',
               category: 'payment',
               description: `F & B Payment [${source}] (${pay.method.toUpperCase()}): ${newOrder.items}`,
-              referenceId: `${orderRef.id}_PAY_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+              referenceId: orderRef.id,
               postedBy: profile.uid,
               paymentMethod: pay.method as any,
               settlementSource: source
@@ -463,6 +370,28 @@ export function FandB() {
               role: profile?.role || 'staff',
               displayName: profile?.displayName || (profile as any)?.name || 'Staff'
             });
+
+            database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+              type: 'income',
+              amount: pay.amount,
+              category: 'F & B Revenue',
+              description: `F & B Order ${orderRef.id} [${source}] (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
+              timestamp: new Date().toISOString(),
+              paymentMethod: pay.method,
+              settlementSource: source,
+              referenceId: orderRef.id,
+              postedBy: profile.uid,
+              processedBy: {
+                uid: profile.uid,
+                name: profile.displayName || (profile as any)?.name || 'Staff',
+                role: profile.role || 'staff'
+              }
+            }, {
+              hotelId: hotel.id,
+              module: 'Finance',
+              action: 'F&B_INCOME_RECORD',
+              details: `Recorded F&B income from Room ${newOrder.roomNumber} [${source}]`
+            }).catch(() => {});
           } else if (pay.method !== 'room') {
             database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
               type: 'income',
@@ -487,12 +416,6 @@ export function FandB() {
             }).catch(() => {});
           }
         }
-      }
-
-      if (isRoomOrder && res) {
-        await recalculateReservationAccountFromLedger(hotel.id, res.id);
-        await syncReservationPaymentsToKitchenOrders(hotel.id, res.id);
-        await syncKitchenOrderPaymentsToLedger(hotel.id, res.id);
       }
 
       // Log activity in background
@@ -536,157 +459,28 @@ export function FandB() {
     }
   };
 
-  const handleDeleteOrder = (orderId: string, roomNumber: string) => {
+  const handleDeleteOrder = async (orderId: string, roomNumber: string) => {
     if (!hotel?.id || !profile) return;
 
-    if (!hasPermission(profile, 'delete_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && (profile as any)?.role !== 'admin' && profile?.role !== 'superAdmin') {
+    if (!hasPermission(profile, 'delete_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
       toast.error('Permission denied: You do not have permission to delete orders.');
       return;
     }
 
-    const target = orders.find(o => o.id === orderId);
-    setOrderToDelete({
-      id: orderId,
-      roomNumber,
-      items: target?.items || 'F&B Order',
-      totalAmount: target?.totalAmount || target?.price || 0
-    });
-  };
-
-  const executeDeleteOrder = async (orderId: string, roomNumber: string) => {
-    if (!hotel?.id || !profile) return;
-    setIsDeletingOrder(true);
+    if (!window.confirm(`Are you sure you want to delete order for Room ${roomNumber}? This action cannot be undone.`)) {
+      return;
+    }
 
     try {
-      // 1. Locate the order from state or fetch from Firestore if needed
-      let targetOrder = orders.find(o => o.id === orderId);
-      const orderDocRef = doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId);
-      if (!targetOrder) {
-        const orderSnap = await getDoc(orderDocRef).catch(() => null);
-        if (orderSnap && orderSnap.exists()) {
-          targetOrder = { id: orderSnap.id, ...orderSnap.data() } as KitchenOrder;
-        }
-      }
-
-      // 2. Identify linked reservation if applicable
-      const isRoom = Boolean(roomNumber && roomNumber !== 'Walk-in');
-      const normRoom = String(roomNumber || '').trim().toLowerCase();
-      let linkedRes = isRoom 
-        ? (reservations.find(r => r.id === (targetOrder as any)?.reservationId)
-           || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom && (r.status === 'checked_in' || r.status === 'checked_out'))
-           || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom))
-        : undefined;
-
-      let reservationId = (targetOrder as any)?.reservationId || linkedRes?.id;
-
-      // Fallback query if reservation not loaded in memory
-      if (!reservationId && isRoom && normRoom) {
-        try {
-          const qRes = query(
-            collection(db, 'hotels', hotel.id, 'reservations'),
-            where('roomNumber', '==', String(roomNumber).trim())
-          );
-          const qSnap = await getDocs(qRes);
-          const match = qSnap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation))
-                                 .find(r => r.status === 'checked_in') || (qSnap.docs[0] ? ({ id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as Reservation) : null);
-          if (match) {
-            reservationId = match.id;
-            linkedRes = match;
-          }
-        } catch (e) {
-          console.warn('Fallback reservation query error:', e);
-        }
-      }
-
-      // 3. Mark document as deleted & cancelled first for instantaneous broadcast to all real-time listeners
-      await updateDoc(orderDocRef, {
-        isDeleted: true,
-        status: 'cancelled',
-        deletedAt: new Date().toISOString(),
-        deletedBy: profile.uid,
-        deletedByEmail: profile.email || ''
-      }).catch((err) => {
-        console.warn('Soft delete tag notice:', err);
-      });
-
-      // 4. Delete Kitchen Order document permanently from Firestore
-      await deleteDoc(orderDocRef);
-      await database.safeDelete(orderDocRef, {
+      await database.safeDelete(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), {
         hotelId: hotel.id,
         module: 'F & B',
         action: 'F&B_ORDER_DELETED',
-        details: `Deleted order ${orderId} for room ${roomNumber}`
-      }).catch(() => {});
-
-      // 5. Find and delete all ledger entries associated with this order
-      const ledgerColRef = collection(db, 'hotels', hotel.id, 'ledger');
-      const [ledgerSnapByRef, ledgerSnapByRes] = await Promise.all([
-        getDocs(query(ledgerColRef, where('referenceId', '==', orderId))).catch(() => null),
-        reservationId ? getDocs(query(ledgerColRef, where('reservationId', '==', reservationId))).catch(() => null) : Promise.resolve(null)
-      ]);
-
-      const entriesToDelete = new Set<string>();
-      if (ledgerSnapByRef) {
-        ledgerSnapByRef.docs.forEach(d => entriesToDelete.add(d.id));
-      }
-
-      if (ledgerSnapByRes) {
-        ledgerSnapByRes.docs.forEach(d => {
-          const data = d.data() as LedgerEntry;
-          if (data.referenceId && (data.referenceId === orderId || data.referenceId.startsWith(`${orderId}_`) || data.referenceId.includes(orderId))) {
-            entriesToDelete.add(d.id);
-          }
-          if (data.description && data.description.includes(orderId)) {
-            entriesToDelete.add(d.id);
-          }
-        });
-      }
-
-      if (entriesToDelete.size > 0) {
-        const batch = writeBatch(db);
-        entriesToDelete.forEach(id => {
-          batch.delete(doc(db, 'hotels', hotel.id, 'ledger', id));
-        });
-        await batch.commit().catch(() => {});
-      }
-
-      // 6. Delete finance records associated with this order
-      const financeColRef = collection(db, 'hotels', hotel.id, 'finance');
-      const financeSnap = await getDocs(query(financeColRef, where('referenceId', '==', orderId))).catch(() => null);
-      if (financeSnap && !financeSnap.empty) {
-        const fBatch = writeBatch(db);
-        financeSnap.docs.forEach(d => fBatch.delete(d.ref));
-        await fBatch.commit().catch(() => {});
-      }
-
-      // 7. Recalculate reservation account from the updated ledger
-      if (reservationId) {
-        await recalculateReservationAccountFromLedger(hotel.id, reservationId);
-        await syncReservationPaymentsToKitchenOrders(hotel.id, reservationId);
-        await syncKitchenOrderPaymentsToLedger(hotel.id, reservationId);
-      }
-
-      // 8. Reset table status if assigned
-      if (targetOrder?.tableId) {
-        const table = tables.find(t => t.id === targetOrder.tableId);
-        if (table && table.currentOrderId === orderId) {
-          database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', table.id), {
-            status: 'available',
-            currentOrderId: '',
-            currentGuestName: '',
-            currentGuestId: '',
-            lastUpdated: new Date().toISOString()
-          }, {
-            hotelId: hotel.id,
-            module: 'F & B',
-            action: 'UPDATE_TABLE_STATUS',
-            details: `Table ${table.tableNumber} status reset to available after order deletion`
-          }).catch(() => {});
-        }
-      }
-
-      // 9. Log activity
-      database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        details: `Deleted order for room ${roomNumber}`
+      });
+      
+      // Log action
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
@@ -700,18 +494,12 @@ export function FandB() {
         module: 'F & B',
         action: 'ACTIVITY_LOG_CREATE',
         details: 'F&B order deletion activity'
-      }).catch(() => {});
-
-      // 10. Update local state immediately for instant feedback
-      setOrders(prev => prev.filter(o => o.id !== orderId));
-      setOrderToDelete(null);
-
-      toast.success('Order and linked room folio charges deleted permanently');
-    } catch (err: any) {
-      console.error('Error deleting order:', err);
-      toast.error('Failed to delete order: ' + (err.message || 'Permission denied'));
-    } finally {
-      setIsDeletingOrder(false);
+      });
+      
+      toast.success('Order deleted successfully');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
+      toast.error('Failed to delete order');
     }
   };
 
@@ -761,68 +549,20 @@ export function FandB() {
 
   // Direct Settlement in F&B Handlers
   const openSettleModal = (order: KitchenOrder, currentBalance: number) => {
-    if (currentBalance <= 0.01) {
-      toast.info('This order has already been completely settled.');
-      return;
-    }
-
     const orderTotal = order.totalAmount || order.price || 0;
-    let paymentsList: { amount: number; method: string; settlementSource?: string }[] = [];
+    let paymentsList: { amount: number; method: string }[] = [];
     if (Array.isArray(order.payments) && order.payments.length > 0) {
       paymentsList = order.payments;
     } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
       paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
     }
-    const directFBOnyPaid = paymentsList
-      .filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk')
+    const directPaid = paymentsList
+      .filter(p => p.method !== 'room')
       .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-    const isRoomOrder = (order.roomNumber && order.roomNumber !== 'Walk-in') || order.paymentMethod === 'room' || order.settlementSource === 'Front Desk' || paymentsList.some(p => p.method === 'room' || p.settlementSource === 'Front Desk');
-
-    // Cross-check linked reservation
-    const linkedRes = isRoomOrder 
-      ? (reservations.find(r => r.id === (order as any).reservationId)
-         || reservations.find(r => r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out'))
-         || reservations.find(r => r.roomNumber === order.roomNumber && r.guestName === order.guestName)
-         || reservations.find(r => r.roomNumber === order.roomNumber)
-         || reservations.find(r => r.guestId && r.guestId === order.guestId))
-      : undefined;
-
-    const roomChargedPortion = Math.max(0, orderTotal - directFBOnyPaid);
-
-    let frontDeskPaid = 0;
-    let isRoomFolioSettled = false;
-
-    if (isRoomOrder && linkedRes && roomChargedPortion > 0) {
-      const resTotal = linkedRes.totalAmount || 0;
-      const resPaid = (linkedRes.paidAmount || 0) + (linkedRes.totalDiscount || 0);
-      const resOwed = Math.max(0, resTotal - resPaid);
-      isRoomFolioSettled = linkedRes.paymentStatus === 'paid' || resOwed <= 0.01;
-
-      if (isRoomFolioSettled) {
-        frontDeskPaid = roomChargedPortion;
-      } else if (resPaid > 0) {
-        const remainingUnpaidRoomCharge = Math.min(roomChargedPortion, resOwed);
-        frontDeskPaid = Math.max(0, roomChargedPortion - remainingUnpaidRoomCharge);
-      }
-    } else {
-      const alreadyFD = paymentsList.filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
-      frontDeskPaid = alreadyFD;
-    }
-
-    if (isRoomFolioSettled) {
-      toast.info('This order has already been completely settled through Front Desk room folio.');
-      return;
-    }
-
-    const effectiveUnsettled = Math.max(0, currentBalance > 0 ? currentBalance : (orderTotal - directFBOnyPaid - frontDeskPaid));
-    if (effectiveUnsettled <= 0.01) {
-      toast.info('This order has already been completely settled through Front Desk room folio.');
-      return;
-    }
-
+    const remaining = Math.max(0, currentBalance > 0 ? currentBalance : (orderTotal - directPaid));
     setSettleOrderModal(order);
-    setSettleAmount(effectiveUnsettled);
+    setSettleAmount(remaining);
     setSettleMethod('cash');
     setSettleSource('F&B Outlet');
     setSettleNotes('');
@@ -839,42 +579,6 @@ export function FandB() {
 
     const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
 
-    // Guard against duplicate settlement if room folio was already settled
-    const isRoomOrder = Boolean(settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in');
-    const normRoom = String(settleOrderModal.roomNumber || '').trim().toLowerCase();
-    let res = isRoomOrder 
-      ? (reservations.find(r => r.id === (settleOrderModal as any).reservationId) 
-         || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom && (r.status === 'checked_in' || r.status === 'checked_out')) 
-         || reservations.find(r => String(r.roomNumber).trim().toLowerCase() === normRoom) 
-         || reservations.find(r => r.id === settleOrderModal.guestId))
-      : undefined;
-
-    if (isRoomOrder && !res && normRoom) {
-      try {
-        const qRes = query(
-          collection(db, 'hotels', hotel.id, 'reservations'),
-          where('roomNumber', '==', String(settleOrderModal.roomNumber).trim())
-        );
-        const qSnap = await getDocs(qRes);
-        const match = qSnap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation))
-                               .find(r => r.status === 'checked_in') || (qSnap.docs[0] ? ({ id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as Reservation) : undefined);
-        if (match) res = match;
-      } catch (e) {
-        console.warn('Fallback reservation query error:', e);
-      }
-    }
-
-    if (res) {
-      const resTotal = res.totalAmount || 0;
-      const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
-      const resOwed = Math.max(0, resTotal - resPaid);
-      if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
-        toast.info('This order has already been fully settled at Front Desk. Duplicate payment avoided.');
-        setSettleOrderModal(null);
-        return;
-      }
-    }
-
     // Calculate existing direct paid
     let currentPayments: { amount: number; method: string; date?: string; reference?: string }[] = [];
     if (Array.isArray(settleOrderModal.payments) && settleOrderModal.payments.length > 0) {
@@ -889,7 +593,12 @@ export function FandB() {
 
     const prevDirectPaid = currentPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
     const newDirectPaid = prevDirectPaid + settleAmount;
-    const effectiveGuestId = settleOrderModal.guestId || res?.guestId || res?.id || 'guest_unknown';
+
+    const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
+    const res = isRoomOrder 
+      ? (reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') || reservations.find(r => r.id === settleOrderModal.guestId))
+      : undefined;
+    const guestId = settleOrderModal.guestId || res?.guestId;
 
     setIsSettling(true);
     try {
@@ -955,8 +664,8 @@ export function FandB() {
       });
 
       // 3. If linked to an in-house room reservation, credit the guest ledger so room folio stays synchronized
-      if (isRoomOrder && res) {
-        await postToLedger(hotel.id, effectiveGuestId, res.id, {
+      if (isRoomOrder && res && guestId) {
+        await postToLedger(hotel.id, guestId, res.id, {
           amount: settleAmount,
           type: 'credit',
           category: 'payment',
@@ -971,30 +680,9 @@ export function FandB() {
           role: profile?.role || 'staff',
           displayName: profile?.displayName || (profile as any)?.name || 'Staff'
         });
-
-        // Recalculate reservation document in Firestore so room folio updates live for all users
-        await recalculateReservationAccountFromLedger(hotel.id, res.id);
-        
-        // Sync kitchen orders with updated reservation
-        await syncReservationPaymentsToKitchenOrders(hotel.id, res.id, {
-          amount: settleAmount,
-          method: settleMethod,
-          settlementSource: settleSource
-        });
-
-        // Ensure direct payments are synchronized to ledger
-        await syncKitchenOrderPaymentsToLedger(hotel.id, res.id);
       }
 
-      // 4. Update local orders state immediately
-      setOrders(prev => prev.map(o => o.id === settleOrderModal.id ? {
-        ...o,
-        payments: updatedPayments,
-        paidAmount: newDirectPaid,
-        settlementSource: settleSource
-      } : o));
-
-      // 5. Log Activity
+      // 4. Log Activity
       await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
@@ -1011,7 +699,7 @@ export function FandB() {
         details: 'Recorded F&B order direct settlement'
       });
 
-      toast.success(`Payment of ${formatCurrency(settleAmount, currency, exchangeRate)} recorded and synced to room folio.`);
+      toast.success(`Payment of ${formatCurrency(settleAmount, currency, exchangeRate)} recorded successfully.`);
       setSettleOrderModal(null);
     } catch (err: any) {
       console.error('Error settling F&B order payment:', err);
@@ -1209,7 +897,6 @@ export function FandB() {
   };
 
   const filteredOrders = orders.filter(o => {
-    if ((o as any).isDeleted === true || o.status === 'cancelled') return false;
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
     const matchesSearch = (o.roomNumber || '').includes(searchQuery) || (o.items?.toLowerCase() || '').includes(searchQuery.toLowerCase());
@@ -1229,12 +916,12 @@ export function FandB() {
     return filteredOrders.slice(startIndex, startIndex + ordersPageSize);
   }, [filteredOrders, ordersPage, ordersPageSize]);
 
-  const activeOrdersCount = orders.filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled' && o.status !== 'delivered').length;
+  const activeOrdersCount = orders.filter(o => o.status !== 'delivered').length;
 
   const stats = [
     { label: 'Active Orders', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
-    { label: 'Preparing', count: orders.filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled' && o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
-    { label: 'Ready for Pickup', count: orders.filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled' && o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
+    { label: 'Preparing', count: orders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
+    { label: 'Ready for Pickup', count: orders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
   ];
 
   const getWaitTime = (timestamp: string) => {
@@ -1503,52 +1190,15 @@ export function FandB() {
           </div>
 
           <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-            <div className="relative flex-1 w-full flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                <input
-                  type="text"
-                  placeholder="Search by room or items..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!hotel?.id) return;
-                  setIsRefreshing(true);
-                  try {
-                    // Force server-authoritative fetch bypassing local IndexedDB cache
-                    const freshOrdersSnap = await getDocsFromServer(
-                      query(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderBy('timestamp', 'desc'))
-                    ).catch(async () => {
-                      return await getDocsFromServer(collection(db, 'hotels', hotel.id, 'kitchen_orders'));
-                    });
-
-                    const freshOrders = freshOrdersSnap.docs
-                      .map(d => ({ id: d.id, ...d.data() } as KitchenOrder))
-                      .filter(o => (o as any).isDeleted !== true && o.status !== 'cancelled')
-                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-                    setOrders(freshOrders);
-                    await syncKitchenOrderPaymentsToLedger(hotel.id);
-                    toast.success('Live orders and room balances synchronized with server');
-                  } catch (e: any) {
-                    console.error('Error refreshing live orders:', e);
-                    toast.error('Sync error: ' + (e?.message || 'Network issue'));
-                  } finally {
-                    setIsRefreshing(false);
-                  }
-                }}
-                disabled={isRefreshing}
-                title="Sync and Refresh Orders from Server"
-                className="p-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-100 rounded-xl transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 text-xs font-semibold shrink-0"
-              >
-                <RefreshCw size={15} className={cn(isRefreshing && "animate-spin text-emerald-400")} />
-                <span className="hidden sm:inline">Sync Live</span>
-              </button>
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+              <input
+                type="text"
+                placeholder="Search by room or items..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+              />
             </div>
             <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
               {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((f) => (
@@ -1591,15 +1241,11 @@ export function FandB() {
                   const orderTotal = order.totalAmount || order.price || 0;
                   
                   // Gather payments
-                  let paymentsList: { amount: number; method: string; settlementSource?: string; reference?: string }[] = [];
+                  let paymentsList: { amount: number; method: string }[] = [];
                   if (Array.isArray(order.payments) && order.payments.length > 0) {
-                    paymentsList = [...order.payments];
+                    paymentsList = order.payments;
                   } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
-                    paymentsList = [{
-                      amount: order.paidAmount,
-                      method: order.paymentMethod || 'cash',
-                      settlementSource: order.settlementSource || 'F&B Outlet'
-                    }];
+                    paymentsList = [{ amount: order.paidAmount, method: order.paymentMethod || 'cash' }];
                     if (order.paymentMethod === 'room' && order.paidAmount < orderTotal) {
                       paymentsList.push({ amount: orderTotal - order.paidAmount, method: 'room' });
                     }
@@ -1607,61 +1253,19 @@ export function FandB() {
                     paymentsList = [{ amount: orderTotal, method: order.paymentMethod }];
                   }
 
-                  const directFBOnyPaid = paymentsList
-                    .filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk')
+                  const directPaid = paymentsList
+                    .filter(p => p.method !== 'room')
                     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-                  const recordedFDPaid = paymentsList
-                    .filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room')
-                    .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-                  const rawRoomCharged = paymentsList
+                  const roomCharged = paymentsList
                     .filter(p => p.method === 'room')
                     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-                  // Link to reservation to evaluate room folio settlement status
-                  const isRoomOrder = (order.roomNumber && order.roomNumber !== 'Walk-in') || order.paymentMethod === 'room' || order.settlementSource === 'Front Desk' || paymentsList.some(p => p.method === 'room' || p.settlementSource === 'Front Desk');
-                  const linkedRes = isRoomOrder 
-                    ? (reservations.find(r => r.id === (order as any).reservationId) 
-                       || reservations.find(r => r.roomNumber === order.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out')) 
-                       || reservations.find(r => r.roomNumber === order.roomNumber && r.guestName === order.guestName) 
-                       || reservations.find(r => r.roomNumber === order.roomNumber) 
-                       || reservations.find(r => r.guestId && r.guestId === order.guestId))
-                    : undefined;
-
-                  const roomChargedPortion = Math.max(0, orderTotal - directFBOnyPaid);
-
-                  let frontDeskSettledAmount = recordedFDPaid;
-                  let remainingUnpaidRoomCharge = rawRoomCharged;
-                  let isRoomFolioSettled = false;
-
-                  if (isRoomOrder && linkedRes && roomChargedPortion > 0) {
-                    const resTotal = linkedRes.totalAmount || 0;
-                    const resPaid = (linkedRes.paidAmount || 0) + (linkedRes.totalDiscount || 0);
-                    const resOwed = Math.max(0, resTotal - resPaid);
-                    isRoomFolioSettled = linkedRes.paymentStatus === 'paid' || resOwed <= 0.01;
-
-                    if (isRoomFolioSettled) {
-                      frontDeskSettledAmount = roomChargedPortion;
-                      remainingUnpaidRoomCharge = 0;
-                    } else if (resPaid > 0) {
-                      remainingUnpaidRoomCharge = Math.min(roomChargedPortion, resOwed);
-                      frontDeskSettledAmount = Math.max(0, roomChargedPortion - remainingUnpaidRoomCharge);
-                    } else {
-                      remainingUnpaidRoomCharge = roomChargedPortion;
-                      frontDeskSettledAmount = 0;
-                    }
-                  } else if (order.settlementSource === 'Front Desk' || recordedFDPaid > 0) {
-                    frontDeskSettledAmount = Math.max(recordedFDPaid, roomChargedPortion);
-                    remainingUnpaidRoomCharge = Math.max(0, roomChargedPortion - frontDeskSettledAmount);
-                  }
-
-                  const totalEffectivePaid = isRoomFolioSettled ? orderTotal : (directFBOnyPaid + frontDeskSettledAmount);
-                  const totalAccounted = totalEffectivePaid + remainingUnpaidRoomCharge;
-                  const balanceOwing = isRoomFolioSettled ? 0 : Math.max(0, orderTotal - totalAccounted);
-                  const weOweGuest = totalEffectivePaid - orderTotal;
-                  const unsettledBalance = isRoomFolioSettled ? 0 : Math.max(0, remainingUnpaidRoomCharge + balanceOwing);
-                  const isCompletelySettled = isRoomFolioSettled || unsettledBalance <= 0.01;
+                  const totalAccounted = directPaid + roomCharged;
+                  const balanceOwing = orderTotal - totalAccounted;
+                  const weOweGuest = directPaid - orderTotal;
+                  const unsettledBalance = Math.max(0, orderTotal - directPaid);
+                  const isCompletelySettled = unsettledBalance <= 0.01;
 
                   return (
                     <motion.div
@@ -1753,13 +1357,13 @@ export function FandB() {
                                 <div className="text-zinc-400">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-semibold uppercase tracking-wider">Amount Paid</span>
-                                    <span className={cn("font-bold text-xs", totalEffectivePaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
-                                      {formatCurrency(totalEffectivePaid, currency, exchangeRate)}
+                                    <span className={cn("font-bold text-xs", directPaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
+                                      {formatCurrency(directPaid, currency, exchangeRate)}
                                     </span>
                                   </div>
-                                  {(paymentsList.filter(p => (p.amount || 0) > 0 && p.method !== 'room' && p.settlementSource !== 'Front Desk').length > 0 || frontDeskSettledAmount > 0) && (
+                                  {paymentsList.filter(p => p.method !== 'room').length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                                      {paymentsList.filter(p => (p.amount || 0) > 0 && p.method !== 'room' && p.settlementSource !== 'Front Desk').map((p: any, idx: number) => (
+                                      {paymentsList.filter(p => p.method !== 'room').map((p: any, idx: number) => (
                                         <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-300 border border-zinc-750">
                                           <span className="capitalize">{p.method}</span>
                                           <span className="text-[8px] font-bold px-1 rounded bg-zinc-700 text-emerald-400">
@@ -1767,35 +1371,15 @@ export function FandB() {
                                           </span>
                                         </span>
                                       ))}
-                                      {frontDeskSettledAmount > 0 ? (
-                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-950/70 text-[9px] text-blue-300 border border-blue-800">
-                                          <span>{formatCurrency(frontDeskSettledAmount, currency, exchangeRate)}</span>
-                                          <span className="text-[8px] font-bold px-1 rounded bg-blue-900 text-emerald-300">
-                                            Front Desk Settled
-                                          </span>
-                                        </span>
-                                      ) : paymentsList.filter(p => (p.amount || 0) > 0 && p.settlementSource === 'Front Desk' && p.method !== 'room').map((p: any, idx: number) => (
-                                        <span key={`fd-${idx}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-950/70 text-[9px] text-blue-300 border border-blue-800">
-                                          <span className="capitalize">{p.method}</span>
-                                          <span className="text-[8px] font-bold px-1 rounded bg-blue-900 text-emerald-300">
-                                            Front Desk
-                                          </span>
-                                        </span>
-                                      ))}
                                     </div>
                                   )}
                                 </div>
 
-                                {roomChargedPortion > 0 && (
+                                {roomCharged > 0 && (
                                   <div className="flex items-center justify-between text-zinc-400">
                                     <span className="text-[10px] font-semibold uppercase tracking-wider">Charged to Room</span>
-                                    <span className="font-bold text-xs text-blue-400 flex items-center gap-1">
-                                      <span>{formatCurrency(roomChargedPortion, currency, exchangeRate)}</span>
-                                      {frontDeskSettledAmount > 0 && (
-                                        <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/10 px-1 py-0.5 rounded border border-emerald-500/20">
-                                          ({formatCurrency(frontDeskSettledAmount, currency, exchangeRate)} paid at Front Desk)
-                                        </span>
-                                      )}
+                                    <span className="font-bold text-xs text-blue-400">
+                                      {formatCurrency(roomCharged, currency, exchangeRate)}
                                     </span>
                                   </div>
                                 )}
@@ -1820,14 +1404,14 @@ export function FandB() {
                                       </button>
                                     </div>
                                   </div>
-                                ) : remainingUnpaidRoomCharge > 0 && !isCompletelySettled ? (
+                                ) : roomCharged > 0 && !isCompletelySettled ? (
                                   <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold">
                                     <div className="flex flex-col">
                                       <span className="text-[10px] uppercase tracking-wider flex items-center gap-1 font-bold text-amber-400">
                                         <Clock size={12} /> Pending Settlement
                                       </span>
                                       <span className="text-[9px] text-zinc-400 font-normal">
-                                        {formatCurrency(unsettledBalance, currency, exchangeRate)} remaining on room folio
+                                        {formatCurrency(unsettledBalance, currency, exchangeRate)} charged to room folio
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -1857,7 +1441,7 @@ export function FandB() {
                                     <span className="flex items-center gap-1">
                                       <CheckCircle2 size={12} /> Completely Settled
                                     </span>
-                                    <span>{frontDeskSettledAmount > 0 || (order.settlementSource === 'Front Desk') ? 'Front Desk Settled' : 'Fully Paid'}</span>
+                                    <span>Fully Paid</span>
                                   </div>
                                 )}
                               </div>
@@ -2108,60 +1692,32 @@ export function FandB() {
                     </div>
                     {(() => {
                       const pTotal = printingOrder.totalAmount || printingOrder.price || 0;
-                      let pPayments: { amount: number; method: string; settlementSource?: string }[] = [];
+                      let pPayments: { amount: number; method: string }[] = [];
                       if (Array.isArray(printingOrder.payments) && printingOrder.payments.length > 0) {
                         pPayments = printingOrder.payments;
                       } else if (printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0) {
-                        pPayments = [{ amount: printingOrder.paidAmount, method: printingOrder.paymentMethod || 'cash', settlementSource: printingOrder.settlementSource }];
+                        pPayments = [{ amount: printingOrder.paidAmount, method: printingOrder.paymentMethod || 'cash' }];
                       } else if (printingOrder.paymentMethod) {
                         pPayments = [{ amount: pTotal, method: printingOrder.paymentMethod }];
                       }
 
-                      const pDirectPaid = pPayments.filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk').reduce((sum, p) => sum + (p.amount || 0), 0);
-                      const pRoomChargedPortion = Math.max(0, pTotal - pDirectPaid);
-
-                      const pIsRoomOrder = (printingOrder.roomNumber && printingOrder.roomNumber !== 'Walk-in') || printingOrder.paymentMethod === 'room' || printingOrder.settlementSource === 'Front Desk' || pPayments.some(p => p.method === 'room' || p.settlementSource === 'Front Desk');
-                      const pLinkedRes = pIsRoomOrder 
-                        ? (reservations.find(r => r.id === (printingOrder as any).reservationId) 
-                           || reservations.find(r => r.roomNumber === printingOrder.roomNumber && (r.status === 'checked_in' || r.status === 'checked_out')) 
-                           || reservations.find(r => r.roomNumber === printingOrder.roomNumber) 
-                           || reservations.find(r => r.guestId && r.guestId === printingOrder.guestId))
-                        : undefined;
-
-                      const pResTotal = pLinkedRes?.totalAmount || 0;
-                      const pResPaid = (pLinkedRes?.paidAmount || 0) + (pLinkedRes?.totalDiscount || 0);
-                      const pResOwed = Math.max(0, pResTotal - pResPaid);
-                      const pIsSettled = pLinkedRes ? (pLinkedRes.paymentStatus === 'paid' || pResOwed <= 0.01) : false;
-
-                      const pFDSettled = pIsSettled ? pRoomChargedPortion : pPayments.filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
-                      const pRemainingRoom = pIsSettled ? 0 : Math.max(0, pRoomChargedPortion - pFDSettled);
-                      const pBalance = pIsSettled ? 0 : Math.max(0, pTotal - (pDirectPaid + pFDSettled + pRemainingRoom));
-                      const pChange = (pDirectPaid + pFDSettled) - pTotal;
+                      const pDirectPaid = pPayments.filter(p => p.method !== 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+                      const pRoomCharged = pPayments.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+                      const pBalance = pTotal - (pDirectPaid + pRoomCharged);
+                      const pChange = pDirectPaid - pTotal;
 
                       return (
                         <div className="mt-2 space-y-1 border-t border-black pt-2 text-xs">
                           {pDirectPaid > 0 && (
                             <div className="flex justify-between font-bold">
-                              <span>AMOUNT PAID ({pPayments.filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk').map(p => p.method.toUpperCase()).join(', ') || 'DIRECT'})</span>
+                              <span>AMOUNT PAID ({pPayments.filter(p => p.method !== 'room').map(p => p.method.toUpperCase()).join(', ') || 'DIRECT'})</span>
                               <span>{formatCurrency(pDirectPaid, currency, exchangeRate)}</span>
                             </div>
                           )}
-                          {pFDSettled > 0 && (
-                            <div className="flex justify-between font-bold text-blue-900">
-                              <span>SETTLED AT FRONT DESK (ROOM FOLIO)</span>
-                              <span>{formatCurrency(pFDSettled, currency, exchangeRate)}</span>
-                            </div>
-                          )}
-                          {pRemainingRoom > 0 && (
-                            <div className="flex justify-between font-bold text-amber-800">
-                              <span>PENDING ON ROOM FOLIO</span>
-                              <span>{formatCurrency(pRemainingRoom, currency, exchangeRate)}</span>
-                            </div>
-                          )}
-                          {pIsSettled && (
-                            <div className="flex justify-between font-black text-emerald-800 pt-1 border-t border-black/20">
-                              <span>STATUS</span>
-                              <span>COMPLETELY SETTLED</span>
+                          {pRoomCharged > 0 && (
+                            <div className="flex justify-between font-bold">
+                              <span>CHARGED TO ROOM</span>
+                              <span>{formatCurrency(pRoomCharged, currency, exchangeRate)}</span>
                             </div>
                           )}
                           {pBalance > 0 && (
@@ -2170,7 +1726,7 @@ export function FandB() {
                               <span>{formatCurrency(pBalance, currency, exchangeRate)}</span>
                             </div>
                           )}
-                          {pChange > 0 && !pIsSettled && (
+                          {pChange > 0 && (
                             <div className="flex justify-between font-black text-emerald-800 pt-1 border-t border-black/20">
                               <span>CHANGE DUE (WE OWE GUEST)</span>
                               <span>{formatCurrency(pChange, currency, exchangeRate)}</span>
@@ -2735,48 +2291,14 @@ export function FandB() {
 
             {(() => {
               const orderTotal = settleOrderModal.totalAmount || settleOrderModal.price || 0;
-              let paymentsList: { amount: number; method: string; settlementSource?: string }[] = [];
+              let paymentsList: { amount: number; method: string }[] = [];
               if (Array.isArray(settleOrderModal.payments) && settleOrderModal.payments.length > 0) {
-                paymentsList = settleOrderModal.payments;
-              } else if (settleOrderModal.paidAmount !== undefined && settleOrderModal.paidAmount > 0) {
+                paymentsList = settleOrderModal.payments.filter(p => (p.amount || 0) > 0 && p.method !== 'room');
+              } else if (settleOrderModal.paidAmount !== undefined && settleOrderModal.paidAmount > 0 && settleOrderModal.paymentMethod !== 'room') {
                 paymentsList = [{ amount: settleOrderModal.paidAmount, method: settleOrderModal.paymentMethod || 'cash' }];
               }
-              const currentDirectPaid = paymentsList
-                .filter(p => (p.amount || 0) > 0 && p.method !== 'room')
-                .reduce((sum, p) => sum + p.amount, 0);
-
-              const roomCharged = paymentsList
-                .filter(p => p.method === 'room')
-                .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-              // Check linked reservation
-              const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
-              const linkedRes = isRoomOrder 
-                ? (reservations.find(r => r.id === (settleOrderModal as any).reservationId) 
-                   || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') 
-                   || reservations.find(r => r.roomNumber === settleOrderModal.roomNumber) 
-                   || reservations.find(r => r.id === settleOrderModal.guestId))
-                : undefined;
-
-              let frontDeskSettled = 0;
-              let remainingRoomCharge = roomCharged;
-              if (roomCharged > 0 && linkedRes) {
-                const resTotal = linkedRes.totalAmount || 0;
-                const resPaid = (linkedRes.paidAmount || 0) + (linkedRes.totalDiscount || 0);
-                const resOwed = Math.max(0, resTotal - resPaid);
-                const isSettled = linkedRes.paymentStatus === 'paid' || resOwed <= 0.01;
-                const alreadyFD = paymentsList.filter(p => p.settlementSource === 'Front Desk' && p.method !== 'room').reduce((s, p) => s + (p.amount || 0), 0);
-                const netNeeded = Math.max(0, roomCharged - alreadyFD);
-                if (isSettled) {
-                  frontDeskSettled = netNeeded;
-                  remainingRoomCharge = 0;
-                } else if (resPaid > 0) {
-                  remainingRoomCharge = Math.min(netNeeded, resOwed);
-                  frontDeskSettled = Math.max(0, netNeeded - remainingRoomCharge);
-                }
-              }
-
-              const remainingDue = Math.max(0, orderTotal - currentDirectPaid - frontDeskSettled);
+              const currentDirectPaid = paymentsList.reduce((sum, p) => sum + p.amount, 0);
+              const remainingDue = Math.max(0, orderTotal - currentDirectPaid);
 
               return (
                 <form onSubmit={handleSettleOrderPayment} className="p-6 space-y-5">
@@ -2790,12 +2312,6 @@ export function FandB() {
                       <span className="text-zinc-400">Directly Paid to F&B</span>
                       <span className="font-bold text-emerald-400">{formatCurrency(currentDirectPaid, currency, exchangeRate)}</span>
                     </div>
-                    {frontDeskSettled > 0 && (
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-400">Front Desk Folio Settled</span>
-                        <span className="font-bold text-blue-400">{formatCurrency(frontDeskSettled, currency, exchangeRate)}</span>
-                      </div>
-                    )}
                     <div className="flex items-center justify-between text-xs pt-2 border-t border-zinc-800 font-bold">
                       <span className="text-red-400">Outstanding Balance Due</span>
                       <span className="text-sm font-black text-red-400">{formatCurrency(remainingDue, currency, exchangeRate)}</span>
@@ -3256,24 +2772,6 @@ export function FandB() {
           </motion.div>
         </div>
       )}
-
-      {/* Delete Order Confirmation Modal */}
-      <ConfirmModal
-        isOpen={!!orderToDelete}
-        title="Delete F&B Order"
-        message={`Are you sure you want to permanently delete the order for ${orderToDelete?.roomNumber === 'Walk-in' ? 'Walk-in' : `Room ${orderToDelete?.roomNumber}`} (${orderToDelete?.items})? This will immediately remove it from all staff views and remove any associated charges from the room folio.`}
-        confirmText={isDeletingOrder ? 'Deleting...' : 'Delete Permanently'}
-        cancelText="Cancel"
-        type="danger"
-        isLoading={isDeletingOrder}
-        onConfirm={async () => {
-          if (!orderToDelete) return;
-          await executeDeleteOrder(orderToDelete.id, orderToDelete.roomNumber);
-        }}
-        onCancel={() => {
-          if (!isDeletingOrder) setOrderToDelete(null);
-        }}
-      />
     </div>
   );
 }

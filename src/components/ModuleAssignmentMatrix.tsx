@@ -107,11 +107,10 @@ export const PMS_MODULES: ModuleDefinition[] = [
     description: 'Property room inventory, live room status matrix, maintenance blocking, and room setup',
     icon: Bed,
     color: 'violet',
-    primaryPermissions: ['view_rooms'],
+    primaryPermissions: ['manage_rooms', 'view_rooms'],
     granularPermissions: [
-      { id: 'view_rooms', name: 'View Rooms Grid', description: 'Inspect room cards, availability, and statuses' },
-      { id: 'change_room_status', name: 'Change Room Status', description: 'Authorize staff to change room status (Clean, Dirty, Maintenance, Out of Service)' },
       { id: 'manage_rooms', name: 'Manage Rooms', description: 'Control room inventory and operational statuses' },
+      { id: 'view_rooms', name: 'View Rooms Grid', description: 'Inspect room cards, availability, and statuses' },
       { id: 'create_rooms', name: 'Add New Rooms', description: 'Add room units to hotel property' },
       { id: 'edit_rooms', name: 'Edit Room Configuration', description: 'Update room numbers, floor, type, and base tariff' },
       { id: 'block_rooms', name: 'Block Rooms (OOO)', description: 'Put rooms out of order for repairs or deep cleaning' },
@@ -133,7 +132,6 @@ export const PMS_MODULES: ModuleDefinition[] = [
     ],
     granularPermissions: [
       { id: 'view_housekeeping', name: 'View Cleaning Queue', description: 'See rooms needing cleaning, inspection, or turn-down' },
-      { id: 'change_room_status', name: 'Change Room Status', description: 'Authorize staff to update clean, dirty, or cleaning states' },
       { id: 'assign_housekeeping_tasks', name: 'Assign Rooms to Staff', description: 'Delegate cleaning duties to attendants' },
       { id: 'edit_housekeeping_tasks', name: 'Update Clean Status', description: 'Mark rooms clean, dirty, or in-progress' },
       { id: 'close_housekeeping_tasks', name: 'Inspect & Finalize Tasks', description: 'Verify cleanliness and release to front desk' },

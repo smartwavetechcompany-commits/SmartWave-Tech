@@ -57,8 +57,7 @@ const BASE_ROLES: { id: StaffRole; label: string }[] = [
 
 const AVAILABLE_PERMISSIONS = [
   { id: 'access_front_desk', label: 'Front Desk Access' },
-  { id: 'change_room_status', label: 'Change Room Status (Clean / Dirty / Maintenance)' },
-  { id: 'manage_rooms', label: 'Manage Rooms & Setup' },
+  { id: 'manage_rooms', label: 'Manage Rooms & Status' },
   { id: 'create_room_blocks', label: 'Block Rooms' },
   { id: 'remove_room_blocks', label: 'Unblock Rooms' },
   { id: 'edit_guest_profiles', label: 'Guest Management' },

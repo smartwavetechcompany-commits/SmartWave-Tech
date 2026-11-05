@@ -5,7 +5,7 @@ import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
 import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
-import { calculateReservationAccount } from '../utils/financialUtils';
+
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
 export const postToLedger = async (
@@ -163,14 +163,10 @@ export const postToLedger = async (
     
     const baseAmount = entry.amount;
     const initialDescription = entry.description;
+    let totalInclusiveTax = 0;
+    const inclusiveTaxEntries: Omit<LedgerEntry, 'id'>[] = [];
 
     for (const tax of activeTaxes) {
-      // Inclusive taxes are already an inherent component of the gross charge amount (e.g. 180,000).
-      // They do NOT alter the primary debit amount and do NOT post additional debt to the guest folio.
-      if (tax.isInclusive) {
-        continue;
-      }
-
       const taxName = tax.name || 'Tax';
       const taxDesc = `${taxName} (${tax.percentage}%)`;
 
@@ -185,29 +181,54 @@ export const postToLedger = async (
       });
 
       if (taxAlreadyPosted) {
+        console.log(`[postToLedger] Skipping duplicate tax ${taxDesc} for: ${initialDescription}`);
         continue;
       }
 
-      // Exclusive tax: added on top of base amount
-      const taxAmount = baseAmount * (tax.percentage / 100);
-      const taxEntry: Omit<LedgerEntry, 'id'> = {
-        timestamp,
-        hotelId,
-        guestId,
-        reservationId,
-        corporateId: finalCorporateId,
-        type: 'debit',
-        amount: taxAmount,
-        description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
-        category: 'tax',
-        postedBy
-      };
-      entries.push(taxEntry);
+      const taxAmount = tax.isInclusive 
+        ? baseAmount - (baseAmount / (1 + (tax.percentage / 100)))
+        : baseAmount * (tax.percentage / 100);
+      
+      if (tax.isInclusive) {
+        totalInclusiveTax += taxAmount;
+        const taxEntry: Omit<LedgerEntry, 'id'> = {
+          timestamp,
+          hotelId,
+          guestId,
+          reservationId,
+          corporateId: finalCorporateId,
+          type: 'debit',
+          amount: taxAmount,
+          description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
+          category: 'tax',
+          postedBy
+        };
+        inclusiveTaxEntries.push(taxEntry);
+      } else {
+        const taxEntry: Omit<LedgerEntry, 'id'> = {
+          timestamp,
+          hotelId,
+          guestId,
+          reservationId,
+          corporateId: finalCorporateId,
+          type: 'debit',
+          amount: taxAmount,
+          description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
+          category: 'tax',
+          postedBy
+        };
+        entries.push(taxEntry);
+      }
     }
+
+    // Adjust the primary entry amount for inclusive taxes
+    entries[0].amount = baseAmount - totalInclusiveTax;
+    // Also add the inclusive tax entries to the main entries list
+    entries.push(...inclusiveTaxEntries);
   }
 
   const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-  const guestRef = guestId && guestId.trim() !== '' ? doc(db, 'hotels', hotelId, 'guests', guestId) : null;
+  const guestRef = doc(db, 'hotels', hotelId, 'guests', guestId);
   const batch = writeBatch(db);
   
   // 3. Post entries to ledger (append-only) using batch
@@ -236,7 +257,7 @@ export const postToLedger = async (
 
   const nightCountAdj = guestEntries.filter(e => e.type === 'debit' && e.category === 'room').length;
 
-  if (guestRef && (guestBalanceAdj !== 0 || nightCountAdj > 0)) {
+  if (guestBalanceAdj !== 0 || nightCountAdj > 0) {
     const spentCredit = guestEntries.filter(e => e.type === 'credit' && e.category === 'payment').reduce((acc, e) => acc + e.amount, 0);
     const spentRefund = guestEntries.filter(e => e.type === 'debit' && e.category === 'refund').reduce((acc, e) => acc + e.amount, 0);
     const spentAdj = spentCredit - spentRefund;
@@ -401,14 +422,6 @@ export const postToLedger = async (
   if (reservationId) {
     // Non-blocking background verification audit
     recalculateReservationAccountFromLedger(hotelId, reservationId).catch(() => {});
-    if (entry.category === 'payment' || entry.category === 'discount' || entry.type === 'credit') {
-      syncReservationPaymentsToKitchenOrders(hotelId, reservationId, {
-        amount: entry.amount,
-        method: paymentMethod,
-        settlementSource: (entry as any).settlementSource,
-        referenceCode: (entry as any).referenceCode
-      }).catch(err => console.error('Error syncing kitchen orders from postToLedger:', err));
-    }
   }
 
   return { id: postedIds[0], ...mainEntry };
@@ -475,26 +488,18 @@ export const recalculateReservationAccountFromLedger = async (
     let totalPaid = 0;
 
     validEntries.forEach(e => {
-      const desc = (e.description || '').toLowerCase();
-      const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
-      if (isErrant) {
-        return;
-      }
-
-      const cat = (e.category || '').toLowerCase();
-      const effectiveAmount = e.amount;
-
       if (e.type === 'debit') {
         if (e.category === 'refund') {
-          totalPaid -= effectiveAmount;
+          totalPaid -= e.amount;
         } else {
-          totalDebits += effectiveAmount;
+          totalDebits += e.amount;
         }
       } else if (e.type === 'credit') {
+        const cat = (e.category || '').toLowerCase();
         if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
-          totalCredits += effectiveAmount;
+          totalCredits += e.amount;
           if (cat === 'payment') {
-            totalPaid += effectiveAmount;
+            totalPaid += e.amount;
           }
         }
       }
@@ -521,42 +526,30 @@ export const recalculateReservationAccountFromLedger = async (
       paymentStatus = 'unpaid';
     }
 
-    const targetTotalAmount = totalDebits > 0 ? totalDebits : (resData.totalAmount || 0);
-    const hasReservationChanged =
-      Math.abs((resData.ledgerBalance || 0) - ledgerBalance) > 0.01 ||
-      Math.abs((resData.paidAmount || 0) - totalPaid) > 0.01 ||
-      Math.abs((resData.totalAmount || 0) - targetTotalAmount) > 0.01 ||
-      resData.paymentStatus !== paymentStatus;
-
-    if (hasReservationChanged) {
-      await database.safeUpdate(resRef, {
-        ledgerBalance,
-        paidAmount: totalPaid,
-        totalAmount: targetTotalAmount,
-        paymentStatus
-      }, {
-        hotelId,
-        module: 'Reservation',
-        action: 'RECALCULATE_FINANCIALS',
-        details: `Re-synchronized reservation ${reservationId} financial balance from valid ledger entries`
-      });
-    }
+    await database.safeUpdate(resRef, {
+      ledgerBalance,
+      paidAmount: totalPaid,
+      totalAmount: totalDebits > 0 ? totalDebits : (resData.totalAmount || 0),
+      paymentStatus
+    }, {
+      hotelId,
+      module: 'Reservation',
+      action: 'RECALCULATE_FINANCIALS',
+      details: `Re-synchronized reservation ${reservationId} financial balance from valid ledger entries`
+    });
 
     if (resData.guestId) {
       const guestRef = doc(db, 'hotels', hotelId, 'guests', resData.guestId);
       const guestSnap = await getDoc(guestRef);
       if (guestSnap.exists()) {
-        const currentGuestBal = (guestSnap.data() as any).ledgerBalance || 0;
-        if (Math.abs(currentGuestBal - ledgerBalance) > 0.01) {
-          await database.safeUpdate(guestRef, {
-            ledgerBalance
-          }, {
-            hotelId,
-            module: 'Guest',
-            action: 'RECALCULATE_GUEST_BALANCE',
-            details: `Re-synchronized guest ${resData.guestId} ledger balance`
-          });
-        }
+        await database.safeUpdate(guestRef, {
+          ledgerBalance
+        }, {
+          hotelId,
+          module: 'Guest',
+          action: 'RECALCULATE_GUEST_BALANCE',
+          details: `Re-synchronized guest ${resData.guestId} ledger balance`
+        });
       }
     }
   } catch (err) {
@@ -947,52 +940,7 @@ export const reconcileAndRepairReservationFinancials = async (
         duplicateIds.push(excessId);
       }
     });
-    retainedRoomCharges.splice(legitimateTotalNights);
   }
-
-  // Identify redundant inclusive tax entries:
-  // In hotels with inclusive taxes (e.g. 7.5% VAT), room charges represent the full inclusive stay rate.
-  // If room charges are posted at full gross rate (>= nightlyRate - 1 or sum >= legitimateTotalNights * nightlyRate - 1),
-  // any separate tax debit marked '[Inclusive]' or corresponding to an active inclusive tax is redundant
-  // and must be purged to avoid double charging the guest.
-  const maxLegitimateGrossRoom = legitimateTotalNights * nightlyRate;
-  const activeInclusiveTaxes = (hotel?.taxes || []).filter(t => t.isInclusive);
-  const taxDebits = ledgerEntries.filter(e => e.type === 'debit' && e.category === 'tax');
-  const totalRetainedRoomSum = retainedRoomCharges.reduce((sum, r) => sum + r.amount, 0);
-
-  taxDebits.forEach(taxEntry => {
-    const desc = (taxEntry.description || '').toLowerCase();
-    const isInclusiveTax = desc.includes('[inclusive]') || 
-      activeInclusiveTaxes.some(t => desc.includes((t.name || '').toLowerCase()));
-    
-    if (isInclusiveTax) {
-      const isRedundant = totalRetainedRoomSum >= maxLegitimateGrossRoom - 1 ||
-        retainedRoomCharges.some(r => r.amount >= nightlyRate - 1 && (
-          (taxEntry.description && r.description && taxEntry.description.includes(r.description)) ||
-          (r.id && taxEntry.description && taxEntry.description.includes(r.id)) ||
-          Math.abs(new Date(r.timestamp || 0).getTime() - new Date(taxEntry.timestamp || 0).getTime()) < 10000
-        ));
-
-      if (isRedundant) {
-        const tId = (taxEntry as any).firestoreId || taxEntry.id;
-        if (tId && !duplicateIds.includes(tId)) {
-          duplicateIds.push(tId);
-        }
-      }
-    }
-  });
-
-  // Identify and purge any errant tax add-on entries (e.g. ₦4,056)
-  ledgerEntries.forEach(entry => {
-    const desc = (entry.description || '').toLowerCase();
-    const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(entry.amount - 4056) < 2;
-    if (isErrant) {
-      const eId = (entry as any).firestoreId || entry.id;
-      if (eId && !duplicateIds.includes(eId)) {
-        duplicateIds.push(eId);
-      }
-    }
-  });
 
   // Identify any attached tax entries for the purged duplicate charges
   if (duplicateIds.length > 0) {
@@ -1022,83 +970,68 @@ export const reconcileAndRepairReservationFinancials = async (
   // Remaining clean ledger entries
   const cleanEntries = ledgerEntries.filter(e => !duplicateIds.includes((e as any).firestoreId || e.id));
 
-  // Repair any room charges that were previously truncated by inclusive tax splitting (e.g. 167,441.86 instead of 180,000)
-  for (const entry of cleanEntries) {
-    if (entry.type === 'debit' && (entry.category === 'room' || entry.chargeType === 'room_rate' || entry.chargeType === 'overstay')) {
-      if (entry.amount < nightlyRate - 1) {
-        const docId = (entry as any).firestoreId || entry.id;
-        if (docId) {
-          try {
-            await database.safeUpdate(doc(db, 'hotels', hotelId, 'ledger', docId), {
-              amount: nightlyRate
-            }, {
-              hotelId,
-              module: 'Ledger',
-              action: 'RESTORE_FULL_ROOM_RATE',
-              details: `Restored room charge ${docId} from ${entry.amount} to full nightly rate of ${nightlyRate}`
-            });
-            entry.amount = nightlyRate;
-          } catch (rErr) {
-            console.error("Failed to restore room debit amount:", rErr);
-          }
+  // Calculate authoritative balances according to RULE 2:
+  // Expected Balance = SUM(All Charges) - SUM(All Payments) - SUM(All Credits)
+  let totalCharges = 0;
+  let totalPayments = 0;
+  let totalCredits = 0;
+  let totalPaid = 0;
+
+  cleanEntries.forEach(e => {
+    if (e.type === 'debit') {
+      if (e.category === 'refund') {
+        totalPaid -= e.amount;
+      } else {
+        totalCharges += e.amount;
+      }
+    } else if (e.type === 'credit') {
+      const cat = (e.category || '').toLowerCase();
+      if (cat === 'payment' || cat === 'transfer' || cat === 'city_ledger' || cat === 'corporate' || cat === 'discount') {
+        totalCredits += e.amount;
+        if (cat === 'payment') {
+          totalPaid += e.amount;
         }
       }
     }
-  }
+  });
 
-  // Calculate authoritative balances from unified single engine
-  const account = calculateReservationAccount(res, hotel, cleanEntries);
-  const totalCharges = account.totalCharges;
-  const totalCredits = account.totalCredits;
-  const totalPayments = account.totalPayments;
-  const expectedBalance = account.outstandingBalance;
+  totalCharges = Number(totalCharges.toFixed(2));
+  totalCredits = Number(totalCredits.toFixed(2));
+  totalPayments = Math.max(0, Number(totalPaid.toFixed(2)));
+  const expectedBalance = Number((totalCharges - totalCredits).toFixed(2));
   const previousStoredBalance = res.ledgerBalance || 0;
   const discrepancy = Number((previousStoredBalance - expectedBalance).toFixed(2));
 
-  // Update reservation document with authoritative reconciled numbers only if values actually changed
-  const needsResUpdate = 
-    Math.abs((res.ledgerBalance || 0) - expectedBalance) > 0.01 ||
-    Math.abs((res.totalAmount || 0) - totalCharges) > 0.01 ||
-    Math.abs((res.paidAmount || 0) - totalPayments) > 0.01 ||
-    (res.nightlyRate || 0) !== nightlyRate ||
-    (res.nights || 0) !== bookedNights ||
-    (res.overstayNights || 0) !== overstayNights ||
-    duplicateIds.length > 0;
+  // Update reservation document with authoritative reconciled numbers
+  await database.safeUpdate(resRef, {
+    ledgerBalance: expectedBalance,
+    totalAmount: totalCharges,
+    paidAmount: totalPayments,
+    nightlyRate,
+    nights: bookedNights,
+    overstayNights,
+    paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 ? 'partial' : 'unpaid'),
+    financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
+  }, {
+    hotelId,
+    module: 'Reconciliation',
+    action: 'FOLIO_RECONCILIATION',
+    details: `Reconciled reservation ${reservationId}. Balance corrected from ${previousStoredBalance} to ${expectedBalance}. Purged ${duplicateIds.length} duplicate entries.`
+  });
 
-  if (needsResUpdate) {
-    await database.safeUpdate(resRef, {
-      ledgerBalance: expectedBalance,
-      totalAmount: totalCharges,
-      paidAmount: totalPayments,
-      nightlyRate,
-      nights: bookedNights,
-      overstayNights,
-      paymentStatus: expectedBalance <= 0.01 && (totalPayments > 0 || totalCredits > 0 || totalCharges > 0) ? 'paid' : (totalPayments > 0 ? 'partial' : 'unpaid'),
-      financialStatus: expectedBalance > 0.01 ? (totalPayments > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED'
-    }, {
-      hotelId,
-      module: 'Reconciliation',
-      action: 'FOLIO_RECONCILIATION',
-      details: `Reconciled reservation ${reservationId}. Balance corrected from ${previousStoredBalance} to ${expectedBalance}. Purged ${duplicateIds.length} duplicate entries.`
-    });
-  }
-
-  // Update guest document only if guest balance changed
-  if (res.guestId && Math.abs((res.ledgerBalance || 0) - expectedBalance) > 0.01) {
+  // Update guest document
+  if (res.guestId) {
     const guestRef = doc(db, 'hotels', hotelId, 'guests', res.guestId);
     const guestSnap = await getDoc(guestRef);
     if (guestSnap.exists()) {
-      const currentGuestBal = (guestSnap.data() as any).ledgerBalance || 0;
-      if (Math.abs(currentGuestBal - expectedBalance) > 0.01) {
-        await database.safeUpdate(guestRef, {
-          ledgerBalance: expectedBalance
-        }, {
-          hotelId,
-          module: 'Guest',
-          action: 'GUEST_BALANCE_RECONCILE',
-          details: `Reconciled guest ${res.guestId} ledger balance to ${expectedBalance}`
-        });
-      }
+      await database.safeUpdate(guestRef, {
+        ledgerBalance: expectedBalance
+      }, {
+        hotelId,
+        module: 'Guest',
+        action: 'GUEST_BALANCE_RECONCILE',
+        details: `Reconciled guest ${res.guestId} ledger balance to ${expectedBalance}`
+      });
     }
   }
 
@@ -1278,17 +1211,26 @@ export const processAutomatedBillingForReservation = async (
         const hoursPastPeriod = Math.min(24, (currentTime.getTime() - Start.getTime()) / (1000 * 60 * 60));
         let targetAmount = 0;
 
-        // Immediately once the grace period runs out (graceInfo.isOverstay === true),
-        // post the extra charges instantly instead of introducing delay
-        if (policy === 'partial') {
+        if (policy === 'grace') {
+          if (hoursPastPeriod > graceHours) {
+            targetAmount = nightlyRate;
+          }
+        } else if (policy === 'partial') {
           if (hoursPastPeriod > fullHours) {
             targetAmount = nightlyRate;
-          } else {
+          } else if (hoursPastPeriod > partialHours) {
             targetAmount = nightlyRate * (partialPercentage / 100);
           }
-        } else {
-          // Standard / grace / full / immediate policy: charge immediately once grace period has elapsed
+        } else if (policy === 'full') {
+          if (hoursPastPeriod > fullHours) {
+            targetAmount = nightlyRate;
+          }
+        } else if (policy === 'full_night' || policy === 'immediate_full') {
           targetAmount = nightlyRate;
+        } else {
+          if (hoursPastPeriod > graceHours) {
+            targetAmount = nightlyRate;
+          }
         }
 
         if (targetAmount > 0) {
@@ -1354,10 +1296,8 @@ export const processAutomatedBillingForReservation = async (
     });
   }
 
-  // Ensure balances and taxes are completely reconciled if charges were posted
-  if (chargedCount > 0) {
-    await reconcileAndRepairReservationFinancials(hotel.id, res.id);
-  }
+  // Ensure balances and taxes are completely reconciled and synchronized to single financial engine
+  await reconcileAndRepairReservationFinancials(hotel.id, res.id);
 
   return { chargedCount, totalAmount: totalAmountCharged };
 };
@@ -1508,248 +1448,3 @@ export const deleteReservationWithFinancialReversal = async (
 
   return { success: true, deletedEntriesCount };
 };
-
-/**
- * Synchronizes Front Desk reservation payments and settlements to linked F&B kitchen orders.
- * When an F&B bill is transferred to a room folio and subsequently paid at Front Desk:
- * 1. Front Desk payment is recognized by the corresponding F&B order.
- * 2. If room folio is fully paid/settled, the order's pending settlement becomes 0.
- * 3. If partially paid, F&B order reflects the remaining unpaid balance.
- * 4. F&B payment history reflects payment received through Front Desk.
- */
-export const syncReservationPaymentsToKitchenOrders = async (
-  hotelId: string,
-  reservationId: string,
-  paymentDetails?: { amount?: number; method?: string; settlementSource?: string; referenceCode?: string }
-) => {
-  if (!hotelId || !reservationId) return;
-  try {
-    const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-    const resSnap = await getDoc(resRef);
-    if (!resSnap.exists()) return;
-    const resData = resSnap.data() as Reservation;
-
-    const resTotal = resData.totalAmount || 0;
-    const resPaid = (resData.paidAmount || 0) + (resData.totalDiscount || 0);
-    const resOwed = Math.max(0, resTotal - resPaid);
-    const isSettled = resData.paymentStatus === 'paid' || resOwed <= 0.01;
-
-    const ordersRef = collection(db, 'hotels', hotelId, 'kitchen_orders');
-    const ordersSnap = await getDocs(ordersRef);
-    if (ordersSnap.empty) return;
-
-    for (const orderDoc of ordersSnap.docs) {
-      const order = { id: orderDoc.id, ...orderDoc.data() } as any;
-      if (order.isDeleted === true || order.status === 'cancelled') continue;
-
-      const matches = 
-        order.reservationId === reservationId ||
-        (order.roomNumber && order.roomNumber === resData.roomNumber && (order.guestId === resData.guestId || !order.guestId || order.guestName === resData.guestName));
-
-      if (!matches) continue;
-
-      const orderTotal = order.totalAmount || order.price || 0;
-      const payments = Array.isArray(order.payments) ? [...order.payments] : [];
-
-      // Direct payments made at F&B outlet (cash, POS card, etc., not room and not Front Desk)
-      const directPaid = payments
-        .filter((p: any) => p.method !== 'room' && p.settlementSource !== 'Front Desk')
-        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-
-      // Check whether this order is charged to room or Front Desk
-      const isRoomChargeOrder = 
-        order.paymentMethod === 'room' ||
-        order.settlementSource === 'Front Desk' ||
-        payments.some((p: any) => p.method === 'room' || p.settlementSource === 'Front Desk') ||
-        (order.roomNumber && order.roomNumber !== 'Walk-in');
-
-      if (!isRoomChargeOrder) continue;
-
-      const roomChargedPortion = Math.max(0, orderTotal - directPaid);
-      if (roomChargedPortion <= 0) continue;
-
-      // Current Front Desk payments recorded on this order
-      const currentFDPaid = payments
-        .filter((p: any) => p.settlementSource === 'Front Desk' && p.method !== 'room')
-        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-
-      const hasRoomChargeEntry = payments.some((p: any) => p.method === 'room');
-
-      let targetFDPaid = 0;
-      let remainingRoomCharged = 0;
-
-      if (isSettled) {
-        // Room folio is completely settled and owed ₦0!
-        // Full remaining room-charged amount is settled by Front Desk.
-        targetFDPaid = roomChargedPortion;
-        remainingRoomCharged = 0;
-      } else if (resPaid > 0) {
-        // Folio partially paid: compute allocated portion
-        remainingRoomCharged = Math.min(roomChargedPortion, resOwed);
-        targetFDPaid = Math.max(0, roomChargedPortion - remainingRoomCharged);
-      } else {
-        // Room folio is completely unpaid
-        remainingRoomCharged = roomChargedPortion;
-        targetFDPaid = 0;
-      }
-
-      // Check if update is needed
-      const paidAmountMatches = Math.abs((order.paidAmount || 0) - (directPaid + targetFDPaid)) <= 0.01;
-      const fdPaidMatches = Math.abs(currentFDPaid - targetFDPaid) <= 0.01;
-      const roomChargeMatches = isSettled ? !hasRoomChargeEntry : true;
-
-      if (paidAmountMatches && fdPaidMatches && roomChargeMatches) {
-        continue;
-      }
-
-      // Reconstruct payments cleanly
-      const nonFDPayments = payments.filter((p: any) => p.method !== 'room' && p.settlementSource !== 'Front Desk');
-      const newPayments: any[] = [...nonFDPayments];
-
-      if (targetFDPaid > 0) {
-        newPayments.push({
-          amount: targetFDPaid,
-          method: paymentDetails?.method || (payments.find((p: any) => p.settlementSource === 'Front Desk')?.method) || 'transfer',
-          date: new Date().toISOString(),
-          reference: 'Front Desk Folio Settlement',
-          settlementSource: 'Front Desk',
-          processedBy: {
-            uid: 'front_desk_sync',
-            name: 'Front Desk',
-            role: 'front_desk'
-          }
-        });
-      }
-
-      if (remainingRoomCharged > 0) {
-        newPayments.push({
-          amount: remainingRoomCharged,
-          method: 'room',
-          reference: 'Charged to Room Folio'
-        });
-      }
-
-      const newPaidAmount = directPaid + targetFDPaid;
-
-      await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', order.id), {
-        payments: newPayments,
-        paidAmount: newPaidAmount,
-        settlementSource: 'Front Desk',
-        lastPaymentAt: new Date().toISOString()
-      }, {
-        hotelId,
-        module: 'F & B',
-        action: 'SYNC_FRONT_DESK_PAYMENT',
-        details: `Synchronized Front Desk payment of ${targetFDPaid} for Order ${order.id} (Room ${order.roomNumber}) - Status: ${isSettled ? 'COMPLETELY SETTLED' : 'PARTIAL'}`
-      }).catch(err => console.error('Error syncing order to Firestore:', err));
-    }
-  } catch (err) {
-    console.error('Failed to sync reservation payments to kitchen orders:', err);
-  }
-};
-
-/**
- * Synchronizes payments made on F&B kitchen orders (direct payments like cash, card, transfer at F&B outlet)
- * into the guest's room reservation ledger, ensuring Front Desk always reflects any payment made in F&B in real time.
- */
-export const syncKitchenOrderPaymentsToLedger = async (
-  hotelId: string,
-  targetReservationId?: string
-) => {
-  if (!hotelId) return;
-  try {
-    const reservationsCol = collection(db, 'hotels', hotelId, 'reservations');
-    const [reservationsSnap, ordersSnap] = await Promise.all([
-      targetReservationId ? getDoc(doc(db, 'hotels', hotelId, 'reservations', targetReservationId)).then(d => d.exists() ? [d] : []) : getDocs(reservationsCol).then(s => s.docs),
-      getDocs(collection(db, 'hotels', hotelId, 'kitchen_orders'))
-    ]);
-
-    if (ordersSnap.empty || reservationsSnap.length === 0) return;
-
-    for (const resDoc of reservationsSnap) {
-      const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
-      const resNormRoom = String(res.roomNumber || '').trim().toLowerCase();
-      if (!resNormRoom) continue;
-
-      // Find all room orders linked to this reservation or room
-      const matchingOrders = ordersSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(o => {
-          if (o.isDeleted === true || o.status === 'cancelled') return false;
-          const oResId = o.reservationId;
-          const oRoom = String(o.roomNumber || '').trim().toLowerCase();
-          return (oResId && oResId === res.id) || (oRoom && oRoom === resNormRoom);
-        });
-
-      if (matchingOrders.length === 0) continue;
-
-      // Query current ledger for this reservation
-      const ledgerSnap = await getDocs(query(
-        collection(db, 'hotels', hotelId, 'ledger'),
-        where('reservationId', '==', res.id)
-      ));
-      const ledgerEntries = ledgerSnap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
-
-      let hasNewLedgerPost = false;
-
-      for (const order of matchingOrders) {
-        const orderPayments = Array.isArray(order.payments) ? order.payments : [];
-        const directPayments = orderPayments.filter((p: any) => 
-          (p.amount || 0) > 0 && 
-          p.method !== 'room' && 
-          p.settlementSource !== 'Front Desk'
-        );
-
-        for (const p of directPayments) {
-          const payAmount = Number(p.amount);
-          if (payAmount <= 0) continue;
-
-          // Check if this payment already exists in ledger
-          const alreadyInLedger = ledgerEntries.some(e => {
-            if (e.type !== 'credit') return false;
-            if (e.referenceId && (e.referenceId === order.id || e.referenceId.startsWith(`${order.id}_`) || e.referenceId.includes(order.id))) {
-              return Math.abs(e.amount - payAmount) <= 0.01;
-            }
-            if (e.description && e.description.includes(order.id)) {
-              return Math.abs(e.amount - payAmount) <= 0.01;
-            }
-            return false;
-          });
-
-          if (!alreadyInLedger) {
-            // Post missing credit payment to reservation ledger
-            const effectiveGuestId = res.guestId || res.id || 'guest_unknown';
-            const payMethod = (p.method || 'cash').toLowerCase() as any;
-            const source = p.settlementSource || 'F&B Outlet';
-            
-            await postToLedger(hotelId, effectiveGuestId, res.id, {
-              amount: payAmount,
-              type: 'credit',
-              category: 'payment',
-              description: `F & B Direct Payment [${source}] (${(p.method || 'cash').toUpperCase()}): ${order.items || 'F&B Order'}`,
-              referenceId: `${order.id}_PAY_DIRECT_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-              postedBy: p.processedBy?.uid || 'f_and_b',
-              paymentMethod: payMethod,
-              settlementSource: source
-            }, p.processedBy?.uid || 'f_and_b', res.corporateId, payMethod, {
-              uid: p.processedBy?.uid || 'f_and_b',
-              displayName: p.processedBy?.name || 'F&B Staff',
-              role: p.processedBy?.role || 'staff'
-            });
-
-            hasNewLedgerPost = true;
-          }
-        }
-      }
-
-      if (hasNewLedgerPost) {
-        await recalculateReservationAccountFromLedger(hotelId, res.id);
-        await syncReservationPaymentsToKitchenOrders(hotelId, res.id);
-      }
-    }
-  } catch (err) {
-    console.error('Failed to sync kitchen order payments to ledger:', err);
-  }
-};
-
-

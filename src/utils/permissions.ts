@@ -26,7 +26,6 @@ export type Permission =
   | 'delete_rooms'
   | 'block_rooms'
   | 'unblock_rooms'
-  | 'change_room_status'
 
   // --- HOUSEKEEPING ---
   | 'view_housekeeping'
@@ -193,7 +192,6 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     description: 'Room inventory, maintenance blocking, and status control',
     permissions: [
       { id: 'view_rooms', label: 'View Rooms', description: 'View room grid and status' },
-      { id: 'change_room_status', label: 'Change Room Status', description: 'Change physical room status (Clean, Dirty, Maintenance, Out of Service)' },
       { id: 'create_rooms', label: 'Create Rooms', description: 'Add new rooms to property' },
       { id: 'edit_rooms', label: 'Edit Rooms', description: 'Change room numbers, types, or base rates' },
       { id: 'delete_rooms', label: 'Delete Rooms', description: 'Remove rooms from inventory' },
@@ -207,7 +205,6 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     description: 'Room cleaning assignments, inspection, and status transitions',
     permissions: [
       { id: 'view_housekeeping', label: 'View Housekeeping', description: 'View cleaning schedule and room statuses' },
-      { id: 'change_room_status', label: 'Change Room Cleanliness Status', description: 'Transition room between Clean, Dirty, and Cleaning' },
       { id: 'assign_housekeeping_tasks', label: 'Assign Tasks', description: 'Assign rooms to cleaners' },
       { id: 'edit_housekeeping_tasks', label: 'Edit Tasks', description: 'Update room clean/dirty states' },
       { id: 'close_housekeeping_tasks', label: 'Close Tasks', description: 'Mark cleaning tasks inspected and completed' },
@@ -404,7 +401,7 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; description: 
     name: 'Housekeeping Manager',
     description: 'Room cleanliness, cleaning task assignments, inspection, and linen inventory',
     permissions: [
-      'view_dashboard', 'view_rooms', 'change_room_status', 'block_rooms', 'unblock_rooms',
+      'view_dashboard', 'view_rooms', 'block_rooms', 'unblock_rooms',
       'view_housekeeping', 'assign_housekeeping_tasks', 'edit_housekeeping_tasks',
       'close_housekeeping_tasks', 'view_inventory', 'edit_inventory',
       // Legacy aliases
@@ -466,7 +463,6 @@ export const BASE_ROLE_PERMISSIONS: Record<string, Permission[]> = {
  * No automatic permission expansion. No privilege escalation.
  */
 const SYNONYM_MAP: Record<string, Permission[]> = {
-  change_room_status: ['change_room_status'],
   edit_reservations: ['edit_reservations', 'edit_reservation'],
   edit_reservation: ['edit_reservations', 'edit_reservation'],
   delete_reservations: ['delete_reservations', 'delete_reservation'],
@@ -514,7 +510,6 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
 
   // Rooms
   view_rooms: { modules: ['rooms'], actions: ['view', 'viewRooms', 'read'] },
-  change_room_status: { modules: ['rooms', 'housekeeping'], actions: ['changeStatus', 'change_room_status', 'updateStatus', 'status'] },
   manage_rooms: { modules: ['rooms'], actions: ['manage', 'manageRooms', 'edit'] },
   create_rooms: { modules: ['rooms'], actions: ['create', 'createRooms'] },
   edit_rooms: { modules: ['rooms'], actions: ['edit', 'editRooms'] },

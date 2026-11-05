@@ -66,42 +66,16 @@ function sanitizeArg(arg: any): any {
   }
 }
 
-function isSuppressedError(arg: any): boolean {
-  if (!arg) return false;
-  let s = typeof arg === 'string' ? arg : '';
-  if (!s && typeof arg === 'object') {
-    try {
-      s = (arg.message || '') + ' ' + (arg.code || '') + ' ' + JSON.stringify(arg);
-    } catch {
-      s = String(arg);
-    }
-  }
-  return (
-    s.includes('resource-exhausted') ||
-    s.includes('Quota exceeded') ||
-    s.includes('Using maximum backoff delay') ||
-    s.includes('WebSocket closed without opened') ||
-    s.includes('failed to connect to websocket') ||
-    s.includes('@firebase/firestore') ||
-    s.includes('WebChannelConnection') ||
-    s.includes("RPC 'Listen' stream") ||
-    s.includes('transport errored') ||
-    s.includes('vite/client')
-  );
-}
-
 console.error = function (...args: any[]) {
-  for (const arg of args) {
-    if (isSuppressedError(arg)) return;
+  const first = typeof args[0] === 'string' ? args[0] : '';
+  if (first.includes('[vite] failed to connect to websocket')) {
+    return;
   }
   const safeArgs = args.map(sanitizeArg);
   originalConsoleError.apply(console, safeArgs);
 };
 
 console.warn = function (...args: any[]) {
-  for (const arg of args) {
-    if (isSuppressedError(arg)) return;
-  }
   const safeArgs = args.map(sanitizeArg);
   originalConsoleWarn.apply(console, safeArgs);
 };

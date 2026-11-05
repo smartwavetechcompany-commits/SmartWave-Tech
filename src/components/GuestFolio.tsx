@@ -978,13 +978,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   }
 
-  // Filter out any errant tax add-on or adjustment entries from guest folio
-  displayedEntries = displayedEntries.filter(entry => {
-    const desc = (entry.description || '').toLowerCase();
-    const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(entry.amount - 4056) < 2;
-    return !isErrant;
-  });
-
   const processedDisplayedEntries = processLedgerTaxes(displayedEntries, hotel?.taxes || [], 'showOnFolio');
 
   const folioBreakdown = BillingEngine.calculateFolioBreakdown(currentReservation, hotel, processedDisplayedEntries);
@@ -993,9 +986,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const originalNightsCount = folioBreakdown.stayDuration.bookedNights;
   const nightlyRateCalculated = folioBreakdown.nightlyRate;
   
-  const totalDebits = resAccount.totalCharges;
-  const totalCredits = resAccount.totalCredits;
-  const balance = resAccount.outstandingBalance;
+  const totalDebits = folioBreakdown.tier3.totalCharges;
+  const totalCredits = folioBreakdown.tier3.totalPayments;
+  const balance = folioBreakdown.tier3.outstandingBalance;
 
   // Real posted entries only in history items - NO VIRTUAL CREDITS OR PROJECTION REDUCTIONS
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));

@@ -123,27 +123,7 @@ export function SoundAlertIndicator() {
         }
       }
 
-      let roomPaidAtFrontDesk = 0;
-      if (roomCharged > 0 && order.roomNumber && order.roomNumber !== 'Walk-in') {
-        const allKnownRes = [...activeReservations, ...debtorReservations];
-        const res = allKnownRes.find(r => 
-          (r.id === (order as any).reservationId) || 
-          (r.roomNumber === order.roomNumber)
-        );
-        if (res) {
-          const resTotal = res.totalAmount || 0;
-          const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
-          const resOwed = Math.max(0, resTotal - resPaid);
-          if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
-            roomPaidAtFrontDesk = roomCharged;
-          } else if (resPaid > 0) {
-            const unpaidPortion = Math.min(roomCharged, resOwed);
-            roomPaidAtFrontDesk = Math.max(0, roomCharged - unpaidPortion);
-          }
-        }
-      }
-
-      const unsettledBalance = Math.max(0, orderTotal - directPaid - roomPaidAtFrontDesk);
+      const unsettledBalance = Math.max(0, orderTotal - directPaid - roomCharged);
       return unsettledBalance > 0.01;
     }
     return false;
@@ -342,27 +322,7 @@ export function SoundAlertIndicator() {
                         if (order.paymentMethod === 'room') roomCharged = order.paidAmount;
                         else directPaid = order.paidAmount;
                       }
-
-                      let roomPaidAtFrontDesk = 0;
-                      if (roomCharged > 0 && order.roomNumber && order.roomNumber !== 'Walk-in') {
-                        const allKnownRes = [...activeReservations, ...debtorReservations];
-                        const res = allKnownRes.find(r => 
-                          (r.id === (order as any).reservationId) || 
-                          (r.roomNumber === order.roomNumber)
-                        );
-                        if (res) {
-                          const resTotal = res.totalAmount || 0;
-                          const resPaid = (res.paidAmount || 0) + (res.totalDiscount || 0);
-                          const resOwed = Math.max(0, resTotal - resPaid);
-                          if (res.paymentStatus === 'paid' || resOwed <= 0.01) {
-                            roomPaidAtFrontDesk = roomCharged;
-                          } else if (resPaid > 0) {
-                            const unpaidPortion = Math.min(roomCharged, resOwed);
-                            roomPaidAtFrontDesk = Math.max(0, roomCharged - unpaidPortion);
-                          }
-                        }
-                      }
-                      const balanceDue = Math.max(0, orderTotal - directPaid - roomPaidAtFrontDesk);
+                      const balanceDue = Math.max(0, orderTotal - directPaid - roomCharged);
 
                       return (
                         <div
