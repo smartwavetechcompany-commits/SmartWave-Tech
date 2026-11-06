@@ -2682,16 +2682,33 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                   ? entry.description 
                                   : (entry.description && typeof entry.description === 'object' ? ((entry.description as any).name || (entry.description as any).text || JSON.stringify(entry.description)) : ''))}
                               </div>
-                              {String(entry.category).toLowerCase() === 'refund' && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
-                                  ↩ Refund Issued
-                                </span>
-                              )}
-                              {entry.isVirtual && (
-                                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-500 text-[8px] font-black uppercase rounded tracking-wide border border-amber-500/30">
-                                  Projected
-                                </span>
-                              )}
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                {entry.billNumber && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                    Bill #{entry.billNumber}
+                                  </span>
+                                )}
+                                {entry.outletName && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    {entry.outletName}
+                                  </span>
+                                )}
+                                {entry.directPaidAmount && entry.directPaidAmount > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-zinc-800 text-zinc-400">
+                                    (Paid at outlet: {formatCurrency(entry.directPaidAmount, currency, exchangeRate)})
+                                  </span>
+                                ) : null}
+                                {String(entry.category).toLowerCase() === 'refund' && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                                    ↩ Refund Issued
+                                  </span>
+                                )}
+                                {entry.isVirtual && (
+                                  <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-500 text-[8px] font-black uppercase rounded tracking-wide border border-amber-500/30">
+                                    Projected
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[10px] text-zinc-500 font-mono">

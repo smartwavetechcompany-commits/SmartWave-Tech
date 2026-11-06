@@ -49,14 +49,25 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
 import { roomService } from '../services/roomService';
-import { getRoomDisplayStatus } from '../utils/roomUtils';
+import { getRoomDisplayStatus, getRoomDetailedReservationInfo, RoomReservationInfo } from '../utils/roomUtils';
 import { hasPermission } from '../utils/permissions';
 import { useNavigate } from 'react-router-dom';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
 
 export function Rooms() {
   const navigate = useNavigate();
-  const { hotel, profile, currency, exchangeRate } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
+
+  // Granular Access Control: Hotel Admin can assign 'change_room_status' permission to staff
+  const canChangeRoomStatus = Boolean(
+    profile && (
+      profile.role === 'hotelAdmin' || 
+      profile.role === 'superAdmin' || 
+      profile.staffRole === 'admin' ||
+      hasPermission(profile, 'change_room_status', customRoles)
+    )
+  );
+
   const [showAvailableRooms, setShowAvailableRooms] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
@@ -407,6 +418,10 @@ export function Rooms() {
 
   const updateStatus = async (roomId: string, status: Room['status']) => {
     if (!hotel?.id) return;
+    if (!canChangeRoomStatus) {
+      toast.error('Permission denied: You do not have permission to change room status (e.g. from clean to dirty). Please contact your Hotel Administrator.');
+      return;
+    }
     const room = rooms.find(r => r.id === roomId);
     try {
       const now = new Date().toISOString();
@@ -473,6 +488,10 @@ export function Rooms() {
 
   const bulkUpdateStatus = async (status: Room['status']) => {
     if (!hotel?.id || selectedRooms.length === 0) return;
+    if (!canChangeRoomStatus) {
+      toast.error('Permission denied: You do not have permission to change room status. Please contact your Hotel Administrator.');
+      return;
+    }
     
     const loadingToast = toast.loading(`Updating ${selectedRooms.length} rooms...`);
     
@@ -537,6 +556,7 @@ export function Rooms() {
     maintenance: 'border-amber-500 text-amber-500 bg-amber-500/5',
     vacant: 'border-zinc-500 text-zinc-500 bg-zinc-500/5',
     out_of_service: 'border-zinc-800 text-zinc-800 bg-zinc-800/5',
+    reserved: 'border-indigo-500 text-indigo-400 bg-indigo-500/10',
   };
 
   const filteredRooms = rooms.filter(room => {
@@ -2254,7 +2274,8 @@ export function Rooms() {
             </div>
           ) : (
             filteredRooms.map((room) => {
-              const displayStatus = getRoomDisplayStatus(room, reservations, blockings);
+              const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings);
+              const displayStatus = resInfo.displayStatus;
               return (
                 <motion.div
                   layout
@@ -2302,32 +2323,36 @@ export function Rooms() {
                           )}
                         </div>
                         
-                        <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                          {(['clean', 'dirty', 'maintenance'] as const).map(s => (
-                            <button
-                              key={s}
-                              onClick={(e) => { e.stopPropagation(); updateStatus(room.id, s); }}
-                              className={cn(
-                                "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter transition-all border",
-                                room.status === s ? "bg-white/20 border-white/20" : "bg-white/5 border-transparent opacity-40 hover:opacity-100"
-                              )}
-                            >
-                              {s[0]}
-                            </button>
-                          ))}
-                        </div>
+                        {canChangeRoomStatus && (
+                          <div className="flex flex-wrap gap-1 mt-1 justify-end">
+                            {(['clean', 'dirty', 'maintenance'] as const).map(s => (
+                              <button
+                                key={s}
+                                onClick={(e) => { e.stopPropagation(); updateStatus(room.id, s); }}
+                                className={cn(
+                                  "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter transition-all border",
+                                  room.status === s ? "bg-white/20 border-white/20" : "bg-white/5 border-transparent opacity-40 hover:opacity-100"
+                                )}
+                                title={`Set room to ${s}`}
+                              >
+                                {s[0]}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                   </div>
                   
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <div className={cn(
                           "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border shadow-sm",
                           displayStatus === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
                           displayStatus === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
                           displayStatus === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
                           displayStatus === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
+                          displayStatus === 'reserved' ? "bg-indigo-500/20 border-indigo-500/30 text-indigo-300" :
                           "bg-zinc-800 border-zinc-700 text-zinc-400"
                         )}>
                           {displayStatus.replace('_', ' ')}
@@ -2340,6 +2365,40 @@ export function Rooms() {
                       </div>
                       <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
                     </div>
+
+                    {/* Prominently display reservation dates & next availability when room has a reservation */}
+                    {resInfo.isReserved && (
+                      <div className="bg-indigo-950/70 border border-indigo-500/30 rounded-lg p-2 text-left space-y-1">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                            <Calendar size={10} className="text-indigo-400 shrink-0" />
+                            Reserved
+                          </span>
+                          {resInfo.guestName && (
+                            <span className="text-[9px] text-zinc-300 font-semibold truncate max-w-[80px]" title={resInfo.guestName}>
+                              {resInfo.guestName}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[9px] text-zinc-200 font-mono">
+                          {resInfo.reservationDates}
+                        </div>
+                        <div className="pt-1 border-t border-indigo-500/20 flex items-center justify-between text-[9px]">
+                          <span className="text-zinc-400">Next Available:</span>
+                          <span className="text-emerald-400 font-bold font-mono">{resInfo.nextAvailableDate}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* If occupied, show next available date */}
+                    {resInfo.isOccupied && (
+                      <div className="bg-blue-950/50 border border-blue-500/30 rounded-lg p-1.5 text-left space-y-0.5">
+                        <div className="flex items-center justify-between text-[9px]">
+                          <span className="text-zinc-400">Next Available:</span>
+                          <span className="text-emerald-400 font-bold font-mono">{resInfo.nextAvailableDate}</span>
+                        </div>
+                      </div>
+                    )}
 
                 {room.amenities && room.amenities.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
@@ -2394,7 +2453,8 @@ export function Rooms() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {filteredRooms.map((room) => {
-                const displayStatus = getRoomDisplayStatus(room, reservations, blockings);
+                const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings);
+                const displayStatus = resInfo.displayStatus;
               return (
                 <tr key={room.id} className="hover:bg-zinc-800/50 transition-colors group">
                   <td className="px-6 py-4">
@@ -2409,24 +2469,61 @@ export function Rooms() {
                   <td className="px-6 py-4 text-zinc-400 text-sm">{room.type}</td>
                   <td className="px-6 py-4 text-right text-zinc-50 font-medium">{formatCurrency(room.price, currency, exchangeRate)}</td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <select 
-                        value={displayStatus}
-                        onChange={(e) => updateStatus(room.id, e.target.value as any)}
-                        className={cn(
-                          "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border bg-transparent focus:outline-none cursor-pointer",
-                          statusColors[displayStatus]
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2">
+                        {canChangeRoomStatus ? (
+                          <select 
+                            value={displayStatus}
+                            onChange={(e) => updateStatus(room.id, e.target.value as any)}
+                            className={cn(
+                              "px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border bg-transparent focus:outline-none cursor-pointer",
+                              statusColors[displayStatus] || 'border-zinc-800 text-zinc-400'
+                            )}
+                          >
+                            <option value="clean" className="bg-zinc-900">Clean</option>
+                            <option value="dirty" className="bg-zinc-900">Dirty</option>
+                            <option value="occupied" className="bg-zinc-900">Occupied</option>
+                            <option value="maintenance" className="bg-zinc-900">Maintenance</option>
+                            <option value="out_of_service" className="bg-zinc-900">Out of Service</option>
+                            <option value="reserved" className="bg-zinc-900">Reserved</option>
+                          </select>
+                        ) : (
+                          <div 
+                            className={cn(
+                              "px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 cursor-not-allowed opacity-90",
+                              statusColors[displayStatus] || 'border-zinc-800 text-zinc-400'
+                            )} 
+                            title="Permission required: Hotel admin must grant 'Change Room Status' permission"
+                          >
+                            <Lock size={10} className="opacity-70" />
+                            {displayStatus.replace('_', ' ')}
+                          </div>
                         )}
-                      >
-                        <option value="clean" className="bg-zinc-900">Clean</option>
-                        <option value="dirty" className="bg-zinc-900">Dirty</option>
-                        <option value="occupied" className="bg-zinc-900">Occupied</option>
-                        <option value="maintenance" className="bg-zinc-900">Maintenance</option>
-                        <option value="out_of_service" className="bg-zinc-900">Out of Service</option>
-                      </select>
-                      {isRoomBlocked(room.id) && (
-                        <div className="bg-red-500/10 text-red-500 border border-red-500/30 rounded px-1.5 py-0.5 text-[8px] font-bold flex items-center gap-1">
-                          <XCircle size={8} /> BLOCKED
+                        {isRoomBlocked(room.id) && (
+                          <div className="bg-red-500/10 text-red-500 border border-red-500/30 rounded px-1.5 py-0.5 text-[8px] font-bold flex items-center gap-1">
+                            <XCircle size={8} /> BLOCKED
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Display reservation dates and next date of availability */}
+                      {resInfo.isReserved && (
+                        <div className="text-[10px] space-y-0.5 max-w-[210px]">
+                          <div className="text-indigo-400 font-mono font-medium flex items-center gap-1">
+                            <Calendar size={10} className="shrink-0" />
+                            <span className="truncate">Dates: {resInfo.reservationDates}</span>
+                          </div>
+                          <div className="text-emerald-400 font-mono font-semibold text-[9px] flex items-center gap-1">
+                            <CheckCircle2 size={10} className="shrink-0" />
+                            <span>Next Available: {resInfo.nextAvailableDate}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {resInfo.isOccupied && (
+                        <div className="text-[9px] text-zinc-400 font-mono flex items-center gap-1">
+                          <span>Next Available:</span>
+                          <span className="text-emerald-400 font-bold">{resInfo.nextAvailableDate}</span>
                         </div>
                       )}
                     </div>

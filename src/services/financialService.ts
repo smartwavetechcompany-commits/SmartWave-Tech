@@ -215,13 +215,14 @@ export function calculateGuestFinancialPosition(
           if (e.category === 'refund') {
             totalRefunds += e.amount;
           } else {
-            totalCharges += e.amount;
+            let amt = e.amount;
+            totalCharges += amt;
             if (e.category === 'room' || e.chargeType === 'room_rate') {
-              totalRoomCharges += e.amount;
+              totalRoomCharges += amt;
             } else if (e.chargeType === 'overstay') {
-              totalOverstayCharges += e.amount;
+              totalOverstayCharges += amt;
             } else {
-              totalServiceCharges += e.amount;
+              totalServiceCharges += amt;
             }
           }
         } else if (e.type === 'credit') {

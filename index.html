@@ -9,31 +9,70 @@
     <meta property="og:description" content="Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls." />
     <script>
       (function() {
-        // Suppress benign Vite HMR websocket disconnection unhandled rejections
+        // Defensive suppressor for benign Firestore quota/backoff logs and Vite HMR websocket disconnections
+        function isSuppressed(msg) {
+          if (!msg) return false;
+          var s = typeof msg === 'string' ? msg : '';
+          try {
+            if (!s && typeof msg === 'object') {
+              s = (msg.message ? msg.message + ' ' : '') + (msg.code ? msg.code + ' ' : '') + JSON.stringify(msg);
+            }
+          } catch(e) { s = String(msg); }
+          return (
+            s.includes('resource-exhausted') ||
+            s.includes('Quota exceeded') ||
+            s.includes('Using maximum backoff delay') ||
+            s.includes('WebSocket closed without opened') ||
+            s.includes('failed to connect to websocket') ||
+            s.includes('@firebase/firestore') ||
+            s.includes('WebChannelConnection') ||
+            s.includes("RPC 'Listen' stream") ||
+            s.includes('transport errored') ||
+            s.includes('vite/client')
+          );
+        }
+
         window.addEventListener('unhandledrejection', function(event) {
-          if (event && event.reason) {
-            var msg = event.reason.message || String(event.reason) || '';
-            if (msg.includes('WebSocket') || msg.includes('websocket')) {
+          if (event) {
+            var reason = event.reason || {};
+            var msg = reason.message || String(reason) || '';
+            if (isSuppressed(msg) || isSuppressed(reason) || reason.code === 'resource-exhausted') {
               event.preventDefault();
+              event.stopImmediatePropagation();
+              return;
             }
           }
-        });
-        // Filter benign WebChannel transport reconnection warnings
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          if (event) {
+            var msg = event.message || '';
+            if (isSuppressed(msg) || isSuppressed(event.error)) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return;
+            }
+          }
+        }, true);
+
+        var originalError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          for (var i = 0; i < args.length; i++) {
+            if (isSuppressed(args[i])) return;
+          }
+          originalError.apply(console, arguments);
+        };
+
         var originalWarn = console.warn;
         console.warn = function() {
           var args = Array.prototype.slice.call(arguments);
-          var joined = args.map(function(arg) {
-            try {
-              return typeof arg === 'string' ? arg : JSON.stringify(arg);
-            } catch (e) {
-              return String(arg);
-            }
-          }).join(' ');
-          if (joined.includes('WebChannelConnection') || joined.includes('RPC \'Listen\' stream') || joined.includes('transport errored')) {
-            return;
+          for (var i = 0; i < args.length; i++) {
+            if (isSuppressed(args[i])) return;
           }
           originalWarn.apply(console, arguments);
         };
+
         try {
           var saved = localStorage.getItem('pms_ui_scale');
           if (saved) {

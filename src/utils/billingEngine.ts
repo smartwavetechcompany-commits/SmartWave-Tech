@@ -183,8 +183,8 @@ export class BillingEngine {
    */
   static calculateTax(subtotal: number, hotel: Hotel | null, options?: any): { amount: number; isInclusive: boolean; rate: number } {
     const activeTaxes = (hotel?.taxes || []).filter(t => (t.status || '').toLowerCase() === 'active' && (t.category || '').toLowerCase() !== 'restaurant');
-    const taxEnabled = options?.taxEnabled ?? (activeTaxes.length > 0);
-    if (!taxEnabled || activeTaxes.length === 0) {
+    const taxEnabled = options?.taxEnabled ?? (activeTaxes.length > 0 || options?.taxRate !== undefined);
+    if (!taxEnabled || (activeTaxes.length === 0 && options?.taxRate === undefined)) {
       return { amount: 0, isInclusive: false, rate: 0 };
     }
 
@@ -208,8 +208,8 @@ export class BillingEngine {
    */
   static calculateServiceCharge(subtotal: number, hotel: Hotel | null, options?: any): { amount: number; isInclusive: boolean; rate: number } {
     const activeServiceCharges = (hotel?.taxes || []).filter(t => (t.status || '').toLowerCase() === 'active' && ((t.category || '').toLowerCase() === 'service' || t.name.toLowerCase().includes('service')));
-    const serviceChargeEnabled = options?.serviceChargeEnabled ?? (activeServiceCharges.length > 0);
-    if (!serviceChargeEnabled || activeServiceCharges.length === 0) {
+    const serviceChargeEnabled = options?.serviceChargeEnabled ?? (activeServiceCharges.length > 0 || options?.serviceChargeRate !== undefined);
+    if (!serviceChargeEnabled || (activeServiceCharges.length === 0 && options?.serviceChargeRate === undefined)) {
       return { amount: 0, isInclusive: false, rate: 0 };
     }
 

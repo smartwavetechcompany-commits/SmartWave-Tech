@@ -108,7 +108,11 @@ export const database = {
         ...(options.metadata || {})
       }, options.userContext);
       return { success: true, id: docRef.id };
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'resource-exhausted' || String(error?.message).includes('Quota exceeded')) {
+        return { success: false, id: docRef.id, quotaExhausted: true };
+      }
+
       createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
@@ -144,7 +148,11 @@ export const database = {
       }, options.userContext);
 
       return { success: true };
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'resource-exhausted' || String(error?.message).includes('Quota exceeded')) {
+        return { success: false, quotaExhausted: true };
+      }
+
       createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path
@@ -180,7 +188,11 @@ export const database = {
         ...(options.metadata || {})
       }, options.userContext);
       return docRef;
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'resource-exhausted' || String(error?.message).includes('Quota exceeded')) {
+        return { id: 'temp_' + Date.now(), path: colRef.path } as any;
+      }
+
       createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         colPath: colRef.path
@@ -206,7 +218,11 @@ export const database = {
       await batch.commit();
       createAuditLog(hotelId, options.module, options.action, options.details, 'success', options.metadata, options.userContext);
       return { success: true };
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'resource-exhausted' || String(error?.message).includes('Quota exceeded')) {
+        return { success: false, quotaExhausted: true };
+      }
+
       createAuditLog(hotelId, options.module, options.action, options.details, 'failure', { error: String(error), ...(options.metadata || {}) }, options.userContext);
       
       await errorService.handleError(error, { 
@@ -247,7 +263,11 @@ export const database = {
         docPath: docRef.path
       }, options.userContext);
       return { success: true };
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'resource-exhausted' || String(error?.message).includes('Quota exceeded')) {
+        return { success: false, quotaExhausted: true };
+      }
+
       createAuditLog(options.hotelId, options.module, options.action, options.details, 'failure', { 
         error: String(error),
         docPath: docRef.path

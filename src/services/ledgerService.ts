@@ -86,12 +86,29 @@ export const postToLedger = async (
     }
   }
 
+  // 0b. Prevent duplicate F&B room charges using referenceId / idempotencyKey
+  if (entry.type === 'debit' && (entry.category === 'F & B' || entry.category === 'restaurant') && (entry.referenceId || entry.idempotencyKey)) {
+    const isDuplicateFB = querySnap.docs.some(doc => {
+      const e = doc.data() as LedgerEntry;
+      if (e.type !== 'debit') return false;
+      if (e.category !== 'F & B' && e.category !== 'restaurant') return false;
+      if (entry.referenceId && e.referenceId && e.referenceId === entry.referenceId) return true;
+      if (entry.idempotencyKey && e.idempotencyKey && e.idempotencyKey === entry.idempotencyKey) return true;
+      return false;
+    });
+
+    if (isDuplicateFB) {
+      console.warn(`Duplicate F&B room charge skipped for reservation ${reservationId}: ref ${entry.referenceId}`);
+      return;
+    }
+  }
+
   // Resolve finalCorporateId if not specified for a payment, and fetch hotel tax setup in parallel
   let finalCorporateId = corporateId;
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
   const hotelRef = doc(db, 'hotels', hotelId);
 
-  const shouldFetchHotel = entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment';
+  const shouldFetchHotel = entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment' && !entry.skipAutomaticTax;
   
   const [resSnap, hotelSnap] = await Promise.all([
     getDoc(resRef),
@@ -451,7 +468,9 @@ export const voidLedgerEntry = async (
     category: category || 'other',
     description: `REVERSAL: ${description} (Ref: ${firestoreId || id})`,
     timestamp: new Date().toISOString(),
-    postedBy: voidedBy
+    postedBy: voidedBy,
+    referenceId: ledgerEntry.referenceId,
+    skipAutomaticTax: true
   };
 
   // 2. Post the reversal

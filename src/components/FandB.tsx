@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, getDocs, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
-import { postToLedger } from '../services/ledgerService';
+import { postToLedger, voidLedgerEntry } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -39,7 +39,8 @@ import {
   ClipboardList,
   Lock,
   CreditCard,
-  Building2
+  Building2,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
@@ -61,30 +62,57 @@ export function FandB() {
   const [editingTable, setEditingTable] = useState<BarTable | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [printingOrder, setPrintingOrder] = useState<KitchenOrder | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered'>('all');
+  const [receiptViewMode, setReceiptViewMode] = useState<'receipt' | 'docket' | 'room_voucher'>('receipt');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'preparing' | 'ready' | 'delivered' | 'paid' | 'posted_to_room' | 'cancelled'>('all');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'food' | 'drink' | 'other'>('all');
+  const [outletFilter, setOutletFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [now, setNow] = useState(new Date());
+
+  const defaultOutlets = [
+    { id: 'restaurant', name: 'Main Restaurant', type: 'restaurant', isActive: true, allowRoomCharge: true },
+    { id: 'bar', name: 'Pool & Lounge Bar', type: 'bar', isActive: true, allowRoomCharge: true },
+    { id: 'room_service', name: 'Room Service', type: 'room_service', isActive: true, allowRoomCharge: true }
+  ];
+  const configuredOutlets = (hotel?.outlets && hotel.outlets.length > 0) ? hotel.outlets : defaultOutlets;
   
   const [cart, setCart] = useState<{ id: string; name: string; price: number; quantity: number }[]>([]);
   const [reportFilter, setReportFilter] = useState({
     type: 'all' as string,
+    outlet: 'all' as string,
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(new Date(), 'yyyy-MM-dd')
   });
+
+  const [activeTab, setActiveTab] = useState<'orders' | 'tables' | 'reconciliation'>('orders');
+  const [reconciliationSubTab, setReconciliationSubTab] = useState<'outlets' | 'payments' | 'cashiers' | 'room_charges' | 'daily'>('outlets');
+
   const [newOrder, setNewOrder] = useState({
     roomNumber: '',
     tableId: '',
     tableNumber: '',
     guestId: '',
+    outletId: configuredOutlets[0]?.id || 'restaurant',
+    outletName: configuredOutlets[0]?.name || 'Main Restaurant',
+    orderType: 'dine_in' as 'dine_in' | 'room_service' | 'takeaway' | 'bar',
     items: '',
     notes: '',
     category: 'all' as string,
     price: 0,
     payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room'; settlementSource?: 'Front Desk' | 'F&B Outlet' }[],
     discount: 0,
-    discountType: 'fixed' as 'fixed' | 'percentage'
+    discountType: 'fixed' as 'fixed' | 'percentage',
+    discountReason: '',
+    discountCode: ''
   });
+
+  // Room verification state
+  const [showRoomVerifyModal, setShowRoomVerifyModal] = useState(false);
+
+  // Void order state
+  const [voidOrderModal, setVoidOrderModal] = useState<KitchenOrder | null>(null);
+  const [voidReason, setVoidReason] = useState<string>('');
+  const [isVoiding, setIsVoiding] = useState<boolean>(false);
 
   // Direct Settlement in F&B State
   const [settleOrderModal, setSettleOrderModal] = useState<KitchenOrder | null>(null);
@@ -258,49 +286,126 @@ export function FandB() {
 
     setIsSaving(true);
     try {
-      // Calculate Taxes
+      const billNumber = `FB-${format(new Date(), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      // 1. Calculate discount
+      let discountAmount = 0;
+      if (newOrder.discount > 0) {
+        if (newOrder.discountType === 'percentage') {
+          discountAmount = (newOrder.price * newOrder.discount) / 100;
+        } else {
+          discountAmount = newOrder.discount;
+        }
+      }
+      const subtotalAfterDiscount = Math.max(0, newOrder.price - discountAmount);
+
+      // 2. Calculate service charge independently of taxes (Module 10)
+      const serviceConfig = hotel?.serviceCharge;
+      const isServiceChargeApplicable = Boolean(
+        serviceConfig?.enabled && (
+          serviceConfig.applicability === 'all' ||
+          serviceConfig.applicability === newOrder.outletId ||
+          (newOrder.outletId === 'restaurant' && serviceConfig.applicability === 'restaurant') ||
+          (newOrder.orderType === 'room_service' && serviceConfig.applicability === 'room_service') ||
+          (newOrder.outletId === 'bar' && serviceConfig.applicability === 'bar')
+        )
+      );
+      let serviceChargeAmount = 0;
+      if (isServiceChargeApplicable && serviceConfig && serviceConfig.percentage > 0) {
+        if (serviceConfig.isInclusive) {
+          serviceChargeAmount = subtotalAfterDiscount - (subtotalAfterDiscount / (1 + serviceConfig.percentage / 100));
+        } else {
+          serviceChargeAmount = subtotalAfterDiscount * (serviceConfig.percentage / 100);
+        }
+      }
+
+      // 3. Calculate taxes (Module 8 & 9)
       const activeTaxes = (hotel?.taxes || []).filter(t => {
         const status = (t.status || '').toLowerCase().trim();
         const category = (t.category || '').toLowerCase().trim();
         return status === 'active' && (category === 'restaurant' || category === 'f & b' || category === 'all');
       });
+      const taxableBase = subtotalAfterDiscount + (serviceConfig?.isTaxable && !serviceConfig?.isInclusive ? serviceChargeAmount : 0);
       const exclusiveTaxes = activeTaxes.filter(t => !t.isInclusive);
-      const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (newOrder.price * (t.percentage / 100)), 0);
+      const totalExclusiveTax = exclusiveTaxes.reduce((acc, t) => acc + (taxableBase * (t.percentage / 100)), 0);
       const taxDetails = activeTaxes.map(t => ({
         name: t.name,
         percentage: t.percentage,
-        amount: t.isInclusive ? (newOrder.price - (newOrder.price / (1 + (t.percentage / 100)))) : (newOrder.price * (t.percentage / 100)),
+        amount: t.isInclusive ? (taxableBase - (taxableBase / (1 + (t.percentage / 100)))) : (taxableBase * (t.percentage / 100)),
         isInclusive: t.isInclusive
       }));
 
-      // Calculate discount
-      let discountAmount = 0;
-      if (newOrder.discount > 0) {
-        if (newOrder.discountType === 'percentage') {
-          discountAmount = ((newOrder.price + totalExclusiveTax) * newOrder.discount) / 100;
-        } else {
-          discountAmount = newOrder.discount;
+      const finalPrice = subtotalAfterDiscount + totalExclusiveTax + (serviceConfig?.isInclusive ? 0 : serviceChargeAmount);
+
+      // 4. Payment breakdown (Module 2, 3, 6)
+      const directPaid = newOrder.payments
+        .filter(p => p.method !== 'room')
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
+      const roomCharged = newOrder.payments
+        .filter(p => p.method === 'room')
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      // Verify room charge rules (Module 3)
+      if (roomCharged > 0) {
+        if (!isRoomOrder || !res) {
+          toast.error(`Cannot charge to room: Room ${newOrder.roomNumber || 'Walk-in'} does not have an active checked-in guest.`);
+          setIsSaving(false);
+          return;
+        }
+        if (res.status !== 'checked_in') {
+          toast.error(`Cannot charge to room: Guest in Room ${res.roomNumber} is not currently checked in (${res.status}).`);
+          setIsSaving(false);
+          return;
+        }
+        const selectedOutlet = configuredOutlets.find(o => o.id === newOrder.outletId);
+        if (selectedOutlet && selectedOutlet.allowRoomCharge === false) {
+          toast.error(`Room charging is disabled for ${selectedOutlet.name}.`);
+          setIsSaving(false);
+          return;
         }
       }
-      const finalPrice = newOrder.price + totalExclusiveTax - discountAmount;
 
-      const orderData = {
+      // Determine financial and order status
+      let financialStatus: KitchenOrder['financialStatus'] = 'unpaid';
+      if (directPaid >= finalPrice - 0.01) {
+        financialStatus = 'paid';
+      } else if (roomCharged >= finalPrice - 0.01) {
+        financialStatus = 'posted_to_room';
+      } else if (directPaid > 0 && roomCharged > 0) {
+        financialStatus = 'partially_settled';
+      } else if (directPaid > 0) {
+        financialStatus = 'partially_settled';
+      }
+
+      const orderData: any = {
         ...newOrder,
+        billNumber,
         itemsList: cart,
         guestName: res?.guestName || guests.find(g => g.id === newOrder.guestId)?.name || 'Walk-in',
         hotelId: hotel.id,
-        status: 'pending',
+        status: financialStatus === 'paid' ? 'paid' : (roomCharged > 0 ? 'delivered' : 'pending'),
+        financialStatus,
         timestamp: new Date().toISOString(),
+        discount: discountAmount,
+        serviceChargeAmount,
+        serviceChargePercentage: isServiceChargeApplicable ? serviceConfig?.percentage : 0,
+        isServiceChargeInclusive: serviceConfig?.isInclusive || false,
         taxAmount: totalExclusiveTax,
         taxDetails: taxDetails,
-        totalAmount: finalPrice
+        totalAmount: finalPrice,
+        paidAmount: directPaid,
+        roomChargedAmount: roomCharged,
+        directPaidAmount: directPaid,
+        cashierUid: profile.uid,
+        cashierName: profile.displayName || (profile as any)?.name || 'Cashier',
+        reservationId: res?.id || undefined
       };
 
       const orderRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData, {
         hotelId: hotel.id,
         module: 'F & B',
         action: 'ADD_ORDER',
-        details: `F & B Order for ${orderData.guestName} (Room ${newOrder.roomNumber})`
+        details: `F & B Order ${billNumber} for ${orderData.guestName} (Room ${newOrder.roomNumber}): ${formatCurrency(finalPrice, currency, exchangeRate)}`
       });
 
       // Update table status if assigned
@@ -326,95 +431,84 @@ export function FandB() {
       // Create background notification for F & B staff
       createNotification(hotel.id, {
         title: 'New F & B Order',
-        message: `New order for Room ${newOrder.roomNumber || 'Walk-in'}: ${newOrder.items}`,
+        message: `New order ${billNumber} for Room ${newOrder.roomNumber || 'Walk-in'}: ${newOrder.items}`,
         type: 'info',
         userId: 'all'
       }).catch(() => {});
 
       const guestId = newOrder.guestId || (res?.guestId);
 
-      // Post charge to room ledger if applicable
-      if (isRoomOrder && res && guestId) {
-        await postToLedger(hotel.id, guestId, res.id, {
-          amount: finalPrice,
+      // POST TO GUEST FOLIO ONLY IF ROOM CHARGED (Module 3 & Module 6)
+      // If paid entirely at outlet, NO room debit is posted!
+      if (roomCharged > 0 && isRoomOrder && res && guestId) {
+        const ledgerDescription = directPaid > 0
+          ? `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber} - Partial Room Charge): ${newOrder.items} (Bill: ${formatCurrency(finalPrice, currency, exchangeRate)}, Paid at Outlet: ${formatCurrency(directPaid, currency, exchangeRate)})`
+          : `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber}): ${newOrder.items}`;
+
+        const postedEntry = await postToLedger(hotel.id, guestId, res.id, {
+          amount: roomCharged, // EXACT room charge debit!
           type: 'debit',
           category: 'F & B',
-          description: `F & B Order (Room ${newOrder.roomNumber || 'Service'}): ${newOrder.items}${discountAmount > 0 ? ` (Discounted)` : ''}`,
+          description: ledgerDescription,
           referenceId: orderRef.id,
-          postedBy: profile.uid
+          postedBy: profile.uid,
+          skipAutomaticTax: true, // Prevents taxes from being calculated a second time
+          outletName: newOrder.outletName,
+          billNumber,
+          preTaxAmount: newOrder.price,
+          discountAmount,
+          serviceChargeAmount,
+          taxAmount: totalExclusiveTax,
+          taxBreakdown: taxDetails,
+          totalOrderAmount: finalPrice,
+          roomChargedAmount: roomCharged,
+          directPaidAmount: directPaid,
+          settlementSource: 'F&B Outlet'
         }, profile.uid, res.corporateId, 'cash', {
           uid: profile?.uid,
           email: profile?.email,
           role: profile?.role || 'staff',
           displayName: profile?.displayName || (profile as any)?.name || 'Staff'
         });
+
+        if (postedEntry?.id) {
+          await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderRef.id), {
+            ledgerEntryId: postedEntry.id
+          }, {
+            hotelId: hotel.id,
+            module: 'F & B',
+            action: 'UPDATE_ORDER_LEDGER_REF',
+            details: `Linked ledger entry ${postedEntry.id} to order ${billNumber}`
+          }).catch(() => {});
+        }
       }
 
-      // Post payments to ledger/finance
+      // Record direct payments in Finance as income (Module 2 & Module 6)
+      // DO NOT post to room ledger!
       for (const pay of newOrder.payments) {
-        if (pay.amount > 0) {
+        if (pay.amount > 0 && pay.method !== 'room') {
           const source = pay.settlementSource || 'F&B Outlet';
-          if (isRoomOrder && res && guestId && pay.method !== 'room') {
-            await postToLedger(hotel.id, guestId, res.id, {
-              amount: pay.amount,
-              type: 'credit',
-              category: 'payment',
-              description: `F & B Payment [${source}] (${pay.method.toUpperCase()}): ${newOrder.items}`,
-              referenceId: orderRef.id,
-              postedBy: profile.uid,
-              paymentMethod: pay.method as any,
-              settlementSource: source
-            }, profile.uid, res.corporateId, pay.method as any, {
-              uid: profile?.uid,
-              email: profile?.email,
-              role: profile?.role || 'staff',
-              displayName: profile?.displayName || (profile as any)?.name || 'Staff'
-            });
-
-            database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
-              type: 'income',
-              amount: pay.amount,
-              category: 'F & B Revenue',
-              description: `F & B Order ${orderRef.id} [${source}] (Room ${newOrder.roomNumber}) - ${pay.method.toUpperCase()}`,
-              timestamp: new Date().toISOString(),
-              paymentMethod: pay.method,
-              settlementSource: source,
-              referenceId: orderRef.id,
-              postedBy: profile.uid,
-              processedBy: {
-                uid: profile.uid,
-                name: profile.displayName || (profile as any)?.name || 'Staff',
-                role: profile.role || 'staff'
-              }
-            }, {
-              hotelId: hotel.id,
-              module: 'Finance',
-              action: 'F&B_INCOME_RECORD',
-              details: `Recorded F&B income from Room ${newOrder.roomNumber} [${source}]`
-            }).catch(() => {});
-          } else if (pay.method !== 'room') {
-            database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
-              type: 'income',
-              amount: pay.amount,
-              category: 'F & B Revenue',
-              description: `F & B Order ${orderRef.id} [${source}] (Walk-in) - ${pay.method.toUpperCase()}`,
-              timestamp: new Date().toISOString(),
-              paymentMethod: pay.method,
-              settlementSource: source,
-              referenceId: orderRef.id,
-              postedBy: profile.uid,
-              processedBy: {
-                uid: profile.uid,
-                name: profile.displayName || (profile as any)?.name || 'Staff',
-                role: profile.role || 'staff'
-              }
-            }, {
-              hotelId: hotel.id,
-              module: 'Finance',
-              action: 'F&B_INCOME_RECORD',
-              details: `Recorded walk-in F&B income [${source}]`
-            }).catch(() => {});
-          }
+          await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+            type: 'income',
+            amount: pay.amount,
+            category: 'F & B Revenue',
+            description: `${newOrder.outletName || 'F&B Outlet'} Bill #${billNumber} [${source}] (${pay.method.toUpperCase()}) - ${newOrder.roomNumber || 'Walk-in'}`,
+            timestamp: new Date().toISOString(),
+            paymentMethod: pay.method,
+            settlementSource: source,
+            referenceId: orderRef.id,
+            postedBy: profile.uid,
+            processedBy: {
+              uid: profile.uid,
+              name: profile.displayName || (profile as any)?.name || 'Staff',
+              role: profile.role || 'staff'
+            }
+          }, {
+            hotelId: hotel.id,
+            module: 'Finance',
+            action: 'F&B_INCOME_RECORD',
+            details: `Recorded direct F&B payment of ${pay.amount} [${source}]`
+          }).catch(() => {});
         }
       }
 
@@ -443,13 +537,18 @@ export function FandB() {
         tableId: '', 
         tableNumber: '', 
         guestId: '', 
+        outletId: configuredOutlets[0]?.id || 'restaurant',
+        outletName: configuredOutlets[0]?.name || 'Main Restaurant',
+        orderType: 'dine_in',
         items: '', 
         notes: '', 
         category: 'all', 
         price: 0, 
         payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }],
         discount: 0,
-        discountType: 'fixed'
+        discountType: 'fixed',
+        discountReason: '',
+        discountCode: ''
       });
     } catch (err: any) {
       console.error('Error in handleAddOrder:', err.message || safeStringify(err));
@@ -500,6 +599,143 @@ export function FandB() {
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/kitchen_orders/${orderId}`);
       toast.error('Failed to delete order');
+    }
+  };
+
+  const handleVoidOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !voidOrderModal || isVoiding) return;
+
+    if (!hasPermission(profile, 'edit_fb_orders', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+      toast.error('Permission denied: You do not have permission to void orders.');
+      return;
+    }
+
+    if (!voidReason.trim()) {
+      toast.error('Please enter a reason for voiding this order.');
+      return;
+    }
+
+    setIsVoiding(true);
+    try {
+      const order = voidOrderModal;
+
+      // 1. If charged to room, reverse the ledger debit using voidLedgerEntry
+      if ((order.roomChargedAmount && order.roomChargedAmount > 0) || order.ledgerEntryId) {
+        let ledgerEntry: any = null;
+        if (order.ledgerEntryId) {
+          const lSnap = await getDoc(doc(db, 'hotels', hotel.id, 'ledger', order.ledgerEntryId));
+          if (lSnap.exists()) {
+            ledgerEntry = { id: lSnap.id, firestoreId: lSnap.id, ...lSnap.data() };
+          }
+        }
+        if (!ledgerEntry) {
+          const q = query(
+            collection(db, 'hotels', hotel.id, 'ledger'),
+            where('referenceId', '==', order.id)
+          );
+          const qSnap = await getDocs(q);
+          const found = qSnap.docs.find(d => {
+            const data = d.data() as any;
+            return data.type === 'debit' && (data.category === 'F & B' || data.category === 'restaurant');
+          });
+          if (found) {
+            ledgerEntry = { id: found.id, firestoreId: found.id, ...found.data() };
+          }
+        }
+
+        if (ledgerEntry) {
+          await voidLedgerEntry(hotel.id, ledgerEntry, profile.uid, {
+            uid: profile.uid,
+            email: profile.email,
+            role: profile.role || 'staff',
+            displayName: profile.displayName || (profile as any)?.name || 'Staff'
+          });
+        }
+      }
+
+      // 2. If direct payments were received at outlet, record refund expense in finance
+      const directPaid = order.directPaidAmount || (order.financialStatus === 'paid' ? (order.totalAmount || order.price || 0) : 0);
+      if (directPaid > 0) {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'expense',
+          amount: directPaid,
+          category: 'F & B Refund',
+          description: `Refund: Voided Order #${order.billNumber || order.id.slice(-6)} (${order.outletName || 'F&B'}) - Reason: ${voidReason.trim()}`,
+          timestamp: new Date().toISOString(),
+          paymentMethod: 'cash',
+          settlementSource: 'F&B Outlet',
+          referenceId: order.id,
+          postedBy: profile.uid,
+          processedBy: {
+            uid: profile.uid,
+            name: profile.displayName || (profile as any)?.name || 'Staff',
+            role: profile.role || 'staff'
+          }
+        }, {
+          hotelId: hotel.id,
+          module: 'Finance',
+          action: 'F&B_REFUND_RECORD',
+          details: `Recorded refund expense of ${directPaid} for voided order ${order.id}`
+        });
+      }
+
+      // 3. Mark kitchen order as cancelled/refunded
+      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', order.id), {
+        status: 'cancelled',
+        financialStatus: 'refunded',
+        voidReason: voidReason.trim(),
+        voidedBy: profile.uid,
+        voidedByName: profile.displayName || (profile as any)?.name || 'Staff',
+        voidedAt: new Date().toISOString(),
+        refundAmount: directPaid
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'VOID_ORDER',
+        details: `Voided order ${order.billNumber || order.id}: ${voidReason.trim()}`
+      });
+
+      // 4. Free table if assigned
+      if (order.tableId) {
+        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'tables', order.tableId), {
+          status: 'available',
+          currentOrderId: null,
+          currentGuestName: null,
+          lastUpdated: new Date().toISOString()
+        }, {
+          hotelId: hotel.id,
+          module: 'F & B',
+          action: 'RELEASE_TABLE',
+          details: `Freed table ${order.tableId} after order void`
+        }).catch(() => {});
+      }
+
+      // 5. Activity log
+      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
+        timestamp: new Date().toISOString(),
+        userId: profile.uid,
+        userEmail: profile.email,
+        userRole: profile.role,
+        action: 'F&B_ORDER_VOIDED',
+        resource: `Order ${order.billNumber || order.id}: ${voidReason.trim()}`,
+        hotelId: hotel.id,
+        module: 'F & B'
+      }, {
+        hotelId: hotel.id,
+        module: 'F & B',
+        action: 'ACTIVITY_LOG_CREATE',
+        details: 'Voided F&B order'
+      });
+
+      toast.success(`Order ${order.billNumber || '#' + order.id.slice(-6)} voided and financials reversed`);
+      setVoidOrderModal(null);
+      setVoidReason('');
+    } catch (err: any) {
+      console.error('Error voiding order:', err);
+      toast.error(err.message || 'Failed to void order');
+    } finally {
+      setIsVoiding(false);
     }
   };
 
@@ -931,8 +1167,6 @@ export function FandB() {
     return `${Math.floor(diff / 60)}h ${diff % 60}m ago`;
   };
 
-  const [activeTab, setActiveTab] = useState<'orders' | 'tables'>('orders');
-
   const handleAddTable = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
@@ -1173,6 +1407,16 @@ export function FandB() {
           Tables
           {activeTab === 'tables' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
         </button>
+        <button
+          onClick={() => setActiveTab('reconciliation')}
+          className={cn(
+            "pb-4 px-2 text-sm font-bold transition-all relative",
+            activeTab === 'reconciliation' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          Financial Reconciliation & Audit
+          {activeTab === 'reconciliation' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+        </button>
       </div>
 
       {activeTab === 'orders' ? (
@@ -1283,11 +1527,21 @@ export function FandB() {
                             {order.roomNumber === 'Walk-in' ? 'W' : order.roomNumber}
                           </div>
                           <div>
-                            <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
-                              {order.roomNumber === 'Walk-in' ? (order.tableNumber ? `Table ${order.tableNumber}` : 'Walk-in') : `Room ${order.roomNumber}`}
+                            <div className="text-xs text-zinc-500 font-medium uppercase tracking-wider flex items-center gap-1.5">
+                              <span>{order.roomNumber === 'Walk-in' ? (order.tableNumber ? `Table ${order.tableNumber}` : 'Walk-in') : `Room ${order.roomNumber}`}</span>
+                              {order.billNumber && (
+                                <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] font-mono font-bold text-zinc-300">
+                                  {order.billNumber}
+                                </span>
+                              )}
                             </div>
-                            <div className="text-[10px] text-zinc-400 font-bold">
-                              {order.guestName}
+                            <div className="text-[10px] text-zinc-300 font-bold flex items-center gap-1">
+                              <span>{order.guestName}</span>
+                              {order.outletName && (
+                                <span className="text-[9px] font-semibold text-emerald-400/80 bg-emerald-500/10 px-1 rounded">
+                                  {order.outletName}
+                                </span>
+                              )}
                             </div>
                             <div className="text-[10px] text-zinc-500 flex items-center gap-1">
                               <Clock size={10} />
@@ -1296,6 +1550,19 @@ export function FandB() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          {order.status !== 'cancelled' && (hasPermission(profile, 'edit_fb_orders', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                            <button
+                              onClick={() => {
+                                setVoidOrderModal(order);
+                                setVoidReason('');
+                              }}
+                              className="p-1.5 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 rounded-lg transition-colors text-[10px] font-bold uppercase flex items-center gap-1"
+                              title="Void Order & Reconcile"
+                            >
+                              <AlertTriangle size={13} />
+                              <span>Void</span>
+                            </button>
+                          )}
                           {(hasPermission(profile, 'delete_fb_orders', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                             <button
                               onClick={() => handleDeleteOrder(order.id, order.roomNumber)}
@@ -1310,6 +1577,7 @@ export function FandB() {
                             order.status === 'pending' ? "bg-blue-500/10 text-blue-500" :
                             order.status === 'preparing' ? "bg-amber-500/10 text-amber-500" :
                             order.status === 'ready' ? "bg-emerald-500/10 text-emerald-500" :
+                            order.status === 'cancelled' ? "bg-red-500/10 text-red-400" :
                             "bg-zinc-800 text-zinc-500"
                           )}>
                             {order.status === 'preparing' && <RefreshCw size={10} className="animate-spin" />}
@@ -1541,7 +1809,7 @@ export function FandB() {
             itemLabel="orders"
           />
         </>
-      ) : (
+      ) : activeTab === 'tables' ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -1631,140 +1899,797 @@ export function FandB() {
             ))}
           </div>
         </div>
+      ) : (
+        /* Financial Reconciliation & Audit View */
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
+                <Building2 className="text-emerald-400" size={22} />
+                Financial Reconciliation & Audit
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Multi-outlet revenue tracking, direct POS collections, room charge folios, and cashier balancing
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={reportFilter.startDate}
+                onChange={(e) => setReportFilter(prev => ({ ...prev, startDate: e.target.value }))}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+              />
+              <span className="text-xs text-zinc-500">to</span>
+              <input
+                type="date"
+                value={reportFilter.endDate}
+                onChange={(e) => setReportFilter(prev => ({ ...prev, endDate: e.target.value }))}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+              />
+            </div>
+          </div>
+
+          {/* Sub-tab Navigation */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/80 pb-3">
+            {[
+              { id: 'outlets', label: 'Sales by Outlet', icon: Utensils },
+              { id: 'payments', label: 'Payment Methods', icon: CreditCard },
+              { id: 'cashiers', label: 'Cashier Accountability', icon: DollarSign },
+              { id: 'room_charges', label: 'Room Charge Audit Log', icon: FileText },
+              { id: 'daily', label: 'Daily Reconciliation & Export', icon: Calendar }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setReconciliationSubTab(tab.id as any)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all",
+                  reconciliationSubTab === tab.id
+                    ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+                    : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800"
+                )}
+              >
+                <tab.icon size={14} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* KPI Metrics Cards */}
+          {(() => {
+            const start = new Date(reportFilter.startDate + 'T00:00:00');
+            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const rangeOrders = orders.filter(o => {
+              const d = new Date(o.timestamp);
+              return d >= start && d <= end;
+            });
+            const validOrders = rangeOrders.filter(o => o.status !== 'cancelled');
+
+            const totalSales = validOrders.reduce((acc, o) => acc + (o.totalAmount || o.price || 0), 0);
+            const totalDirectPaid = validOrders.reduce((acc, o) => {
+              const p = (o.payments || []).filter(pay => pay.method !== 'room').reduce((s, pay) => s + (pay.amount || 0), 0);
+              return acc + (p || o.directPaidAmount || (o.roomChargedAmount === 0 && o.status === 'paid' ? (o.totalAmount || o.price || 0) : 0));
+            }, 0);
+            const totalRoomCharged = validOrders.reduce((acc, o) => {
+              const r = (o.payments || []).filter(pay => pay.method === 'room').reduce((s, pay) => s + (pay.amount || 0), 0);
+              return acc + (r || o.roomChargedAmount || 0);
+            }, 0);
+            const totalVoided = rangeOrders.filter(o => o.status === 'cancelled').reduce((acc, o) => acc + (o.totalAmount || o.price || 0), 0);
+
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>Total F&B Revenue</span>
+                    <UtensilsCrossed size={16} className="text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-black text-zinc-50">{formatCurrency(totalSales, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">{validOrders.length} confirmed orders</div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>Direct Outlet Collections</span>
+                    <DollarSign size={16} className="text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-black text-emerald-400">{formatCurrency(totalDirectPaid, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">Cash, Card & Transfer at POS</div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>Transferred to Room Folios</span>
+                    <Building2 size={16} className="text-amber-400" />
+                  </div>
+                  <div className="text-2xl font-black text-amber-400">{formatCurrency(totalRoomCharged, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">Pending checkout settlement</div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>Voided & Reversals</span>
+                    <AlertTriangle size={16} className="text-red-400" />
+                  </div>
+                  <div className="text-2xl font-black text-red-400">{formatCurrency(totalVoided, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">{rangeOrders.filter(o => o.status === 'cancelled').length} cancelled orders</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Sub-tab 1: Outlets */}
+          {reconciliationSubTab === 'outlets' && (() => {
+            const start = new Date(reportFilter.startDate + 'T00:00:00');
+            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const validOrders = orders.filter(o => {
+              const d = new Date(o.timestamp);
+              return d >= start && d <= end && o.status !== 'cancelled';
+            });
+
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-zinc-200">Revenue Breakdown by Outlet</h3>
+                  <span className="text-xs text-zinc-500">{configuredOutlets.length} active outlets</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Outlet Name</th>
+                        <th className="p-4">Type</th>
+                        <th className="p-4 text-center">Orders</th>
+                        <th className="p-4 text-right">Gross Sales</th>
+                        <th className="p-4 text-right">Direct Paid (POS)</th>
+                        <th className="p-4 text-right">Charged to Room</th>
+                        <th className="p-4 text-center">Room Charge Policy</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {configuredOutlets.map(outlet => {
+                        const outletOrders = validOrders.filter(o => o.outletId === outlet.id || (outlet.id === 'restaurant' && !o.outletId));
+                        const grossSales = outletOrders.reduce((sum, o) => sum + (o.totalAmount || o.price || 0), 0);
+                        const directPaid = outletOrders.reduce((sum, o) => sum + (o.directPaidAmount || (o.roomChargedAmount === 0 && o.status === 'paid' ? (o.totalAmount || o.price || 0) : 0)), 0);
+                        const roomCharged = outletOrders.reduce((sum, o) => sum + (o.roomChargedAmount || 0), 0);
+
+                        return (
+                          <tr key={outlet.id} className="hover:bg-zinc-800/40 transition-colors">
+                            <td className="p-4 font-bold text-zinc-100 flex items-center gap-2">
+                              <Utensils size={14} className="text-emerald-400" />
+                              {outlet.name}
+                            </td>
+                            <td className="p-4 uppercase text-[10px] font-semibold text-zinc-400">{outlet.type}</td>
+                            <td className="p-4 text-center font-bold">{outletOrders.length}</td>
+                            <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(grossSales, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(directPaid, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(roomCharged, currency, exchangeRate)}</td>
+                            <td className="p-4 text-center">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                                outlet.allowRoomCharge !== false
+                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                  : "bg-zinc-800 text-zinc-400"
+                              )}>
+                                {outlet.allowRoomCharge !== false ? 'Enabled' : 'Direct Only'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Sub-tab 2: Payment Methods */}
+          {reconciliationSubTab === 'payments' && (() => {
+            const start = new Date(reportFilter.startDate + 'T00:00:00');
+            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const validOrders = orders.filter(o => {
+              const d = new Date(o.timestamp);
+              return d >= start && d <= end && o.status !== 'cancelled';
+            });
+
+            const methodTotals: Record<string, { count: number; amount: number }> = {
+              cash: { count: 0, amount: 0 },
+              card: { count: 0, amount: 0 },
+              transfer: { count: 0, amount: 0 },
+              room: { count: 0, amount: 0 }
+            };
+
+            for (const order of validOrders) {
+              if (Array.isArray(order.payments) && order.payments.length > 0) {
+                for (const p of order.payments) {
+                  const m = p.method || 'cash';
+                  if (!methodTotals[m]) methodTotals[m] = { count: 0, amount: 0 };
+                  if (p.amount > 0) {
+                    methodTotals[m].count += 1;
+                    methodTotals[m].amount += p.amount;
+                  }
+                }
+              } else {
+                const isRoom = order.roomNumber && order.roomNumber !== 'Walk-in' && (order.roomChargedAmount ?? 0) > 0;
+                const m = isRoom ? 'room' : (order.paymentMethod || 'cash');
+                if (!methodTotals[m]) methodTotals[m] = { count: 0, amount: 0 };
+                methodTotals[m].count += 1;
+                methodTotals[m].amount += (order.totalAmount || order.price || 0);
+              }
+            }
+
+            const grandTotal = Object.values(methodTotals).reduce((sum, item) => sum + item.amount, 0);
+
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800">
+                  <h3 className="text-sm font-bold text-zinc-200">Collections by Tender / Payment Method</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Payment Method</th>
+                        <th className="p-4">Settlement Destination</th>
+                        <th className="p-4 text-center">Transactions</th>
+                        <th className="p-4 text-right">Total Collected</th>
+                        <th className="p-4 text-right">Share of Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {[
+                        { key: 'cash', label: 'Cash', dest: 'F&B Outlet Cash Drawer' },
+                        { key: 'card', label: 'Card / POS Terminal', dest: 'F&B Merchant Account' },
+                        { key: 'transfer', label: 'Bank Transfer', dest: 'Hotel Corporate Bank Account' },
+                        { key: 'room', label: 'Charge to Room Folio', dest: 'Transferred to Front Desk Ledger' }
+                      ].map(row => {
+                        const data = methodTotals[row.key] || { count: 0, amount: 0 };
+                        const pct = grandTotal > 0 ? (data.amount / grandTotal) * 100 : 0;
+
+                        return (
+                          <tr key={row.key} className="hover:bg-zinc-800/40 transition-colors">
+                            <td className="p-4 font-bold text-zinc-100 flex items-center gap-2">
+                              {row.key === 'cash' && <DollarSign size={14} className="text-emerald-400" />}
+                              {row.key === 'card' && <CreditCard size={14} className="text-blue-400" />}
+                              {row.key === 'transfer' && <RefreshCw size={14} className="text-purple-400" />}
+                              {row.key === 'room' && <Building2 size={14} className="text-amber-400" />}
+                              {row.label}
+                            </td>
+                            <td className="p-4 text-zinc-400 text-[11px]">{row.dest}</td>
+                            <td className="p-4 text-center font-bold">{data.count}</td>
+                            <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(data.amount, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-mono text-zinc-400">{pct.toFixed(1)}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Sub-tab 3: Cashiers */}
+          {reconciliationSubTab === 'cashiers' && (() => {
+            const start = new Date(reportFilter.startDate + 'T00:00:00');
+            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const validOrders = orders.filter(o => {
+              const d = new Date(o.timestamp);
+              return d >= start && d <= end && o.status !== 'cancelled';
+            });
+
+            const cashierMap: Record<string, { count: number; direct: number; room: number; total: number }> = {};
+            for (const order of validOrders) {
+              const cashier = order.cashierName || 'Staff';
+              if (!cashierMap[cashier]) {
+                cashierMap[cashier] = { count: 0, direct: 0, room: 0, total: 0 };
+              }
+              const orderTotal = order.totalAmount || order.price || 0;
+              const directPaid = order.directPaidAmount || (order.roomChargedAmount === 0 && order.status === 'paid' ? orderTotal : 0);
+              const roomCharged = order.roomChargedAmount || 0;
+
+              cashierMap[cashier].count += 1;
+              cashierMap[cashier].direct += directPaid;
+              cashierMap[cashier].room += roomCharged;
+              cashierMap[cashier].total += orderTotal;
+            }
+
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800">
+                  <h3 className="text-sm font-bold text-zinc-200">Cashier Performance & Shift Balancing</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Cashier Name</th>
+                        <th className="p-4 text-center">Orders Handled</th>
+                        <th className="p-4 text-right">Direct POS Collected</th>
+                        <th className="p-4 text-right">Room Charges Posted</th>
+                        <th className="p-4 text-right">Total Shift Volume</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {Object.entries(cashierMap).map(([cashier, data]) => (
+                        <tr key={cashier} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="p-4 font-bold text-zinc-100">{cashier}</td>
+                          <td className="p-4 text-center font-bold">{data.count}</td>
+                          <td className="p-4 text-right font-black text-emerald-400">{formatCurrency(data.direct, currency, exchangeRate)}</td>
+                          <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(data.room, currency, exchangeRate)}</td>
+                          <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(data.total, currency, exchangeRate)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Sub-tab 4: Room Charges Audit Log */}
+          {reconciliationSubTab === 'room_charges' && (() => {
+            const start = new Date(reportFilter.startDate + 'T00:00:00');
+            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const roomOrders = orders.filter(o => {
+              const d = new Date(o.timestamp);
+              const isRoom = (o.roomChargedAmount && o.roomChargedAmount > 0) || (o.payments || []).some(p => p.method === 'room');
+              return d >= start && d <= end && isRoom;
+            });
+
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-zinc-200">Room Charge Transfer Audit Trail</h3>
+                  <span className="text-xs text-zinc-500">{roomOrders.length} transfers found</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Date & Time</th>
+                        <th className="p-4">Bill #</th>
+                        <th className="p-4">Room & Guest</th>
+                        <th className="p-4">Outlet</th>
+                        <th className="p-4">Items Summary</th>
+                        <th className="p-4 text-right">Debit to Folio</th>
+                        <th className="p-4">Folio Ledger Ref</th>
+                        <th className="p-4 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {roomOrders.map(order => (
+                        <tr key={order.id} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="p-4 text-zinc-400">{new Date(order.timestamp).toLocaleString()}</td>
+                          <td className="p-4 font-mono font-bold text-zinc-200">{order.billNumber || '#' + order.id.slice(-6)}</td>
+                          <td className="p-4">
+                            <div className="font-bold text-zinc-100">Room {order.roomNumber}</div>
+                            <div className="text-[10px] text-zinc-400">{order.guestName}</div>
+                          </td>
+                          <td className="p-4 text-zinc-300 font-medium">{order.outletName || 'Restaurant'}</td>
+                          <td className="p-4 text-zinc-400 max-w-xs truncate">{order.items}</td>
+                          <td className="p-4 text-right font-black text-amber-400">
+                            {formatCurrency(order.roomChargedAmount || order.totalAmount || order.price, currency, exchangeRate)}
+                          </td>
+                          <td className="p-4 font-mono text-[10px] text-zinc-400">
+                            {order.ledgerEntryId ? `LED-${order.ledgerEntryId.slice(-6).toUpperCase()}` : `REF-${order.id.slice(-6).toUpperCase()}`}
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                              order.status === 'cancelled' ? "bg-red-500/10 text-red-400" :
+                              order.financialStatus === 'paid' ? "bg-emerald-500/10 text-emerald-400" :
+                              "bg-amber-500/10 text-amber-400"
+                            )}>
+                              {order.status === 'cancelled' ? 'Voided' : order.financialStatus || order.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Sub-tab 5: Daily Summary & Export */}
+          {reconciliationSubTab === 'daily' && (() => {
+            const start = new Date(reportFilter.startDate + 'T00:00:00');
+            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const rangeOrders = orders.filter(o => {
+              const d = new Date(o.timestamp);
+              return d >= start && d <= end;
+            });
+
+            const dailyMap: Record<string, { count: number; gross: number; taxes: number; direct: number; room: number; voided: number }> = {};
+            for (const order of rangeOrders) {
+              const day = order.timestamp ? format(new Date(order.timestamp), 'yyyy-MM-dd') : 'Unknown';
+              if (!dailyMap[day]) {
+                dailyMap[day] = { count: 0, gross: 0, taxes: 0, direct: 0, room: 0, voided: 0 };
+              }
+              const total = order.totalAmount || order.price || 0;
+              const tax = order.taxAmount || 0;
+
+              if (order.status === 'cancelled') {
+                dailyMap[day].voided += total;
+              } else {
+                dailyMap[day].count += 1;
+                dailyMap[day].gross += total;
+                dailyMap[day].taxes += tax;
+                dailyMap[day].direct += (order.directPaidAmount || (order.roomChargedAmount === 0 && order.status === 'paid' ? total : 0));
+                dailyMap[day].room += (order.roomChargedAmount || 0);
+              }
+            }
+
+            const exportDailyReconciliationCSV = () => {
+              const rows = Object.entries(dailyMap).sort(([a], [b]) => b.localeCompare(a)).map(([day, d]) => ({
+                Date: day,
+                'Order Count': d.count,
+                'Gross Revenue': d.gross,
+                'Taxes Collected': d.taxes,
+                'Direct POS Collections': d.direct,
+                'Room Folio Charges': d.room,
+                'Voided / Cancelled': d.voided
+              }));
+              exportToCSV(rows, `FB_Daily_Reconciliation_${reportFilter.startDate}_${reportFilter.endDate}`);
+            };
+
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-200">Daily Reconciliation Report</h3>
+                    <p className="text-xs text-zinc-500">Summary totals for daily accounting audits</p>
+                  </div>
+                  <button
+                    onClick={exportDailyReconciliationCSV}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-bold transition-all active:scale-95 border border-zinc-700"
+                  >
+                    <Download size={14} />
+                    Export CSV
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Date</th>
+                        <th className="p-4 text-center">Orders</th>
+                        <th className="p-4 text-right">Gross Revenue</th>
+                        <th className="p-4 text-right">Taxes</th>
+                        <th className="p-4 text-right">Direct POS Collections</th>
+                        <th className="p-4 text-right">Room Charges</th>
+                        <th className="p-4 text-right">Voided</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {Object.entries(dailyMap).sort(([a], [b]) => b.localeCompare(a)).map(([day, d]) => (
+                        <tr key={day} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="p-4 font-bold text-zinc-100">{day}</td>
+                          <td className="p-4 text-center font-bold">{d.count}</td>
+                          <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(d.gross, currency, exchangeRate)}</td>
+                          <td className="p-4 text-right text-zinc-400">{formatCurrency(d.taxes, currency, exchangeRate)}</td>
+                          <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(d.direct, currency, exchangeRate)}</td>
+                          <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(d.room, currency, exchangeRate)}</td>
+                          <td className="p-4 text-right font-bold text-red-400">{formatCurrency(d.voided, currency, exchangeRate)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
       )}
 
-      {/* Print Docket Modal */}
+      {/* Print Documents Modal */}
       {printingOrder && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="relative w-full max-w-md">
+          <div className="relative w-full max-w-lg my-8">
             <button 
               onClick={() => setPrintingOrder(null)}
               className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all print:hidden"
             >
               <XCircle size={32} />
             </button>
-            
-            {/* Docket View */}
-            <div 
-              id="fandb-kitchen-docket"
-              className="bg-white text-black p-8 font-mono shadow-2xl print:shadow-none print:p-0 fandb-docket"
-            >
-              <div className="text-center border-b-2 border-black pb-4 mb-4">
-                <h2 className="text-xl font-black uppercase tracking-tighter">F & B DOCKET</h2>
-                <p className="text-xs font-bold mt-1">{hotel?.name}</p>
-                <p className="text-[10px]">{new Date(printingOrder.timestamp).toLocaleString()}</p>
-              </div>
-              
-              <div className="flex justify-between mb-4 border-b border-black pb-2">
-                <div>
-                  <p className="text-[10px] font-bold uppercase">Room Number</p>
-                  <p className="text-lg font-black">{printingOrder.roomNumber}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-bold uppercase">Order ID</p>
-                  <p className="text-sm font-bold">#{(printingOrder.id || '').slice(-6).toUpperCase()}</p>
-                </div>
-              </div>
-              
-              <div className="mb-6">
-                <p className="text-[10px] font-bold uppercase border-b border-black mb-2">Order Items</p>
-                {printingOrder.itemsList ? (
-                  <div className="space-y-1">
-                    {printingOrder.itemsList.map((item, idx) => (
-                      <div key={idx} className="flex justify-between text-sm font-bold">
-                        <span>{item.quantity}x {item.name}</span>
-                        <span>{(item.price * item.quantity).toLocaleString()}</span>
-                      </div>
-                    ))}
-                    <div className="border-t border-black pt-1 mt-2 flex justify-between text-xs font-bold">
-                      <span>SUBTOTAL</span>
-                      <span>{printingOrder.price.toLocaleString()}</span>
-                    </div>
-                    {printingOrder.taxDetails?.map((tax, idx) => (
-                      <div key={idx} className="flex justify-between text-[10px]">
-                        <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}</span>
-                        <span>{tax.isInclusive ? '' : '+'}{tax.amount.toLocaleString()}</span>
-                      </div>
-                    ))}
-                    <div className="border-t border-black pt-1 mt-1 flex justify-between text-sm font-black">
-                      <span>GRAND TOTAL</span>
-                      <span>{(printingOrder.totalAmount || printingOrder.price).toLocaleString()}</span>
-                    </div>
-                    {(() => {
-                      const pTotal = printingOrder.totalAmount || printingOrder.price || 0;
-                      let pPayments: { amount: number; method: string }[] = [];
-                      if (Array.isArray(printingOrder.payments) && printingOrder.payments.length > 0) {
-                        pPayments = printingOrder.payments;
-                      } else if (printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0) {
-                        pPayments = [{ amount: printingOrder.paidAmount, method: printingOrder.paymentMethod || 'cash' }];
-                      } else if (printingOrder.paymentMethod) {
-                        pPayments = [{ amount: pTotal, method: printingOrder.paymentMethod }];
-                      }
 
-                      const pDirectPaid = pPayments.filter(p => p.method !== 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
-                      const pRoomCharged = pPayments.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
-                      const pBalance = pTotal - (pDirectPaid + pRoomCharged);
-                      const pChange = pDirectPaid - pTotal;
-
-                      return (
-                        <div className="mt-2 space-y-1 border-t border-black pt-2 text-xs">
-                          {pDirectPaid > 0 && (
-                            <div className="flex justify-between font-bold">
-                              <span>AMOUNT PAID ({pPayments.filter(p => p.method !== 'room').map(p => p.method.toUpperCase()).join(', ') || 'DIRECT'})</span>
-                              <span>{formatCurrency(pDirectPaid, currency, exchangeRate)}</span>
-                            </div>
-                          )}
-                          {pRoomCharged > 0 && (
-                            <div className="flex justify-between font-bold">
-                              <span>CHARGED TO ROOM</span>
-                              <span>{formatCurrency(pRoomCharged, currency, exchangeRate)}</span>
-                            </div>
-                          )}
-                          {pBalance > 0 && (
-                            <div className="flex justify-between font-black text-red-700 pt-1 border-t border-black/20">
-                              <span>OWING / BALANCE DUE</span>
-                              <span>{formatCurrency(pBalance, currency, exchangeRate)}</span>
-                            </div>
-                          )}
-                          {pChange > 0 && (
-                            <div className="flex justify-between font-black text-emerald-800 pt-1 border-t border-black/20">
-                              <span>CHANGE DUE (WE OWE GUEST)</span>
-                              <span>{formatCurrency(pChange, currency, exchangeRate)}</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                ) : (
-                  <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed">
-                    {printingOrder.items}
-                  </p>
+            {/* Document Mode Selector */}
+            <div className="flex items-center gap-1.5 p-1.5 bg-zinc-900 border border-zinc-800 rounded-2xl mb-4 print:hidden">
+              <button
+                type="button"
+                onClick={() => setReceiptViewMode('receipt')}
+                className={cn(
+                  "flex-1 py-2 text-xs font-bold rounded-xl transition-all",
+                  receiptViewMode === 'receipt'
+                    ? "bg-emerald-500 text-black shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
                 )}
-              </div>
-              
-              {printingOrder.notes && (
-                <div className="mb-6 bg-zinc-100 p-3 border-l-4 border-black">
-                  <p className="text-[10px] font-bold uppercase mb-1">Special Instructions</p>
-                  <p className="text-xs italic">{printingOrder.notes}</p>
+              >
+                Direct Receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceiptViewMode('room_voucher')}
+                className={cn(
+                  "flex-1 py-2 text-xs font-bold rounded-xl transition-all",
+                  receiptViewMode === 'room_voucher'
+                    ? "bg-amber-400 text-black shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                )}
+              >
+                Room Voucher
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceiptViewMode('docket')}
+                className={cn(
+                  "flex-1 py-2 text-xs font-bold rounded-xl transition-all",
+                  receiptViewMode === 'docket'
+                    ? "bg-blue-500 text-white shadow"
+                    : "text-zinc-400 hover:text-zinc-200"
+                )}
+              >
+                Kitchen Ticket (KOT)
+              </button>
+            </div>
+            
+            {/* Printable Document Container */}
+            <div 
+              id="fandb-printable-document"
+              className="bg-white text-black p-8 font-mono shadow-2xl print:shadow-none print:p-0 rounded-2xl print:rounded-none"
+            >
+              {receiptViewMode === 'room_voucher' ? (
+                /* Room Charge Voucher */
+                <div>
+                  <div className="text-center border-b-2 border-black pb-4 mb-4">
+                    <h2 className="text-lg font-black uppercase tracking-tight">ROOM CHARGE VOUCHER</h2>
+                    <p className="text-xs font-bold mt-0.5">{hotel?.name}</p>
+                    <p className="text-[10px] text-zinc-600">{(hotel as any)?.address || ''}</p>
+                    <p className="text-[10px] text-zinc-500 mt-1">{new Date(printingOrder.timestamp).toLocaleString()}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs border-b border-black pb-3 mb-3">
+                    <div>
+                      <p className="text-[9px] uppercase font-bold text-zinc-500">Guest Name</p>
+                      <p className="font-black text-sm">{printingOrder.guestName || 'In-House Guest'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] uppercase font-bold text-zinc-500">Room Number</p>
+                      <p className="font-black text-lg">Room {printingOrder.roomNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] uppercase font-bold text-zinc-500">Bill Number</p>
+                      <p className="font-bold text-[11px]">{printingOrder.billNumber || '#' + printingOrder.id.slice(-6).toUpperCase()}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] uppercase font-bold text-zinc-500">Outlet</p>
+                      <p className="font-bold text-[11px]">{printingOrder.outletName || 'Restaurant & Bar'}</p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <p className="text-[10px] font-bold uppercase border-b border-black pb-1 mb-2">Itemized Charges</p>
+                    {printingOrder.itemsList && printingOrder.itemsList.length > 0 ? (
+                      <div className="space-y-1">
+                        {printingOrder.itemsList.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-xs font-semibold">
+                            <span>{item.quantity}x {item.name}</span>
+                            <span>{formatCurrency(item.price * item.quantity, currency, exchangeRate)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs leading-relaxed">{printingOrder.items}</p>
+                    )}
+
+                    <div className="border-t border-black pt-2 mt-3 space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>{formatCurrency(printingOrder.price, currency, exchangeRate)}</span>
+                      </div>
+                      {printingOrder.serviceChargeAmount && printingOrder.serviceChargeAmount > 0 ? (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Service Charge ({printingOrder.serviceChargePercentage || 10}%):</span>
+                          <span>+{formatCurrency(printingOrder.serviceChargeAmount, currency, exchangeRate)}</span>
+                        </div>
+                      ) : null}
+                      {printingOrder.taxDetails?.map((tax, idx) => (
+                        <div key={idx} className="flex justify-between text-[10px]">
+                          <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}</span>
+                          <span>{tax.isInclusive ? '' : '+'}{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-black text-sm pt-1 border-t border-black">
+                        <span>Total Bill:</span>
+                        <span>{formatCurrency(printingOrder.totalAmount || printingOrder.price, currency, exchangeRate)}</span>
+                      </div>
+                      {printingOrder.directPaidAmount && printingOrder.directPaidAmount > 0 ? (
+                        <div className="flex justify-between font-bold text-xs text-zinc-700">
+                          <span>Paid at Outlet (Direct):</span>
+                          <span>-{formatCurrency(printingOrder.directPaidAmount, currency, exchangeRate)}</span>
+                        </div>
+                      ) : null}
+                      <div className="flex justify-between font-black text-base pt-1 border-t-2 border-black">
+                        <span>CHARGED TO ROOM FOLIO:</span>
+                        <span>{formatCurrency(printingOrder.roomChargedAmount || printingOrder.totalAmount || printingOrder.price, currency, exchangeRate)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Legal Notice */}
+                  <div className="bg-zinc-100 p-3 border border-black/40 text-[10px] leading-relaxed mb-6 font-sans">
+                    <p className="font-bold text-center uppercase tracking-wide">Important Notice</p>
+                    <p className="mt-1 text-justify">
+                      This transaction has been charged to the guest's hotel account and is not a payment receipt. Final settlement will occur at checkout.
+                    </p>
+                  </div>
+
+                  {/* Signatures */}
+                  <div className="grid grid-cols-2 gap-6 pt-4 border-t border-dashed border-black text-center text-xs">
+                    <div>
+                      <div className="h-10 border-b border-black"></div>
+                      <p className="font-bold mt-1 text-[10px] uppercase">Guest Signature</p>
+                    </div>
+                    <div>
+                      <div className="h-10 border-b border-black"></div>
+                      <p className="font-bold mt-1 text-[10px] uppercase">Staff Signature ({printingOrder.cashierName || 'Cashier'})</p>
+                    </div>
+                  </div>
+                </div>
+              ) : receiptViewMode === 'receipt' ? (
+                /* Direct F&B Receipt */
+                <div>
+                  <div className="text-center border-b-2 border-black pb-4 mb-4">
+                    <h2 className="text-xl font-black uppercase tracking-tight">F & B RECEIPT</h2>
+                    <p className="text-xs font-bold mt-0.5">{hotel?.name}</p>
+                    <p className="text-[10px] text-zinc-600">{(hotel as any)?.address || hotel?.branding?.address || ''}</p>
+                    <p className="text-[10px] text-zinc-500 mt-1">{new Date(printingOrder.timestamp).toLocaleString()}</p>
+                  </div>
+
+                  <div className="flex justify-between text-xs border-b border-black pb-2 mb-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase">Customer</p>
+                      <p className="font-black">{printingOrder.guestName || (printingOrder.roomNumber === 'Walk-in' ? 'Walk-in Guest' : `Room ${printingOrder.roomNumber}`)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold uppercase">Bill #</p>
+                      <p className="font-bold text-[11px]">{printingOrder.billNumber || '#' + printingOrder.id.slice(-6).toUpperCase()}</p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <p className="text-[10px] font-bold uppercase border-b border-black pb-1 mb-2">Order Items</p>
+                    {printingOrder.itemsList ? (
+                      <div className="space-y-1">
+                        {printingOrder.itemsList.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-xs font-bold">
+                            <span>{item.quantity}x {item.name}</span>
+                            <span>{formatCurrency(item.price * item.quantity, currency, exchangeRate)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs leading-relaxed">{printingOrder.items}</p>
+                    )}
+
+                    <div className="border-t border-black pt-2 mt-3 space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>{formatCurrency(printingOrder.price, currency, exchangeRate)}</span>
+                      </div>
+                      {printingOrder.serviceChargeAmount && printingOrder.serviceChargeAmount > 0 ? (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Service Charge ({printingOrder.serviceChargePercentage || 10}%):</span>
+                          <span>+{formatCurrency(printingOrder.serviceChargeAmount, currency, exchangeRate)}</span>
+                        </div>
+                      ) : null}
+                      {printingOrder.taxDetails?.map((tax, idx) => (
+                        <div key={idx} className="flex justify-between text-[10px]">
+                          <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}</span>
+                          <span>{tax.isInclusive ? '' : '+'}{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-black text-sm pt-1 border-t border-black">
+                        <span>GRAND TOTAL:</span>
+                        <span>{formatCurrency(printingOrder.totalAmount || printingOrder.price, currency, exchangeRate)}</span>
+                      </div>
+
+                      {/* Payment Methods Breakdown */}
+                      {(() => {
+                        const pTotal = printingOrder.totalAmount || printingOrder.price || 0;
+                        let pPayments: { amount: number; method: string }[] = [];
+                        if (Array.isArray(printingOrder.payments) && printingOrder.payments.length > 0) {
+                          pPayments = printingOrder.payments;
+                        } else if (printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0) {
+                          pPayments = [{ amount: printingOrder.paidAmount, method: printingOrder.paymentMethod || 'cash' }];
+                        } else if (printingOrder.paymentMethod) {
+                          pPayments = [{ amount: pTotal, method: printingOrder.paymentMethod }];
+                        }
+                        const pDirectPaid = pPayments.filter(p => p.method !== 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+                        const pRoomCharged = pPayments.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                        return (
+                          <div className="pt-2 border-t border-black space-y-1">
+                            {pPayments.filter(p => p.method !== 'room' && (p.amount || 0) > 0).map((pay, idx) => (
+                              <div key={idx} className="flex justify-between font-bold text-xs">
+                                <span className="uppercase">PAID ({pay.method}):</span>
+                                <span>{formatCurrency(pay.amount, currency, exchangeRate)}</span>
+                              </div>
+                            ))}
+                            {pRoomCharged > 0 && (
+                              <div className="flex justify-between font-bold text-xs text-amber-800">
+                                <span>ROOM CHARGE:</span>
+                                <span>{formatCurrency(pRoomCharged, currency, exchangeRate)}</span>
+                              </div>
+                            )}
+                            <div className="pt-2 text-center font-black text-xs uppercase tracking-widest text-emerald-800">
+                              ✓ {pRoomCharged > 0 && pDirectPaid > 0 ? 'PARTIAL OUTLET PAYMENT - BALANCE ON FOLIO' : 'PAID IN FULL'}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="text-center border-t-2 border-dashed border-black pt-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider">Thank You For Your Patronage!</p>
+                    <p className="text-[8px] mt-1 text-zinc-500">Cashier: {printingOrder.cashierName || 'Staff'}</p>
+                  </div>
+                </div>
+              ) : (
+                /* Kitchen Docket (KOT) */
+                <div>
+                  <div className="text-center border-b-2 border-black pb-3 mb-3">
+                    <h2 className="text-xl font-black uppercase tracking-tighter">KITCHEN TICKET (KOT)</h2>
+                    <p className="text-xs font-bold">{hotel?.name}</p>
+                    <p className="text-[10px]">{new Date(printingOrder.timestamp).toLocaleTimeString()} • {new Date(printingOrder.timestamp).toLocaleDateString()}</p>
+                  </div>
+
+                  <div className="flex justify-between border-b-2 border-black pb-2 mb-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase">Destination</p>
+                      <p className="text-lg font-black">{printingOrder.roomNumber === 'Walk-in' ? (printingOrder.tableNumber ? `Table ${printingOrder.tableNumber}` : 'Walk-in') : `Room ${printingOrder.roomNumber}`}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold uppercase">Ticket ID</p>
+                      <p className="text-sm font-bold font-mono">#{(printingOrder.id || '').slice(-6).toUpperCase()}</p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <p className="text-[10px] font-bold uppercase border-b border-black mb-2">Preparation List</p>
+                    {printingOrder.itemsList ? (
+                      <div className="space-y-2">
+                        {printingOrder.itemsList.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-sm font-black">
+                            <span>{item.quantity}x {item.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm font-bold leading-relaxed">{printingOrder.items}</p>
+                    )}
+                  </div>
+
+                  {printingOrder.notes && (
+                    <div className="mb-4 bg-zinc-100 p-2.5 border-l-4 border-black">
+                      <p className="text-[10px] font-bold uppercase">Special Instructions:</p>
+                      <p className="text-xs italic font-bold mt-0.5">{printingOrder.notes}</p>
+                    </div>
+                  )}
+
+                  <div className="text-center border-t-2 border-dashed border-black pt-2">
+                    <p className="text-[10px] font-bold uppercase">Kitchen Copy • Chef Check</p>
+                  </div>
                 </div>
               )}
-              
-              <div className="flex justify-between border-t border-black pt-2 mb-8">
-                <p className="text-[10px] font-bold uppercase">Category</p>
-                <p className="text-[10px] font-bold uppercase">{printingOrder.category}</p>
-              </div>
-              
-              <div className="text-center border-t-2 border-dashed border-black pt-4">
-                <p className="text-[10px] font-bold uppercase">Kitchen Copy</p>
-                <p className="text-[8px] mt-2 opacity-50">Generated by PMS Enterprise</p>
-              </div>
-              
-              <div className="mt-8 flex justify-center print:hidden">
+
+              <div className="mt-6 flex justify-center print:hidden">
                 <button 
                   onClick={() => {
-                    printDocument(document.getElementById('fandb-kitchen-docket'), {
-                      title: `F&B-Docket-Order-${printingOrder.id.slice(-6)}`,
+                    printDocument(document.getElementById('fandb-printable-document'), {
+                      title: `FB-${receiptViewMode.toUpperCase()}-${printingOrder.billNumber || printingOrder.id.slice(-6)}`,
                       pageSize: '80mm auto',
                       pageMargin: '0'
                     });
@@ -1772,7 +2697,7 @@ export function FandB() {
                   className="bg-black text-zinc-50 px-8 py-3 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-all active:scale-95 flex items-center gap-2"
                 >
                   <Printer size={18} />
-                  Print Docket
+                  Print Document
                 </button>
               </div>
             </div>
@@ -1939,6 +2864,44 @@ export function FandB() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {/* Outlet & Order Type */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Outlet</label>
+                      <select
+                        value={newOrder.outletId}
+                        onChange={(e) => {
+                          const outlet = configuredOutlets.find(o => o.id === e.target.value);
+                          setNewOrder({
+                            ...newOrder,
+                            outletId: e.target.value,
+                            outletName: outlet?.name || 'Main Restaurant'
+                          });
+                        }}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                      >
+                        {configuredOutlets.map(outlet => (
+                          <option key={outlet.id} value={outlet.id}>
+                            {outlet.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Order Type</label>
+                      <select
+                        value={newOrder.orderType}
+                        onChange={(e) => setNewOrder({ ...newOrder, orderType: e.target.value as any })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                      >
+                        <option value="dine_in">Dine-in</option>
+                        <option value="room_service">Room Service</option>
+                        <option value="takeaway">Takeaway</option>
+                        <option value="bar">Bar / Lounge</option>
+                      </select>
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Table (Optional)</label>
                     <select
@@ -1979,6 +2942,46 @@ export function FandB() {
                       ))}
                     </select>
                   </div>
+
+                  {/* Room & Guest Verification Card */}
+                  {newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in' && (() => {
+                    const verifiedRes = reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in');
+                    const selectedOutlet = configuredOutlets.find(o => o.id === newOrder.outletId);
+                    const allowRoomCharge = selectedOutlet?.allowRoomCharge !== false;
+
+                    if (verifiedRes) {
+                      return (
+                        <div className="p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-zinc-400">Verified In-House Guest</span>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              Checked In
+                            </span>
+                          </div>
+                          <div className="font-bold text-zinc-100">{verifiedRes.guestName}</div>
+                          <div className="text-[10px] text-zinc-400 flex items-center justify-between pt-1 border-t border-zinc-800/60">
+                            <span>Room {verifiedRes.roomNumber}</span>
+                            {allowRoomCharge ? (
+                              <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                                <CheckCircle2 size={11} /> Room Charge Allowed
+                              </span>
+                            ) : (
+                              <span className="text-amber-400 font-semibold flex items-center gap-1">
+                                <AlertTriangle size={11} /> Outlet Disabled
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400 text-[10px] font-medium flex items-center gap-1.5">
+                        <AlertCircle size={14} className="shrink-0" />
+                        <span>Room {newOrder.roomNumber} is not currently checked in. Orders cannot be charged to room.</span>
+                      </div>
+                    );
+                  })()}
 
                   {newOrder.roomNumber && (
                     <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-800 space-y-4">
@@ -2769,6 +3772,116 @@ export function FandB() {
                 </div>
               </div>
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Void Order Modal */}
+      {voidOrderModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[75] flex items-center justify-center p-4 overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+          >
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+                  <AlertTriangle size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-zinc-100">Void Order</h3>
+                  <p className="text-xs text-zinc-400 font-mono">
+                    {voidOrderModal.billNumber || '#' + voidOrderModal.id.slice(-6)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setVoidOrderModal(null)}
+                className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-zinc-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleVoidOrder} className="p-6 space-y-4">
+              <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between text-zinc-400">
+                  <span>Guest / Room:</span>
+                  <span className="font-bold text-zinc-200">
+                    {voidOrderModal.guestName} ({voidOrderModal.roomNumber === 'Walk-in' ? 'Walk-in' : `Room ${voidOrderModal.roomNumber}`})
+                  </span>
+                </div>
+                <div className="flex justify-between text-zinc-400">
+                  <span>Order Total:</span>
+                  <span className="font-bold text-zinc-200">
+                    {formatCurrency(voidOrderModal.totalAmount || voidOrderModal.price, currency, exchangeRate)}
+                  </span>
+                </div>
+                {voidOrderModal.roomChargedAmount && voidOrderModal.roomChargedAmount > 0 ? (
+                  <div className="flex justify-between text-amber-400 font-semibold pt-1 border-t border-zinc-800">
+                    <span>Charged to Room:</span>
+                    <span>{formatCurrency(voidOrderModal.roomChargedAmount, currency, exchangeRate)}</span>
+                  </div>
+                ) : null}
+                {voidOrderModal.directPaidAmount && voidOrderModal.directPaidAmount > 0 ? (
+                  <div className="flex justify-between text-emerald-400 font-semibold pt-1 border-t border-zinc-800">
+                    <span>Paid at Outlet:</span>
+                    <span>{formatCurrency(voidOrderModal.directPaidAmount, currency, exchangeRate)}</span>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-300 text-xs space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertCircle size={14} /> Financial Audit Reversal
+                </p>
+                <p className="text-[11px] leading-relaxed text-red-400/90">
+                  Voiding this order will reverse room ledger debits, cancel associated taxes, and issue a refund expense for any outlet collections. This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                  Reason for Void <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  placeholder="e.g. Guest cancelled order, incorrect items prepared, duplicate entry..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 focus:outline-none focus:border-red-500/50 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setVoidOrderModal(null)}
+                  className="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Keep Order
+                </button>
+                <button
+                  type="submit"
+                  disabled={isVoiding || !voidReason.trim()}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-lg active:scale-95"
+                >
+                  {isVoiding ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      Reversing...
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle size={14} />
+                      Confirm Void
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </motion.div>
         </div>
       )}

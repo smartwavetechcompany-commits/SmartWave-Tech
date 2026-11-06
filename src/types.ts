@@ -12,6 +12,32 @@ export interface Tax {
   showOnFolio: boolean;
   status: 'active' | 'inactive';
   category: 'all' | 'room' | 'restaurant' | 'service';
+  taxType?: 'vat' | 'sales_tax' | 'consumption_tax' | 'city_tax' | 'other';
+  jurisdiction?: string;
+  calculationOrder?: number;
+  isServiceChargeTaxable?: boolean;
+  discountReducesTaxableBase?: boolean;
+  effectiveDate?: string;
+  reportingCategory?: string;
+}
+
+export interface HotelOutlet {
+  id: string;
+  name: string;
+  type: 'restaurant' | 'bar' | 'lounge' | 'room_service' | 'cafe' | 'other';
+  isActive: boolean;
+  serviceChargePercentage?: number;
+  allowRoomCharge?: boolean;
+}
+
+export interface ServiceChargeConfig {
+  enabled: boolean;
+  percentage: number;
+  isInclusive: boolean;
+  isTaxable: boolean;
+  applicability: 'all' | 'restaurant' | 'room_service' | 'bar';
+  applicableOutlets?: string[];
+  effectiveDate?: string;
 }
 
 export interface CustomRole {
@@ -329,6 +355,7 @@ export interface HotelSettings {
 export interface Hotel {
   id: string;
   name: string;
+  address?: string;
   plan: PlanType;
   subscriptionStatus: SubscriptionStatus;
   subscriptionExpiry: string; // ISO string
@@ -339,6 +366,8 @@ export interface Hotel {
   modulesEnabled: string[];
   branding?: HotelBranding;
   taxes?: Tax[];
+  outlets?: HotelOutlet[];
+  serviceCharge?: ServiceChargeConfig;
   defaultCurrency?: 'NGN' | 'USD';
   exchangeRate?: number;
   limits?: {
@@ -501,6 +530,7 @@ export interface GracePeriodRequest {
 
 export interface Reservation {
   id: string;
+  hotelId?: string;
   guestName: string;
   guestEmail?: string;
   guestPhone?: string;
@@ -636,19 +666,36 @@ export interface InventoryConsumptionRule {
 
 export interface KitchenOrder {
   id: string;
+  hotelId?: string;
   roomNumber: string;
   tableId?: string;
   tableNumber?: string;
   guestId?: string;
   guestName?: string;
+  outletId?: string;
+  outletName?: string;
+  orderType?: 'dine_in' | 'room_service' | 'takeaway' | 'bar';
+  billNumber?: string;
   items: string;
   itemsList?: { id: string; name: string; price: number; quantity: number }[];
-  status: 'pending' | 'preparing' | 'ready' | 'delivered';
+  status: 'pending' | 'preparing' | 'ready' | 'delivered' | 'finalized' | 'posted_to_room' | 'paid' | 'partially_paid' | 'cancelled' | 'refunded';
+  financialStatus?: 'unpaid' | 'paid' | 'posted_to_room' | 'partially_settled' | 'refunded' | 'voided';
   timestamp: string;
-  category: 'food' | 'drink' | 'other';
+  category: 'food' | 'drink' | 'other' | string;
   notes?: string;
-  price: number;
-  paidAmount?: number;
+  price: number; // Subtotal before taxes and discounts
+  discount?: number;
+  discountType?: 'fixed' | 'percentage';
+  discountReason?: string;
+  discountApprovedBy?: string;
+  serviceChargeAmount?: number;
+  serviceChargePercentage?: number;
+  isServiceChargeInclusive?: boolean;
+  paidAmount?: number; // Direct cash/card/transfer collected
+  roomChargedAmount?: number; // Amount posted to guest folio
+  directPaidAmount?: number;
+  ledgerEntryId?: string; // PMS ledger reference
+  reservationId?: string;
   payments?: { 
     amount: number; 
     method: string; 
@@ -657,14 +704,23 @@ export interface KitchenOrder {
     settlementSource?: 'Front Desk' | 'F&B Outlet';
     processedBy?: { uid: string; name: string; role: string };
   }[];
-  paymentMethod: 'cash' | 'card' | 'transfer' | 'room';
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'room' | string;
   settlementSource?: 'Front Desk' | 'F&B Outlet';
+  cashierUid?: string;
+  cashierName?: string;
   preparedAt?: string;
   readyAt?: string;
   deliveredAt?: string;
   taxAmount?: number;
   taxDetails?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
   totalAmount?: number;
+  voidReason?: string;
+  voidedBy?: string;
+  voidedAt?: string;
+  refundAmount?: number;
+  refundReason?: string;
+  refundedBy?: string;
+  refundedAt?: string;
 }
 
 export interface BarTable {
@@ -992,6 +1048,18 @@ export interface LedgerEntry {
   masterReservationId?: string;
   postedByName?: string;
   settlementSource?: 'Front Desk' | 'F&B Outlet';
+  // F&B Specific Integration Metadata
+  outletName?: string;
+  billNumber?: string;
+  preTaxAmount?: number;
+  discountAmount?: number;
+  serviceChargeAmount?: number;
+  taxAmount?: number;
+  taxBreakdown?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
+  totalOrderAmount?: number;
+  roomChargedAmount?: number;
+  directPaidAmount?: number;
+  skipAutomaticTax?: boolean;
 }
 
 export interface CorporateAccount {

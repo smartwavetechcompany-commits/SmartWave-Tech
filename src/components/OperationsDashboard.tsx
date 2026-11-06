@@ -520,6 +520,9 @@ export function OperationsDashboard() {
     };
   }, [hotel?.id]);
 
+  // Dynamic automatic overstay charges based on current time & settings
+
+
   const today = format(new Date(), 'yyyy-MM-dd');
 
   // Arrivals: Pending or confirmed reservations scheduled to arrive today

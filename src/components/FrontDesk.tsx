@@ -23,6 +23,7 @@ import {
   Calendar,
   User,
   CreditCard,
+  UtensilsCrossed,
   CheckCircle2,
   XCircle,
   Clock,
@@ -6074,6 +6075,30 @@ export function FrontDesk() {
                     </div>
                     <p className="text-sm font-bold text-zinc-50">{formatCurrency(preview.originalNights * preview.nightlyRate, currency, exchangeRate)}</p>
                   </div>
+
+                  {/* F&B Room Charges */}
+                  {(() => {
+                    const fbDebits = ledgerEntries.filter(e => 
+                      e.reservationId === checkoutPreviewRes.id && 
+                      e.type === 'debit' && 
+                      (e.category === 'F & B' || e.category === 'restaurant')
+                    );
+                    const fbTotal = fbDebits.reduce((acc, e) => acc + (e.amount || 0), 0);
+                    if (fbDebits.length === 0) return null;
+
+                    return (
+                      <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-bold text-zinc-50 flex items-center gap-1.5">
+                            <UtensilsCrossed size={13} className="text-amber-400" />
+                            F&B Room Charges ({fbDebits.length} order{fbDebits.length > 1 ? 's' : ''})
+                          </p>
+                          <p className="text-[10px] text-zinc-500">Transferred from restaurant/bar to room account</p>
+                        </div>
+                        <p className="text-sm font-bold text-amber-400">{formatCurrency(fbTotal, currency, exchangeRate)}</p>
+                      </div>
+                    );
+                  })()}
 
                   {/* Late checkout details */}
                   <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">

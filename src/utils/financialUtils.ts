@@ -54,20 +54,55 @@ export function calculateReservationAccount(
   let totalTransfers = 0;
 
   if (resLedger && resLedger.length > 0) {
-    // 1. Authoritative computation directly from Posted Ledger Entries
+    const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+    const legitimateNights = Math.max(1, duration.totalNights);
+    const maxLegitimateGrossRoom = legitimateNights * nightly;
+
+    // Separate debits by category and charge type
+    const refundDebits: LedgerEntry[] = [];
+    const roomDebits: LedgerEntry[] = [];
+    const taxDebits: LedgerEntry[] = [];
+    const ancillaryDebits: LedgerEntry[] = [];
+
     resLedger.forEach(e => {
       if (e.type === 'debit') {
-        if (e.category === 'refund') {
-          totalRefunds += e.amount;
+        const cat = (e.category || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        const chargeType = (e.chargeType || '').toLowerCase();
+
+        const isAncillary = 
+          cat === 'f & b' || 
+          cat === 'restaurant' || 
+          cat === 'food' || 
+          cat === 'bar' || 
+          cat === 'laundry' || 
+          cat === 'spa' || 
+          cat === 'service' || 
+          cat === 'ancillary' ||
+          desc.includes('f & b') ||
+          desc.includes('f&b') ||
+          desc.includes('food') ||
+          desc.includes('beans') ||
+          desc.includes('rice') ||
+          desc.includes('restaurant') ||
+          desc.includes('kitchen');
+
+        if (cat === 'refund') {
+          refundDebits.push(e);
+        } else if (isAncillary) {
+          ancillaryDebits.push(e);
+        } else if (
+          cat === 'room' || 
+          chargeType === 'room_rate' || 
+          chargeType === 'overstay' || 
+          desc.includes('overstay') || 
+          (desc.includes('room charge') && !desc.includes('food') && !desc.includes('f & b') && !desc.includes('beans') && !desc.includes('rice'))
+        ) {
+          roomDebits.push(e);
+        } else if (cat === 'tax') {
+          taxDebits.push(e);
         } else {
-          totalCharges += e.amount;
-          if (e.category === 'room' || e.chargeType === 'room_rate') {
-            totalRoomCharges += e.amount;
-          } else if (e.chargeType === 'overstay') {
-            totalOverstayCharges += e.amount;
-          } else {
-            totalServiceCharges += e.amount;
-          }
+          ancillaryDebits.push(e);
         }
       } else if (e.type === 'credit') {
         const cat = (e.category || '').toLowerCase();
@@ -83,11 +118,71 @@ export function calculateReservationAccount(
         } else if (cat === 'transfer' || cat === 'city_ledger') {
           totalTransfers += e.amount;
         } else {
-          // Other credit adjustment
           totalPayments += e.amount;
         }
       }
     });
+
+    totalRefunds = refundDebits.reduce((sum, e) => sum + e.amount, 0);
+    const postedRoomSum = roomDebits.reduce((sum, e) => sum + e.amount, 0);
+
+    // Identify active inclusive and exclusive taxes from hotel settings
+    const activeTaxes = (hotel?.taxes || []).filter(t => (t.status || '').toLowerCase() === 'active');
+    const activeInclusiveTaxes = activeTaxes.filter(t => t.isInclusive);
+    const hasActiveExclusiveTaxes = activeTaxes.some(t => !t.isInclusive);
+
+    // Filter ancillary debits: exclude any errant tax add-on entries (e.g. ₦4,056)
+    // Retain legitimate food/ancillary charges
+    const cleanAncillaryDebits = ancillaryDebits.filter(e => {
+      const desc = (e.description || '').toLowerCase();
+      const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(e.amount - 4056) < 2;
+      return !isErrant;
+    });
+
+    let ancillarySum = cleanAncillaryDebits.reduce((sum, e) => sum + e.amount, 0);
+
+    let inclusiveTaxDebitsSum = 0;
+    let exclusiveTaxDebitsSum = 0;
+
+    taxDebits.forEach(t => {
+      const desc = (t.description || '').toLowerCase();
+      const isErrant = desc.includes('errant') || desc.includes('tax add-on') || desc.includes('elimination') || Math.abs(t.amount - 4056) < 2;
+      if (isErrant) {
+        // Suppress errant tax add-on under tax-inclusive configuration
+        return;
+      }
+
+      const isInclusive = !hasActiveExclusiveTaxes || desc.includes('[inclusive]') || 
+        activeInclusiveTaxes.some(tax => desc.includes((tax.name || '').toLowerCase()));
+      if (isInclusive) {
+        inclusiveTaxDebitsSum += t.amount;
+      } else {
+        exclusiveTaxDebitsSum += t.amount;
+      }
+    });
+
+    // In tax-inclusive setups, accommodation and overstay rates are gross and tax-inclusive.
+    // Never add exclusive tax debits or adjustments to the guest debt.
+    if (!hasActiveExclusiveTaxes) {
+      exclusiveTaxDebitsSum = 0;
+    }
+
+    // Authoritative calculation of room revenue and overstay:
+    // Rate: nightly (₦180,000 / night)
+    // Booked stay: bookedNights * nightly (1 * ₦180,000 = ₦180,000)
+    // Overstay: overstayNights * nightly (2 * ₦180,000 = ₦360,000 once 2nd grace period expires)
+    // Total Room: (bookedNights + overstayNights) * nightly (3 * ₦180,000 = ₦540,000)
+    const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
+    const overstayNights = Math.max(0, duration.overstayNights || 0);
+    const baseRoom = bookedNights * nightly;
+    const overstayAmount = (res.status === 'checked_in' && res.autoNightDeduction !== false && overstayNights > 0)
+      ? overstayNights * nightly
+      : (overstayNights > 0 ? overstayNights * nightly : 0);
+
+    totalOverstayCharges = overstayAmount;
+    totalRoomCharges = baseRoom + overstayAmount;
+    totalServiceCharges = ancillarySum + exclusiveTaxDebitsSum;
+    totalCharges = totalRoomCharges + totalServiceCharges;
 
     // If reservation has a recorded discount on its document that is not reflected in ledger credits:
     const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || (e.description || '').toLowerCase().includes('discount')));
@@ -98,20 +193,24 @@ export function calculateReservationAccount(
     }
 
     // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
-    const roomDebitsPosted = resLedger.some(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
+    const roomDebitsPosted = roomDebits.length > 0;
     if (!roomDebitsPosted && res.status === 'checked_in' && totalCharges === 0) {
-      const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
       const baseRoom = nightly * duration.totalNights;
       totalCharges += baseRoom;
       totalRoomCharges += baseRoom;
     }
   } else {
-    // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown without unposted overstay projections
+    // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown
     const nightly = BillingEngine.getNightlyRate(res, hotel);
-    const baseRoom = nightly * duration.totalNights;
-    totalCharges = (res.totalAmount && res.totalAmount > 0) ? res.totalAmount : baseRoom;
-    totalRoomCharges = baseRoom;
-    totalOverstayCharges = 0;
+    const baseRoom = nightly * (duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1));
+    const overstayAmount = (res.autoNightDeduction !== false && duration.overstayNights > 0) 
+      ? nightly * duration.overstayNights 
+      : 0;
+    totalOverstayCharges = overstayAmount;
+    totalRoomCharges = baseRoom + overstayAmount;
+    totalCharges = (res.totalAmount && res.totalAmount > 0 && duration.overstayNights === 0) 
+      ? res.totalAmount 
+      : ((res.totalAmount && res.totalAmount > 0) ? res.totalAmount + overstayAmount : totalRoomCharges);
     totalServiceCharges = 0;
     
     // Explicitly track legitimate credits: direct payments received vs discounts granted

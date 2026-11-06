@@ -20,11 +20,14 @@ import {
   Plus, 
   Layers,
   ArrowRight,
-  ShieldAlert
+  ShieldAlert,
+  Lock
 } from 'lucide-react';
 import { cn, formatCurrency } from '../utils';
 import { format, parseISO, startOfDay, endOfDay, isWithinInterval } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
+import { getRoomDetailedReservationInfo, RoomReservationInfo } from '../utils/roomUtils';
+import { hasPermission } from '../utils/permissions';
 import { GuestFolio } from './GuestFolio';
 import { toast } from 'sonner';
 import { createAuditLog } from '../utils/database';
@@ -40,9 +43,19 @@ export type OperationalRoomStatus =
   | 'housekeeping_pending';
 
 export function RoomStatusDashboard() {
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, customRoles } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+
+  // Granular Access Control: Hotel Admin can assign 'change_room_status' permission to staff
+  const canChangeRoomStatus = Boolean(
+    profile && (
+      profile.role === 'hotelAdmin' || 
+      profile.role === 'superAdmin' || 
+      profile.staffRole === 'admin' ||
+      hasPermission(profile, 'change_room_status', customRoles)
+    )
+  );
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -352,6 +365,12 @@ export function RoomStatusDashboard() {
   // Quick Status Update
   const handleQuickStatusUpdate = async (newStatus: Room['status']) => {
     if (!hotel?.id || !activeRoom) return;
+
+    if (!canChangeRoomStatus) {
+      toast.error('Permission denied: You do not have permission to change room status (e.g., from clean to dirty). Please contact your Hotel Administrator to grant this permission.');
+      return;
+    }
+
     try {
       const roomRef = doc(db, 'hotels', hotel.id, 'rooms', activeRoom.id);
       const now = new Date().toISOString();
@@ -698,21 +717,26 @@ export function RoomStatusDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filteredRooms.map((room) => {
             const status = getOperationalStatus(room);
-            const visuals = getStatusVisuals(status);
+            const detailedResInfo = getRoomDetailedReservationInfo(room, reservations);
+            const isReservedState = status === 'reserved' || detailedResInfo.isReserved;
+            const effectiveStatus: OperationalRoomStatus = isReservedState && status !== 'occupied' && status !== 'out_of_order' ? 'reserved' : status;
+            const visuals = getStatusVisuals(effectiveStatus);
             const resInfo = activeReservationMap.get(room.id) || activeReservationMap.get(room.roomNumber);
             const currentRes = resInfo?.active || resInfo?.todayReserved;
-            const upcomingRes = resInfo?.upcoming;
+            const upcomingRes = resInfo?.upcoming || detailedResInfo.primaryReservation;
             const activeRes = currentRes || upcomingRes;
 
             const guestName = currentRes?.guestName 
               ? currentRes.guestName 
               : upcomingRes?.guestName 
                 ? `Reserved: ${upcomingRes.guestName}` 
-                : 'Available';
+                : detailedResInfo.guestName
+                  ? `Reserved: ${detailedResInfo.guestName}`
+                  : 'Available';
             const roomType = room.type || 'Standard';
-            const dateLabel = status === 'occupied' 
+            const dateLabel = effectiveStatus === 'occupied' 
               ? 'Check-Out:' 
-              : status === 'reserved' 
+              : effectiveStatus === 'reserved' 
                 ? 'Check-In:' 
                 : upcomingRes 
                   ? 'Booked From:' 
@@ -772,6 +796,33 @@ export function RoomStatusDashboard() {
                     <span>{dateLabel}</span>
                     <span className="font-mono text-zinc-300 font-medium">{dateValue}</span>
                   </div>
+
+                  {/* Reserved Details: Dates of Reservation & Next Date of Availability */}
+                  {detailedResInfo.isReserved && (
+                    <div className="mt-2 p-2 rounded-xl bg-blue-950/70 border border-blue-500/40 text-[11px] space-y-1 text-left">
+                      <div className="flex items-center justify-between text-blue-400 font-bold">
+                        <span className="flex items-center gap-1">
+                          <Calendar size={11} className="shrink-0" />
+                          Reservation Dates:
+                        </span>
+                      </div>
+                      <div className="text-zinc-100 font-mono text-[10px] font-semibold leading-tight">
+                        {detailedResInfo.reservationDates}
+                      </div>
+                      <div className="pt-1 border-t border-blue-500/20 flex items-center justify-between text-[10px]">
+                        <span className="text-zinc-400">Next Available:</span>
+                        <span className="text-emerald-400 font-bold font-mono">{detailedResInfo.nextAvailableDate}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* If Occupied, also display Next Available Date */}
+                  {effectiveStatus === 'occupied' && (
+                    <div className="mt-2 p-1.5 rounded-lg bg-red-950/40 border border-red-500/30 text-[10px] flex items-center justify-between">
+                      <span className="text-zinc-400">Next Available:</span>
+                      <span className="text-emerald-400 font-bold font-mono">{detailedResInfo.nextAvailableDate}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Bottom interactive hover hint */}
@@ -788,7 +839,9 @@ export function RoomStatusDashboard() {
       )}
 
       {/* QUICK ACTION MODAL FOR CLICKED ROOM */}
-      {activeRoom && (
+      {activeRoom && (() => {
+        const modalResInfo = getRoomDetailedReservationInfo(activeRoom, reservations);
+        return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95">
             {/* Modal Header */}
@@ -820,44 +873,48 @@ export function RoomStatusDashboard() {
             {/* Modal Content */}
             <div className="p-6 space-y-4">
               {/* Guest & Stay info */}
-              {activeReservation ? (
+              {activeReservation || modalResInfo.isReserved ? (
                 <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-2 text-xs">
                   <div className="flex items-center justify-between font-semibold">
-                    <span className="text-zinc-400">Current / Scheduled Guest:</span>
-                    <span className="text-zinc-100">{activeReservation.guestName}</span>
+                    <span className="text-zinc-400">Guest:</span>
+                    <span className="text-zinc-100">{activeReservation?.guestName || modalResInfo.guestName || 'Reserved Guest'}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-400">Stay Dates:</span>
-                    <span className="text-zinc-200">
-                      {safeFormatDate(activeReservation.checkIn, 'MMM dd, yyyy')} - {safeFormatDate(activeReservation.checkOut, 'MMM dd, yyyy')}
+                    <span className="text-zinc-400">Reservation Dates:</span>
+                    <span className="text-zinc-200 font-mono">
+                      {modalResInfo.reservationDates || (activeReservation ? `${safeFormatDate(activeReservation.checkIn, 'MMM dd, yyyy')} - ${safeFormatDate(activeReservation.checkOut, 'MMM dd, yyyy')}` : 'N/A')}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-400">Status:</span>
-                    <span className="uppercase text-emerald-400 font-bold">{activeReservation.status}</span>
+                    <span className="text-zinc-400">Next Date of Availability:</span>
+                    <span className="text-emerald-400 font-mono font-bold">{modalResInfo.nextAvailableDate}</span>
                   </div>
-                  {activeReservation.isPrincipalRoom && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-400">Status:</span>
+                    <span className="uppercase text-emerald-400 font-bold">{activeReservation?.status || (modalResInfo.isReserved ? 'RESERVED' : activeRoom.status)}</span>
+                  </div>
+                  {activeReservation?.isPrincipalRoom && (
                     <div className="text-[11px] text-amber-400 bg-amber-500/10 p-2 rounded border border-amber-500/20">
                       Principal (Master) Room • Linked Rooms: {activeReservation.linkedRoomNumbers?.join(', ') || 'None'}
                     </div>
                   )}
-                  {activeReservation.principalRoomNumber && (
+                  {activeReservation?.principalRoomNumber && (
                     <div className="text-[11px] text-blue-400 bg-blue-500/10 p-2 rounded border border-blue-500/20">
                       Linked to Master Room {activeReservation.principalRoomNumber}
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 text-xs text-zinc-400 text-center">
-                  Room is currently vacant without active guest check-in.
+                <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 text-xs text-zinc-400 space-y-1.5">
+                  <div className="text-center">Room is currently vacant without active guest check-in.</div>
+                  <div className="flex items-center justify-between text-zinc-300 pt-1 border-t border-zinc-800">
+                    <span className="text-zinc-500">Next Date of Availability:</span>
+                    <span className="text-emerald-400 font-bold font-mono">{modalResInfo.nextAvailableDate}</span>
+                  </div>
                 </div>
               )}
 
-              {/* Action Buttons as requested:
-                  - Open guest folio
-                  - View reservation
-                  - Create work order
-                  - Update Room Status */}
+              {/* Action Buttons as requested */}
               <div className="grid grid-cols-2 gap-3 pt-2">
                 {activeReservation ? (
                   <button
@@ -888,19 +945,35 @@ export function RoomStatusDashboard() {
                   <div className="text-[10px] text-zinc-400">Report issue / maintenance</div>
                 </button>
 
-                <button
-                  onClick={() => setShowStatusModal(true)}
-                  className="p-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-left transition-all col-span-2"
-                >
-                  <RefreshCw size={18} className="text-blue-400 mb-1" />
-                  <div className="text-xs font-bold text-zinc-100">Change Room Status</div>
-                  <div className="text-[10px] text-zinc-400">Set clean, dirty, inspected, out of order</div>
-                </button>
+                {canChangeRoomStatus ? (
+                  <button
+                    onClick={() => setShowStatusModal(true)}
+                    className="p-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-left transition-all col-span-2"
+                  >
+                    <RefreshCw size={18} className="text-blue-400 mb-1" />
+                    <div className="text-xs font-bold text-zinc-100">Change Room Status</div>
+                    <div className="text-[10px] text-zinc-400">Set clean, dirty, inspected, out of order</div>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => toast.error('Permission denied: You do not have permission to change room status (e.g., from clean to dirty). Please contact your Hotel Administrator to grant this permission.')}
+                    className="p-3 bg-zinc-950/60 border border-zinc-800/60 rounded-xl text-left transition-all col-span-2 group/lock hover:border-amber-500/40"
+                    title="Hotel Admin permission required to change room status"
+                  >
+                    <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                      <Lock size={16} className="text-amber-500/80" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500/80">Admin Permission Required</span>
+                    </div>
+                    <div className="text-xs font-bold text-zinc-300">Change Room Status (Locked)</div>
+                    <div className="text-[10px] text-zinc-500">Only authorized staff or administrators can change room status</div>
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* QUICK STATUS CHANGER MODAL */}
       {showStatusModal && activeRoom && (

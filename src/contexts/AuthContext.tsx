@@ -471,12 +471,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, () => {});
 
-    // Periodic heartbeat to refresh lastActivityAt
+    // Periodic heartbeat to refresh lastActivityAt (throttled to 5 minutes)
     const heartbeat = setInterval(() => {
       updateDoc(sessionDocRef, {
         lastActivityAt: new Date().toISOString()
       }).catch(() => {});
-    }, 60000); // every 60 seconds
+    }, 300000); // every 5 minutes
 
     return () => {
       clearInterval(heartbeat);

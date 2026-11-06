@@ -45,25 +45,41 @@ class ErrorService {
    */
   public async handleError(error: any, context: { module: string; severity?: ErrorSeverity; silent?: boolean }) {
     const severity = context.severity || ErrorSeverity.MEDIUM;
-    const message = error.message || 'An unexpected error occurred';
+    const message = error?.message || (typeof error === 'string' ? error : 'An unexpected error occurred');
+    const code = error?.code || 'UNKNOWN_ERROR';
     
+    const isQuotaOrBenign = 
+      code === 'resource-exhausted' ||
+      message.toLowerCase().includes('quota') ||
+      message.toLowerCase().includes('resource-exhausted') ||
+      message.toLowerCase().includes('backoff delay') ||
+      message.toLowerCase().includes('websocket') ||
+      message.toLowerCase().includes('offline') ||
+      code === 'unavailable' ||
+      code === 'network-request-failed';
+
     const appError: AppError = {
       message,
-      code: error.code || 'UNKNOWN_ERROR',
+      code,
       severity,
       module: context.module,
-      details: error.stack || (typeof error === 'object' ? safeStringify(error) : error),
+      details: error?.stack || (typeof error === 'object' ? safeStringify(error) : error),
       timestamp: new Date().toISOString(),
       userId: auth.currentUser?.uid,
       userEmail: auth.currentUser?.email || undefined
     };
+
+    if (isQuotaOrBenign) {
+      // Suppress logging to console/firestore to prevent loop & quota exhaustion
+      return appError;
+    }
 
     // 1. Log to console for dev
     console.error(`[${context.module}] Error:`, error?.message || String(error));
 
     // 2. Log to Firestore if authenticated (background task)
     if (auth.currentUser) {
-      this.logToFirestore(appError).catch(console.error);
+      this.logToFirestore(appError).catch(() => {});
     }
 
     // 3. Notify user if not silent
@@ -81,9 +97,8 @@ class ErrorService {
         ...error,
         createdAt: serverTimestamp()
       });
-    } catch (e) {
-      // If logging itself fails, don't recurse infinitely
-      console.error('Failed to log error to Firestore:', e);
+    } catch {
+      // Silent catch to avoid recursive logging failures
     }
   }
 

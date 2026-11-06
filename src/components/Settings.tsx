@@ -4,7 +4,7 @@ import { doc, setDoc, addDoc, collection, getDocs, query, writeBatch, where } fr
 import { sendPasswordResetEmail, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { database } from '../utils/database';
-import { Tax, Reservation, HotelBankAccount, HotelCustomInfoField } from '../types';
+import { Tax, Reservation, HotelBankAccount, HotelCustomInfoField, ServiceChargeConfig, HotelOutlet } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 import { 
   User, 
@@ -40,7 +40,8 @@ import {
   Landmark,
   Hash,
   Sliders,
-  FileText
+  FileText,
+  Utensils
 } from 'lucide-react';
 import { cn, safeStringify } from '../utils';
 import { toast } from 'sonner';
@@ -191,12 +192,30 @@ export function Settings() {
   }, [hotel]);
 
   const [localTaxes, setLocalTaxes] = useState<Tax[]>(hotel?.taxes || []);
+  const [localServiceCharge, setLocalServiceCharge] = useState<ServiceChargeConfig>(hotel?.serviceCharge || {
+    enabled: false,
+    percentage: 10,
+    isInclusive: false,
+    isTaxable: false,
+    applicability: 'all'
+  });
+  const [localOutlets, setLocalOutlets] = useState<HotelOutlet[]>(hotel?.outlets || [
+    { id: 'restaurant', name: 'Main Restaurant', type: 'restaurant', isActive: true, allowRoomCharge: true },
+    { id: 'bar', name: 'Pool & Lounge Bar', type: 'bar', isActive: true, allowRoomCharge: true },
+    { id: 'room_service', name: 'Room Service', type: 'room_service', isActive: true, allowRoomCharge: true }
+  ]);
 
   useEffect(() => {
     if (hotel?.taxes) {
       setLocalTaxes(hotel?.taxes);
     }
-  }, [hotel?.taxes]);
+    if (hotel?.serviceCharge) {
+      setLocalServiceCharge(hotel.serviceCharge);
+    }
+    if (hotel?.outlets) {
+      setLocalOutlets(hotel.outlets);
+    }
+  }, [hotel?.taxes, hotel?.serviceCharge, hotel?.outlets]);
 
   const handleUpdateLocalTax = (index: number, updates: Partial<Tax>) => {
     const updated = [...localTaxes];
@@ -212,12 +231,14 @@ export function Settings() {
       const newTaxes = localTaxes;
 
       await database.safeSet(doc(db, 'hotels', hotel.id), {
-        taxes: localTaxes
+        taxes: localTaxes,
+        serviceCharge: localServiceCharge,
+        outlets: localOutlets
       }, {
         hotelId: hotel.id,
         module: 'Settings',
         action: 'UPDATE_TAX_SETTINGS',
-        details: 'Updated global tax configuration',
+        details: 'Updated global tax, service charge, and outlet configurations',
         metadata: {
           changes: {
             taxes: {
@@ -2582,7 +2603,7 @@ export function Settings() {
                             type="text" 
                             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={tax.name}
-                            placeholder="e.g. VAT, Service Charge"
+                            placeholder="e.g. VAT, Consumption Tax"
                             onChange={(e) => handleUpdateLocalTax(index, { name: e.target.value })}
                           />
                         </div>
@@ -2597,66 +2618,103 @@ export function Settings() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Category</label>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Applicability</label>
                           <select 
                             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                             value={tax.category}
                             onChange={(e) => handleUpdateLocalTax(index, { category: e.target.value as any })}
                           >
-                            <option value="all">All Services</option>
+                            <option value="all">All Services (Rooms & Outlets)</option>
                             <option value="room">Rooms Only</option>
-                            <option value="restaurant">Restaurant Only</option>
+                            <option value="restaurant">Restaurant & F&B Outlets Only</option>
                             <option value="service">Services Only</option>
                           </select>
                         </div>
-                        <div className="flex items-center justify-end pt-6">
+                        <div>
+                          <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Tax Type</label>
+                          <select 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={tax.taxType || 'vat'}
+                            onChange={(e) => handleUpdateLocalTax(index, { taxType: e.target.value as any })}
+                          >
+                            <option value="vat">VAT (Value Added Tax)</option>
+                            <option value="consumption_tax">Consumption Tax</option>
+                            <option value="sales_tax">Sales Tax</option>
+                            <option value="city_tax">City / Municipal Tax</option>
+                            <option value="other">Other Statutory Levy</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-900">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Tax Jurisdiction</label>
+                          <input 
+                            type="text" 
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:border-emerald-500 outline-none"
+                            value={tax.jurisdiction || ''}
+                            placeholder="e.g. Federal / National, State Authority"
+                            onChange={(e) => handleUpdateLocalTax(index, { jurisdiction: e.target.value })}
+                          />
+                        </div>
+                        <div className="flex items-center gap-4 pt-4">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-400">
+                            <input
+                              type="checkbox"
+                              checked={tax.discountReducesTaxableBase !== false}
+                              onChange={(e) => handleUpdateLocalTax(index, { discountReducesTaxableBase: e.target.checked })}
+                              className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0"
+                            />
+                            <span>Discounts reduce taxable base</span>
+                          </label>
                           <button 
                             onClick={() => {
                               const updated = localTaxes.filter(t => t.id !== tax.id);
                               setLocalTaxes(updated);
                             }}
-                            className="p-2 text-zinc-500 hover:text-red-500 transition-all"
+                            className="p-1.5 text-zinc-500 hover:text-red-500 transition-all ml-auto"
+                            title="Delete Tax"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </div>
                       
-                      <div className="flex flex-wrap items-center gap-4 pt-2">
+                      <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-zinc-900/60">
                         <button 
                           onClick={() => handleUpdateLocalTax(index, { isInclusive: !tax.isInclusive })}
                           className={cn(
-                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                            "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all",
                             tax.isInclusive ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
                           )}
                         >
-                          {tax.isInclusive ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                          Inclusive Tax
+                          {tax.isInclusive ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                          Inclusive Tax (Built into Price)
                         </button>
                         <button 
                           onClick={() => handleUpdateLocalTax(index, { showOnReceipt: !tax.showOnReceipt })}
                           className={cn(
-                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                            "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all",
                             tax.showOnReceipt ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
                           )}
                         >
-                          {tax.showOnReceipt ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                          {tax.showOnReceipt ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
                           Show on Receipt
                         </button>
                         <button 
                           onClick={() => handleUpdateLocalTax(index, { showOnFolio: !tax.showOnFolio })}
                           className={cn(
-                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                            "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all",
                             tax.showOnFolio ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
                           )}
                         >
-                          {tax.showOnFolio ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                          {tax.showOnFolio ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
                           Show on Folio
                         </button>
                         <button 
                           onClick={() => handleUpdateLocalTax(index, { status: tax.status === 'active' ? 'inactive' : 'active' })}
                           className={cn(
-                            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ml-auto",
+                            "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ml-auto",
                             tax.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
                           )}
                         >
@@ -2666,6 +2724,186 @@ export function Settings() {
                     </div>
                   ))
                 )}
+              </div>
+
+              {/* Service Charge Configuration Card */}
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 space-y-6">
+                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+                  <div>
+                    <h4 className="text-base font-bold text-zinc-50 flex items-center gap-2">
+                      <Percent size={18} className="text-amber-500" />
+                      Service Charge Configuration
+                    </h4>
+                    <p className="text-xs text-zinc-500 mt-0.5">Configure hotel service charges independently of government taxes.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalServiceCharge(prev => ({ ...prev, enabled: !prev.enabled }))}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5",
+                      localServiceCharge.enabled ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-zinc-800 text-zinc-500"
+                    )}
+                  >
+                    {localServiceCharge.enabled ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    {localServiceCharge.enabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+
+                {localServiceCharge.enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Percentage (%)</label>
+                      <input 
+                        type="number" 
+                        step="0.1"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-amber-500 outline-none"
+                        value={localServiceCharge.percentage}
+                        onChange={(e) => setLocalServiceCharge(prev => ({ ...prev, percentage: Number(e.target.value) }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-500 uppercase mb-2">Applicability</label>
+                      <select 
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-amber-500 outline-none"
+                        value={localServiceCharge.applicability}
+                        onChange={(e) => setLocalServiceCharge(prev => ({ ...prev, applicability: e.target.value as any }))}
+                      >
+                        <option value="all">All Outlets & Services</option>
+                        <option value="restaurant">Restaurant Only</option>
+                        <option value="room_service">Room Service Only</option>
+                        <option value="bar">Bar Only</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center pt-6">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={localServiceCharge.isInclusive}
+                          onChange={(e) => setLocalServiceCharge(prev => ({ ...prev, isInclusive: e.target.checked }))}
+                          className="rounded border-zinc-700 bg-zinc-900 text-amber-500 focus:ring-0"
+                        />
+                        <span>Included in Displayed Menu Prices</span>
+                      </label>
+                    </div>
+                    <div className="flex items-center pt-6">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={localServiceCharge.isTaxable}
+                          onChange={(e) => setLocalServiceCharge(prev => ({ ...prev, isTaxable: e.target.checked }))}
+                          className="rounded border-zinc-700 bg-zinc-900 text-amber-500 focus:ring-0"
+                        />
+                        <span>Service Charge is Subject to Tax</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* F&B Outlets Management Card */}
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 space-y-6">
+                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+                  <div>
+                    <h4 className="text-base font-bold text-zinc-50 flex items-center gap-2">
+                      <Utensils size={18} className="text-emerald-500" />
+                      Hotel F&B Outlets
+                    </h4>
+                    <p className="text-xs text-zinc-500 mt-0.5">Configure restaurant, bar, lounge, and room service operational identities.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newOutlet: HotelOutlet = {
+                        id: `outlet-${Date.now()}`,
+                        name: 'New Outlet',
+                        type: 'restaurant',
+                        isActive: true,
+                        allowRoomCharge: true
+                      };
+                      setLocalOutlets([...localOutlets, newOutlet]);
+                    }}
+                    className="bg-zinc-800 text-zinc-50 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 hover:bg-zinc-700 transition-all active:scale-95"
+                  >
+                    <Plus size={14} />
+                    Add Outlet
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {localOutlets.map((outlet, index) => (
+                    <div key={outlet.id} className="grid grid-cols-1 sm:grid-cols-4 gap-4 p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl items-center">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Outlet Name</label>
+                        <input
+                          type="text"
+                          value={outlet.name}
+                          onChange={(e) => {
+                            const updated = [...localOutlets];
+                            updated[index].name = e.target.value;
+                            setLocalOutlets(updated);
+                          }}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-zinc-500 uppercase mb-1">Outlet Type</label>
+                        <select
+                          value={outlet.type}
+                          onChange={(e) => {
+                            const updated = [...localOutlets];
+                            updated[index].type = e.target.value as any;
+                            setLocalOutlets(updated);
+                          }}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:border-emerald-500 outline-none"
+                        >
+                          <option value="restaurant">Restaurant</option>
+                          <option value="bar">Bar / Pub</option>
+                          <option value="lounge">Lounge</option>
+                          <option value="room_service">Room Service</option>
+                          <option value="cafe">Cafe / Bistro</option>
+                          <option value="other">Other Outlet</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs text-zinc-400">
+                          <input
+                            type="checkbox"
+                            checked={outlet.allowRoomCharge !== false}
+                            onChange={(e) => {
+                              const updated = [...localOutlets];
+                              updated[index].allowRoomCharge = e.target.checked;
+                              setLocalOutlets(updated);
+                            }}
+                            className="rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-0"
+                          />
+                          <span>Allow Room Charge</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs text-zinc-400">
+                          <input
+                            type="checkbox"
+                            checked={outlet.isActive !== false}
+                            onChange={(e) => {
+                              const updated = [...localOutlets];
+                              updated[index].isActive = e.target.checked;
+                              setLocalOutlets(updated);
+                            }}
+                            className="rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-0"
+                          />
+                          <span>Active</span>
+                        </label>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setLocalOutlets(localOutlets.filter(o => o.id !== outlet.id))}
+                          className="p-1.5 text-zinc-500 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

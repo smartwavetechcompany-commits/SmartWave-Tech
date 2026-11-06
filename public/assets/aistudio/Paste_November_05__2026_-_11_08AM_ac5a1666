@@ -1,0 +1,964 @@
+# SMARTWAVE PMS — F&B BILLING, ROOM CHARGES, GUEST FOLIO, FRONT DESK SETTLEMENT, RECEIPTS, AND TAX CONFIGURATION
+
+## PROJECT CONTEXT
+
+We are updating the existing SmartWave PMS, a commercial hotel Property Management System built with Firebase, Firestore, and the existing application architecture.
+
+The objective is to improve and properly integrate the Food & Beverage (F&B) module with the Front Desk, Guest Account, Folio, Payment, Receipt, Tax Configuration, and Financial Reporting modules.
+
+This is an enhancement to the existing PMS, NOT a new system.
+
+## CRITICAL IMPLEMENTATION INSTRUCTIONS
+
+1. Do not rewrite, replace, restructure, or scatter existing business logic.
+2. Do not create a separate financial calculation engine for F&B.
+3. Do not duplicate existing payment, folio, tax, receipt, or guest-account logic.
+4. First inspect the existing F&B module and its connections to the Front Desk, guest accounts, payment records, tax configuration, and financial reports.
+5. Reuse the existing shared financial engine, transaction services, Firestore collections, calculation functions, and existing data structures wherever possible.
+6. Do not introduce unnecessary new collections, duplicate fields, or parallel financial workflows.
+7. Do not modify unrelated PMS modules.
+8. Do not change existing room reservation, room pricing, checkout, housekeeping, guest registration, corporate billing, or other business logic unless a specific integration adjustment is strictly necessary.
+9. Preserve all existing working functionality, permissions, configurations, and financial records.
+10. Do not overwrite existing Firestore security rules. Append or modify only the necessary rules while preserving existing access controls.
+11. Do not introduce Firestore indexes.
+12. Maintain the existing user interface design system and navigation structure.
+13. All changes must be compatible with existing Firestore data and existing hotel operations.
+14. Implement the necessary changes directly within the existing modules rather than scattering functionality throughout the PMS.
+15. Before making changes, identify the existing source of truth for each financial operation and reuse it.
+
+---
+
+# MODULE 1: F&B BILLING WORKFLOW
+
+The F&B module must support restaurant, bar, lounge, room service, and other configured hotel food and beverage outlets.
+
+Each outlet should have its own operational identity while using the hotel's shared financial system.
+
+The system must support:
+
+- Dine-in orders.
+- Room service.
+- Takeaway orders.
+- Restaurant and bar orders.
+- Table management.
+- Menu items and categories.
+- Configurable menu prices.
+- Item quantities.
+- Modifiers and add-ons.
+- Kitchen order tickets.
+- Order status.
+- Discounts and promotional codes where permitted.
+- Tax calculation.
+- Service charge where applicable.
+- Direct payment.
+- Charge to room.
+- Split payment.
+- Partial payment.
+- Refunds.
+- Transaction cancellation and correction.
+- F&B sales reporting.
+
+Every transaction must have a unique reference number and retain its relationship to the outlet, cashier, guest, payment, and corresponding PMS financial records.
+
+## F&B BILLING PRINCIPLE
+
+The F&B module must distinguish between:
+
+1. An order that has been created.
+2. An order that has been prepared or served.
+3. A bill that has been finalised.
+4. A bill that has been paid.
+5. A bill that has been posted to a guest folio.
+6. A bill that has been partially settled.
+7. A bill that has been refunded or corrected.
+
+Serving food must not automatically mean that the bill has been paid.
+
+Closing an order must not automatically mean that the hotel has received money.
+
+---
+
+# MODULE 2: PAYMENT OPTIONS AT THE F&B OUTLET
+
+When an F&B bill is ready for settlement, the cashier must be presented with the existing supported payment methods.
+
+Examples:
+
+- Cash.
+- POS/card payment.
+- Bank transfer.
+- Other existing configured payment methods.
+- Charge to Room.
+- Split Payment.
+
+The system must use the existing payment configuration and not introduce hardcoded payment methods.
+
+The cashier must explicitly select how the transaction will be settled.
+
+## WORKFLOW A: GUEST PAYS DIRECTLY AT THE RESTAURANT
+
+Example:
+
+Guest orders food worth ₦25,000 and pays the entire amount at the restaurant.
+
+Expected workflow:
+
+1. The waiter creates the order.
+2. The kitchen receives the order where applicable.
+3. The cashier finalises the bill.
+4. The system calculates the applicable discounts, service charges, and taxes.
+5. The guest pays ₦25,000 using the selected payment method.
+6. The system records the actual payment.
+7. The F&B transaction is marked as paid.
+8. The cashier issues the appropriate receipt.
+9. The transaction appears in the F&B sales report.
+10. The payment appears in the relevant cashier and payment reports.
+
+### Front Desk Behaviour
+
+A transaction paid entirely at the restaurant must NOT create an outstanding charge on the guest's room folio.
+
+It must not appear as an unpaid F&B charge on the Front Desk Guest Account.
+
+The system must not charge the guest again during checkout.
+
+The guest's F&B transaction must remain traceable in the outlet records without being added to the guest's outstanding PMS balance.
+
+The guest's folio should only display an F&B charge if the existing accounting design intentionally records paid transactions there for a documented reason. If such a design exists, do not change it without first examining the consequences.
+
+---
+
+# MODULE 3: CHARGE TO ROOM — COMPLETE WORKFLOW
+
+This is a critical integration.
+
+When a guest orders food or drinks and requests that the bill be charged to their room, the F&B transaction must be posted to the correct guest account and settled later through the Front Desk.
+
+A charge to room is NOT a payment received.
+
+It is an outstanding financial obligation owed by the guest to the hotel.
+
+## STEP 1: CASHIER SELECTS CHARGE TO ROOM
+
+At the F&B settlement screen, provide the existing or appropriate Charge to Room option.
+
+When selected, the system should open a room and guest verification interface.
+
+The interface should display:
+
+- Room number.
+- Registered guest name.
+- Current room occupancy status.
+- Check-in status.
+- Guest account status.
+- Whether room charging is permitted.
+- Applicable account or billing restrictions.
+
+## STEP 2: VERIFY THE GUEST AND ROOM
+
+The system must verify that:
+
+- The room is occupied.
+- The guest is currently checked in.
+- The guest account belongs to the correct active stay.
+- Room charging is permitted for that guest.
+- The guest has not checked out.
+- The relevant folio is open and capable of accepting charges.
+- Existing room-charge restrictions are respected.
+- The transaction is being posted to the correct guest account.
+
+Do not allow staff to charge a room using only an unchecked room number.
+
+Display the guest name beside the room number to help staff confirm the correct account.
+
+Follow the hotel's approved guest verification procedure.
+
+If room charging is disabled for the guest or stay, prevent the transaction and clearly explain why.
+
+Do not allow F&B staff to bypass Front Desk restrictions.
+
+## STEP 3: FINALISE THE F&B BILL
+
+Before posting, display the complete F&B bill:
+
+- Outlet name.
+- Bill number.
+- Guest and room information.
+- Menu items.
+- Quantities.
+- Item prices.
+- Discounts.
+- Service charges.
+- Tax breakdown.
+- Final payable amount.
+
+The cashier must confirm the transaction before posting.
+
+## STEP 4: POST THE TRANSACTION TO THE PMS GUEST FOLIO
+
+After confirmation:
+
+1. Finalise the F&B bill.
+2. Create or confirm the financial transaction using the existing financial engine.
+3. Post the appropriate charge to the correct guest folio.
+4. Store the F&B bill reference in the PMS transaction.
+5. Store the PMS folio reference in the F&B transaction.
+6. Update the guest account balance.
+7. Update the Front Desk Guest Account.
+8. Update the relevant F&B room-posting report.
+9. Issue the appropriate outlet receipt.
+
+The F&B module must not manually create a second independent charge in the Front Desk module.
+
+The charge must flow through the existing shared transaction logic.
+
+## STEP 5: FRONT DESK GUEST ACCOUNT DISPLAY
+
+The posted F&B transaction must immediately appear in the correct guest account and folio.
+
+It should appear under a clear description such as:
+
+**Restaurant — F&B Charge**
+
+The transaction must include:
+
+- Date and time.
+- Outlet name.
+- F&B bill number.
+- Transaction reference.
+- Description of the purchase.
+- Amount before tax.
+- Applicable discount.
+- Service charge where applicable.
+- Tax breakdown.
+- Total F&B charge.
+- User who posted the charge.
+- Transaction status.
+
+The Front Desk must not need to manually re-enter the F&B charge.
+
+The system should display the charge through the existing real-time data mechanism.
+
+---
+
+# MODULE 4: HOW ROOM-CHARGED F&B MUST APPEAR ON THE GUEST FOLIO
+
+The F&B charge must appear as a financial debit on the guest folio.
+
+Example:
+
+Guest accommodation: ₦180,000
+
+Restaurant charge: ₦25,000
+
+Laundry: ₦5,000
+
+Expected folio:
+
+Accommodation: ₦180,000
+
+Restaurant — F&B: ₦25,000
+
+Laundry: ₦5,000
+
+Total charges: ₦210,000
+
+Payments already received: ₦180,000
+
+Outstanding balance: ₦30,000
+
+The system must calculate the balance using the existing financial engine.
+
+Do not manually add F&B charges to the outstanding balance separately if the shared folio calculation already includes them.
+
+The guest should see the F&B charge as a separate identifiable transaction rather than an unexplained increase in the total amount owed.
+
+## IMPORTANT
+
+The F&B charge must:
+
+- Increase the outstanding guest balance.
+- Increase the appropriate F&B sales amount.
+- Be included in the hotel's relevant financial reports.
+- Remain unpaid until actual payment is recorded.
+- Not automatically increase cash received.
+- Not automatically increase bank receipts.
+- Not automatically mark the transaction as paid.
+- Not be posted twice.
+- Not be deducted from the room accommodation charge.
+
+The F&B sale and the outstanding guest receivable must remain distinguishable in the financial reporting structure.
+
+---
+
+# MODULE 5: FRONT DESK CHECKOUT AND SETTLEMENT
+
+When a guest charged F&B to their room, the Front Desk must settle the combined outstanding account.
+
+The checkout screen should display the consolidated guest folio.
+
+Example:
+
+Accommodation: ₦180,000
+
+Restaurant: ₦25,000
+
+Bar: ₦10,000
+
+Laundry: ₦5,000
+
+Total charges: ₦220,000
+
+Payments received before checkout: ₦180,000
+
+Outstanding balance: ₦40,000
+
+The Front Desk should be able to see exactly which transactions make up the ₦40,000.
+
+The cashier should not need to open the F&B module to understand the outstanding bill.
+
+## CHECKOUT PAYMENT WORKFLOW
+
+1. Open the guest's account.
+2. Display all charges and previously recorded payments.
+3. Display the outstanding balance.
+4. Allow the guest to settle the balance using supported payment methods.
+5. Record the actual payment.
+6. Update the folio balance.
+7. Update the payment status.
+8. Generate the appropriate receipt and invoice.
+9. Complete checkout only according to the existing PMS checkout rules.
+
+Do not automatically settle outstanding F&B charges simply because checkout has been initiated.
+
+Do not allow a guest to check out with an unpaid balance if existing hotel policy blocks owing balances.
+
+If the existing PMS supports corporate billing or authorised outstanding balances, preserve that functionality and route eligible charges through the existing corporate billing logic.
+
+---
+
+# MODULE 6: PARTIAL PAYMENT AND SPLIT PAYMENT
+
+This functionality must be handled carefully.
+
+The system must distinguish between:
+
+- Partial payment at the restaurant.
+- Partial payment at the Front Desk.
+- A bill split between payment methods.
+- A bill split between a guest and a company.
+- An outstanding balance that remains unpaid.
+
+## SCENARIO A: PARTIAL PAYMENT AT THE RESTAURANT, REMAINDER CHARGED TO ROOM
+
+Example:
+
+F&B bill: ₦30,000
+
+Guest pays cash: ₦10,000
+
+Remaining amount: ₦20,000
+
+The guest requests that the remaining amount be charged to their room.
+
+Expected workflow:
+
+1. Calculate the final F&B bill.
+2. Record the actual ₦10,000 payment.
+3. Calculate the remaining ₦20,000.
+4. Verify the guest and room.
+5. Post only the remaining ₦20,000 to the guest folio.
+6. Record the bill as split-settled between the outlet payment and room charge.
+7. Issue a receipt showing both settlement components.
+8. Display only the unpaid ₦20,000 as the F&B charge on the guest folio.
+
+The Front Desk must not charge the original ₦30,000 again.
+
+The restaurant must not record ₦30,000 as cash received.
+
+The hotel must not record the entire ₦30,000 as paid.
+
+## SCENARIO B: PARTIAL PAYMENT AT THE FRONT DESK
+
+Example:
+
+Guest folio outstanding: ₦50,000
+
+Guest pays: ₦30,000
+
+Remaining balance: ₦20,000
+
+Expected behaviour:
+
+- Record the actual ₦30,000 payment.
+- Update the guest's account.
+- Reduce the outstanding balance to ₦20,000.
+- Keep the remaining balance unpaid.
+- Display the partial payment on the folio.
+- Display the remaining amount as outstanding.
+- Prevent the transaction from being marked fully settled.
+- Preserve existing checkout restrictions.
+
+The guest's payment must not automatically close the entire folio.
+
+## SCENARIO C: SPLIT PAYMENT USING TWO PAYMENT METHODS
+
+Example:
+
+F&B bill: ₦40,000
+
+Cash: ₦15,000
+
+Card: ₦25,000
+
+Expected behaviour:
+
+- Record each payment independently.
+- Associate both payment records with the same F&B transaction.
+- Display both payment methods on the receipt.
+- Ensure total payment equals the bill.
+- Mark the bill paid only when the complete bill has been settled.
+- Update outlet payment reports correctly.
+
+Support multiple payment methods where permitted by the existing payment engine.
+
+---
+
+# MODULE 7: RECEIPTS AND INVOICES
+
+The system must distinguish between an F&B outlet receipt, a PMS folio, a payment receipt, and the final hotel invoice.
+
+Do not treat them as interchangeable documents.
+
+## A. DIRECT F&B PAYMENT RECEIPT
+
+For a guest who pays at the restaurant, the receipt should include:
+
+- Hotel name.
+- Outlet name.
+- Receipt number.
+- F&B bill number.
+- Date and time.
+- Cashier.
+- Items purchased.
+- Quantities.
+- Unit prices.
+- Discounts.
+- Service charge.
+- Tax breakdown.
+- Total bill.
+- Payment method.
+- Amount paid.
+- Balance due.
+- Transaction status.
+
+The receipt should clearly indicate that payment was received.
+
+## B. ROOM-CHARGED F&B RECEIPT
+
+When the bill is charged to the guest's room, the receipt must not falsely indicate that the guest has paid the bill.
+
+It should display:
+
+- Hotel name.
+- Outlet name.
+- F&B receipt number.
+- Bill number.
+- Date and time.
+- Guest name.
+- Room number.
+- Items purchased.
+- Quantities.
+- Item prices.
+- Discounts.
+- Service charge.
+- Tax breakdown.
+- Total bill.
+- Settlement method: Charge to Room.
+- PMS folio reference.
+- Outstanding amount posted to the room.
+- Status: Posted to Guest Folio / Payable at Front Desk.
+
+The receipt should clearly communicate:
+
+**This transaction has been charged to the guest's hotel account and is not a payment receipt.**
+
+If the existing system supports an outlet-specific receipt format, preserve that design while ensuring these details are available.
+
+## C. PARTIAL PAYMENT RECEIPT
+
+For a split-settled transaction, display:
+
+Original bill: ₦30,000
+
+Cash received: ₦10,000
+
+Charged to room: ₦20,000
+
+Outstanding at Front Desk: ₦20,000
+
+Settlement status: Partially Paid / Partially Posted to Guest Folio
+
+The receipt must not show the complete bill as cash paid.
+
+## D. FINAL HOTEL RECEIPT AND INVOICE
+
+At checkout, the Front Desk should produce the appropriate final hotel invoice and payment receipt according to the existing PMS billing design and applicable legal requirements.
+
+The consolidated invoice should identify:
+
+- Accommodation.
+- Restaurant charges.
+- Bar charges.
+- Room service.
+- Laundry.
+- Other billable services.
+- Discounts.
+- Applicable taxes.
+- Total charges.
+- Payments received.
+- Remaining balance, if any.
+- Final settlement status.
+
+Do not issue duplicate financial invoices for the same taxable transaction.
+
+The F&B outlet receipt and the final hotel invoice must remain linked through transaction references.
+
+The tax engine must determine the appropriate invoice treatment.
+
+---
+
+# MODULE 8: F&B TAX CONFIGURATION
+
+The F&B module must use the existing PMS tax configuration and shared financial calculation engine.
+
+Do not create independent tax calculations within the restaurant, bar, Front Desk, or receipt modules.
+
+## TAX CONFIGURATION REQUIREMENTS
+
+The Hotel Admin must be able to configure:
+
+- Tax name.
+- Tax percentage.
+- Tax type.
+- Tax jurisdiction.
+- Tax applicability.
+- Tax-inclusive pricing.
+- Tax-exclusive pricing.
+- Taxable menu items.
+- Tax-exempt menu items.
+- Multiple applicable taxes where legally permitted.
+- Tax calculation order.
+- Whether service charge is taxable.
+- Whether discounts reduce the taxable base.
+- Effective date.
+- Tax activation and deactivation.
+- Tax reporting category.
+
+Examples of tax types:
+
+- VAT.
+- Applicable state or local consumption taxes.
+- Other legally applicable configured taxes.
+
+These are configurable examples, not automatic tax assignments.
+
+## TAX RULES
+
+1. Do not hardcode tax percentages into F&B menu items or calculation functions.
+2. Tax must be retrieved from the shared tax configuration.
+3. Each menu item should inherit its applicable tax classification.
+4. Tax must be calculated consistently at the outlet and Front Desk.
+5. The tax breakdown must remain traceable.
+6. Discounts must be applied according to the configured taxable-base rules.
+7. Tax-inclusive prices must not have tax added twice.
+8. Tax-exclusive prices must calculate the applicable tax correctly.
+9. Tax exemptions must be applied only when properly configured and authorised.
+10. Tax changes must not silently recalculate previously completed transactions.
+11. Historical transactions must preserve the tax configuration and rates applied when they were originally posted.
+12. Tax adjustments must be auditable.
+13. Refunds and cancellations must reverse the appropriate tax components.
+14. Do not allow staff to manually change tax amounts without the appropriate permissions and audit trail.
+
+---
+
+# MODULE 9: TAX-INCLUSIVE AND TAX-EXCLUSIVE PRICING
+
+The system must support both pricing models.
+
+## TAX-EXCLUSIVE EXAMPLE
+
+Assume:
+
+Menu item price before tax: ₦10,000
+
+Configured VAT: 7.5%
+
+VAT: ₦750
+
+Total: ₦10,750
+
+The customer pays ₦10,750.
+
+The system must display:
+
+Subtotal: ₦10,000
+
+VAT: ₦750
+
+Total: ₦10,750
+
+## TAX-INCLUSIVE EXAMPLE
+
+Assume:
+
+Displayed menu price: ₦10,750
+
+Configured VAT: 7.5%
+
+The VAT component is included in the displayed price.
+
+Taxable amount before VAT: ₦10,000
+
+VAT component: ₦750
+
+Total payable: ₦10,750
+
+The system must not add another ₦750 to the existing ₦10,750.
+
+## TAX CALCULATION VALIDATION
+
+Use the shared calculation engine to verify the actual taxable base and tax amount.
+
+Do not independently calculate tax in the receipt, guest folio, and checkout screens.
+
+All three screens must display the same tax breakdown derived from the same financial transaction.
+
+---
+
+# MODULE 10: SERVICE CHARGE CONFIGURATION
+
+Service charges must be configurable independently of tax.
+
+The Hotel Admin should be able to configure:
+
+- Service charge percentage.
+- Service charge applicability.
+- Outlets where it applies.
+- Menu items where it applies.
+- Whether it is included in displayed prices.
+- Whether it is taxable under the configured jurisdiction.
+- Effective date.
+- Applicable exemptions.
+
+The system must not automatically assume that every F&B transaction attracts a service charge.
+
+The system must calculate service charge according to the configured hotel policy.
+
+Do not allow the same service charge to be applied at the F&B outlet and then again at Front Desk checkout.
+
+A charge posted to the guest folio must retain its original service charge and tax breakdown.
+
+---
+
+# MODULE 11: DISCOUNTS, PROMOTIONS, AND COMPLIMENTARY F&B
+
+F&B discounts must integrate with the existing discount and promotional-code system wherever applicable.
+
+The system should support:
+
+- Percentage discounts.
+- Fixed-amount discounts.
+- Approved promotional codes.
+- Staff-authorised discounts.
+- Complimentary meals.
+- Complimentary drinks.
+- Manager-approved adjustments.
+
+Preserve the existing Hotel Admin discount permissions and approval logic.
+
+Do not allow F&B staff to create unrestricted discounts if the existing PMS requires Hotel Admin approval.
+
+## DISCOUNT RULES
+
+- Record the original amount.
+- Record the discount amount.
+- Record the final taxable amount according to the configured tax rules.
+- Record the user who applied the discount.
+- Record the approval where required.
+- Do not allow discounts to alter already-paid transactions without a correction process.
+- Prevent duplicate discount application.
+- Preserve existing corporate discount and promotional-code rules.
+
+Complimentary transactions must be recorded as authorised zero-charge or discounted transactions according to the existing accounting design.
+
+They must not be falsely recorded as cash sales.
+
+---
+
+# MODULE 12: TRANSACTION CORRECTIONS, REFUNDS, AND VOIDING
+
+The system must preserve financial history.
+
+Do not permanently delete completed financial transactions.
+
+If an F&B transaction is incorrect:
+
+- Use the existing void, reversal, adjustment, or refund functionality.
+- Record the reason.
+- Record the user who initiated the correction.
+- Record the approving user where required.
+- Preserve the original transaction.
+- Link the correction to the original transaction.
+- Reverse the appropriate financial and tax effects.
+- Update the guest folio through the shared financial engine.
+- Update the relevant reports.
+
+If a room charge has already been posted, correcting the F&B transaction must also correct the guest folio.
+
+Do not reverse the outlet transaction without correcting the corresponding PMS posting.
+
+Do not refund an amount that was never actually received as payment.
+
+A room charge is an outstanding receivable, not cash received.
+
+---
+
+# MODULE 13: F&B AND FRONT DESK TRANSACTION RECONCILIATION
+
+Implement the necessary reporting and reconciliation using the existing reporting architecture.
+
+The system should allow authorised users to reconcile:
+
+- Total F&B sales.
+- Direct F&B payments.
+- F&B room charges.
+- Split payments.
+- Outstanding room-posted F&B charges.
+- F&B refunds.
+- F&B discounts.
+- Tax collected.
+- Service charges.
+- Front Desk settlements of F&B charges.
+
+## RECONCILIATION RULE
+
+F&B room charges must be traceable from:
+
+F&B bill → PMS folio posting → Guest account → Front Desk payment → Final invoice.
+
+Each stage must share the appropriate transaction reference.
+
+The system must prevent the same F&B transaction from being posted to the guest folio twice.
+
+The system must also prevent an F&B room charge from being recorded as cash or card revenue received before actual payment.
+
+## REPORTS
+
+Add the necessary F&B reporting capability without duplicating existing reports.
+
+The system should support:
+
+- F&B sales by outlet.
+- F&B sales by cashier.
+- F&B sales by payment method.
+- Room-charge transactions.
+- F&B transactions posted to guest folios.
+- F&B payments received at the outlet.
+- F&B charges settled at Front Desk.
+- Outstanding F&B charges.
+- F&B refunds.
+- F&B tax report.
+- Service charge report.
+- Daily outlet reconciliation.
+- Room-posting reconciliation.
+- Transaction correction report.
+
+Reports must use the existing financial records and must not independently recalculate sales or payments.
+
+---
+
+# MODULE 14: PERMISSIONS AND SECURITY
+
+Maintain the existing role-based permission architecture.
+
+Suggested operational responsibilities:
+
+### F&B Staff
+
+- Create orders.
+- Manage permitted menu operations.
+- Submit kitchen orders.
+- Process authorised payments.
+- Request room charges.
+- View permitted outlet transactions.
+
+### F&B Manager
+
+- Manage permitted outlet operations.
+- Approve authorised discounts and voids.
+- Review F&B reports.
+- Review outlet reconciliation.
+
+### Front Desk
+
+- View guest folios.
+- View F&B room charges.
+- Receive guest payments.
+- Settle guest accounts.
+- Issue permitted receipts and invoices.
+
+### Hotel Admin
+
+- Configure F&B operational settings.
+- Configure applicable taxes and service charges.
+- Manage permissions.
+- Review reports and audit records.
+- Authorise operations according to the existing permission system.
+
+### Finance / Management
+
+- Review financial records.
+- Reconcile F&B and Front Desk transactions.
+- Review adjustments and refunds.
+- Access financial reports according to existing permissions.
+
+Do not grant entire modules when a user has only been granted a specific permission.
+
+Do not allow F&B staff to bypass Front Desk account restrictions.
+
+All financial operations must retain user attribution and audit history.
+
+---
+
+# MODULE 15: FIRESTORE AND REAL-TIME INTEGRATION
+
+Inspect the existing Firestore schema before implementing.
+
+Reuse existing collections and references wherever possible.
+
+Do not create duplicate guest folios, payment records, or financial transactions.
+
+Ensure that:
+
+- Room-charge postings appear immediately in the Front Desk guest account.
+- Payment updates appear immediately in the relevant account.
+- The F&B outlet can identify the transaction status.
+- The Front Desk can identify the originating F&B bill.
+- The correct guest and stay references are preserved.
+- Existing Firestore rules enforce appropriate permissions.
+- Updates do not overwrite unrelated fields.
+- Existing records remain backward-compatible.
+- Real-time listeners are used consistently with the current application architecture.
+
+Use the existing transaction and concurrency controls to prevent duplicate postings, repeated payments, and race conditions.
+
+If a posting fails, do not silently mark the F&B bill as successfully charged to the room.
+
+Provide a clear error state and allow an authorised retry without creating duplicate charges.
+
+---
+
+# MODULE 16: ACCEPTANCE TESTS
+
+Before considering the enhancement complete, test the following scenarios.
+
+### Test 1: Restaurant payment
+
+Guest pays the complete bill at the restaurant.
+
+Expected result: Paid F&B transaction, correct outlet report, no duplicate outstanding room charge.
+
+### Test 2: Complete room charge
+
+Guest charges the entire restaurant bill to the room.
+
+Expected result: Correct F&B bill, correct guest folio debit, correct Front Desk outstanding balance, correct receipt.
+
+### Test 3: Partial outlet payment
+
+Guest pays part of the bill and charges the remainder to the room.
+
+Expected result: Actual payment recorded, only the remainder posted to the folio, no duplicate charge.
+
+### Test 4: Split cash and card
+
+Guest pays through two methods.
+
+Expected result: Both payment records are associated with the same bill and the correct total is settled.
+
+### Test 5: Front Desk partial payment
+
+Guest pays only part of the outstanding folio.
+
+Expected result: Payment is recorded, balance remains outstanding, and the account is not falsely marked fully paid.
+
+### Test 6: Tax-inclusive menu price
+
+Expected result: Tax is extracted correctly and not added twice.
+
+### Test 7: Tax-exclusive menu price
+
+Expected result: Tax is added correctly using the existing tax engine.
+
+### Test 8: Room charge disabled
+
+Expected result: F&B staff cannot post a room charge or bypass existing restrictions.
+
+### Test 9: Guest checkout
+
+Expected result: All room-posted F&B charges appear in the consolidated guest account and are settled through the existing checkout process.
+
+### Test 10: Refund
+
+Expected result: Refund and reversal are recorded correctly, with corresponding guest folio and tax adjustments.
+
+### Test 11: Duplicate posting prevention
+
+Expected result: Repeated confirmation or network retry cannot create duplicate F&B charges.
+
+### Test 12: Financial reconciliation
+
+Expected result: Outlet sales, guest folio charges, payments, taxes, and outstanding balances reconcile correctly.
+
+### Test 13: Existing PMS functionality
+
+Expected result: Existing reservations, room charges, guest payments, checkout, corporate billing, and financial reports continue to work without regressions.
+
+---
+
+# FINAL IMPLEMENTATION REQUIREMENT
+
+Before making any code changes, inspect the existing F&B, Front Desk, Guest Account, Folio, Payment, Receipt, Tax Configuration, and Financial Reporting modules.
+
+Identify the exact existing functions and collections responsible for:
+
+- Financial transaction creation.
+- F&B sales.
+- Guest folio posting.
+- Guest account balances.
+- Payment recording.
+- Tax calculation.
+- Receipt generation.
+- Checkout settlement.
+- Financial reporting.
+
+Then implement the necessary changes using those existing systems.
+
+Do not build a second financial engine.
+
+Do not change unrelated PMS logic.
+
+Do not remove or overwrite existing business rules.
+
+After implementation, provide a concise summary of:
+
+1. What was updated.
+2. Which existing modules were integrated.
+3. Which existing financial functions were reused.
+4. Whether any Firestore schema changes were necessary.
+5. Which tax settings are configurable.
+6. Which acceptance tests passed.
+7. Any remaining integration limitations.
+
+The final result must be a professional, financially consistent F&B module where restaurant and bar transactions can be paid directly, charged to guest rooms, partially paid, or settled at the Front Desk without duplicate charges, incorrect balances, or inconsistent receipts.

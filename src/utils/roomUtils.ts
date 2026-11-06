@@ -43,7 +43,156 @@ export const getRoomDisplayStatus = (
   if (hasReservation) return 'reserved';
 
   // 4. Return physical status (Clean/Dirty/Maintenance)
+  // If a room still has a legacy or leftover 'occupied' status in the database but no active reservation
+  // is checked in today, treat the room as dirty (awaiting housekeeping cleaning) rather than occupied.
+  if (room.status === 'occupied') {
+    return 'dirty';
+  }
+
   return room.status;
+};
+
+export interface RoomReservationInfo {
+  isReserved: boolean;
+  isOccupied: boolean;
+  displayStatus: DisplayRoomStatus;
+  primaryReservation?: Reservation;
+  reservationDates?: string; // e.g. "Nov 4, 2026 – Nov 7, 2026"
+  checkInDate?: string;
+  checkOutDate?: string;
+  nextAvailableDate?: string; // e.g. "Nov 7, 2026"
+  nextAvailableDateIso?: string; // e.g. "2026-11-07"
+  guestName?: string;
+}
+
+/**
+ * Computes comprehensive reservation details for a room:
+ * - Accurately detects active and upcoming reservations
+ * - Formats reservation date span (e.g. "Nov 4, 2026 – Nov 7, 2026")
+ * - Calculates the next date of availability (considering consecutive bookings and room blocks)
+ */
+export const getRoomDetailedReservationInfo = (
+  room: Room,
+  reservations: Reservation[],
+  roomBlockings: RoomBlocking[] = [],
+  targetDate: Date = new Date()
+): RoomReservationInfo => {
+  const today = startOfDay(targetDate);
+
+  // Filter valid non-cancelled reservations for this room
+  const roomRes = reservations.filter(r => {
+    if (r.roomId !== room.id && r.roomNumber !== room.roomNumber) return false;
+    if (r.status === 'cancelled' || r.status === 'checked_out' || r.status === 'no_show') return false;
+    return true;
+  });
+
+  // Sort chronologically by check-in date
+  roomRes.sort((a, b) => {
+    const tA = new Date(a.checkIn || 0).getTime();
+    const tB = new Date(b.checkIn || 0).getTime();
+    return tA - tB;
+  });
+
+  // 1. Check for active checked-in guest
+  const activeStay = roomRes.find(r => r.status === 'checked_in');
+  
+  // 2. Check for confirmed/pending reservation covering target date
+  const reservedToday = roomRes.find(r => {
+    if (r.status !== 'confirmed' && r.status !== 'pending') return false;
+    const start = startOfDay(parseISO(r.checkIn));
+    const end = startOfDay(parseISO(r.checkOut));
+    return today >= start && today < end;
+  });
+
+  // 3. Check for upcoming confirmed/pending reservation in the future
+  const upcomingRes = roomRes.find(r => {
+    if (r.status !== 'confirmed' && r.status !== 'pending') return false;
+    const start = startOfDay(parseISO(r.checkIn));
+    const end = startOfDay(parseISO(r.checkOut));
+    return start >= today || end > today;
+  });
+
+  const relevantRes = activeStay || reservedToday || upcomingRes;
+  const isOccupied = !!activeStay;
+  const isReserved = !isOccupied && (!!reservedToday || !!upcomingRes || room.status === 'reserved');
+
+  const baseDisplayStatus = getRoomDisplayStatus(room, reservations, roomBlockings, targetDate);
+  const displayStatus: DisplayRoomStatus = isOccupied ? 'occupied' : isReserved ? 'reserved' : baseDisplayStatus;
+
+  if (!relevantRes) {
+    return {
+      isReserved: false,
+      isOccupied: false,
+      displayStatus,
+      nextAvailableDate: 'Available Now',
+      nextAvailableDateIso: format(today, 'yyyy-MM-dd')
+    };
+  }
+
+  // Format reservation dates
+  let reservationDates = '';
+  try {
+    const sDate = parseISO(relevantRes.checkIn);
+    const eDate = parseISO(relevantRes.checkOut);
+    reservationDates = `${format(sDate, 'MMM d, yyyy')} – ${format(eDate, 'MMM d, yyyy')}`;
+  } catch {
+    reservationDates = `${relevantRes.checkIn} – ${relevantRes.checkOut}`;
+  }
+
+  // Calculate next date of availability:
+  // Follow chain of contiguous consecutive reservations on this room
+  let endChain = parseISO(relevantRes.checkOut);
+  const relevantIndex = roomRes.indexOf(relevantRes);
+  if (relevantIndex >= 0) {
+    for (let i = relevantIndex + 1; i < roomRes.length; i++) {
+      const nextRes = roomRes[i];
+      const nextStart = parseISO(nextRes.checkIn);
+      const nextEnd = parseISO(nextRes.checkOut);
+      // If consecutive without gap (next starts on or before current ends)
+      if (startOfDay(nextStart).getTime() <= startOfDay(endChain).getTime()) {
+        if (startOfDay(nextEnd) > startOfDay(endChain)) {
+          endChain = nextEnd;
+        }
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Also check if any maintenance blockings extend the unavailability
+  const relevantBlocks = roomBlockings.filter(b => b.roomId === room.id);
+  for (const b of relevantBlocks) {
+    try {
+      const bStart = parseISO(b.startDate);
+      const bEnd = parseISO(b.endDate);
+      if (startOfDay(bStart).getTime() <= startOfDay(endChain).getTime() && endOfDay(bEnd).getTime() >= startOfDay(endChain).getTime()) {
+        endChain = addDays(endOfDay(bEnd), 1);
+      }
+    } catch {}
+  }
+
+  let nextAvailableDate = '';
+  let nextAvailableDateIso = '';
+  try {
+    nextAvailableDate = format(endChain, 'MMM d, yyyy');
+    nextAvailableDateIso = format(endChain, 'yyyy-MM-dd');
+  } catch {
+    nextAvailableDate = relevantRes.checkOut;
+    nextAvailableDateIso = relevantRes.checkOut;
+  }
+
+  return {
+    isReserved,
+    isOccupied,
+    displayStatus,
+    primaryReservation: relevantRes,
+    reservationDates,
+    checkInDate: relevantRes.checkIn,
+    checkOutDate: relevantRes.checkOut,
+    nextAvailableDate,
+    nextAvailableDateIso,
+    guestName: relevantRes.guestName
+  };
 };
 
 export interface ConflictCheckResult {
