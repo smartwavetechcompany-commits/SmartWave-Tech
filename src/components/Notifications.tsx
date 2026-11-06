@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, orderBy, limit, doc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, limit, doc, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,10 +47,11 @@ export function Notifications() {
       limit(50)
     );
 
-    getDocs(q).then(
+    const unsubscribe = onSnapshot(
+      q,
       (snap) => {
         const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification));
-        // Sort client-side to avoid index error
+        // Client-side sort descending by timestamp
         setNotifications(docs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       },
       (error) => {
@@ -58,7 +59,7 @@ export function Notifications() {
       }
     );
 
-    return () => {};
+    return () => unsubscribe();
   }, [hotel?.id, profile?.uid]);
 
   const markAsRead = async (id: string) => {

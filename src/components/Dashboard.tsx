@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, collectionGroup, onSnapshot, query, where, limit, orderBy, getDocs } from 'firebase/firestore';
+import { collection, collectionGroup, onSnapshot, query, where, limit, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking, OutstandingDebt, LedgerEntry } from '../types';

@@ -23,12 +23,13 @@ import {
   Layers,
   Wrench
 } from 'lucide-react';
-import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount, Guest } from '../types';
 import { formatCurrency } from '../utils';
 import { 
   getOutstandingDebts, 
+  subscribeOutstandingDebts,
   receiveDebtPayment, 
   transferDebt, 
   writeOffDebt, 
@@ -143,7 +144,53 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
   };
 
   useEffect(() => {
-    loadDebts();
+    if (!hotel?.id) return;
+    setLoading(true);
+
+    // 1. Real-time Outstanding Debt Ledger synchronization
+    const unsubDebts = subscribeOutstandingDebts(
+      hotel.id,
+      (data) => {
+        setDebts(data);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Failed to load outstanding debts in real-time:", err);
+        setLoading(false);
+      }
+    );
+
+    // 2. Real-time Corporate Accounts synchronization
+    const corpRef = collection(db, 'hotels', hotel.id, 'corporate_accounts');
+    const unsubCorp = onSnapshot(
+      corpRef,
+      (corpSnap) => {
+        const corps = corpSnap.docs.map(d => ({ id: d.id, ...d.data() } as CorporateAccount));
+        setCorporateAccounts(corps);
+      },
+      (err) => {
+        console.warn("Real-time corporate accounts notice in DebtLedger:", err);
+      }
+    );
+
+    // 3. Real-time Guest linkage synchronization
+    const guestsRef = collection(db, 'hotels', hotel.id, 'guests');
+    const unsubGuests = onSnapshot(
+      guestsRef,
+      (guestsSnap) => {
+        const guestList = guestsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
+        setGuests(guestList);
+      },
+      (err) => {
+        console.warn("Real-time guests notice in DebtLedger:", err);
+      }
+    );
+
+    return () => {
+      unsubDebts();
+      unsubCorp();
+      unsubGuests();
+    };
   }, [hotel?.id]);
 
   // Statistics

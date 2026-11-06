@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, doc, onSnapshot, writeBatch, increment, getDoc, setDoc, arrayUnion, where } from 'firebase/firestore';
+import { collection, query, doc, onSnapshot, writeBatch, increment, getDoc, setDoc, arrayUnion, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';

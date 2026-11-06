@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -93,153 +93,197 @@ export function Reports() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
+  const [rawLedgerEntries, setRawLedgerEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<{ id: string; collection: string; label: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // 1. Real-time Firestore subscriptions for Reports
   useEffect(() => {
     if (!hotel?.id) return;
-    
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const startDate = startOfDay(new Date(dateRange.start));
-        const endDate = endOfDay(new Date(dateRange.end));
+    setLoading(true);
 
-        // Fetch rooms for occupancy (current)
-        const roomsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'rooms'));
-        const totalRooms = roomsSnap.size;
-        const occupiedRooms = roomsSnap.docs.filter(d => d.data().status === 'occupied').length;
-        const currentOccupancy = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+    const unsubs: (() => void)[] = [];
 
-        // Fetch ledger entries for revenue (only for finance users)
-        const ledgerSnap = canViewFinances
-          ? await getDocs(collection(db, 'hotels', hotel.id, 'ledger'))
-          : { docs: [] };
-        const allEntries = ledgerSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
-        
-        // Fetch all other data needed for reports; exclude sensitive financial queries for unauthorized users
-        const [rSnap, gSnap, cSnap, fSnap, iSnap, aSnap, sSnap, staffSnap] = await Promise.all([
-          getDocs(collection(db, 'hotels', hotel.id, 'reservations')),
-          getDocs(collection(db, 'hotels', hotel.id, 'guests')),
-          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'corporate_accounts')) : Promise.resolve({ docs: [] } as any),
-          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'finance')) : Promise.resolve({ docs: [] } as any),
-          getDocs(collection(db, 'hotels', hotel.id, 'inventory')),
-          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'accounts')) : Promise.resolve({ docs: [] } as any),
-          canViewFinances ? getDocs(collection(db, 'hotels', hotel.id, 'suppliers')) : Promise.resolve({ docs: [] } as any),
-          getDocs(query(collection(db, 'users'), where('hotelId', '==', hotel.id)))
-        ]);
+    // Rooms (live room inventory & status)
+    const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
+      setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      setLoading(false);
+    }, (err) => {
+      console.warn("Reports rooms listener notice:", err);
+      setLoading(false);
+    });
+    unsubs.push(unsubRooms);
 
-        const allReservations = rSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
-        const allRooms = roomsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room));
-        const allGuests = gSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-        const allCorps = cSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount));
-        const allFinance = fSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
-        const allInventory = iSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const allAccounts = aSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const allSuppliers = sSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const allStaff = staffSnap.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() }));
+    // Reservations (live stay details, occupancy, checkins/checkouts)
+    const unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
+      setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    }, (err) => {
+      console.warn("Reports reservations listener notice:", err);
+    });
+    unsubs.push(unsubRes);
 
-        setReservations(allReservations);
-        setRooms(allRooms);
-        setGuests(allGuests);
-        setCorporateAccounts(allCorps);
-        setFinanceRecords(allFinance);
-        setInventory(allInventory);
-        setAccounts(allAccounts);
-        setSuppliers(allSuppliers);
-        setStaff(allStaff);
+    // Guests (profiles, contact info)
+    const unsubGuests = onSnapshot(collection(db, 'hotels', hotel.id, 'guests'), (snap) => {
+      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+    }, (err) => {
+      console.warn("Reports guests listener notice:", err);
+    });
+    unsubs.push(unsubGuests);
 
-        const filteredEntries = allEntries.filter(entry => {
-          const entryDate = new Date(entry.timestamp);
-          return isWithinInterval(entryDate, { start: startDate, end: endDate });
-        });
+    // Inventory
+    const unsubInv = onSnapshot(collection(db, 'hotels', hotel.id, 'inventory'), (snap) => {
+      setInventory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("Reports inventory listener notice:", err);
+    });
+    unsubs.push(unsubInv);
 
-        setLedgerEntries(filteredEntries);
+    // Staff
+    const unsubStaff = onSnapshot(query(collection(db, 'users'), where('hotelId', '==', hotel.id)), (snap) => {
+      setStaff(snap.docs.map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("Reports staff listener notice:", err);
+    });
+    unsubs.push(unsubStaff);
 
-        // Calculate stats
-        const totalRevenue = filteredEntries
-          .filter(e => e.type === 'debit')
-          .reduce((acc, curr) => acc + curr.amount, 0);
+    // Financial collections (restricted to authorized users)
+    if (canViewFinances) {
+      const unsubLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
+        setRawLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      }, (err) => {
+        console.warn("Reports ledger listener notice:", err);
+      });
+      unsubs.push(unsubLedger);
 
-        const corpRev = filteredEntries
-          .filter(e => e.type === 'debit' && e.corporateId)
-          .reduce((acc, curr) => acc + curr.amount, 0);
-        
-        const indivRev = totalRevenue - corpRev;
+      const unsubCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), (snap) => {
+        setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+      }, (err) => {
+        console.warn("Reports corporate accounts listener notice:", err);
+      });
+      unsubs.push(unsubCorp);
 
-        // Fetch reservations for occupancy trends
-        const resSnap = await getDocs(collection(db, 'hotels', hotel.id, 'reservations'));
-        const allRes = resSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
+      const unsubFinance = onSnapshot(collection(db, 'hotels', hotel.id, 'finance'), (snap) => {
+        setFinanceRecords(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord)));
+      }, (err) => {
+        console.warn("Reports finance listener notice:", err);
+      });
+      unsubs.push(unsubFinance);
 
-        // Group revenue by category for chart
-        const categoryRevenue: { [key: string]: number } = {};
-        filteredEntries.forEach(entry => {
-          if (entry.type === 'debit') {
-            const cat = entry.category || 'Other';
-            categoryRevenue[cat] = (categoryRevenue[cat] || 0) + entry.amount;
-          }
-        });
+      const unsubAccounts = onSnapshot(collection(db, 'hotels', hotel.id, 'accounts'), (snap) => {
+        setAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.warn("Reports accounts listener notice:", err);
+      });
+      unsubs.push(unsubAccounts);
 
-        const revenueByCategory = Object.entries(categoryRevenue).map(([name, value]) => ({ name, value }));
-        setCorporateData(revenueByCategory.length > 0 ? revenueByCategory : [{ name: 'No Data', value: 0 }]);
+      const unsubSuppliers = onSnapshot(collection(db, 'hotels', hotel.id, 'suppliers'), (snap) => {
+        setSuppliers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (err) => {
+        console.warn("Reports suppliers listener notice:", err);
+      });
+      unsubs.push(unsubSuppliers);
+    } else {
+      setRawLedgerEntries([]);
+      setCorporateAccounts([]);
+      setFinanceRecords([]);
+      setAccounts([]);
+      setSuppliers([]);
+    }
 
-        // Group revenue by day for chart
-        const dailyRevenue: { [key: string]: number } = {};
-        filteredEntries.forEach(entry => {
-          if (entry.type === 'debit') {
-            const day = safeFormatDate(entry.timestamp, 'MMM d');
-            dailyRevenue[day] = (dailyRevenue[day] || 0) + entry.amount;
-          }
-        });
-
-        const chartData = Object.entries(dailyRevenue).map(([name, revenue]) => ({ name, revenue }));
-        setRevenueData(chartData.length > 0 ? chartData : [{ name: 'No Data', revenue: 0 }]);
-
-        const roomRevenue = filteredEntries
-          .filter(e => e.category === 'room' && e.type === 'debit')
-          .reduce((acc, curr) => acc + curr.amount, 0);
-
-        setStats({
-          occupancy: currentOccupancy,
-          revPar: totalRooms > 0 ? roomRevenue / totalRooms : 0,
-          adr: occupiedRooms > 0 ? roomRevenue / occupiedRooms : 0,
-          totalGuests: new Set(filteredEntries.map(e => e.reservationId).filter(Boolean)).size,
-          corporateRevenue: corpRev,
-          individualRevenue: indivRev,
-          totalRevenue
-        });
-
-        // Calculate occupancy trend
-        const trend: { name: string; rate: number }[] = [];
-        let curr = new Date(startDate);
-        while (curr <= endDate) {
-          const dayStr = format(curr, 'MMM d');
-          const activeOnDay = allRes.filter(res => {
-            const checkIn = new Date(res.checkIn);
-            const checkOut = new Date(res.checkOut);
-            return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut);
-          }).length;
-          
-          trend.push({
-            name: dayStr,
-            rate: totalRooms > 0 ? Math.round((activeOnDay / totalRooms) * 100) : 0
-          });
-          
-          curr.setDate(curr.getDate() + 1);
-        }
-        setOccupancyData(trend);
-
-      } catch (err: any) {
-        console.error("Error fetching report data:", err.message || safeStringify(err));
-        toast.error("Failed to load report data");
-      } finally {
-        setLoading(false);
-      }
+    return () => {
+      unsubs.forEach(unsub => unsub());
     };
+  }, [hotel?.id, canViewFinances]);
 
-    fetchData();
-  }, [hotel?.id, dateRange]);
+  // 2. Live Metric and Chart Calculations triggered whenever live data or date range changes
+  useEffect(() => {
+    const startDate = startOfDay(new Date(dateRange.start));
+    const endDate = endOfDay(new Date(dateRange.end));
+
+    // Current occupancy from live rooms
+    const totalRooms = rooms.length;
+    const occupiedRooms = rooms.filter(d => d.status === 'occupied').length;
+    const currentOccupancy = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+
+    // Filter live ledger entries by current date interval
+    const filteredEntries = rawLedgerEntries.filter(entry => {
+      if (!entry.timestamp) return false;
+      const entryDate = new Date(entry.timestamp);
+      return isWithinInterval(entryDate, { start: startDate, end: endDate });
+    });
+
+    setLedgerEntries(filteredEntries);
+
+    // Revenue calculations
+    const totalRevenue = filteredEntries
+      .filter(e => e.type === 'debit')
+      .reduce((acc, curr) => acc + curr.amount, 0);
+
+    const corpRev = filteredEntries
+      .filter(e => e.type === 'debit' && e.corporateId)
+      .reduce((acc, curr) => acc + curr.amount, 0);
+    
+    const indivRev = totalRevenue - corpRev;
+
+    // Group revenue by category for chart
+    const categoryRevenue: { [key: string]: number } = {};
+    filteredEntries.forEach(entry => {
+      if (entry.type === 'debit') {
+        const cat = entry.category || 'Other';
+        categoryRevenue[cat] = (categoryRevenue[cat] || 0) + entry.amount;
+      }
+    });
+
+    const revenueByCategory = Object.entries(categoryRevenue).map(([name, value]) => ({ name, value }));
+    setCorporateData(revenueByCategory.length > 0 ? revenueByCategory : [{ name: 'No Data', value: 0 }]);
+
+    // Group revenue by day for chart
+    const dailyRevenue: { [key: string]: number } = {};
+    filteredEntries.forEach(entry => {
+      if (entry.type === 'debit') {
+        const day = safeFormatDate(entry.timestamp, 'MMM d');
+        dailyRevenue[day] = (dailyRevenue[day] || 0) + entry.amount;
+      }
+    });
+
+    const chartData = Object.entries(dailyRevenue).map(([name, revenue]) => ({ name, revenue }));
+    setRevenueData(chartData.length > 0 ? chartData : [{ name: 'No Data', revenue: 0 }]);
+
+    const roomRevenue = filteredEntries
+      .filter(e => e.category === 'room' && e.type === 'debit')
+      .reduce((acc, curr) => acc + curr.amount, 0);
+
+    setStats({
+      occupancy: currentOccupancy,
+      revPar: totalRooms > 0 ? roomRevenue / totalRooms : 0,
+      adr: occupiedRooms > 0 ? roomRevenue / occupiedRooms : 0,
+      totalGuests: new Set(filteredEntries.map(e => e.reservationId).filter(Boolean)).size,
+      corporateRevenue: corpRev,
+      individualRevenue: indivRev,
+      totalRevenue
+    });
+
+    // Calculate occupancy trend over interval
+    const trend: { name: string; rate: number }[] = [];
+    let curr = new Date(startDate);
+    while (curr <= endDate) {
+      const dayStr = format(curr, 'MMM d');
+      const activeOnDay = reservations.filter(res => {
+        const checkIn = new Date(res.checkIn);
+        const checkOut = new Date(res.checkOut);
+        return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut);
+      }).length;
+      
+      trend.push({
+        name: dayStr,
+        rate: totalRooms > 0 ? Math.round((activeOnDay / totalRooms) * 100) : 0
+      });
+      
+      curr.setDate(curr.getDate() + 1);
+    }
+    setOccupancyData(trend);
+  }, [rawLedgerEntries, rooms, reservations, dateRange]);
 
   const getReportHeaders = (type: string): string[] => {
     const headers = (() => {

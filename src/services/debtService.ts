@@ -9,7 +9,8 @@ import {
   updateDoc, 
   increment, 
   arrayUnion,
-  orderBy 
+  orderBy,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
@@ -121,6 +122,40 @@ export const getOutstandingDebts = async (hotelId: string): Promise<OutstandingD
       ...data,
       agingDays
     };
+  });
+};
+
+/**
+ * Real-time listener for the hotel's accounts receivable / debt ledger.
+ * Automatically computes live aging days and unsubscribes cleanly.
+ */
+export const subscribeOutstandingDebts = (
+  hotelId: string,
+  callback: (debts: OutstandingDebt[]) => void,
+  onError?: (error: any) => void
+): (() => void) => {
+  const debtsRef = collection(db, 'hotels', hotelId, 'outstanding_debt_ledger');
+  return onSnapshot(debtsRef, (snap) => {
+    const now = new Date();
+    const debts = snap.docs.map(d => {
+      const data = d.data() as OutstandingDebt;
+      let agingDays = 0;
+      try {
+        if (data.checkoutDate) {
+          agingDays = Math.max(0, differenceInDays(now, parseISO(data.checkoutDate)));
+        }
+      } catch {
+        agingDays = 0;
+      }
+      return {
+        ...data,
+        agingDays
+      };
+    });
+    callback(debts);
+  }, (err) => {
+    console.error("Outstanding debts real-time listener error:", err);
+    if (onError) onError(err);
   });
 };
 

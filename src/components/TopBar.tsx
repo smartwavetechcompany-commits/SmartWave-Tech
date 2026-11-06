@@ -7,7 +7,7 @@ import { UIScaleControl } from './UIScaleControl';
 import { AudioAlertWidget } from './AudioAlertWidget';
 import { User, Building2, WifiOff, XCircle, LogOut, Search, Bed, Users, Calendar, ArrowRight, Loader2, ShieldAlert, CheckCircle2, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, getDocs, limit, or } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, or, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../utils';
 import { toast } from 'sonner';
@@ -36,17 +36,13 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const isManaging = isSuperAdmin && hotel?.id;
 
   useEffect(() => {
-    if (isSuperAdmin) {
-      const fetchHotels = async () => {
-        try {
-          const snap = await getDocs(collection(db, 'hotels'));
-          setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        } catch (error) {
-          console.error('Error fetching hotels for SuperAdmin:', error);
-        }
-      };
-      fetchHotels();
-    }
+    if (!isSuperAdmin) return;
+    const unsub = onSnapshot(collection(db, 'hotels'), (snap) => {
+      setHotels(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.error('Error listening to hotels for SuperAdmin in TopBar:', error);
+    });
+    return () => unsub();
   }, [isSuperAdmin]);
 
   useEffect(() => {
