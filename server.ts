@@ -628,8 +628,40 @@ async function startServer() {
   }
   const activeActivationTokens = new Map<string, ActivationTokenEntry>();
 
+  // Helper: Look up user in Firebase Authentication by email
+  async function lookupAuthUserByEmail(email: string): Promise<{ uid: string; email: string } | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (adminAuth) {
+      try {
+        const userRecord = await adminAuth.getUserByEmail(normalizedEmail);
+        return { uid: userRecord.uid, email: userRecord.email || normalizedEmail };
+      } catch (err: any) {
+        if (err?.code !== 'auth/user-not-found') {
+          console.warn('[FIREBASE AUTH ADMIN LOOKUP NOTICE]:', err?.message);
+        }
+      }
+    }
+
+    if (firebaseConfig?.apiKey) {
+      try {
+        const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: [normalizedEmail] })
+        });
+        const data = await resp.json();
+        if (resp.ok && data?.users && data.users.length > 0) {
+          return { uid: data.users[0].localId, email: data.users[0].email || normalizedEmail };
+        }
+      } catch (restErr) {
+        console.warn('[FIREBASE AUTH REST LOOKUP NOTICE]:', restErr);
+      }
+    }
+    return null;
+  }
+
   // Helper: Create user in Firebase Authentication
-  async function createStaffAuthUser(email: string, displayName?: string): Promise<{ uid: string; email: string; idToken?: string; tempPass?: string }> {
+  async function createStaffAuthUser(email: string, displayName?: string): Promise<{ uid: string; email: string; idToken?: string; tempPass?: string; isExisting?: boolean }> {
     const normalizedEmail = email.trim().toLowerCase();
 
     // 1. Try Firebase Admin SDK if configured with service account
@@ -644,6 +676,11 @@ async function startServer() {
         return { uid: userRecord.uid, email: userRecord.email || normalizedEmail };
       } catch (adminErr: any) {
         if (adminErr?.code === 'auth/email-already-in-use') {
+          const existing = await lookupAuthUserByEmail(normalizedEmail);
+          if (existing) {
+            console.log(`[FIREBASE AUTH ADMIN] User ${normalizedEmail} already exists in Auth with UID ${existing.uid}`);
+            return { uid: existing.uid, email: existing.email, isExisting: true };
+          }
           const err: any = new Error('The email address is already in use by another account in Firebase Authentication.');
           err.code = 'auth/email-already-in-use';
           throw err;
@@ -671,6 +708,11 @@ async function startServer() {
     const data = await resp.json();
     if (!resp.ok) {
       if (data?.error?.message === 'EMAIL_EXISTS') {
+        const existing = await lookupAuthUserByEmail(normalizedEmail);
+        if (existing) {
+          console.log(`[FIREBASE AUTH REST] User ${normalizedEmail} already exists in Auth with UID ${existing.uid}`);
+          return { uid: existing.uid, email: existing.email, tempPass, isExisting: true };
+        }
         const err: any = new Error('The email address is already in use by another account in Firebase Authentication.');
         err.code = 'auth/email-already-in-use';
         throw err;
@@ -835,8 +877,8 @@ async function startServer() {
     try {
       const { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
 
-      // 1. Create user in Firebase Authentication
-      let authUser: { uid: string; email: string; idToken?: string; tempPass?: string };
+      // 1. Create or link user in Firebase Authentication
+      let authUser: { uid: string; email: string; idToken?: string; tempPass?: string; isExisting?: boolean };
       try {
         authUser = await createStaffAuthUser(normalizedEmail, fullName.trim());
       } catch (authErr: any) {
@@ -850,6 +892,25 @@ async function startServer() {
       }
 
       const firebase_uid = authUser.uid;
+
+      // Multi-tenant check: ensure existing account does not belong to another hotel
+      if (authUser.isExisting) {
+        try {
+          const existingSnap = await getDoc(doc(db, 'users', firebase_uid));
+          if (existingSnap.exists()) {
+            const exData = existingSnap.data();
+            const exHotel = exData.hotelId || exData.hotel_id;
+            if (exHotel && exHotel !== hotelId) {
+              return res.status(409).json({
+                error: `The email '${normalizedEmail}' is already associated with another hotel property (${exHotel}).`,
+                code: 'auth/email-already-in-use-other-hotel'
+              });
+            }
+          }
+        } catch (exErr) {
+          console.warn("[CREATE STAFF] Notice checking existing user document:", exErr);
+        }
+      }
       const tokenId = 'act_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
       const now = new Date().toISOString();
 

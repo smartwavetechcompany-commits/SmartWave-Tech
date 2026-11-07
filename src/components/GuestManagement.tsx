@@ -68,67 +68,58 @@ export function GuestManagement() {
   const queryClient = useQueryClient();
   const { activeBookingSources } = useBookingSources();
 
-  // Load guests with TanStack Query (caching and optimized state)
-  const { data: guests = [], isLoading: isGuestsLoading } = useQuery<Guest[]>({
-    queryKey: ['guests', hotel?.id],
-    queryFn: async () => {
-      if (!hotel?.id) return [];
-      const q = query(collection(db, 'hotels', hotel.id, 'guests'), orderBy('name', 'asc'));
-      const snap = await getDocs(q);
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest));
-    },
-    enabled: !!hotel?.id && !!profile,
-    staleTime: 0,
-  });
+  // Real-time synchronization for guests
+  const [guests, setGuests] = useState<Guest[]>([]);
+  const [isGuestsLoading, setIsGuestsLoading] = useState(true);
+  const [allReservations, setAllReservations] = useState<Reservation[]>([]);
+  const [allLedgerEntries, setAllLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [allOutstandingDebts, setAllOutstandingDebts] = useState<any[]>([]);
 
-  // Load reservations with TanStack Query
-  const { data: allReservations = [] } = useQuery<Reservation[]>({
-    queryKey: ['reservations', hotel?.id],
-    queryFn: async () => {
-      if (!hotel?.id) return [];
-      const q = query(collection(db, 'hotels', hotel.id, 'reservations'));
-      const snap = await getDocs(q);
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
-    },
-    enabled: !!hotel?.id && !!profile,
-    staleTime: 0,
-  });
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = query(collection(db, 'hotels', hotel.id, 'guests'), orderBy('name', 'asc'));
+    const unsub = onSnapshot(q, (snap) => {
+      setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
+      setIsGuestsLoading(false);
+    }, (err) => {
+      console.warn("Guest real-time listener notice:", err);
+      setIsGuestsLoading(false);
+    });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
 
-  // Load ledger entries with TanStack Query as single source of truth for financial statistics
-  const { data: allLedgerEntries = [] } = useQuery<LedgerEntry[]>({
-    queryKey: ['guest_ledger_entries', hotel?.id],
-    queryFn: async () => {
-      if (!hotel?.id) return [];
-      try {
-        const q = query(collection(db, 'hotels', hotel.id, 'ledger'));
-        const snap = await getDocs(q);
-        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
-      } catch (err: any) {
-        console.error("Failed to query ledger entries in GuestManagement:", err);
-        return [];
-      }
-    },
-    enabled: !!hotel?.id && !!profile,
-    staleTime: 0,
-  });
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = query(collection(db, 'hotels', hotel.id, 'reservations'));
+    const unsub = onSnapshot(q, (snap) => {
+      setAllReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+    }, (err) => {
+      console.warn("Reservations listener notice in GuestManagement:", err);
+    });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
 
-  // Load outstanding debt records with TanStack Query
-  const { data: allOutstandingDebts = [] } = useQuery<any[]>({
-    queryKey: ['guest_outstanding_debts', hotel?.id],
-    queryFn: async () => {
-      if (!hotel?.id) return [];
-      try {
-        const q = query(collection(db, 'hotels', hotel.id, 'outstanding_debt_ledger'));
-        const snap = await getDocs(q);
-        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      } catch (err: any) {
-        console.warn("Failed to query debt records in GuestManagement:", err);
-        return [];
-      }
-    },
-    enabled: !!hotel?.id && !!profile,
-    staleTime: 0,
-  });
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = query(collection(db, 'hotels', hotel.id, 'ledger'));
+    const unsub = onSnapshot(q, (snap) => {
+      setAllLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+    }, (err) => {
+      console.warn("Ledger listener notice in GuestManagement:", err);
+    });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const q = query(collection(db, 'hotels', hotel.id, 'outstanding_debt_ledger'));
+    const unsub = onSnapshot(q, (snap) => {
+      setAllOutstandingDebts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("Debt listener notice in GuestManagement:", err);
+    });
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);

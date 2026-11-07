@@ -41,7 +41,8 @@ import {
   Hash,
   Clock,
   MailCheck,
-  Send
+  Send,
+  Loader2
 } from 'lucide-react';
 import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
@@ -103,6 +104,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const [isCreatingRole, setIsCreatingRole] = useState(false);
   const [editingPermissions, setEditingPermissions] = useState<UserProfile | null>(null);
   const [editingPermsList, setEditingPermsList] = useState<string[]>([]);
+  const [editingSelectedRoleId, setEditingSelectedRoleId] = useState<string>('');
+  const [editingStaffRole, setEditingStaffRole] = useState<StaffRole>('frontDesk');
+  const [editingDepartment, setEditingDepartment] = useState<string>('Front Office');
   const [isSavingOverrides, setIsSavingOverrides] = useState(false);
   const [resettingUser, setResettingUser] = useState<UserProfile | null>(null);
   const [summaryData, setSummaryData] = useState<UserSummaryData | null>(null);
@@ -131,9 +135,16 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     customRoleDescription: '',
   });
 
+  const [isCreatingStaff, setIsCreatingStaff] = useState(false);
+  const [actionLoadingMemberId, setActionLoadingMemberId] = useState<string | null>(null);
   const [hasPermissionError, setHasPermissionError] = useState(false);
   const [showConfirmRemove, setShowConfirmRemove] = useState<{ uid: string; email: string } | null>(null);
   const [showConfirmSuspend, setShowConfirmSuspend] = useState<{ member: UserProfile; willSuspend: boolean } | null>(null);
+
+  // Reset permission error if hotel or user profile switches
+  useEffect(() => {
+    setHasPermissionError(false);
+  }, [hotelId, profile?.uid]);
 
   // Role-based permission check for staff password reset
   const canResetPasswords = profile && (
@@ -274,6 +285,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     const assignedModules = getAssignedModulesFromPermissions(permissionsToAssign);
 
     try {
+      setIsCreatingStaff(true);
       toast.loading('Provisioning user in Firebase Authentication & database...');
 
       const result = await provisionStaffAccount({
@@ -341,6 +353,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       toast.dismiss();
       toast.error('Failed to create staff member: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsCreatingStaff(false);
     }
   };
 
@@ -348,6 +362,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const handleResendActivation = async (member: UserProfile) => {
     if (!hotelId || !member.email || !profile) return;
     try {
+      setActionLoadingMemberId(member.uid);
       toast.loading(`Regenerating Firebase activation link for ${member.email}...`);
 
       const result = await resendStaffActivation({
@@ -390,6 +405,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       toast.dismiss();
       toast.error(err.message || 'Failed to resend activation email');
+    } finally {
+      setActionLoadingMemberId(null);
     }
   };
 
@@ -397,6 +414,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const handleDirectActivate = async (member: UserProfile) => {
     if (!hotelId || !profile) return;
     try {
+      setActionLoadingMemberId(member.uid);
       toast.loading(`Activating account for ${member.displayName || member.email}...`);
       await database.safeUpdate(doc(db, 'users', member.uid), {
         status: 'active',
@@ -419,6 +437,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       toast.dismiss();
       toast.error(`Could not activate staff account: ${err.message}`);
+    } finally {
+      setActionLoadingMemberId(null);
     }
   };
 
@@ -427,6 +447,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     if (!hotelId) return;
 
     try {
+      setActionLoadingMemberId(member.uid);
       toast.loading(willSuspend ? `Suspending ${member.email} and terminating sessions...` : `Reactivating ${member.email}...`);
       const userRef = doc(db, 'users', member.uid);
 
@@ -477,6 +498,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       toast.dismiss();
       toast.error('Failed to update account status: ' + err.message);
+    } finally {
+      setActionLoadingMemberId(null);
     }
   };
 
@@ -484,6 +507,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const removeStaff = async (staffUid: string, staffEmail: string) => {
     if (!hotelId) return;
     try {
+      setActionLoadingMemberId(staffUid);
       toast.loading(`Permanently removing ${staffEmail} and deleting from Firebase Auth...`);
 
       // If user is deleting their own account on this device, delete from client auth
@@ -547,6 +571,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
     } catch (err: any) {
       toast.dismiss();
       toast.error('Failed to remove staff member: ' + err.message);
+    } finally {
+      setActionLoadingMemberId(null);
     }
   };
 
@@ -914,6 +940,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                                       : (BASE_ROLE_PERMISSIONS[member.staffRole || member.role] || []) as string[];
                                   setEditingPermissions(member);
                                   setEditingPermsList(initialPerms);
+                                  setEditingSelectedRoleId(member.customRoleId || '');
+                                  setEditingStaffRole((member.staffRole || member.role || 'frontDesk') as StaffRole);
+                                  setEditingDepartment(member.department || 'Front Office');
                                 }}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-emerald-500/20 text-zinc-200 hover:text-emerald-300 text-xs font-semibold border border-zinc-700/60 transition-all shadow-sm"
                                 title="Manage assigned modules and granular permissions for this staff member"
@@ -925,11 +954,16 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                                 </span>
                               </button>
 
+                              {actionLoadingMemberId === member.uid && (
+                                <Loader2 size={15} className="animate-spin text-emerald-400" />
+                              )}
+
                               {/* Instantly Mark Active & Verified */}
                               {member.status === 'pending_activation' && canResetPasswords && (
                                 <button
+                                  disabled={actionLoadingMemberId === member.uid}
                                   onClick={() => handleDirectActivate(member)}
-                                  className="p-1.5 rounded-lg text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                                  className="p-1.5 rounded-lg text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
                                   title="Instantly Mark Active & Verified"
                                 >
                                   <CheckCircle2 size={16} />
@@ -939,8 +973,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                               {/* Resend Activation Email (One-time 24h link) */}
                               {member.status === 'pending_activation' && canResetPasswords && (
                                 <button
+                                  disabled={actionLoadingMemberId === member.uid}
                                   onClick={() => handleResendActivation(member)}
-                                  className="p-1.5 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
+                                  className="p-1.5 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-40"
                                   title="Resend Account Activation Email"
                                 >
                                   <MailCheck size={16} />
@@ -950,8 +985,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                               {/* Visible Admin Password Reset action on every user account */}
                               {canResetPasswords && (
                                 <button
+                                  disabled={actionLoadingMemberId === member.uid}
                                   onClick={() => setResettingUser(member)}
-                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
                                   title="Reset Staff Password (Dispatches Secure Reset Email)"
                                 >
                                   <KeyRound size={16} />
@@ -961,8 +997,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                               {/* Suspend / Reactivate */}
                               {member.uid !== profile?.uid && member.role !== 'hotelAdmin' && (
                                 <button
+                                  disabled={actionLoadingMemberId === member.uid}
                                   onClick={() => setShowConfirmSuspend({ member, willSuspend: !isSuspended })}
-                                  className={`p-1.5 rounded-lg transition-colors ${
+                                  className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${
                                     isSuspended 
                                       ? 'text-emerald-400 hover:bg-emerald-500/10' 
                                       : 'text-zinc-400 hover:text-red-400 hover:bg-red-500/10'
@@ -976,8 +1013,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                               {/* Remove */}
                               {member.uid !== profile?.uid && member.role !== 'hotelAdmin' && (
                                 <button
+                                  disabled={actionLoadingMemberId === member.uid}
                                   onClick={() => setShowConfirmRemove({ uid: member.uid, email: member.email })}
-                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                                  className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 transition-colors disabled:opacity-40"
                                   title="Remove Staff"
                                 >
                                   <Trash2 size={16} />
@@ -1364,9 +1402,17 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 bg-emerald-500 text-zinc-950 text-xs font-bold py-2.5 rounded-xl hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                  disabled={isCreatingStaff}
+                  className="flex-1 bg-emerald-500 text-zinc-950 text-xs font-bold py-2.5 rounded-xl hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  Create Staff Account
+                  {isCreatingStaff ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Creating Account...</span>
+                    </>
+                  ) : (
+                    <span>Create Staff Account</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -1396,13 +1442,65 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               </button>
             </div>
             
+            {/* Role & Department Quick Selector */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-zinc-950/60 rounded-xl border border-zinc-800">
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Department</label>
+                <select
+                  value={editingDepartment}
+                  onChange={(e) => setEditingDepartment(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                >
+                  {DEPARTMENTS.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-400 mb-1">Role Template Preset</label>
+                <select
+                  value={editingSelectedRoleId ? `custom_${editingSelectedRoleId}` : editingStaffRole}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.startsWith('custom_')) {
+                      const cId = val.replace('custom_', '');
+                      setEditingSelectedRoleId(cId);
+                      const cr = customRoles.find(r => r.id === cId);
+                      if (cr) setEditingPermsList(cr.permissions || []);
+                    } else {
+                      const bRole = val as StaffRole;
+                      setEditingSelectedRoleId('');
+                      setEditingStaffRole(bRole);
+                      setEditingPermsList((BASE_ROLE_PERMISSIONS[bRole] || []) as string[]);
+                    }
+                  }}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                >
+                  <optgroup label="Standard System Roles">
+                    {BASE_ROLES.map(role => (
+                      <option key={role.id} value={role.id}>{role.label}</option>
+                    ))}
+                  </optgroup>
+                  {customRoles.length > 0 && (
+                    <optgroup label="Property Custom Roles">
+                      {customRoles.map(cr => (
+                        <option key={cr.id} value={`custom_${cr.id}`}>{cr.name} ({cr.permissions?.length || 0} perms)</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+            </div>
+
             <div className="flex-1 overflow-y-auto pr-1">
               <ModuleAssignmentMatrix
                 selectedPermissions={editingPermsList}
                 onChange={(perms) => setEditingPermsList(perms)}
                 customRoles={customRoles}
-                selectedRoleId={editingPermissions.customRoleId}
+                selectedRoleId={editingSelectedRoleId}
                 onSelectRoleId={(roleId) => {
+                  setEditingSelectedRoleId(roleId);
                   const r = customRoles.find(cr => cr.id === roleId);
                   if (r) {
                     setEditingPermsList(r.permissions || []);
@@ -1429,42 +1527,57 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   try {
                     const assignedModules = getAssignedModulesFromPermissions(editingPermsList);
 
-                    // 1. Call server API endpoint for audit log and robust server-side write
-                    try {
-                      const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
-                      await fetch('/api/auth/update-user-permissions', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
-                        },
-                        body: JSON.stringify({
-                          uid: editingPermissions.uid,
-                          email: editingPermissions.email,
-                          hotelId,
-                          permissions: editingPermsList,
-                          assignedModules,
-                          adminEmail: profile?.email || 'Administrator',
-                          adminUid: profile?.uid || 'admin'
-                        })
-                      });
-                    } catch (apiErr) {
-                      console.warn("Server permission update notice:", apiErr);
-                    }
-
-                    // 2. Direct client Firestore update with merge: true to instantly trigger onSnapshot for active sessions
-                    await database.safeSet(doc(db, 'users', editingPermissions.uid), {
+                    const updates: any = {
                       permissions: editingPermsList,
                       assignedModules,
+                      customRoleId: editingSelectedRoleId || null,
+                      staffRole: editingStaffRole,
+                      department: editingDepartment,
                       updatedAt: new Date().toISOString()
-                    }, {
+                    };
+
+                    // 1. Direct client Firestore update for instant real-time synchronization across active sessions
+                    await database.safeSet(doc(db, 'users', editingPermissions.uid), updates, {
                       hotelId,
                       module: 'Staff Security',
                       action: 'OVERRIDE_PERMISSIONS',
-                      details: `Updated assigned modules (${assignedModules.join(', ') || 'none'}) and permissions (${editingPermsList.length} capabilities) for ${editingPermissions.email}`
+                      details: `Updated assigned modules (${assignedModules.join(', ') || 'none'}), role (${editingSelectedRoleId || editingStaffRole}), and permissions (${editingPermsList.length} capabilities) for ${editingPermissions.email}`
                     });
 
-                    toast.success('Module access and permissions successfully updated');
+                    // Sync to firebase_uid document if different
+                    if (editingPermissions.firebase_uid && editingPermissions.firebase_uid !== editingPermissions.uid) {
+                      database.safeSet(doc(db, 'users', editingPermissions.firebase_uid), updates, {
+                        hotelId,
+                        module: 'Staff Security',
+                        action: 'OVERRIDE_PERMISSIONS_SYNC',
+                        details: `Synced permissions to firebase_uid for ${editingPermissions.email}`
+                      }).catch(() => {});
+                    }
+
+                    // 2. Non-blocking server API call for backend auditing and verification
+                    const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
+                    fetch('/api/auth/update-user-permissions', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+                      },
+                      body: JSON.stringify({
+                        uid: editingPermissions.uid,
+                        firebase_uid: editingPermissions.firebase_uid,
+                        email: editingPermissions.email,
+                        hotelId,
+                        permissions: editingPermsList,
+                        assignedModules,
+                        customRoleId: editingSelectedRoleId || null,
+                        staffRole: editingStaffRole,
+                        department: editingDepartment,
+                        adminEmail: profile?.email || 'Administrator',
+                        adminUid: profile?.uid || 'admin'
+                      })
+                    }).catch(apiErr => console.warn("Background permission update notice:", apiErr));
+
+                    toast.success('Module access, role, and permissions successfully updated');
                     setEditingPermissions(null);
                   } catch (err: any) {
                     toast.error('Failed to update: ' + err.message);

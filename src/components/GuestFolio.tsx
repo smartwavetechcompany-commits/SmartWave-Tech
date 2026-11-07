@@ -590,7 +590,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const handlePostCharge = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id || !profile || !currentReservation.guestId) return;
+    if (!hotel?.id || !profile || !currentReservation.guestId || isSaving) return;
 
     const policy = canEditInvoice(hotel, profile, currentReservation);
     if (!policy.allowed) {
@@ -1029,7 +1029,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   });
 
   const handleVoidEntry = async () => {
-    if (!hotel?.id || !confirmDelete || !profile) return;
+    if (!hotel?.id || !confirmDelete || !profile || isDeleting) return;
     
     const policy = canVoidTransaction(hotel, profile, confirmDelete);
     if (!policy.allowed) {

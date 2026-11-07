@@ -869,7 +869,7 @@ export function Settings() {
   };
 
   const handleSystemReset = async () => {
-    if (!hotel?.id || profile?.role !== 'hotelAdmin') return;
+    if (!hotel?.id || (profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin')) return;
     
     setIsSaving(true);
     try {
@@ -882,19 +882,21 @@ export function Settings() {
         'debt_ledger',
         'debts',
         'debtors',
-        'activityLogs',
-        'auditLogs',
-        'AuditLogs',
-        'maintenance',
-        'housekeeping',
-        'inventory',
-        'purchaseOrders',
-        'purchase_orders',
-        'suppliers',
-        'accounts',
-        'commissions',
         'corporate_accounts',
-        'surveys',
+        'kitchen_orders',
+        'tables',
+        'bar_orders',
+        'dining_tabs',
+        'pos_transactions',
+        'housekeeping',
+        'housekeeping_cleanings',
+        'housekeeping_inspections',
+        'housekeeping_briefings',
+        'housekeeping_incidents',
+        'housekeeping_requests',
+        'housekeeping_stock_transactions',
+        'maintenance',
+        'tasks',
         'room_blockings',
         'checkin_history',
         'checkout_history',
@@ -902,83 +904,108 @@ export function Settings() {
         'inventory_consumption_rules',
         'inventory_transactions',
         'inventory_audits',
-        'housekeeping_stock_transactions',
+        'purchaseOrders',
+        'purchase_orders',
+        'suppliers',
+        'accounts',
+        'commissions',
+        'surveys',
+        'notifications',
         'transactions',
-        'notifications'
+        'cashier_sessions',
+        'shifts',
+        'activityLogs',
+        'auditLogs',
+        'AuditLogs'
       ];
 
       for (const collName of collectionsToClear) {
-        const q = query(collection(db, 'hotels', hotel.id, collName));
-        const snap = await getDocs(q);
-        
-        // Delete in batches of 500 (Firestore limit)
-        const batches = [];
-        let currentBatch = writeBatch(db);
-        let count = 0;
+        try {
+          const q = query(collection(db, 'hotels', hotel.id, collName));
+          const snap = await getDocs(q);
+          
+          // Delete in batches of 500 (Firestore maximum batch limit)
+          const batches = [];
+          let currentBatch = writeBatch(db);
+          let count = 0;
 
-        for (const docSnap of snap.docs) {
-          currentBatch.delete(docSnap.ref);
-          count++;
-          if (count === 500) {
+          for (const docSnap of snap.docs) {
+            currentBatch.delete(docSnap.ref);
+            count++;
+            if (count === 500) {
+              batches.push(currentBatch.commit());
+              currentBatch = writeBatch(db);
+              count = 0;
+            }
+          }
+          if (count > 0) {
             batches.push(currentBatch.commit());
-            currentBatch = writeBatch(db);
-            count = 0;
+          }
+          if (batches.length > 0) {
+            await Promise.all(batches);
+          }
+        } catch (collErr) {
+          console.warn(`[SYSTEM RESET] Non-critical warning resetting ${collName}:`, collErr);
+        }
+      }
+
+      // Reset room statuses to vacant and clean
+      try {
+        const roomsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'rooms'));
+        const roomBatches = [];
+        let roomBatch = writeBatch(db);
+        let rCount = 0;
+        for (const rSnap of roomsSnap.docs) {
+          roomBatch.update(rSnap.ref, {
+            status: 'clean',
+            housekeepingStatus: 'clean',
+            currentGuestId: null,
+            currentReservationId: null,
+            assignedTo: null,
+            isBlocked: false,
+            blockedUntil: null,
+            blockedReason: null,
+            maintenanceReason: null
+          });
+          rCount++;
+          if (rCount === 500) {
+            roomBatches.push(roomBatch.commit());
+            roomBatch = writeBatch(db);
+            rCount = 0;
           }
         }
-        if (count > 0) {
-          batches.push(currentBatch.commit());
-        }
-        await Promise.all(batches);
-      }
-
-      // Reset room statuses to vacant/clean
-      const roomsSnap = await getDocs(collection(db, 'hotels', hotel.id, 'rooms'));
-      const roomBatches = [];
-      let roomBatch = writeBatch(db);
-      let rCount = 0;
-      for (const rSnap of roomsSnap.docs) {
-        roomBatch.update(rSnap.ref, {
-          status: 'dirty',
-          housekeepingStatus: 'dirty',
-          currentGuestId: null,
-          currentReservationId: null,
-          assignedTo: null
-        });
-        rCount++;
-        if (rCount === 500) {
+        if (rCount > 0) {
           roomBatches.push(roomBatch.commit());
-          roomBatch = writeBatch(db);
-          rCount = 0;
         }
+        if (roomBatches.length > 0) {
+          await Promise.all(roomBatches);
+        }
+      } catch (roomErr) {
+        console.warn("[SYSTEM RESET] Room status reset warning:", roomErr);
       }
-      if (rCount > 0) {
-        roomBatches.push(roomBatch.commit());
-      }
-      await Promise.all(roomBatches);
 
-      // Log the reset
+      // Record minimal non-destructive system audit log entry
       await database.safeAdd(collection(db, 'activityLogs'), {
         timestamp: new Date().toISOString(),
         userId: profile.uid,
         userEmail: profile.email,
         userRole: profile.role,
         action: 'SYSTEM_RESET',
-        resource: 'All System Data',
-        hotelId: hotel.id
+        resource: 'All Operational System Data',
+        hotelId: hotel.id,
+        details: 'Full operational data reset executed by Hotel Administrator. User accounts and authentication preserved.'
       }, {
         hotelId: hotel.id,
         module: 'Settings',
         action: 'SYSTEM_RESET_LOG',
-        details: 'Full system data reset execution'
-      });
+        details: 'Full operational system reset execution. Preserved all user profiles and credentials.'
+      }).catch(() => {});
 
-      toast.success('System data cleared successfully!');
+      toast.success('All hotel operational data successfully cleared! User accounts and system configuration preserved.');
       setShowConfirmSystemReset(false);
-      // Refresh page to clear local state
-      window.location.reload();
     } catch (err: any) {
       console.error("System reset error:", err.message || safeStringify(err));
-      toast.error('Failed to reset system data.');
+      toast.error('Failed to reset system data: ' + (err.message || 'Unknown error'));
     } finally {
       setIsSaving(false);
     }

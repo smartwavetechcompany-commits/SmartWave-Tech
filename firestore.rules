@@ -73,7 +73,7 @@ service cloud.firestore {
 
     function getHotelId() {
       let data = getUserData();
-      return data != null ? data.hotelId : null;
+      return data != null ? (data.hotelId != null ? data.hotelId : data.hotel_id) : null;
     }
 
     function sameHotel(hotelId) {
@@ -127,7 +127,7 @@ service cloud.firestore {
 
       allow create: if (isAuthenticated() && (
                       (request.auth.uid == userId && request.resource.data.role != "superAdmin") ||
-                      (isAdmin() && request.resource.data.hotelId == getHotelId() && hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
+                      (isAdmin() && (request.resource.data.hotelId == getHotelId() || request.resource.data.hotel_id == getHotelId()) && hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
                       isSuperAdmin()
                     ));
 
@@ -142,11 +142,17 @@ service cloud.firestore {
                         ]) &&
                         request.resource.data.status in ['active', 'pending_activation'] &&
                         request.resource.data.role == resource.data.role &&
-                        request.resource.data.hotelId == resource.data.hotelId
+                        (request.resource.data.hotelId == resource.data.hotelId || request.resource.data.hotel_id == resource.data.hotel_id)
                       ) ||
                       (isAuthenticated() && (
-                        (request.auth.uid == userId) ||
-                        (isAdmin() && resource != null && resource.data.hotelId == getHotelId() &&
+                        (request.auth.uid == userId && (
+                          isHotelAdmin() || isSuperAdmin() || (
+                            request.resource.data.role == resource.data.role &&
+                            (resource.data.permissions == null || request.resource.data.permissions == resource.data.permissions) &&
+                            (resource.data.customRoleId == null || request.resource.data.customRoleId == resource.data.customRoleId)
+                          )
+                        )) ||
+                        (isAdmin() && resource != null && (resource.data.hotelId == getHotelId() || resource.data.hotel_id == getHotelId()) &&
                          hasStaffManagementPermission() &&
                          request.resource.data.role != "superAdmin") ||
                         (hasStaffManagementPermission() && request.resource.data.role != "superAdmin") ||
@@ -156,7 +162,7 @@ service cloud.firestore {
 
       allow delete: if isAuthenticated() && (
                       isSuperAdmin() ||
-                      ((isHotelAdmin() || hasStaffManagementPermission() || isAdmin()) && resource != null && resource.data.hotelId == getHotelId() && request.auth.uid != userId)
+                      ((isHotelAdmin() || hasStaffManagementPermission() || isAdmin()) && resource != null && (resource.data.hotelId == getHotelId() || resource.data.hotel_id == getHotelId()) && request.auth.uid != userId)
                     );
     }
 

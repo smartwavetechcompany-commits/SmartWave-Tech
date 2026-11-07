@@ -672,25 +672,31 @@ export const hasPermission = (
 
   const synonyms = SYNONYM_MAP[permission] || [permission];
 
-  // 1. Check explicit permissions on user document if configured
-  // When an admin assigns explicit permissions (array or structured object), that explicit set is authoritative.
-  // We do NOT fall through to base role templates, because that would grant the entire module!
-  if (profile.permissions !== undefined && profile.permissions !== null) {
-    return evaluateExplicitPermissions(profile.permissions, permission, synonyms);
-  }
-
-  // 2. Custom Role assigned to this user
+  // 1. Custom Role assigned to this user:
+  // If the user has a custom role assigned, the active definition in customRoles takes priority
+  // so updates to the role in Role Builder take effect immediately across all sessions!
   if (profile.customRoleId) {
     if (customRoles.length > 0) {
       const customRole = customRoles.find(r => r.id === profile.customRoleId);
-      if (customRole && customRole.status !== 'disabled' && customRole.status !== 'archived') {
+      if (customRole) {
+        if (customRole.status === 'disabled' || customRole.status === 'archived') {
+          return false;
+        }
         const rolePerms = customRole.permissions || [];
         return evaluateExplicitPermissions(rolePerms, permission, synonyms);
       }
     }
-    // When a custom role is designated, permissions are strictly bound to that role.
-    // Do NOT fall through to base role templates as that would grant full module access.
+    // If customRoles is still loading or not in cache, fallback to snapshot in profile.permissions
+    if (profile.permissions !== undefined && profile.permissions !== null) {
+      return evaluateExplicitPermissions(profile.permissions, permission, synonyms);
+    }
     return false;
+  }
+
+  // 2. Check explicit permissions on user document if configured (without custom role)
+  // When an admin assigns explicit permissions (array or structured object), that explicit set is authoritative.
+  if (profile.permissions !== undefined && profile.permissions !== null) {
+    return evaluateExplicitPermissions(profile.permissions, permission, synonyms);
   }
 
   // 3. Fallback for unconfigured/legacy users ONLY:
@@ -851,28 +857,15 @@ export const isPMSModuleAssigned = (
   if (!profile) return false;
   if (profile.role === 'superAdmin' || profile.role === 'hotelAdmin' || profile.role === 'admin') return true;
 
-  // 1. Direct match on assignedModules array
-  if (Array.isArray(profile.assignedModules)) {
-    const isDirectMatch = profile.assignedModules.includes(moduleId) || 
-      (moduleId === 'frontDesk' && profile.assignedModules.includes('reservations')) || 
-      (moduleId === 'reservations' && profile.assignedModules.includes('frontDesk'));
-    if (isDirectMatch) return true;
-  }
+  if (profile.status === 'suspended' || profile.status === 'inactive') return false;
 
-  // 2. Structured object check (e.g. profile.permissions.reservations)
-  if (typeof profile.permissions === 'object' && profile.permissions !== null && !Array.isArray(profile.permissions)) {
-    const modObj = profile.permissions[moduleId] || (moduleId === 'frontDesk' ? profile.permissions.reservations : undefined);
-    if (typeof modObj === 'object' && modObj !== null) {
-      // If any action inside the module object is true, module is visible
-      const hasAnyTrue = Object.values(modObj).some(val => val === true);
-      if (hasAnyTrue) return true;
-    }
-  }
-
-  // 3. Rule 1: Check if user has ANY granular permission belonging to this module
+  // Granular check: User MUST have at least one valid action permission belonging to this module
   const perms = MODULE_ACTION_PERMISSIONS[moduleId];
-  if (!perms) return false;
+  if (!perms || perms.length === 0) {
+    return Array.isArray(profile.assignedModules) && profile.assignedModules.includes(moduleId);
+  }
 
+  // If the user has any granular action permission within this module, it is visible
   return perms.some(p => hasPermission(profile, p, customRoles));
 };
 

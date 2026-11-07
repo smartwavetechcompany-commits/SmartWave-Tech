@@ -1,0 +1,701 @@
+TASK: Fix Role-Based Access Control (RBAC) Real-Time Synchronization Across SmartWave PMS
+The role-based access system in my SmartWave PMS is not reflecting permission changes live. When a Hotel Admin changes a staff member's role, module access, or individual permissions, the changes do not immediately reflect in the affected user's active session.
+Investigate and fix this issue across the existing application.
+1. Strict Preservation Requirements
+Do not rewrite, restructure, scatter, or replace the existing application architecture.
+Do not change existing business logic, financial logic, reservation logic, or unrelated modules.
+Do not introduce Firestore indexes.
+Do not create a separate permission system or duplicate existing RBAC logic.
+Reuse the existing Firestore collections, user documents, role definitions, permission structures, and authorization functions.
+Make only the changes necessary to correct real-time RBAC synchronization.
+Preserve existing SuperAdmin, Hotel Admin, and staff access boundaries.
+2. Investigate the Actual Cause
+Before implementing anything, inspect the existing authentication, staff management, role assignment, permission management, Firestore data structures, and access-control logic.
+Identify why permission changes are not reflected immediately.
+Investigate specifically:
+Whether the application loads user roles and permissions only once during login.
+Whether role and permission data are stored in React state or context without being refreshed.
+Whether the application uses getDoc() or getDocs() for permissions that should remain synchronized.
+Whether the existing onSnapshot() listener is missing, incorrectly configured, or attached to the wrong document or collection.
+Whether permission updates are saved to a different Firestore document than the one the active session reads.
+Whether the application maintains duplicate or inconsistent permission state.
+Whether browser sessions continue using stale cached permissions.
+Whether different modules implement their own permission checks instead of using the existing centralized authorization logic.
+Whether Firestore security rules or frontend authorization logic prevent updated permissions from being recognized.
+Do not assume the cause. Verify it from the existing implementation.
+3. Implement Reliable Real-Time Permission Synchronization
+Use the existing Firestore structure and authorization architecture.
+Where appropriate, establish or correct real-time listeners using Firestore onSnapshot() for the authenticated user's relevant role and permission documents.
+The active user's permission state should automatically update when:
+A Hotel Admin changes the user's role.
+A Hotel Admin grants or removes a module permission.
+A Hotel Admin changes individual action permissions.
+A user's access is suspended or revoked.
+A user's assigned department or staff group changes.
+Existing role definitions or permission assignments are updated, where the current architecture supports this.
+The application must not require a page refresh, logout, or login to recognize these changes.
+Ensure that permission updates propagate to all active sessions belonging to the affected user, including sessions open in different browser tabs or devices.
+4. Update Access Across All Existing Modules
+Ensure updated permissions immediately affect the existing PMS modules, including:
+Dashboard
+Front Desk
+Reservations
+Room Management
+Guest Accounts and Folios
+Payments and Checkout
+Food and Beverage
+Housekeeping
+Maintenance
+Laundry
+Kitchen
+Storekeeping and Inventory
+Corporate Accounts
+Financial Reports
+Staff Management
+Settings and other existing modules
+Do not grant access to an entire module when the user has permission for only a specific action.
+For example, if a staff member is granted permission to view a module but not create, edit, delete, approve, or settle transactions, the application must continue enforcing those individual restrictions.
+5. Immediate Revocation and Security
+Real-time permission synchronization must improve security, not merely update the interface.
+When access is revoked:
+Remove the restricted module or action from the user's active interface immediately.
+Prevent the user from continuing to perform restricted actions through an already-open screen.
+Revalidate authorization before sensitive Firestore writes and protected operations.
+Do not rely solely on hiding buttons or menu items.
+Preserve existing Firestore security rules and backend authorization protections.
+Do not allow staff to modify their own roles or permissions unless the existing authorization system explicitly permits it.
+Ensure Hotel Admin permissions remain limited to their own hotel.
+Preserve SuperAdmin's existing cross-hotel authorization boundaries.
+If a user is suspended or their account is disabled, apply the existing account-status and access-revocation mechanisms immediately.
+6. Listener and State Management
+Implement the solution carefully:
+Avoid duplicate onSnapshot() subscriptions.
+Clean up listeners when users log out, switch accounts, or components unmount.
+Prevent stale listeners from updating the wrong user's session.
+Avoid unnecessary repeated Firestore reads and excessive rerenders.
+Prevent permission state from being overwritten by outdated asynchronous requests.
+Preserve loading and error handling.
+Do not introduce infinite listener loops.
+Ensure the application behaves correctly when connectivity is temporarily lost and restored.
+Do not blindly replace every Firestore read with onSnapshot(). Use real-time listeners only where continuous synchronization is required.
+7. Firestore Security Rules
+Inspect the existing Firestore security rules to determine whether they correctly support the current RBAC structure.
+Do not overwrite the existing rules.
+If a rule modification is genuinely necessary, append or minimally modify only the relevant permission-related conditions while preserving every existing rule and authorization boundary.
+Do not weaken security to make the application appear functional.
+8. Testing and Verification
+Test the complete permission lifecycle:
+A staff member logs in with existing permissions.
+Hotel Admin removes one permission.
+The staff member's active session immediately loses that permission.
+Hotel Admin grants a permission.
+The staff member's active session immediately receives that permission.
+Hotel Admin changes the user's role.
+The active session reflects the updated role and corresponding permissions.
+Hotel Admin suspends the user.
+The affected user loses access immediately.
+Multiple active sessions remain synchronized.
+Users from other hotels are not affected.
+Existing SuperAdmin and Hotel Admin access remains correct.
+9. Final Requirement
+Fix the actual underlying problem rather than adding a temporary refresh button or requiring users to log in again.
+After implementation, provide a concise report explaining:
+The actual root cause.
+The existing files or components that were modified.
+How real-time permission synchronization now works.
+How immediate permission revocation is enforced.
+Any remaining limitations.
+Important: Do not claim that RBAC is fully fixed unless the actual permission changes have been tested across active sessions and relevant modules.
+SMARTWAVE PMS — APPLICATION-WIDE BUTTON RESPONSE AND PERFORMANCE OPTIMIZATION
+OBJECTIVE
+Fix the delays experienced when clicking buttons throughout the existing SmartWave PMS.
+The objective is to make buttons respond immediately and execute their intended functions as efficiently as possible, without changing existing business logic, financial calculations, permissions, or application functionality.
+This is a performance optimization of the existing application, NOT a system rewrite.
+CRITICAL INSTRUCTIONS
+Do not rewrite the application.
+Do not change existing business logic.
+Do not alter financial calculations or transaction rules.
+Do not change existing Firestore collections or data structures unnecessarily.
+Do not introduce Firestore indexes.
+Do not remove existing functionality.
+Do not scatter logic across unrelated modules.
+Preserve existing Firebase authentication, permissions, and tenant isolation.
+Inspect the actual cause of the delay before making changes.
+Fix the underlying performance problem rather than applying superficial UI changes.
+Apply improvements across the entire PMS, not just one button or module.
+1. INVESTIGATE THE CAUSE OF BUTTON DELAYS
+Inspect the entire application and identify why button clicks take too long to execute.
+Investigate:
+Slow Firestore reads and writes.
+Excessive database requests.
+Multiple sequential requests that could safely run concurrently.
+Unnecessary API calls.
+Repeated Firestore queries.
+Duplicate onSnapshot() listeners.
+Unnecessary React component re-renders.
+Expensive calculations performed during rendering.
+Unnecessary component state updates.
+Buttons waiting for unrelated operations.
+Repeated data fetching after successful actions.
+Long-running operations blocking the user interface.
+Inefficient event handlers.
+Unnecessary page reloads.
+Unnecessary navigation or component remounting.
+Large datasets being loaded when only a small portion is required.
+Network latency.
+Repeated validation or configuration fetching.
+Any existing bottleneck affecting application responsiveness.
+Do not assume every delay is caused by Firestore.
+Measure and identify the actual bottlenecks before modifying the code.
+2. IMMEDIATE BUTTON RESPONSE
+Every button must respond immediately when clicked.
+When a user clicks a button:
+Immediately acknowledge the interaction.
+Display an appropriate loading state where necessary.
+Prevent accidental repeated submissions.
+Execute the intended operation without unnecessary delays.
+Provide clear success or failure feedback.
+Restore the appropriate button state after completion.
+Do not make users wonder whether the button was clicked successfully.
+Buttons should not remain visually inactive while the system performs an operation.
+IMPORTANT
+Immediate visual feedback must not be confused with immediate transaction completion.
+A button may respond immediately while a legitimate database operation continues in the background.
+Do not display a successful result until the operation has actually succeeded.
+3. OPTIMIZE FIRESTORE OPERATIONS
+Inspect existing Firestore operations and improve their efficiency.
+Where appropriate:
+Avoid unnecessary repeated reads.
+Reuse already available data.
+Avoid fetching the same configuration repeatedly.
+Avoid redundant queries.
+Use existing shared data services.
+Use efficient query conditions.
+Avoid loading unnecessary documents.
+Avoid repeating successful operations.
+Prevent duplicate submissions.
+Minimize unnecessary database round trips.
+Use onSnapshot() for shared data that requires live synchronization, but do not create additional listeners unnecessarily.
+Do not sacrifice real-time synchronization to improve button speed.
+The entire PMS must continue updating live across authorised users and modules.
+Do not replace real-time functionality with stale cached data.
+4. OPTIMIZE BUTTON HANDLERS
+Inspect button handlers throughout the application.
+Ensure that:
+Click handlers execute only the intended operation.
+Expensive calculations are not unnecessarily repeated.
+Event handlers do not trigger redundant requests.
+Buttons do not wait for unrelated operations.
+State updates are performed efficiently.
+Unnecessary component re-renders are eliminated.
+Existing validation is preserved.
+Existing permissions are preserved.
+Where multiple independent operations can safely run concurrently, optimize their execution.
+However, do not parallelize dependent financial or database operations where doing so could create inconsistent results.
+Preserve the existing transaction order wherever business logic requires it.
+5. PREVENT DUPLICATE BUTTON ACTIONS
+Users should not accidentally create duplicate reservations, payments, F&B orders, guest charges, or other records by clicking repeatedly.
+Implement appropriate safeguards using the existing application architecture.
+For relevant operations:
+Prevent repeated submissions while an operation is in progress.
+Disable the relevant action temporarily when necessary.
+Use existing transaction identifiers and idempotency mechanisms where available.
+Ensure duplicate requests do not create duplicate financial transactions.
+Restore the button after success or failure.
+Allow appropriate retries after failed operations.
+Do not introduce unnecessary restrictions on ordinary navigation or non-destructive buttons.
+6. OPTIMIZE THE ENTIRE PMS
+Apply performance improvements across all relevant modules, including:
+Dashboard.
+Front Desk.
+Reservations.
+Room Management.
+Guest Accounts.
+Guest Folios.
+Payments.
+Checkout.
+F&B.
+Housekeeping.
+Maintenance.
+Laundry.
+Kitchen.
+Inventory.
+Storekeeping.
+Corporate Accounts.
+Financial Reports.
+Staff Management.
+Settings.
+All other existing modules.
+Do not optimize only the Dashboard or Front Desk.
+Identify common performance problems in shared components and fix them centrally where appropriate.
+7. PRESERVE REAL-TIME SYNCHRONIZATION
+The existing application uses Firestore onSnapshot() for real-time updates.
+Do not break this functionality.
+Ensure:
+Button actions remain responsive.
+Firestore updates remain real-time.
+Listeners are not unnecessarily recreated.
+Listener cleanup is correct.
+Shared data updates remain consistent.
+Other users continue receiving live updates.
+Performance improvements do not introduce stale data.
+The entire PMS must remain synchronized across all authorised users.
+8. PREVENT UNNECESSARY PAGE RELOADS
+Inspect the application for actions that reload entire pages or modules unnecessarily.
+Where appropriate, update only the affected application state or data.
+Avoid:
+Full page reloads after routine operations.
+Reopening modules unnecessarily.
+Refetching every collection after a single update.
+Resetting unrelated application state.
+Remounting entire screens unnecessarily.
+However, preserve existing navigation behaviour and ensure that all relevant data remains accurate.
+9. LOADING STATES AND USER EXPERIENCE
+Implement appropriate loading feedback for slow operations.
+Examples:
+Save.
+Create.
+Update.
+Delete.
+Confirm.
+Process Payment.
+Post F&B Charge.
+Checkout.
+Generate Report.
+Use the existing design system.
+Do not introduce unnecessary animations or visual changes.
+For operations that complete quickly, avoid excessive loading indicators that make the application feel slower.
+For longer operations, show meaningful progress or status information.
+10. IMPORTANT FINANCIAL SAFEGUARDS
+Performance optimization must never compromise financial correctness.
+Do not:
+Skip payment validation.
+Skip tax calculations.
+Bypass guest account validation.
+Bypass room-charge restrictions.
+Bypass permissions.
+Mark transactions as successful before Firestore confirms success.
+Create optimistic financial updates that cannot be safely reconciled.
+Duplicate financial transactions.
+Change checkout or folio logic.
+For payments, F&B charges, refunds, and other financial operations, preserve the existing transaction safeguards.
+11. TESTING AND VERIFICATION
+After implementing the improvements, test the application across different modules.
+Verify:
+Buttons respond immediately.
+Save operations complete efficiently.
+Firestore operations are not unnecessarily repeated.
+Real-time updates continue working.
+Multiple users can perform operations without duplicate records.
+Financial transactions remain correct.
+Buttons recover correctly after failed operations.
+Users receive appropriate feedback.
+Navigation remains functional.
+Existing business logic remains unchanged.
+Test both fast and slow network conditions where possible.
+FINAL REQUIREMENT
+Inspect the entire SmartWave PMS and identify the actual causes of button delays.
+Implement targeted performance improvements across the application.
+Do not merely add loading spinners or disable buttons.
+The objective is to make the application genuinely faster, not just make it appear faster.
+Preserve all existing business logic, Firestore architecture, real-time synchronization, security, and financial correctness.
+After implementation, provide a concise report identifying:
+The causes of the delays.
+The affected modules.
+The optimizations implemented.
+Any Firestore operations improved.
+Any unnecessary re-renders or repeated requests eliminated.
+The performance improvements verified.
+Any remaining bottlenecks.
+SMARTWAVE PMS — GLOBAL REAL-TIME SYNCHRONIZATION AND COMPLETE HOTEL SYSTEM RESET
+PROJECT CONTEXT
+We are updating the existing SmartWave PMS built with Firebase, Firestore, and the current application architecture.
+This enhancement has two objectives:
+Ensure that all relevant PMS data updates in real time across every module and every authorised user.
+Implement a complete Hotel Admin-controlled system reset that removes all hotel operational and module data from Firestore while preserving all existing user accounts and authentication records.
+This is an enhancement to the existing PMS, not a new system.
+CRITICAL IMPLEMENTATION INSTRUCTIONS
+Do not rewrite, replace, or scatter existing business logic.
+Do not restructure unrelated modules.
+Preserve the existing architecture, Firestore collections, user accounts, authentication, permissions, and working functionality.
+Inspect the existing Firestore structure before implementation.
+Reuse existing real-time mechanisms and services wherever possible.
+Do not create duplicate collections or unnecessary listeners.
+Do not introduce Firestore indexes.
+Do not overwrite existing Firestore security rules.
+Only modify the relevant real-time synchronization and system reset functionality.
+Ensure compatibility with all existing hotel modules.
+The reset must affect the entire hotel operational system, not just the currently open module or browser session.
+PART 1: GLOBAL REAL-TIME SYNCHRONIZATION
+1. OBJECTIVE
+Ensure that the SmartWave PMS operates as a genuinely real-time, multi-user hotel management system.
+Whenever an authorised user creates, updates, deletes, or modifies information, the relevant changes must immediately become visible to all other authorised users who are viewing or working with that information.
+Users must not need to:
+Refresh the browser.
+Log out and log back in.
+Reopen a module.
+Navigate away and return.
+Manually reload a page.
+Restart the application.
+The system must remain synchronised across different computers, browsers, and authenticated user sessions.
+2. MODULES THAT MUST UPDATE LIVE
+Inspect all existing modules and ensure real-time synchronization wherever shared data is displayed or modified.
+This includes, but is not limited to:
+Dashboard.
+Front Desk.
+Reservations.
+Room Management.
+Guest Accounts.
+Guest Folios.
+Payments.
+Checkout.
+F&B.
+Restaurant and Bar.
+Housekeeping.
+Maintenance.
+Laundry.
+Storekeeping and Inventory.
+Kitchen.
+Corporate Accounts.
+Financial Reports.
+Staff Management.
+Hotel Settings.
+Room Settings.
+Tax Configuration.
+Discount and Promotion Configuration.
+System Reset.
+Do not assume that implementing real-time updates in one module automatically synchronizes the others.
+Inspect the actual data dependencies and update the necessary listeners and shared data services.
+3. FIRESTORE REAL-TIME LISTENERS
+Use the existing Firestore architecture and implement or correct real-time listeners where necessary.
+Where the application uses Firestore, use the appropriate existing real-time subscription mechanisms, such as onSnapshot, for relevant data.
+Examples include:
+Guest account updates.
+Room status updates.
+Reservation changes.
+F&B room charges.
+Payments.
+Folio balances.
+Staff permission changes.
+Tax configuration.
+Hotel settings.
+Do not replace existing working listeners unnecessarily.
+Avoid introducing duplicate listeners for the same data.
+Ensure listeners are properly managed and cleaned up when users leave a module or their access changes.
+4. REAL-TIME FINANCIAL SYNCHRONIZATION
+This is especially important for financial modules.
+Whenever an authorised user:
+Creates an F&B room charge.
+Records a guest payment.
+Applies a permitted discount.
+Processes a refund.
+Settles a folio.
+Updates a corporate account.
+Completes checkout.
+The appropriate changes must immediately appear in the relevant Front Desk, Guest Account, Folio, Dashboard, and Reporting interfaces.
+All financial calculations must continue using the existing shared financial engine.
+Do not create independent calculations to make individual screens appear updated.
+The displayed figures must come from the authoritative financial records.
+5. PREVENT STALE AND INCONSISTENT DATA
+Ensure that:
+Real-time listeners update the correct UI state.
+Previously loaded data does not overwrite newer updates.
+Multiple users cannot accidentally overwrite each other's changes.
+Duplicate transactions are prevented.
+Updates are handled correctly when users are temporarily disconnected.
+Reconnection restores the correct current data.
+Loading and synchronization states are handled appropriately.
+Errors are displayed clearly.
+Permission changes take effect without requiring unnecessary reauthentication.
+The system does not display outdated financial balances after successful transactions.
+Use the existing concurrency controls and transaction mechanisms where necessary.
+Do not introduce additional financial logic.
+6. REAL-TIME CONFIGURATION UPDATES
+When the Hotel Admin changes a system configuration, the change must immediately apply to the appropriate authorised users.
+Examples:
+Tax settings.
+F&B settings.
+Room pricing settings.
+Checkout settings.
+Grace-period configuration.
+Housekeeping settings.
+Booking-source configuration.
+Payment settings.
+Staff permissions.
+Do not allow one user's screen to continue using outdated configuration values after a successful update.
+Preserve existing configuration rules and permissions.
+7. REAL-TIME VALIDATION
+Test the following:
+Hotel Admin changes a setting; other authorised users see the change immediately.
+Front Desk posts an F&B charge; the guest account updates immediately.
+A payment is recorded; all relevant balances update immediately.
+Housekeeping updates a room; the appropriate Front Desk room status updates immediately.
+Staff permissions change; the affected user receives the updated access restrictions.
+Two authorised users work on shared records without stale data overwriting newer changes.
+A user reconnects after losing internet connectivity and receives the correct current data.
+PART 2: COMPLETE HOTEL SYSTEM RESET
+1. OBJECTIVE
+Implement a complete system reset functionality accessible exclusively to the Hotel Admin.
+The reset must remove all hotel operational and module data from Firestore across the entire hotel system.
+This is not a module-specific reset.
+It must affect:
+F&B.
+Front Desk.
+Reservations.
+Room Management.
+Guest Accounts.
+Folios.
+Payments.
+Housekeeping.
+Maintenance.
+Laundry.
+Kitchen.
+Inventory.
+Storekeeping.
+Corporate Accounts.
+Financial and operational reports.
+Other hotel operational modules currently present in the PMS.
+The reset must apply globally to the affected hotel and must be reflected immediately for every user.
+2. HOTEL ADMIN ONLY
+The complete system reset must be restricted exclusively to the Hotel Admin.
+The following users must not have access to this functionality:
+Front Desk Staff.
+F&B Staff.
+Housekeeping Staff.
+Kitchen Staff.
+Maintenance Staff.
+IT Staff.
+Management Staff.
+Other ordinary hotel users.
+Do not grant reset permission merely because a user has access to the Dashboard, Settings, or another administrative module.
+The permission must be explicitly enforced using the existing role-based security architecture.
+3. RESET SCOPE
+When the Hotel Admin resets the system, the reset must affect the entire operational data environment of that hotel.
+It must not be limited to:
+The current browser.
+The current user.
+The currently selected module.
+The current device.
+The current session.
+The current Firestore collection visible in the interface.
+All authorised users working in the affected hotel must experience the same reset.
+DATA THAT MUST BE DELETED
+Inspect the existing Firestore architecture and identify all hotel operational data, including:
+Reservations.
+Guest records.
+Check-in and checkout records.
+Guest folios.
+Guest account transactions.
+F&B orders and bills.
+Restaurant transactions.
+Bar transactions.
+Room service orders.
+Payments.
+Financial transaction records.
+Housekeeping tasks.
+Room operational records.
+Maintenance requests.
+Laundry records.
+Kitchen orders.
+Inventory transactions.
+Storekeeping records.
+Corporate account transactions.
+Reports and operational records.
+Other module-specific operational data.
+The deletion must include associated subcollections and nested operational documents where applicable.
+Do not leave behind operational records simply because they are stored in a different collection or nested structure.
+4. USER ACCOUNTS MUST NOT BE DELETED
+This is a strict requirement.
+The system reset must not delete user accounts.
+Preserve:
+Existing Hotel Admin accounts.
+Existing staff accounts.
+Existing user documents.
+Firebase Authentication users.
+Login credentials and authentication identities.
+Existing staff role assignments.
+Existing staff permissions.
+Existing user activation status.
+The hotel identity and tenant association required to continue using the PMS.
+Do not delete users from Firebase Authentication.
+Do not delete or recreate the user collection.
+Do not reset user passwords.
+Do not suspend users.
+Do not remove existing staff permissions.
+Do not require users to register again after the reset.
+After the reset, all existing users must be able to log in using their existing credentials and access the PMS according to their existing roles and permissions.
+5. PRESERVE THE MINIMUM SYSTEM STRUCTURE
+The reset must delete operational and module data without destroying the essential system structure required for the hotel to continue operating.
+Preserve:
+Hotel identity and tenant information.
+Hotel Admin account.
+User accounts and authentication.
+User role and permission configuration.
+Essential application configuration required for the PMS to function.
+System-level configuration required to maintain the existing hotel installation.
+However, do not preserve operational data merely because it is stored alongside configuration data.
+Inspect the existing structure and distinguish operational records from essential configuration.
+If a configuration collection contains both operational records and essential settings, delete only the operational records while preserving the necessary configuration.
+Do not arbitrarily preserve reservations, guest accounts, financial transactions, F&B bills, or other operational data.
+6. RESET MUST DELETE FROM FIRESTORE
+The reset must perform actual data deletion from Firestore.
+Do not implement a reset that merely:
+Clears the current screen.
+Hides records.
+Changes a local state variable.
+Logs the user out.
+Clears browser cache.
+Deletes only data stored locally.
+Marks operational records as hidden while leaving them in the database.
+The data must actually be deleted from the relevant Firestore collections and subcollections.
+After the reset, previously deleted operational records must no longer appear when users reopen modules or reconnect.
+Do not leave orphaned operational documents or associated subcollections.
+Use the existing Firebase architecture and appropriate deletion mechanisms.
+Do not introduce unnecessary new infrastructure.
+7. GLOBAL RESET INTERFACE
+Provide a dedicated system reset control within the existing Hotel Admin interface.
+The control should be clearly identified as:
+Reset Entire Hotel System
+It must not be confused with:
+Resetting an individual module.
+Resetting a dashboard.
+Logging out.
+Clearing browser data.
+Restarting the application.
+Display a clear explanation before the reset begins.
+Example warning:
+"This action will permanently delete hotel operational data across all PMS modules, including reservations, guest records, F&B transactions, folios, payments, housekeeping, inventory, and other operational records. All users in this hotel will be affected. Existing user accounts, authentication, and permissions will remain intact."
+8. RESET CONFIRMATION
+Because this operation is destructive, implement multiple confirmation safeguards.
+Before proceeding:
+Verify the current user's Hotel Admin role.
+Display the complete reset warning.
+Require the Hotel Admin to explicitly confirm the operation.
+Require a deliberate confirmation action rather than a single accidental click.
+Display the affected hotel identity.
+Prevent ordinary staff from initiating the reset.
+Do not trigger the reset merely by opening the reset page.
+Do not allow the reset to execute automatically without explicit confirmation.
+The reset must not be accessible through an ordinary staff-facing interface or unrestricted API operation.
+9. RESET EXECUTION
+When the Hotel Admin confirms:
+Verify the user's permissions again on the server.
+Identify the correct hotel tenant.
+Identify all operational collections and subcollections belonging to that hotel.
+Execute the reset using the existing Firebase architecture.
+Delete the applicable operational data from Firestore.
+Preserve all existing users and authentication.
+Preserve the essential hotel identity and system structure.
+Update the reset status.
+Notify all affected authenticated users through the existing real-time mechanism.
+Ensure the system displays the clean operational state.
+The reset must be scoped correctly to the intended hotel.
+Do not accidentally delete operational records belonging to other hotels or tenants.
+10. SAFE HANDLING OF LARGE DATASETS
+Firestore may contain more records than can be deleted in a single batch.
+Inspect the existing architecture and implement the appropriate deletion strategy for large datasets.
+The implementation must:
+Handle large collections.
+Handle nested subcollections.
+Avoid exceeding Firestore batch limits.
+Prevent uncontrolled deletion.
+Provide a clear reset progress state.
+Handle failures safely.
+Avoid reporting success before deletion is confirmed.
+Prevent duplicate reset execution.
+Ensure interrupted resets can be handled safely.
+Do not assume that deleting a parent document automatically deletes its subcollections.
+Explicitly inspect and handle nested data.
+11. RESET AUDIT AND ACCOUNTABILITY
+Maintain a minimal system-level audit record for the reset operation.
+The audit should contain:
+Hotel identifier.
+Admin user identifier.
+Reset initiation time.
+Reset completion time.
+Reset status.
+Success or failure.
+Summary of the reset operation.
+This minimal audit record must not preserve the deleted operational transactions, guest records, or F&B data.
+Restrict access to this audit record according to the existing administrative permissions.
+Do not allow ordinary users to modify or delete reset audit records.
+12. RESET REAL-TIME EFFECT ON ALL USERS
+This requirement is particularly important.
+When the Hotel Admin resets the system:
+Every connected user in the affected hotel must receive the reset state.
+All operational lists must become empty where applicable.
+Dashboard totals must update.
+Guest lists must update.
+Reservation lists must update.
+F&B orders and transactions must update.
+Front Desk guest accounts must update.
+Room operational records must update according to the preserved configuration.
+Housekeeping operational tasks must update.
+Inventory operational records must update.
+Financial operational reports must update.
+Users must not continue seeing previously deleted data because of stale local state or cached queries.
+Use the existing Firestore real-time listeners and application state management.
+Do not rely exclusively on browser refresh.
+Do not require every staff member to log out and log back in.
+Do not delete user accounts to achieve the reset.
+13. RESET AND FIRESTORE SECURITY
+Ensure that:
+Only the Hotel Admin can initiate the reset.
+The role is verified using trusted server-side authorization.
+Ordinary users cannot call the reset operation directly.
+Existing tenant isolation remains intact.
+One hotel cannot reset another hotel's data.
+Users cannot escalate their permissions to access reset functionality.
+Existing Firestore security rules remain intact except for necessary targeted modifications.
+The reset does not bypass existing authentication.
+All deletion operations are appropriately restricted.
+Do not rely solely on hiding the reset button in the frontend.
+The underlying reset operation must enforce authorization independently.
+14. RESET ACCEPTANCE TESTS
+Test the following scenarios.
+Test 1: Hotel Admin reset
+Hotel Admin initiates a reset.
+Expected result: All applicable operational records across all hotel modules are deleted.
+Test 2: Staff user attempts reset
+An ordinary staff user attempts to access the reset functionality.
+Expected result: Access is denied.
+Test 3: User preservation
+Reset the system.
+Expected result: Existing Hotel Admin and staff accounts remain intact and can log in.
+Test 4: Firebase Authentication preservation
+Expected result: No existing Firebase Authentication users are deleted.
+Test 5: Multi-user reset
+Hotel Admin resets the system while several users are logged in.
+Expected result: All affected users receive the updated clean system state.
+Test 6: Firestore deletion
+Expected result: Operational documents and applicable subcollections are actually deleted from Firestore.
+Test 7: Nested data
+Expected result: Associated operational subcollections are not left behind.
+Test 8: Tenant isolation
+Expected result: Resetting one hotel does not delete another hotel's operational data.
+Test 9: Interrupted reset
+Expected result: The system handles incomplete deletion safely and does not falsely report completion.
+Test 10: Existing PMS functionality
+Expected result: The hotel can continue operating after the reset, with existing users, permissions, and essential configurations intact.
+FINAL IMPLEMENTATION REQUIREMENT
+Before making changes:
+Inspect the existing real-time synchronization architecture.
+Inspect the existing Firestore collections and nested structures.
+Identify all operational modules and their data dependencies.
+Identify existing user accounts, authentication, roles, and permissions.
+Identify the existing Hotel Admin authorization mechanism.
+Identify essential hotel configuration that must survive the reset.
+Identify all operational data that must be deleted.
+Reuse the existing architecture and modify only the necessary components.
+After implementation, provide a summary showing:
+Modules updated for real-time synchronization.
+Existing listeners reused or corrected.
+Firestore collections included in the reset.
+Nested subcollections handled.
+User accounts and authentication preserved.
+Essential configurations preserved.
+Reset permissions enforced.
+Multi-user synchronization tested.
+Reset execution tested.
+Any remaining limitations.
+The final system must provide reliable real-time synchronization across all modules and users, alongside a complete Hotel Admin-controlled reset that deletes hotel operational data from Firestore while preserving every existing user account and the essential system structure.

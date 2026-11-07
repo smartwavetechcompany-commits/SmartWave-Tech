@@ -1,4 +1,4 @@
-import { doc, setDoc, addDoc, collection, serverTimestamp, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db, firebaseConfig } from '../firebase';
 import { UserProfile, UserRole, StaffRole } from '../types';
 
@@ -135,16 +135,50 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
   });
 
   const authData = await authResp.json();
+  let firebaseUid = authData?.localId;
+
   if (!authResp.ok) {
     if (authData?.error?.message === 'EMAIL_EXISTS') {
-      const err: any = new Error('This email address is already registered in Firebase Authentication. Please use a different email or resend the password reset invitation.');
-      err.code = 'auth/email-already-in-use';
-      throw err;
+      try {
+        const lookupResp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: [normalizedEmail] })
+        });
+        const lookupData = await lookupResp.json();
+        if (lookupResp.ok && lookupData?.users?.[0]?.localId) {
+          firebaseUid = lookupData.users[0].localId;
+        }
+      } catch (lookupErr) {
+        console.warn("[Staff Provisioning] Lookup notice:", lookupErr);
+      }
+
+      if (!firebaseUid) {
+        const err: any = new Error('This email address is already registered in Firebase Authentication. Please use a different email or resend the password reset invitation.');
+        err.code = 'auth/email-already-in-use';
+        throw err;
+      }
+    } else {
+      throw new Error(authData?.error?.message || 'Failed to create user in Firebase Authentication');
     }
-    throw new Error(authData?.error?.message || 'Failed to create user in Firebase Authentication');
   }
 
-  const firebaseUid = authData.localId;
+  // Tenant Boundary Check: verify existing account is not tied to another hotel
+  try {
+    const existingSnap = await getDoc(doc(db, 'users', firebaseUid));
+    if (existingSnap.exists()) {
+      const exData = existingSnap.data();
+      const exHotel = exData.hotelId || exData.hotel_id;
+      if (exHotel && exHotel !== hotelId) {
+        throw new Error(`The email '${normalizedEmail}' is already registered with another hotel property.`);
+      }
+    }
+  } catch (docErr: any) {
+    if (docErr.message?.includes('another hotel property')) {
+      throw docErr;
+    }
+  }
+
   const tokenId = 'act_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const activationLink = `${cleanBase}/set-password?email=${encodeURIComponent(normalizedEmail)}&token=${tokenId}&tp=${encodeURIComponent(tempPass)}&mode=resetPassword`;
