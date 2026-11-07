@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, onSnapshot, orderBy, doc, addDoc, limit, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, limit, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
+import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount, Promotion } from '../types';
@@ -1045,6 +1046,33 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         role: profile?.role || 'staff',
         displayName: profile?.displayName || (profile as any)?.name || 'Staff'
       });
+
+      // If this voided entry was linked to an F&B kitchen order, synchronize the order's status
+      const refId = confirmDelete.referenceId;
+      const cat = String(confirmDelete.category || '').toLowerCase();
+      if (refId && (cat === 'f & b' || cat === 'restaurant' || confirmDelete.billNumber || confirmDelete.outletName)) {
+        try {
+          const koRef = doc(db, 'hotels', hotel.id, 'kitchen_orders', refId);
+          const koSnap = await getDoc(koRef);
+          if (koSnap.exists()) {
+            await database.safeUpdate(koRef, {
+              status: 'cancelled',
+              financialStatus: 'refunded',
+              voidReason: 'Voided by Front Desk from Guest Folio',
+              voidedBy: profile.uid,
+              voidedByName: profile.displayName || (profile as any)?.name || 'Front Desk Staff',
+              voidedAt: new Date().toISOString()
+            }, {
+              hotelId: hotel.id,
+              module: 'F & B',
+              action: 'VOID_ORDER_FROM_FOLIO',
+              details: `Order ${refId} cancelled and refunded via guest folio void`
+            });
+          }
+        } catch (kErr) {
+          console.warn('Could not sync void to kitchen_orders:', kErr);
+        }
+      }
       
       toast.success('Transaction voided and reversed');
       setConfirmDelete(null);

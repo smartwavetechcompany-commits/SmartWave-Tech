@@ -643,7 +643,7 @@ export const settleLedger = async (
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
   settlementSource?: 'Front Desk' | 'F&B Outlet'
 ) => {
-  return postToLedger(hotelId, guestId, reservationId, {
+  const result = await postToLedger(hotelId, guestId, reservationId, {
     amount,
     type: 'credit',
     category: 'payment',
@@ -654,6 +654,90 @@ export const settleLedger = async (
     proofUrl,
     settlementSource: settlementSource || 'Front Desk'
   } as any, postedBy, corporateId, paymentMethod, userContext);
+
+  // Synchronize any F&B kitchen orders charged to this room that are settled via Front Desk
+  try {
+    const koQuery = query(
+      collection(db, 'hotels', hotelId, 'kitchen_orders'),
+      where('reservationId', '==', reservationId)
+    );
+    const koSnap = await getDocs(koQuery);
+    let remainingAllocation = amount;
+
+    for (const kDoc of koSnap.docs) {
+      const kData = kDoc.data() as any;
+      if (kData.financialStatus === 'posted_to_room' || (kData.roomChargedAmount && kData.roomChargedAmount > (kData.paidAmount || 0))) {
+        const roomOwed = Math.max(0, (kData.roomChargedAmount || kData.totalAmount || 0) - (kData.directPaidAmount || 0));
+        if (roomOwed <= 0) continue;
+
+        if (remainingAllocation >= roomOwed - 0.01) {
+          remainingAllocation -= roomOwed;
+          const updatedPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
+          updatedPayments.push({
+            amount: roomOwed,
+            method: paymentMethod,
+            date: new Date().toISOString(),
+            reference: `Front Desk Folio Settlement (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
+            settlementSource: settlementSource || 'Front Desk',
+            processedBy: {
+              uid: userContext?.uid || postedBy,
+              name: userContext?.displayName || 'Front Desk Staff',
+              role: userContext?.role || 'staff'
+            }
+          });
+
+          await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
+            financialStatus: 'paid',
+            status: kData.status === 'delivered' ? 'paid' : kData.status,
+            paidAmount: (kData.directPaidAmount || 0) + roomOwed,
+            settlementSource: settlementSource || 'Front Desk',
+            settledAt: new Date().toISOString(),
+            settledBy: postedBy,
+            settledByName: userContext?.displayName || 'Front Desk Staff',
+            payments: updatedPayments
+          }, {
+            hotelId,
+            module: 'F & B',
+            action: 'SETTLE_ORDER_VIA_FRONT_DESK',
+            details: `Front Desk settled room charge of ${roomOwed} for Order ${kDoc.id}`
+          });
+        } else if (remainingAllocation > 0) {
+          const partialAmt = remainingAllocation;
+          remainingAllocation = 0;
+          const updatedPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
+          updatedPayments.push({
+            amount: partialAmt,
+            method: paymentMethod,
+            date: new Date().toISOString(),
+            reference: `Front Desk Partial Folio Settlement (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
+            settlementSource: settlementSource || 'Front Desk',
+            processedBy: {
+              uid: userContext?.uid || postedBy,
+              name: userContext?.displayName || 'Front Desk Staff',
+              role: userContext?.role || 'staff'
+            }
+          });
+
+          await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
+            financialStatus: 'partially_settled',
+            paidAmount: (kData.paidAmount || kData.directPaidAmount || 0) + partialAmt,
+            settlementSource: settlementSource || 'Front Desk',
+            lastPaymentAt: new Date().toISOString(),
+            payments: updatedPayments
+          }, {
+            hotelId,
+            module: 'F & B',
+            action: 'PARTIAL_SETTLE_ORDER_VIA_FRONT_DESK',
+            details: `Front Desk partially settled room charge of ${partialAmt} for Order ${kDoc.id}`
+          });
+        }
+      }
+    }
+  } catch (koErr) {
+    console.warn('[settleLedger] Failed to synchronize kitchen_orders settlement:', koErr);
+  }
+
+  return result;
 };
 
 export const transferLedgerBalance = async (

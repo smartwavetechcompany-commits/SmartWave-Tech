@@ -545,9 +545,17 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                       {incidentalDebits.map((e, index) => (
                         <div key={e.id || `incidental-${index}`} className="flex justify-between items-start py-1">
                           <div className="flex-1">
-                            <p className="text-sm font-bold">{getSafeStr(e.description)}</p>
+                            <p className="text-sm font-bold flex items-center gap-2 flex-wrap">
+                              {getSafeStr(e.description)}
+                              {e.billNumber && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-700 border border-zinc-200">
+                                  Bill #{e.billNumber}
+                                </span>
+                              )}
+                            </p>
                             <p className="text-[10px] text-zinc-500 font-medium">
-                              Category: {getSafeStr(e.category, 'OTHER').toUpperCase()} • Posted {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
+                              {e.outletName ? `${e.outletName} • ` : ''}Category: {getSafeStr(e.category, 'OTHER').toUpperCase()} • Posted {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
+                              {e.directPaidAmount && e.directPaidAmount > 0 ? ` • Outlet Paid: ${formatCurrency(e.directPaidAmount, currency, exchangeRate)}` : ''}
                             </p>
                           </div>
                           <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>

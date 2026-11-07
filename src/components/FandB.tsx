@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
-import { postToLedger, voidLedgerEntry } from '../services/ledgerService';
+import { postToLedger, voidLedgerEntry, recalculateReservationAccountFromLedger } from '../services/ledgerService';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -92,6 +92,7 @@ export function FandB() {
     tableId: '',
     tableNumber: '',
     guestId: '',
+    reservationId: '',
     outletId: configuredOutlets[0]?.id || 'restaurant',
     outletName: configuredOutlets[0]?.name || 'Main Restaurant',
     orderType: 'dine_in' as 'dine_in' | 'room_service' | 'takeaway' | 'bar',
@@ -274,9 +275,12 @@ export function FandB() {
       return;
     }
 
-    // Check if room number is specified but not checked in
+    // Check if room number is specified
     const isRoomOrder = newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in';
-    const res = isRoomOrder ? reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in') : undefined;
+    const res = isRoomOrder 
+      ? (reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in') 
+         || (newOrder.reservationId ? reservations.find(r => r.id === newOrder.reservationId) : undefined)) 
+      : undefined;
 
     const hasRoomPayment = newOrder.payments.some(p => p.method === 'room');
     if (isRoomOrder && hasRoomPayment && !res) {
@@ -341,9 +345,14 @@ export function FandB() {
       const directPaid = newOrder.payments
         .filter(p => p.method !== 'room')
         .reduce((sum, p) => sum + (p.amount || 0), 0);
-      const roomCharged = newOrder.payments
+      let roomCharged = newOrder.payments
         .filter(p => p.method === 'room')
         .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      // Auto-fallback: If user selected "room" as payment method or if order is for a room and no direct payments were collected
+      if (hasRoomPayment && (roomCharged <= 0 || newOrder.payments.length === 1)) {
+        roomCharged = Math.max(0, Number((finalPrice - directPaid).toFixed(2)));
+      }
 
       // Verify room charge rules (Module 3)
       if (roomCharged > 0) {
@@ -367,10 +376,10 @@ export function FandB() {
 
       // Determine financial and order status
       let financialStatus: KitchenOrder['financialStatus'] = 'unpaid';
-      if (directPaid >= finalPrice - 0.01) {
-        financialStatus = 'paid';
-      } else if (roomCharged >= finalPrice - 0.01) {
+      if (roomCharged >= finalPrice - 0.01) {
         financialStatus = 'posted_to_room';
+      } else if (directPaid >= finalPrice - 0.01) {
+        financialStatus = 'paid';
       } else if (directPaid > 0 && roomCharged > 0) {
         financialStatus = 'partially_settled';
       } else if (directPaid > 0) {
@@ -436,21 +445,22 @@ export function FandB() {
         userId: 'all'
       }).catch(() => {});
 
-      const guestId = newOrder.guestId || (res?.guestId);
+      const effectiveGuestId = newOrder.guestId || res?.guestId || res?.id || 'unknown';
 
       // POST TO GUEST FOLIO ONLY IF ROOM CHARGED (Module 3 & Module 6)
       // If paid entirely at outlet, NO room debit is posted!
-      if (roomCharged > 0 && isRoomOrder && res && guestId) {
+      if (roomCharged > 0 && isRoomOrder && res) {
         const ledgerDescription = directPaid > 0
           ? `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber} - Partial Room Charge): ${newOrder.items} (Bill: ${formatCurrency(finalPrice, currency, exchangeRate)}, Paid at Outlet: ${formatCurrency(directPaid, currency, exchangeRate)})`
           : `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber}): ${newOrder.items}`;
 
-        const postedEntry = await postToLedger(hotel.id, guestId, res.id, {
+        const postedEntry = await postToLedger(hotel.id, effectiveGuestId, res.id, {
           amount: roomCharged, // EXACT room charge debit!
           type: 'debit',
           category: 'F & B',
           description: ledgerDescription,
           referenceId: orderRef.id,
+          idempotencyKey: `FB_ROOM_${orderRef.id}`,
           postedBy: profile.uid,
           skipAutomaticTax: true, // Prevents taxes from being calculated a second time
           outletName: newOrder.outletName,
@@ -473,7 +483,9 @@ export function FandB() {
 
         if (postedEntry?.id) {
           await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderRef.id), {
-            ledgerEntryId: postedEntry.id
+            ledgerEntryId: postedEntry.id,
+            roomChargedAmount: roomCharged,
+            financialStatus: roomCharged >= finalPrice - 0.01 ? 'posted_to_room' : 'partially_settled'
           }, {
             hotelId: hotel.id,
             module: 'F & B',
@@ -481,6 +493,9 @@ export function FandB() {
             details: `Linked ledger entry ${postedEntry.id} to order ${billNumber}`
           }).catch(() => {});
         }
+
+        // Re-synchronize authoritative reservation account balance
+        await recalculateReservationAccountFromLedger(hotel.id, res.id).catch(() => {});
       }
 
       // Record direct payments in Finance as income (Module 2 & Module 6)
@@ -537,6 +552,7 @@ export function FandB() {
         tableId: '', 
         tableNumber: '', 
         guestId: '', 
+        reservationId: '', 
         outletId: configuredOutlets[0]?.id || 'restaurant',
         outletName: configuredOutlets[0]?.name || 'Main Restaurant',
         orderType: 'dine_in',
@@ -571,6 +587,47 @@ export function FandB() {
     }
 
     try {
+      // If this order had a room charge, reverse/void the ledger debit to maintain folio balance accuracy
+      try {
+        const orderSnap = await getDoc(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId));
+        if (orderSnap.exists()) {
+          const oData = orderSnap.data() as any;
+          if (oData.ledgerEntryId || (oData.roomChargedAmount && oData.roomChargedAmount > 0)) {
+            let ledgerEntry: any = null;
+            if (oData.ledgerEntryId) {
+              const lSnap = await getDoc(doc(db, 'hotels', hotel.id, 'ledger', oData.ledgerEntryId));
+              if (lSnap.exists()) {
+                ledgerEntry = { id: lSnap.id, firestoreId: lSnap.id, ...lSnap.data() };
+              }
+            }
+            if (!ledgerEntry) {
+              const q = query(
+                collection(db, 'hotels', hotel.id, 'ledger'),
+                where('referenceId', '==', orderId)
+              );
+              const qSnap = await getDocs(q);
+              const found = qSnap.docs.find(d => {
+                const data = d.data() as any;
+                return data.type === 'debit' && (data.category === 'F & B' || data.category === 'restaurant');
+              });
+              if (found) {
+                ledgerEntry = { id: found.id, firestoreId: found.id, ...found.data() };
+              }
+            }
+            if (ledgerEntry) {
+              await voidLedgerEntry(hotel.id, ledgerEntry, profile.uid, {
+                uid: profile.uid,
+                email: profile.email,
+                role: profile.role || 'staff',
+                displayName: profile.displayName || (profile as any)?.name || 'Staff'
+              });
+            }
+          }
+        }
+      } catch (voidErr) {
+        console.warn('Could not void linked ledger entry on order deletion:', voidErr);
+      }
+
       await database.safeDelete(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderId), {
         hotelId: hotel.id,
         module: 'F & B',
@@ -899,8 +956,14 @@ export function FandB() {
         details: `Recorded F&B direct payment of ${settleAmount} [${settleSource}]`
       });
 
-      // 3. If linked to an in-house room reservation, credit the guest ledger so room folio stays synchronized
-      if (isRoomOrder && res && guestId) {
+      // 3. If linked to an in-house room reservation and this order was previously charged to the room,
+      // credit the guest ledger so room folio stays synchronized without creating unearned credits
+      const wasChargedToRoom = Boolean(
+        (settleOrderModal.roomChargedAmount && settleOrderModal.roomChargedAmount > 0) ||
+        settleOrderModal.financialStatus === 'posted_to_room' ||
+        settleOrderModal.ledgerEntryId
+      );
+      if (wasChargedToRoom && isRoomOrder && res && guestId) {
         await postToLedger(hotel.id, guestId, res.id, {
           amount: settleAmount,
           type: 'credit',
@@ -916,6 +979,9 @@ export function FandB() {
           role: profile?.role || 'staff',
           displayName: profile?.displayName || (profile as any)?.name || 'Staff'
         });
+
+        // Re-synchronize authoritative reservation account balance
+        await recalculateReservationAccountFromLedger(hotel.id, res.id).catch(() => {});
       }
 
       // 4. Log Activity
@@ -2921,15 +2987,20 @@ export function FandB() {
                     </select>
                   </div>
 
-                  <div className="space-y-2">
+                    <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room & Guest</label>
                     <select
                       required
                       value={newOrder.roomNumber}
                       onChange={(e) => {
                         const roomNum = e.target.value;
-                        const res = reservations.find(r => r.roomNumber === roomNum);
-                        setNewOrder({ ...newOrder, roomNumber: roomNum, guestId: res?.guestId || '' });
+                        const res = reservations.find(r => r.roomNumber === roomNum && r.status === 'checked_in') || reservations.find(r => r.roomNumber === roomNum);
+                        setNewOrder({ 
+                          ...newOrder, 
+                          roomNumber: roomNum, 
+                          guestId: res?.guestId || res?.id || '',
+                          reservationId: res?.id || ''
+                        });
                       }}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
                     >
@@ -2990,16 +3061,33 @@ export function FandB() {
                           <DollarSign size={14} />
                           Payments
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setNewOrder({
-                            ...newOrder,
-                            payments: [...newOrder.payments, { amount: 0, method: 'cash' }]
-                          })}
-                          className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
-                        >
-                          <Plus size={12} /> Add Split
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {newOrder.roomNumber !== 'Walk-in' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewOrder({
+                                  ...newOrder,
+                                  payments: [{ amount: 0, method: 'room', settlementSource: 'F&B Outlet' }]
+                                });
+                              }}
+                              className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold hover:bg-emerald-500/20 uppercase transition-colors"
+                              title="Set full order payment to Charge to Room"
+                            >
+                              Charge to Room
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setNewOrder({
+                              ...newOrder,
+                              payments: [...newOrder.payments, { amount: 0, method: 'cash' }]
+                            })}
+                            className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase"
+                          >
+                            <Plus size={12} /> Add Split
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-3">
