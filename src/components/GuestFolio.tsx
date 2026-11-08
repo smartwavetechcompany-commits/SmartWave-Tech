@@ -103,7 +103,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     price: number;
     quantity: number;
     type: 'debit' | 'credit';
-    category: 'restaurant' | 'service' | 'other' | 'laundry' | 'discount';
+    category: 'restaurant' | 'F & B' | 'service' | 'other' | 'laundry' | 'discount';
     description: string;
     discount: number;
     discountType: 'fixed' | 'percentage';
@@ -113,7 +113,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     price: 0,
     quantity: 1,
     type: 'debit' as 'debit' | 'credit',
-    category: 'restaurant' as 'restaurant' | 'service' | 'other' | 'laundry' | 'discount',
+    category: 'restaurant' as 'restaurant' | 'F & B' | 'service' | 'other' | 'laundry' | 'discount',
     description: '',
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
@@ -2202,10 +2202,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="restaurant">Restaurant</option>
-                          <option value="service">Room Service</option>
-                          <option value="laundry">Laundry</option>
-                          <option value="discount">Discount</option>
-                          <option value="other">Other</option>
+                          <option value="F & B">Food & Beverage / Bar</option>
+                          <option value="service">Room Service / Services</option>
+                          <option value="laundry">Laundry & Dry Cleaning</option>
+                          <option value="other">Other Incidentals / Amenities</option>
+                          <option value="discount">Discount / Concession</option>
                         </select>
                       </div>
                       <div className="space-y-2">
@@ -2780,9 +2781,44 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className="text-[10px] font-semi uppercase px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded">
-                              {typeof entry.category === 'string' ? entry.category : (entry.category && typeof entry.category === 'object' ? String((entry.category as any).name || 'general') : 'general')}
-                            </span>
+                            {(() => {
+                              const rawCat = (typeof entry.category === 'string' ? entry.category : (entry.category && typeof entry.category === 'object' ? String((entry.category as any).name || 'other') : 'other')).toLowerCase();
+                              let colorClass = "bg-zinc-800 text-zinc-400 border-zinc-700";
+                              let label = typeof entry.category === 'string' ? entry.category : 'General';
+                              if (rawCat === 'room' || entry.chargeType === 'room_rate' || entry.chargeType === 'overstay') {
+                                colorClass = "bg-blue-500/10 text-blue-400 border-blue-500/30";
+                                label = entry.chargeType === 'overstay' ? 'Overstay' : 'Room Stay';
+                              } else if (rawCat === 'restaurant' || rawCat === 'f & b' || rawCat === 'food' || rawCat === 'drink') {
+                                colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+                                label = 'F & B';
+                              } else if (rawCat === 'laundry') {
+                                colorClass = "bg-purple-500/10 text-purple-400 border-purple-500/30";
+                                label = 'Laundry';
+                              } else if (rawCat === 'service') {
+                                colorClass = "bg-cyan-500/10 text-cyan-400 border-cyan-500/30";
+                                label = 'Room Service';
+                              } else if (rawCat === 'payment') {
+                                colorClass = "bg-emerald-500/20 text-emerald-300 font-bold border-emerald-500/40";
+                                label = 'Payment';
+                              } else if (rawCat === 'discount') {
+                                colorClass = "bg-amber-500/10 text-amber-400 border-amber-500/30";
+                                label = 'Discount';
+                              } else if (rawCat === 'refund') {
+                                colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+                                label = 'Refund';
+                              } else if (rawCat === 'city_ledger' || rawCat === 'transfer') {
+                                colorClass = "bg-indigo-500/10 text-indigo-400 border-indigo-500/30";
+                                label = 'Transfer';
+                              } else if (rawCat === 'tax') {
+                                colorClass = "bg-zinc-800 text-zinc-400 border-zinc-700";
+                                label = 'Tax';
+                              }
+                              return (
+                                <span className={cn("text-[9px] font-bold uppercase px-2 py-0.5 rounded border inline-flex items-center gap-1", colorClass)}>
+                                  {label}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 text-right text-sm font-bold text-red-500">
                             {entry.type === 'debit' ? formatCurrency(entry.amount, currency, exchangeRate) : '-'}

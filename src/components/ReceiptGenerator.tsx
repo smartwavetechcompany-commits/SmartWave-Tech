@@ -133,7 +133,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const activeLedger = (ledgerEntries && ledgerEntries.length > 0) ? ledgerEntries : fetchedLedger;
 
   // Filter entries based on folioType if reservation is corporate
-  const filteredEntries = (reservation?.corporateId && folioType !== 'all')
+  const filteredEntries = (reservation?.corporateId && folioType && folioType !== 'all')
     ? activeLedger.filter(e => folioType === 'company' ? !!e.corporateId : !e.corporateId)
     : activeLedger;
   
@@ -156,16 +156,27 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     const cat = getSafeStr(e.category).toLowerCase();
     const desc = getSafeStr(e.description).toLowerCase();
     const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
-    return !isDiscount && (cat === 'transfer' || desc.includes('transfer'));
+    return !isDiscount && (cat === 'transfer' || cat === 'city_ledger' || desc.includes('transfer'));
+  }).reduce((acc, e) => acc + e.amount, 0);
+
+  const totalReversals = credits.filter(e => {
+    const cat = getSafeStr(e.category).toLowerCase();
+    const desc = getSafeStr(e.description).toLowerCase();
+    return cat === 'reversal' || desc.startsWith('reversal') || desc.includes('reversal:');
   }).reduce((acc, e) => acc + e.amount, 0);
 
   const totalPayments = credits.filter(e => {
     const cat = getSafeStr(e.category).toLowerCase();
     const desc = getSafeStr(e.description).toLowerCase();
     const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
-    const isTransfer = cat === 'transfer' || desc.includes('transfer');
-    return !isDiscount && !isTransfer && (cat === 'payment' || e.type === 'credit');
+    const isTransfer = cat === 'transfer' || cat === 'city_ledger' || desc.includes('transfer');
+    const isReversal = cat === 'reversal' || desc.startsWith('reversal') || desc.includes('reversal:');
+    const isRefund = cat === 'refund';
+    return !isDiscount && !isTransfer && !isReversal && !isRefund && (cat === 'payment' || e.type === 'credit');
   }).reduce((acc, e) => acc + e.amount, 0);
+
+  const refundDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() === 'refund');
+  const totalRefunds = refundDebits.reduce((acc, e) => acc + e.amount, 0);
   
   const totalTaxDebits = processedEntries.filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
   let otherTaxAmount = 0;
@@ -533,7 +544,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                 {(() => {
                   const incidentalDebits = debits.filter(e => {
                     const cat = getSafeStr(e.category).toLowerCase();
-                    return cat !== 'room' && cat !== 'tax';
+                    const desc = getSafeStr(e.description).toLowerCase();
+                    return cat !== 'room' && cat !== 'tax' && cat !== 'refund' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay' && !desc.startsWith('reversal');
                   });
                   
                   if (incidentalDebits.length === 0) {
@@ -542,25 +554,37 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
                   return (
                     <div className="divide-y divide-zinc-100/60">
-                      {incidentalDebits.map((e, index) => (
-                        <div key={e.id || `incidental-${index}`} className="flex justify-between items-start py-1">
-                          <div className="flex-1">
-                            <p className="text-sm font-bold flex items-center gap-2 flex-wrap">
-                              {getSafeStr(e.description)}
-                              {e.billNumber && (
-                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-700 border border-zinc-200">
-                                  Bill #{e.billNumber}
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-[10px] text-zinc-500 font-medium">
-                              {e.outletName ? `${e.outletName} • ` : ''}Category: {getSafeStr(e.category, 'OTHER').toUpperCase()} • Posted {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
-                              {e.directPaidAmount && e.directPaidAmount > 0 ? ` • Outlet Paid: ${formatCurrency(e.directPaidAmount, currency, exchangeRate)}` : ''}
-                            </p>
+                      {incidentalDebits.map((e, index) => {
+                        const cat = getSafeStr(e.category, 'OTHER').toUpperCase();
+                        let deptBadge = cat;
+                        if (cat === 'F & B' || cat === 'RESTAURANT' || cat === 'FOOD' || cat === 'DRINK') {
+                          deptBadge = e.outletName || 'F&B';
+                        } else if (cat === 'SERVICE') {
+                          deptBadge = 'ROOM SERVICE';
+                        } else if (cat === 'LAUNDRY') {
+                          deptBadge = 'LAUNDRY';
+                        }
+
+                        return (
+                          <div key={e.id || `incidental-${index}`} className="flex justify-between items-start py-1">
+                            <div className="flex-1">
+                              <p className="text-sm font-bold flex items-center gap-2 flex-wrap">
+                                {getSafeStr(e.description)}
+                                {e.billNumber && (
+                                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-700 border border-zinc-200">
+                                    Bill #{e.billNumber}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-zinc-500 font-medium">
+                                <span className="font-semibold text-zinc-700">{deptBadge}</span> • Posted {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
+                                {e.directPaidAmount && e.directPaidAmount > 0 ? ` • Outlet Paid: ${formatCurrency(e.directPaidAmount, currency, exchangeRate)}` : ''}
+                              </p>
+                            </div>
+                            <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
                           </div>
-                          <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -646,15 +670,41 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                 <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(reservation.paidAmount, currency, exchangeRate)}</span>
               </div>
             )}
-            {credits.map(e => (
-              <div key={e.id} className="flex justify-between items-start">
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-emerald-600">{cleanLedgerDescription(getSafeStr(e.description))}</p>
-                  <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
+            {credits.map(e => {
+              const cat = getSafeStr(e.category).toLowerCase();
+              const desc = getSafeStr(e.description).toLowerCase();
+              const isReversal = cat === 'reversal' || desc.startsWith('reversal') || desc.includes('reversal:');
+              const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
+              const isTransfer = cat === 'transfer' || cat === 'city_ledger' || desc.includes('transfer');
+              
+              let typeLabel = "Payment Received";
+              let textCol = "text-emerald-600";
+              if (isReversal) {
+                typeLabel = "Reversal / Adjustment";
+                textCol = "text-amber-600";
+              } else if (isDiscount) {
+                typeLabel = "Discount";
+                textCol = "text-emerald-600";
+              } else if (isTransfer) {
+                typeLabel = "Transfer";
+                textCol = "text-indigo-600";
+              }
+
+              return (
+                <div key={e.id} className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <p className={cn("text-sm font-bold", textCol)}>{cleanLedgerDescription(getSafeStr(e.description))}</p>
+                    <p className="text-[10px] text-zinc-400">
+                      <span className="font-medium text-zinc-600">{typeLabel}</span> • {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
+                      {(e as any).referenceCode ? ` • Ref: ${(e as any).referenceCode}` : ''}
+                    </p>
+                  </div>
+                  <span className={cn("font-bold text-sm text-right", textCol)}>
+                    -{formatCurrency(e.amount, currency, exchangeRate)}
+                  </span>
                 </div>
-                <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(e.amount, currency, exchangeRate)}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -705,6 +755,18 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <div className="flex justify-between items-center text-emerald-600 text-[10px]">
                 <span className="font-bold uppercase tracking-widest">Transfers</span>
                 <span className="font-bold">{formatCurrency(totalTransfers, currency, exchangeRate)}</span>
+              </div>
+            )}
+            {totalReversals > 0 && (
+              <div className="flex justify-between items-center text-amber-600 text-[10px]">
+                <span className="font-bold uppercase tracking-widest">Adjustments / Reversals</span>
+                <span className="font-bold">-{formatCurrency(totalReversals, currency, exchangeRate)}</span>
+              </div>
+            )}
+            {totalRefunds > 0 && (
+              <div className="flex justify-between items-center text-rose-600 text-[10px]">
+                <span className="font-bold uppercase tracking-widest">Refunds Issued</span>
+                <span className="font-bold">+{formatCurrency(totalRefunds, currency, exchangeRate)}</span>
               </div>
             )}
             <div className="border-t border-zinc-200 pt-2 flex justify-between items-center">
