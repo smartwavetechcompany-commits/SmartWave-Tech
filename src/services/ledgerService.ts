@@ -990,7 +990,7 @@ export const reconcileAndRepairReservationFinancials = async (
   // If there are accrued stay/overstay nights that have not yet posted to the ledger, post them now
   if (hotel && res.status === 'checked_in' && res.autoNightDeduction !== false && roomDebits.length < legitimateTotalNights) {
     try {
-      await processAutomatedBillingForReservation(hotel, res, 'system', new Date());
+      await processAutomatedBillingForReservation(hotel, res, 'system', new Date(), true /* skipReconcile to prevent recursion */);
       const freshSnap = await getDocs(query(collection(db, 'hotels', hotelId, 'ledger'), where('reservationId', '==', reservationId)));
       ledgerEntries = freshSnap.docs.map(doc => ({ id: doc.id, firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId?: string }));
       roomDebits = ledgerEntries.filter(e => 
@@ -1175,15 +1175,49 @@ export const detectAndPurgeDuplicateOverstayCharges = async (
   existingEntries?: LedgerEntry[]
 ): Promise<string[]> => {
   if (!hotelId || !res?.id) return [];
-  const recon = await reconcileAndRepairReservationFinancials(hotelId, res.id, existingEntries);
-  return recon.purgedEntryIds;
+  let ledgerEntries = existingEntries;
+  if (!ledgerEntries) {
+    const q = query(
+      collection(db, 'hotels', hotelId, 'ledger'),
+      where('reservationId', '==', res.id)
+    );
+    const snap = await getDocs(q);
+    ledgerEntries = snap.docs.map(doc => ({ id: doc.id, firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId?: string }));
+  }
+
+  const overstayDebits = ledgerEntries.filter(e => 
+    e.type === 'debit' && 
+    (e.chargeType === 'overstay' || (e.description && e.description.toLowerCase().includes('overstay')))
+  );
+
+  if (overstayDebits.length <= 1) return [];
+
+  const seenDates = new Set<string>();
+  const duplicateIds: string[] = [];
+  overstayDebits.forEach(entry => {
+    const key = entry.chargePeriodStart 
+      ? format(new Date(entry.chargePeriodStart), 'yyyy-MM-dd')
+      : (entry.referenceId || entry.description || entry.id);
+    if (seenDates.has(key)) {
+      const dupId = (entry as any).firestoreId || entry.id;
+      if (dupId) duplicateIds.push(dupId);
+    } else {
+      seenDates.add(key);
+    }
+  });
+
+  if (duplicateIds.length > 0) {
+    await purgeCorruptedLedgerEntries(hotelId, duplicateIds);
+  }
+  return duplicateIds;
 };
 
 export const processAutomatedBillingForReservation = async (
   hotel: Hotel,
   res: Reservation,
   profileUid: string,
-  currentTime: Date = new Date()
+  currentTime: Date = new Date(),
+  skipReconcile = false
 ) => {
   if (!res.guestId || res.autoNightDeduction === false || res.status !== 'checked_in') {
     return { chargedCount: 0, totalAmount: 0 };
@@ -1402,7 +1436,9 @@ export const processAutomatedBillingForReservation = async (
   }
 
   // Ensure balances and taxes are completely reconciled and synchronized to single financial engine
-  await reconcileAndRepairReservationFinancials(hotel.id, res.id);
+  if (!skipReconcile) {
+    await reconcileAndRepairReservationFinancials(hotel.id, res.id);
+  }
 
   return { chargedCount, totalAmount: totalAmountCharged };
 };

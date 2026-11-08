@@ -856,22 +856,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const unsubLedger = onSnapshot(q, (snap) => {
       const entries = snap.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId: string }));
       
-      // Auto-heal: Detect and purge any corrupted / virtual / invalid credit entries automatically
-      const invalidEntryIds = entries
-        .filter(e => !validateLedgerTransaction(e).isValid)
-        .map(e => e.firestoreId)
-        .filter(Boolean);
-
-      if (invalidEntryIds.length > 0 && hotel?.id) {
-        purgeCorruptedLedgerEntries(hotel.id, invalidEntryIds);
-      }
-
-      // Auto-heal: Detect and purge any duplicate or runaway overstay entries automatically
-      if (hotel?.id && currentReservation.status === 'checked_in') {
-        detectAndPurgeDuplicateOverstayCharges(hotel.id, currentReservation, entries);
-      }
-
-      // Filter valid entries for display
+      // Filter valid entries for display - corrupted / invalid entries are excluded client-side
       const validEntries = entries.filter(e => validateLedgerTransaction(e).isValid);
 
       // Client-side sorting to avoid composite index requirements
@@ -913,7 +898,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   }, [currentReservation.corporateId]);
 
-  const [hasAutoAudited, setHasAutoAudited] = useState(false);
+  const autoAuditRanRef = useRef(false);
 
   const autoSyncNightlyCharges = async () => {
     if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
@@ -933,11 +918,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   };
 
   useEffect(() => {
-    if (!loading && currentReservation.status === 'checked_in' && !hasAutoAudited && hotel?.id && profile) {
-      setHasAutoAudited(true);
+    if (!loading && currentReservation.status === 'checked_in' && !autoAuditRanRef.current && hotel?.id && profile) {
+      autoAuditRanRef.current = true;
       autoSyncNightlyCharges();
     }
-  }, [loading, currentReservation.status, hasAutoAudited, hotel?.id, profile, ledgerEntries]);
+  }, [loading, currentReservation.status, hotel?.id, profile]);
 
   // Improved filtering:
   // If it's a corporate reservation, split the entries.
@@ -1481,49 +1466,56 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <History size={16} className="text-emerald-500" />
               <h3 className="text-[10px] sm:text-xs font-bold text-zinc-50 uppercase tracking-widest">Financial Summary</h3>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {Object.entries(
-                processedDisplayedEntries.reduce((acc: any, entry) => {
-                  const rawCat = entry.category;
-                  const cat = typeof rawCat === 'string' 
-                    ? rawCat 
-                    : (rawCat && typeof rawCat === 'object' ? String((rawCat as any).name || 'Other') : 'Other');
-                  if (!acc[cat]) acc[cat] = { debit: 0, credit: 0 };
-                  if (entry.type === 'debit') acc[cat].debit += entry.amount;
-                  else acc[cat].credit += entry.amount;
-                  return acc;
-                }, {
-                  room: { debit: 0, credit: 0 }
-                })
-              ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([catKey, totals]: [string, any]) => (
-                <div key={catKey} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
-                  <p className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase mb-1.5 sm:mb-2">{String(catKey).replace(/_/g, ' ')}</p>
-                  <div className="space-y-1">
-                    {totals.debit > 0 && (
-                      <div className="flex justify-between text-[10px] sm:text-xs">
-                        <span className="text-zinc-500">Charges</span>
-                        <span className="text-red-400 font-bold">{formatCurrency(totals.debit, currency, exchangeRate)}</span>
+            {loading ? (
+              <div className="py-6 flex items-center justify-center gap-2 text-zinc-500 text-xs">
+                <Loader2 size={16} className="animate-spin text-emerald-500" />
+                <span>Synchronizing real-time financial ledger...</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {Object.entries(
+                  processedDisplayedEntries.reduce((acc: any, entry) => {
+                    const rawCat = entry.category;
+                    const cat = typeof rawCat === 'string' 
+                      ? rawCat 
+                      : (rawCat && typeof rawCat === 'object' ? String((rawCat as any).name || 'Other') : 'Other');
+                    if (!acc[cat]) acc[cat] = { debit: 0, credit: 0 };
+                    if (entry.type === 'debit') acc[cat].debit += entry.amount;
+                    else acc[cat].credit += entry.amount;
+                    return acc;
+                  }, {
+                    room: { debit: 0, credit: 0 }
+                  })
+                ).filter(([_, totals]: [string, any]) => totals.debit > 0 || totals.credit > 0).map(([catKey, totals]: [string, any]) => (
+                  <div key={catKey} className="p-3 sm:p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50 group hover:border-emerald-500/30 transition-colors">
+                    <p className="text-[8px] sm:text-[10px] font-bold text-zinc-500 uppercase mb-1.5 sm:mb-2">{String(catKey).replace(/_/g, ' ')}</p>
+                    <div className="space-y-1">
+                      {totals.debit > 0 && (
+                        <div className="flex justify-between text-[10px] sm:text-xs">
+                          <span className="text-zinc-500">Charges</span>
+                          <span className="text-red-400 font-bold">{formatCurrency(totals.debit, currency, exchangeRate)}</span>
+                        </div>
+                      )}
+                      {totals.credit > 0 && (
+                        <div className="flex justify-between text-[10px] sm:text-xs">
+                          <span className="text-zinc-500">Payments</span>
+                          <span className="text-emerald-400 font-bold">{formatCurrency(totals.credit, currency, exchangeRate)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-[10px] sm:text-xs pt-1 mt-1 border-t border-zinc-800/50">
+                        <span className="text-zinc-400 font-medium">Net</span>
+                        <span className={cn(
+                          "font-black",
+                          (totals.debit - totals.credit) > 0 ? "text-zinc-50" : "text-emerald-400"
+                        )}>
+                          {formatCurrency(Math.abs(totals.debit - totals.credit), currency, exchangeRate)}
+                        </span>
                       </div>
-                    )}
-                    {totals.credit > 0 && (
-                      <div className="flex justify-between text-[10px] sm:text-xs">
-                        <span className="text-zinc-500">Payments</span>
-                        <span className="text-emerald-400 font-bold">{formatCurrency(totals.credit, currency, exchangeRate)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-[10px] sm:text-xs pt-1 mt-1 border-t border-zinc-800/50">
-                      <span className="text-zinc-400 font-medium">Net</span>
-                      <span className={cn(
-                        "font-black",
-                        (totals.debit - totals.credit) > 0 ? "text-zinc-50" : "text-emerald-400"
-                      )}>
-                        {formatCurrency(Math.abs(totals.debit - totals.credit), currency, exchangeRate)}
-                      </span>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Guest & Stay Info */}
@@ -1737,8 +1729,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </div>
               </div>
               
-              <div className="space-y-4">
-                {/* TIER 1: GROSS RATE */}
+              {loading ? (
+                <div className="py-16 px-6 flex flex-col items-center justify-center bg-zinc-900/30 rounded-xl border border-zinc-800/50 space-y-4">
+                  <Loader2 size={32} className="animate-spin text-emerald-500" />
+                  <div className="text-center space-y-1">
+                    <p className="text-xs font-bold text-zinc-300 uppercase tracking-widest">Calculating Authoritative Folio...</p>
+                    <p className="text-[10px] text-zinc-500">Synchronizing room charges, taxes, and payments with live ledger</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* TIER 1: GROSS RATE */}
                 <div className="bg-zinc-900/30 p-4 rounded-xl border border-zinc-805 space-y-2">
                   <div className="flex justify-between items-center pb-1 border-b border-zinc-800/50">
                     <span className="text-[10px] font-black tracking-wider text-zinc-400 uppercase">Tier 1: Gross Rate & Services</span>
@@ -1932,6 +1933,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   </div>
                 )}
               </div>
+            )}
             </div>
           </div>
 
