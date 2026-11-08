@@ -904,12 +904,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
-  const [activeFolio, setActiveFolio] = useState<'guest' | 'company'>(reservation.corporateId ? 'company' : 'guest');
+  const [activeFolio, setActiveFolio] = useState<'all' | 'guest' | 'company'>(reservation.corporateId ? 'all' : 'guest');
   
   // Sync active folio if reservation data loads later
   useEffect(() => {
     if (currentReservation.corporateId && activeFolio === 'guest' && !reservation.corporateId) {
-      setActiveFolio('company');
+      setActiveFolio('all');
     }
   }, [currentReservation.corporateId]);
 
@@ -951,7 +951,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   );
 
   let displayedEntries = currentReservation.corporateId
-    ? (activeFolio === 'company' ? companyEntries : guestEntries)
+    ? (activeFolio === 'company' ? companyEntries : (activeFolio === 'guest' ? guestEntries : ledgerEntries))
     : ledgerEntries; // Show all for regular guest bookings
 
   // Adjust guest folio display if the guest balance has been transferred to a corporate account
@@ -1281,24 +1281,45 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
             {/* Folio Tabs for Corporate Stays */}
             {currentReservation.corporateId && (
-              <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 self-center sm:self-auto">
+              <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 self-center sm:self-auto gap-1">
                 <button
-                  onClick={() => setActiveFolio('guest')}
+                  type="button"
+                  onClick={() => setActiveFolio('all')}
                   className={cn(
-                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                    activeFolio === 'guest' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-500 hover:text-zinc-300"
+                    "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1",
+                    activeFolio === 'all' ? "bg-zinc-100 text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-300"
                   )}
                 >
-                  Folio 2 (Guest)
+                  <span>All Charges</span>
+                  <span className={cn("px-1.5 py-0.2 rounded-full text-[9px] font-mono", activeFolio === 'all' ? "bg-zinc-300 text-zinc-900" : "bg-zinc-800 text-zinc-400")}>
+                    {ledgerEntries.length}
+                  </span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveFolio('company')}
                   className={cn(
-                    "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
+                    "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1",
                     activeFolio === 'company' ? "bg-blue-500 text-white shadow-sm" : "text-zinc-500 hover:text-zinc-300"
                   )}
                 >
-                  Folio 1 (Company)
+                  <span>Folio 1 (Company)</span>
+                  <span className={cn("px-1.5 py-0.2 rounded-full text-[9px] font-mono", activeFolio === 'company' ? "bg-blue-700 text-white" : "bg-zinc-800 text-zinc-400")}>
+                    {companyEntries.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveFolio('guest')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1",
+                    activeFolio === 'guest' ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  <span>Folio 2 (Guest)</span>
+                  <span className={cn("px-1.5 py-0.2 rounded-full text-[9px] font-mono", activeFolio === 'guest' ? "bg-emerald-700 text-white" : "bg-zinc-800 text-zinc-400")}>
+                    {guestEntries.length}
+                  </span>
                 </button>
               </div>
             )}

@@ -40,7 +40,8 @@ import {
   Lock,
   CreditCard,
   Building2,
-  FileText
+  FileText,
+  BedDouble
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
@@ -100,7 +101,7 @@ export function FandB() {
     notes: '',
     category: 'all' as string,
     price: 0,
-    payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room'; settlementSource?: 'Front Desk' | 'F&B Outlet' }[],
+    payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room'; settlementSource?: 'Front Desk' | 'F&B Outlet'; date?: string; reference?: string }[],
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage',
     discountReason: '',
@@ -118,7 +119,7 @@ export function FandB() {
   // Direct Settlement in F&B State
   const [settleOrderModal, setSettleOrderModal] = useState<KitchenOrder | null>(null);
   const [settleAmount, setSettleAmount] = useState<number>(0);
-  const [settleMethod, setSettleMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
+  const [settleMethod, setSettleMethod] = useState<'cash' | 'card' | 'transfer' | 'room'>('cash');
   const [settleSource, setSettleSource] = useState<'F&B Outlet' | 'Front Desk'>('F&B Outlet');
   const [settleNotes, setSettleNotes] = useState<string>('');
   const [isSettling, setIsSettling] = useState(false);
@@ -276,9 +277,9 @@ export function FandB() {
     }
 
     // Check if room number is specified
-    const isRoomOrder = newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in';
+    const isRoomOrder = Boolean(newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in');
     const res = isRoomOrder 
-      ? (reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in') 
+      ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === String(newOrder.roomNumber).trim().toLowerCase() && r.status === 'checked_in') 
          || (newOrder.reservationId ? reservations.find(r => r.id === newOrder.reservationId) : undefined)) 
       : undefined;
 
@@ -349,8 +350,9 @@ export function FandB() {
         .filter(p => p.method === 'room')
         .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-      // Auto-fallback: If user selected "room" as payment method or if order is for a room and no direct payments were collected
-      if (hasRoomPayment && (roomCharged <= 0 || newOrder.payments.length === 1)) {
+      // Auto-fallback: If order is for a checked-in room and direct payments don't cover full price,
+      // or if user selected "room" as payment method:
+      if (isRoomOrder && res && (hasRoomPayment || directPaid < finalPrice - 0.01)) {
         roomCharged = Math.max(0, Number((finalPrice - directPaid).toFixed(2)));
       }
 
@@ -386,6 +388,21 @@ export function FandB() {
         financialStatus = 'partially_settled';
       }
 
+      let resolvedPayments = [...newOrder.payments];
+      if (roomCharged > 0) {
+        const nonRoomPayments = resolvedPayments.filter(p => p.method !== 'room' && (p.amount || 0) > 0);
+        resolvedPayments = [
+          ...nonRoomPayments,
+          {
+            amount: roomCharged,
+            method: 'room',
+            date: new Date().toISOString(),
+            settlementSource: 'F&B Outlet',
+            reference: 'Charged to Room Folio'
+          }
+        ];
+      }
+
       const orderData: any = {
         ...newOrder,
         billNumber,
@@ -407,7 +424,8 @@ export function FandB() {
         directPaidAmount: directPaid,
         cashierUid: profile.uid,
         cashierName: profile.displayName || (profile as any)?.name || 'Cashier',
-        reservationId: res?.id || undefined
+        reservationId: res?.id || undefined,
+        payments: resolvedPayments
       };
 
       const orderRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'kitchen_orders'), orderData, {
@@ -474,7 +492,7 @@ export function FandB() {
           roomChargedAmount: roomCharged,
           directPaidAmount: directPaid,
           settlementSource: 'F&B Outlet'
-        }, profile.uid, res.corporateId, 'cash', {
+        }, profile.uid, undefined, 'cash', {
           uid: profile?.uid,
           email: profile?.email,
           role: profile?.role || 'staff',
@@ -889,9 +907,87 @@ export function FandB() {
 
     const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
     const res = isRoomOrder 
-      ? (reservations.find(r => r.roomNumber === settleOrderModal.roomNumber && r.status === 'checked_in') || reservations.find(r => r.id === settleOrderModal.guestId))
+      ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === String(settleOrderModal.roomNumber).trim().toLowerCase() && r.status === 'checked_in') || reservations.find(r => r.id === settleOrderModal.guestId))
       : undefined;
     const guestId = settleOrderModal.guestId || res?.guestId;
+
+    // Direct Charge to Room flow from Settle Modal
+    if (settleMethod === 'room') {
+      if (!isRoomOrder || !res) {
+        toast.error(`Cannot charge to room: Room ${settleOrderModal.roomNumber || 'Walk-in'} does not have an active checked-in guest.`);
+        return;
+      }
+      if (res.status !== 'checked_in') {
+        toast.error(`Cannot charge to room: Guest in Room ${res.roomNumber} is not currently checked in (${res.status}).`);
+        return;
+      }
+      setIsSettling(true);
+      try {
+        const billNo = settleOrderModal.billNumber || `FB-${settleOrderModal.id.slice(-6)}`;
+        const postedEntry = await postToLedger(hotel.id, guestId || res.guestId || 'unknown', res.id, {
+          amount: settleAmount,
+          type: 'debit',
+          category: 'F & B',
+          description: `${settleOrderModal.outletName || 'Restaurant'} — F&B Charge (Bill #${billNo}): ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`,
+          referenceId: settleOrderModal.id,
+          idempotencyKey: `FB_ROOM_${settleOrderModal.id}_${Date.now()}`,
+          postedBy: profile.uid,
+          skipAutomaticTax: true,
+          outletName: settleOrderModal.outletName,
+          billNumber: billNo,
+          preTaxAmount: settleOrderModal.price || settleAmount,
+          totalOrderAmount: orderTotal,
+          roomChargedAmount: (settleOrderModal.roomChargedAmount || 0) + settleAmount,
+          directPaidAmount: prevDirectPaid,
+          settlementSource: 'F&B Outlet'
+        }, profile.uid, undefined, 'cash', {
+          uid: profile?.uid,
+          email: profile?.email,
+          role: profile?.role || 'staff',
+          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        });
+
+        const updatedPayments = [
+          ...currentPayments,
+          {
+            amount: settleAmount,
+            method: 'room',
+            date: new Date().toISOString(),
+            reference: settleNotes || 'Charged to Room Folio',
+            settlementSource: 'F&B Outlet',
+            processedBy: {
+              uid: profile.uid,
+              name: profile.displayName || (profile as any)?.name || 'Staff',
+              role: profile.role || 'staff'
+            }
+          }
+        ];
+
+        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', settleOrderModal.id), {
+          payments: updatedPayments,
+          roomChargedAmount: (settleOrderModal.roomChargedAmount || 0) + settleAmount,
+          financialStatus: 'posted_to_room',
+          ledgerEntryId: postedEntry?.id || settleOrderModal.ledgerEntryId,
+          lastPaymentAt: new Date().toISOString()
+        }, {
+          hotelId: hotel.id,
+          module: 'F & B',
+          action: 'CHARGE_ORDER_TO_ROOM',
+          details: `Transferred ${formatCurrency(settleAmount, currency, exchangeRate)} to Room ${res.roomNumber} folio`
+        });
+
+        await recalculateReservationAccountFromLedger(hotel.id, res.id).catch(() => {});
+
+        toast.success(`Successfully charged ${formatCurrency(settleAmount, currency, exchangeRate)} to Room ${res.roomNumber} folio`);
+        setSettleOrderModal(null);
+      } catch (err: any) {
+        console.error('Error charging F&B order to room:', err);
+        toast.error(err.message || 'Failed to charge order to room');
+      } finally {
+        setIsSettling(false);
+      }
+      return;
+    }
 
     setIsSettling(true);
     try {
@@ -2994,12 +3090,15 @@ export function FandB() {
                       value={newOrder.roomNumber}
                       onChange={(e) => {
                         const roomNum = e.target.value;
-                        const res = reservations.find(r => r.roomNumber === roomNum && r.status === 'checked_in') || reservations.find(r => r.roomNumber === roomNum);
+                        const matchedRes = reservations.find(r => String(r.roomNumber).trim() === String(roomNum).trim() && r.status === 'checked_in') || reservations.find(r => String(r.roomNumber).trim() === String(roomNum).trim());
                         setNewOrder({ 
                           ...newOrder, 
                           roomNumber: roomNum, 
-                          guestId: res?.guestId || res?.id || '',
-                          reservationId: res?.id || ''
+                          guestId: matchedRes?.guestId || matchedRes?.id || '',
+                          reservationId: matchedRes?.id || '',
+                          payments: (roomNum && roomNum !== 'Walk-in' && matchedRes)
+                            ? [{ amount: 0, method: 'room', settlementSource: 'F&B Outlet' }]
+                            : newOrder.payments
                         });
                       }}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
@@ -3461,8 +3560,11 @@ export function FandB() {
                     <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
                       Payment Method
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {(['cash', 'card', 'transfer'] as const).map((method) => (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {(settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in' 
+                        ? ['room', 'cash', 'card', 'transfer'] as const 
+                        : ['cash', 'card', 'transfer'] as const
+                      ).map((method) => (
                         <button
                           key={method}
                           type="button"
@@ -3474,10 +3576,11 @@ export function FandB() {
                               : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                           )}
                         >
+                          {method === 'room' && <BedDouble size={14} />}
                           {method === 'cash' && <DollarSign size={14} />}
                           {method === 'card' && <CreditCard size={14} />}
                           {method === 'transfer' && <RefreshCw size={14} />}
-                          {method}
+                          {method === 'room' ? 'Charge Room' : method}
                         </button>
                       ))}
                     </div>
