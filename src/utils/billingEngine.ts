@@ -28,10 +28,11 @@ export interface FolioBreakdown {
   stayDuration: StayDuration;
   nightlyRate: number;
   tier1: {
-    baseRoomGross: number; // Pre-tax room charges accrued for all nights
+    baseRoomGross: number; // Pre-tax room charges accrued for booked nights
+    overstayGross?: number; // Pre-tax overstay charges accrued
     ancillaryCharges: LedgerEntry[];
     ancillaryTotal: number;
-    totalGrossRate: number; // baseRoomGross + ancillaryTotal
+    totalGrossRate: number; // baseRoomGross + overstayGross + ancillaryTotal
   };
   tier2: {
     taxes: FolioTaxItem[];
@@ -278,28 +279,45 @@ export class BillingEngine {
       const postedRoomChargesSum = roomDebits.reduce((sum, e) => sum + e.amount, 0);
       const postedTaxChargesSum = taxDebits.reduce((sum, e) => sum + e.amount, 0);
 
+      // Check if there are active stay or overstay nights that have accrued but are not yet posted to the ledger
+      let unpostedStayCharges = 0;
+      let calculatedOverstayGross = 0;
+      if (res.status === 'checked_in' && res.autoNightDeduction !== false) {
+        const legitimateTotalNights = stayDuration.totalNights;
+        const totalRoomStayRequired = legitimateTotalNights * nightlyRate;
+        if (totalRoomStayRequired > postedRoomChargesSum) {
+          unpostedStayCharges = totalRoomStayRequired - postedRoomChargesSum;
+          totalCharges += unpostedStayCharges;
+        }
+        calculatedOverstayGross = stayDuration.overstayNights * nightlyRate;
+      } else {
+        const postedOverstayDebits = roomDebits.filter(e => e.chargeType === 'overstay' || (e.description && e.description.toLowerCase().includes('overstay')));
+        calculatedOverstayGross = postedOverstayDebits.reduce((sum, e) => sum + e.amount, 0);
+      }
+
       // Determine how taxes and base gross are structured in ledger
       const hasInclusiveTaxDebits = taxDebits.some(t => t.description?.toLowerCase().includes('[inclusive]'));
       if (hasInclusiveTaxDebits) {
         // Room debits were posted as pre-tax base, and taxes as separate entries
-        baseRoomGross = postedRoomChargesSum;
+        baseRoomGross = stayDuration.bookedNights * nightlyRate;
         inclusiveTaxTotal = taxDebits.filter(t => t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
         exclusiveTaxTotal = taxDebits.filter(t => !t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
       } else if (activeTaxes.some(t => t.isInclusive)) {
         // Room debits represent gross inclusive stay; extract base and tax
-        const totalRoomStay = postedRoomChargesSum;
+        const totalRoomStay = postedRoomChargesSum + unpostedStayCharges;
         const incRate = activeTaxes.filter(t => t.isInclusive).reduce((sum, t) => sum + t.percentage, 0);
         inclusiveTaxTotal = totalRoomStay - (totalRoomStay / (1 + incRate / 100));
-        baseRoomGross = totalRoomStay - inclusiveTaxTotal;
+        const totalPreTaxStay = totalRoomStay - inclusiveTaxTotal;
+        baseRoomGross = (stayDuration.bookedNights / Math.max(1, stayDuration.totalNights)) * totalPreTaxStay;
         exclusiveTaxTotal = postedTaxChargesSum;
       } else {
-        baseRoomGross = postedRoomChargesSum;
+        baseRoomGross = stayDuration.bookedNights * nightlyRate;
         inclusiveTaxTotal = 0;
         exclusiveTaxTotal = postedTaxChargesSum;
       }
 
       // Generate clean itemized tax rows calculated exactly once
-      const staySubjectAmount = baseRoomGross + inclusiveTaxTotal;
+      const staySubjectAmount = baseRoomGross + calculatedOverstayGross + inclusiveTaxTotal;
       folioTaxes = activeTaxes.map(tax => {
         const amt = tax.isInclusive 
           ? staySubjectAmount - (staySubjectAmount / (1 + tax.percentage / 100))
@@ -344,7 +362,7 @@ export class BillingEngine {
       inclusiveTaxTotal = calcIncTotal;
       exclusiveTaxTotal = calcExclTotal;
       totalTaxAmount = calculatedTaxTotal;
-      baseRoomGross = totalRoomStay - inclusiveTaxTotal;
+      baseRoomGross = (stayDuration.bookedNights * nightlyRate) - (inclusiveTaxTotal * (stayDuration.bookedNights / Math.max(1, stayDuration.totalNights)));
       ancillaryTotal = 0;
       ancillaryCharges = [];
       totalCharges = totalRoomStay + exclusiveTaxTotal;
@@ -352,9 +370,10 @@ export class BillingEngine {
       totalRefunds = 0;
     }
 
+    const overstayGross = Number(((stayDuration.overstayNights > 0 && res.autoNightDeduction !== false) ? (nightlyRate * stayDuration.overstayNights) : 0).toFixed(2));
     baseRoomGross = Number(baseRoomGross.toFixed(2));
     ancillaryTotal = Number(ancillaryTotal.toFixed(2));
-    totalGrossRate = Number((baseRoomGross + ancillaryTotal).toFixed(2));
+    totalGrossRate = Number((baseRoomGross + overstayGross + ancillaryTotal).toFixed(2));
     inclusiveTaxTotal = Number(inclusiveTaxTotal.toFixed(2));
     exclusiveTaxTotal = Number(exclusiveTaxTotal.toFixed(2));
     totalTaxAmount = Number(totalTaxAmount.toFixed(2));
@@ -385,6 +404,7 @@ export class BillingEngine {
       nightlyRate,
       tier1: {
         baseRoomGross,
+        overstayGross,
         ancillaryCharges,
         ancillaryTotal,
         totalGrossRate

@@ -34,9 +34,11 @@ export interface GuestAccountSummary {
 export function calculateReservationAccount(
   res: Reservation,
   hotel: Hotel | null,
-  ledgerEntries?: LedgerEntry[]
+  ledgerEntries?: LedgerEntry[],
+  options?: { currentTime?: Date }
 ): GuestAccountSummary {
-  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res });
+  const currentTime = options?.currentTime || new Date();
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res, currentTime });
   const totalNights = duration.totalNights;
   const totalDays = duration.totalDays;
 

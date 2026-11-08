@@ -665,73 +665,69 @@ export const settleLedger = async (
     let remainingAllocation = amount;
 
     for (const kDoc of koSnap.docs) {
+      if (remainingAllocation <= 0.001) break;
       const kData = kDoc.data() as any;
-      if (kData.financialStatus === 'posted_to_room' || (kData.roomChargedAmount && kData.roomChargedAmount > (kData.paidAmount || 0))) {
-        const roomOwed = Math.max(0, (kData.roomChargedAmount || kData.totalAmount || 0) - (kData.directPaidAmount || 0));
-        if (roomOwed <= 0) continue;
+      
+      // Determine what portion of this order was charged to the room
+      const roomTarget = kData.roomChargedAmount !== undefined
+        ? Number(kData.roomChargedAmount)
+        : (kData.financialStatus === 'posted_to_room' ? Number(kData.totalAmount || kData.price || 0) : 0);
 
-        if (remainingAllocation >= roomOwed - 0.01) {
-          remainingAllocation -= roomOwed;
-          const updatedPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
-          updatedPayments.push({
-            amount: roomOwed,
-            method: paymentMethod,
-            date: new Date().toISOString(),
-            reference: `Front Desk Folio Settlement (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
-            settlementSource: settlementSource || 'Front Desk',
-            processedBy: {
-              uid: userContext?.uid || postedBy,
-              name: userContext?.displayName || 'Front Desk Staff',
-              role: userContext?.role || 'staff'
-            }
-          });
+      if (roomTarget <= 0.001) continue;
 
-          await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
-            financialStatus: 'paid',
-            status: kData.status === 'delivered' ? 'paid' : kData.status,
-            paidAmount: (kData.directPaidAmount || 0) + roomOwed,
-            settlementSource: settlementSource || 'Front Desk',
-            settledAt: new Date().toISOString(),
-            settledBy: postedBy,
-            settledByName: userContext?.displayName || 'Front Desk Staff',
-            payments: updatedPayments
-          }, {
-            hotelId,
-            module: 'F & B',
-            action: 'SETTLE_ORDER_VIA_FRONT_DESK',
-            details: `Front Desk settled room charge of ${roomOwed} for Order ${kDoc.id}`
-          });
-        } else if (remainingAllocation > 0) {
-          const partialAmt = remainingAllocation;
-          remainingAllocation = 0;
-          const updatedPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
-          updatedPayments.push({
-            amount: partialAmt,
-            method: paymentMethod,
-            date: new Date().toISOString(),
-            reference: `Front Desk Partial Folio Settlement (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
-            settlementSource: settlementSource || 'Front Desk',
-            processedBy: {
-              uid: userContext?.uid || postedBy,
-              name: userContext?.displayName || 'Front Desk Staff',
-              role: userContext?.role || 'staff'
-            }
-          });
+      const existingPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
 
-          await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
-            financialStatus: 'partially_settled',
-            paidAmount: (kData.paidAmount || kData.directPaidAmount || 0) + partialAmt,
-            settlementSource: settlementSource || 'Front Desk',
-            lastPaymentAt: new Date().toISOString(),
-            payments: updatedPayments
-          }, {
-            hotelId,
-            module: 'F & B',
-            action: 'PARTIAL_SETTLE_ORDER_VIA_FRONT_DESK',
-            details: `Front Desk partially settled room charge of ${partialAmt} for Order ${kDoc.id}`
-          });
-        }
+      // Calculate how much has already been settled via Front Desk for this specific order
+      const alreadySettledAtFrontDesk = existingPayments
+        .filter((p: any) => p.settlementSource === 'Front Desk' || (p.reference && String(p.reference).includes('Front Desk')))
+        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+      // What remains to be settled for this room charge
+      const roomStillOwed = Math.max(0, roomTarget - alreadySettledAtFrontDesk);
+
+      if (roomStillOwed <= 0.001) {
+        // Order room charge is already completely settled at Front Desk
+        continue;
       }
+
+      const allocatedToThisOrder = Math.min(remainingAllocation, roomStillOwed);
+      remainingAllocation -= allocatedToThisOrder;
+
+      const isFullySettledNow = (alreadySettledAtFrontDesk + allocatedToThisOrder) >= roomTarget - 0.01;
+
+      existingPayments.push({
+        amount: allocatedToThisOrder,
+        method: paymentMethod,
+        date: new Date().toISOString(),
+        reference: `Front Desk Folio Settlement (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
+        settlementSource: 'Front Desk',
+        processedBy: {
+          uid: userContext?.uid || postedBy,
+          name: userContext?.displayName || 'Front Desk Staff',
+          role: userContext?.role || 'staff'
+        }
+      });
+
+      const orderTotal = kData.totalAmount || kData.price || 0;
+      const outletPaid = (kData.directPaidAmount || 0);
+      const totalSettledNow = Math.min(orderTotal, outletPaid + alreadySettledAtFrontDesk + allocatedToThisOrder);
+
+      await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
+        financialStatus: isFullySettledNow ? 'paid' : 'partially_settled',
+        status: isFullySettledNow && (kData.status === 'delivered' || kData.status === 'ready') ? 'paid' : kData.status,
+        paidAmount: totalSettledNow,
+        settlementSource: 'Front Desk',
+        settledAt: isFullySettledNow ? new Date().toISOString() : (kData.settledAt || null),
+        settledBy: isFullySettledNow ? postedBy : (kData.settledBy || null),
+        settledByName: isFullySettledNow ? (userContext?.displayName || 'Front Desk Staff') : (kData.settledByName || null),
+        lastPaymentAt: new Date().toISOString(),
+        payments: existingPayments
+      }, {
+        hotelId,
+        module: 'F & B',
+        action: isFullySettledNow ? 'SETTLE_ORDER_VIA_FRONT_DESK' : 'PARTIAL_SETTLE_ORDER_VIA_FRONT_DESK',
+        details: `Front Desk ${isFullySettledNow ? 'settled' : 'partially settled'} room charge of ${allocatedToThisOrder} for Order ${kDoc.id}`
+      });
     }
   } catch (koErr) {
     console.warn('[settleLedger] Failed to synchronize kitchen_orders settlement:', koErr);
@@ -984,13 +980,29 @@ export const reconcileAndRepairReservationFinancials = async (
   const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
   const overstayNights = Math.max(0, duration.overstayNights || 0);
   const legitimateTotalNights = duration.totalNights;
-  const nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
 
   // Identify all room debit charges (base room and overstay)
-  const roomDebits = ledgerEntries.filter(e => 
+  let roomDebits = ledgerEntries.filter(e => 
     e.type === 'debit' && 
     (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
   );
+
+  // If there are accrued stay/overstay nights that have not yet posted to the ledger, post them now
+  if (hotel && res.status === 'checked_in' && res.autoNightDeduction !== false && roomDebits.length < legitimateTotalNights) {
+    try {
+      await processAutomatedBillingForReservation(hotel, res, 'system', new Date());
+      const freshSnap = await getDocs(query(collection(db, 'hotels', hotelId, 'ledger'), where('reservationId', '==', reservationId)));
+      ledgerEntries = freshSnap.docs.map(doc => ({ id: doc.id, firestoreId: doc.id, ...doc.data() } as LedgerEntry & { firestoreId?: string }));
+      roomDebits = ledgerEntries.filter(e => 
+        e.type === 'debit' && 
+        (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
+      );
+    } catch (autoErr) {
+      console.warn('[reconcileAndRepairReservationFinancials] Failed to auto-bill accrued stay nights:', autoErr);
+    }
+  }
+
+  const nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
 
   const duplicateIds: string[] = [];
 
@@ -1292,10 +1304,10 @@ export const processAutomatedBillingForReservation = async (
 
   if (graceInfo.isOverstay && hotel.autoChargeOverstays !== false && maxAllowedOverstayNights > 0) {
     const policy = hotel?.overstayPolicy || 'grace';
-    const graceHours = hotel?.overstayGraceHours ?? 2;
-    const partialHours = hotel?.overstayPartialHours ?? 3;
-    const partialPercentage = hotel?.overstayPartialPercentage ?? 50;
-    const fullHours = hotel?.overstayFullHours ?? 6;
+    const hotelGraceMinutes = graceInfo.totalGraceMinutes;
+    const scheduledMs = graceInfo.scheduledCheckoutDateTime.getTime();
+    const graceMs = hotelGraceMinutes * 60 * 1000;
+    const nowMs = currentTime.getTime();
 
     // STRICT BOUNDARY: Never iterate beyond actual allowed overstay nights!
     for (let j = 1; j <= maxAllowedOverstayNights; j++) {
@@ -1307,32 +1319,22 @@ export const processAutomatedBillingForReservation = async (
       const Start = addDays(checkOutDateTime, j - 1);
       const End = addDays(checkOutDateTime, j);
 
-      if (currentTime >= Start) {
+      // Night j is due if current time is past its scheduled deadline
+      const deadlineForNightJ = scheduledMs + (j - 1) * 24 * 60 * 60 * 1000 + graceMs;
+      const isNightJDue = nowMs > deadlineForNightJ;
+
+      if (isNightJDue) {
         const startStr = Start.toISOString();
         const endStr = End.toISOString();
+        let targetAmount = nightlyRate;
 
-        const hoursPastPeriod = Math.min(24, (currentTime.getTime() - Start.getTime()) / (1000 * 60 * 60));
-        let targetAmount = 0;
-
-        if (policy === 'grace') {
-          if (hoursPastPeriod > graceHours) {
-            targetAmount = nightlyRate;
-          }
-        } else if (policy === 'partial') {
-          if (hoursPastPeriod > fullHours) {
-            targetAmount = nightlyRate;
-          } else if (hoursPastPeriod > partialHours) {
+        if (policy === 'partial' && j === 1) {
+          const partialHours = hotel?.overstayPartialHours ?? 3;
+          const fullHours = hotel?.overstayFullHours ?? 6;
+          const hoursPastDeadline = (nowMs - deadlineForNightJ) / (1000 * 60 * 60);
+          if (hoursPastDeadline <= partialHours) {
+            const partialPercentage = hotel?.overstayPartialPercentage ?? 50;
             targetAmount = nightlyRate * (partialPercentage / 100);
-          }
-        } else if (policy === 'full') {
-          if (hoursPastPeriod > fullHours) {
-            targetAmount = nightlyRate;
-          }
-        } else if (policy === 'full_night' || policy === 'immediate_full') {
-          targetAmount = nightlyRate;
-        } else {
-          if (hoursPastPeriod > graceHours) {
-            targetAmount = nightlyRate;
           }
         }
 

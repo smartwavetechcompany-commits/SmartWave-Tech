@@ -919,14 +919,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
     
     try {
-      // RULE 1, 4, 9: First ensure full reconciliation and purge any duplicate or excess overstays
-      await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id, ledgerEntries);
-
-      // Now process automated stay billing with strict duration limits
+      // 1. Process automated stay billing first so any accrued overstay/night charges post to ledger
       const res = await processAutomatedBillingForReservation(hotel, currentReservation, profile.uid, new Date());
       if (res.chargedCount > 0) {
         toast.info(`Accrued ${res.chargedCount} night stay(s) automatically.`);
       }
+
+      // 2. Perform full reconciliation and balance synchronization
+      await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id);
     } catch (err: any) {
       console.error("Auto sync nightly charges error:", err);
     }
@@ -1747,11 +1747,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   
                   {/* Base rate calculations */}
                   <div className="flex justify-between text-xs">
-                    <span className="text-zinc-500">Base Room Stay Gross</span>
+                    <span className="text-zinc-500">Base Room Stay Gross ({folioBreakdown.stayDuration.bookedNights} night{folioBreakdown.stayDuration.bookedNights > 1 ? 's' : ''})</span>
                     <span className="text-zinc-300 font-medium font-mono">
                       {formatCurrency(folioBreakdown.tier1.baseRoomGross, currency, exchangeRate)}
                     </span>
                   </div>
+
+                  {folioBreakdown.stayDuration.overstayNights > 0 && (
+                    <div className="flex justify-between text-xs text-amber-400">
+                      <span className="flex items-center gap-1 font-bold">
+                        <Clock size={11} /> Overstay Room Charge ({folioBreakdown.stayDuration.overstayNights} night{folioBreakdown.stayDuration.overstayNights > 1 ? 's' : ''})
+                      </span>
+                      <span className="font-mono font-bold">
+                        {formatCurrency(folioBreakdown.tier1.overstayGross ?? (folioBreakdown.nightlyRate * folioBreakdown.stayDuration.overstayNights), currency, exchangeRate)}
+                      </span>
+                    </div>
+                  )}
                   
                   {/* Ancillary services list if any */}
                   {folioBreakdown.tier1.ancillaryCharges.length > 0 && (

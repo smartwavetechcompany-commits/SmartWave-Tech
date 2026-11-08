@@ -1647,7 +1647,7 @@ export function FandB() {
                   const orderTotal = order.totalAmount || order.price || 0;
                   
                   // Gather payments
-                  let paymentsList: { amount: number; method: string }[] = [];
+                  let paymentsList: { amount: number; method: string; settlementSource?: string; reference?: string }[] = [];
                   if (Array.isArray(order.payments) && order.payments.length > 0) {
                     paymentsList = order.payments;
                   } else if (order.paidAmount !== undefined && order.paidAmount > 0) {
@@ -1659,19 +1659,32 @@ export function FandB() {
                     paymentsList = [{ amount: orderTotal, method: order.paymentMethod }];
                   }
 
-                  const directPaid = paymentsList
-                    .filter(p => p.method !== 'room')
+                  // 1. Direct payments collected at F&B outlet (cash, transfer, card, POS)
+                  const outletDirectPaid = paymentsList
+                    .filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk' && !p.reference?.includes('Front Desk'))
                     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-                  const roomCharged = paymentsList
-                    .filter(p => p.method === 'room')
+                  // 2. Portion charged to room folio
+                  const roomCharged = order.roomChargedAmount !== undefined
+                    ? order.roomChargedAmount
+                    : paymentsList.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                  // 3. Portion settled via Front Desk room folio payment
+                  const frontDeskSettled = paymentsList
+                    .filter(p => p.settlementSource === 'Front Desk' || p.reference?.includes('Front Desk'))
                     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-                  const totalAccounted = directPaid + roomCharged;
-                  const balanceOwing = orderTotal - totalAccounted;
-                  const weOweGuest = directPaid - orderTotal;
-                  const unsettledBalance = Math.max(0, orderTotal - directPaid);
-                  const isCompletelySettled = unsettledBalance <= 0.01;
+                  // Total payments received for this order (capped at orderTotal)
+                  const totalPaidByGuest = Math.min(orderTotal, outletDirectPaid + frontDeskSettled);
+                  const isCompletelySettled = (outletDirectPaid + frontDeskSettled >= orderTotal - 0.01) || order.financialStatus === 'paid';
+
+                  // Change owed is STRICTLY excess cash tendered at the outlet
+                  const weOweGuest = Math.max(0, outletDirectPaid - orderTotal);
+
+                  // Accounted at checkout vs remaining
+                  const totalAccounted = outletDirectPaid + roomCharged;
+                  const balanceOwing = Math.max(0, orderTotal - totalAccounted);
+                  const unsettledBalance = isCompletelySettled ? 0 : Math.max(0, orderTotal - (outletDirectPaid + frontDeskSettled));
 
                   return (
                     <motion.div
@@ -1787,20 +1800,26 @@ export function FandB() {
                                 <div className="text-zinc-400">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-semibold uppercase tracking-wider">Amount Paid</span>
-                                    <span className={cn("font-bold text-xs", directPaid > 0 ? "text-emerald-400" : "text-zinc-500")}>
-                                      {formatCurrency(directPaid, currency, exchangeRate)}
+                                    <span className={cn("font-bold text-xs", totalPaidByGuest > 0 ? "text-emerald-400" : "text-zinc-500")}>
+                                      {formatCurrency(totalPaidByGuest, currency, exchangeRate)}
                                     </span>
                                   </div>
-                                  {paymentsList.filter(p => p.method !== 'room').length > 0 && (
+                                  {paymentsList.filter(p => p.method !== 'room' && (p.amount || 0) > 0).length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                                      {paymentsList.filter(p => p.method !== 'room').map((p: any, idx: number) => (
-                                        <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-300 border border-zinc-750">
-                                          <span className="capitalize">{p.method}</span>
-                                          <span className="text-[8px] font-bold px-1 rounded bg-zinc-700 text-emerald-400">
-                                            {p.settlementSource || 'F&B Outlet'}
+                                      {paymentsList.filter(p => p.method !== 'room' && (p.amount || 0) > 0).map((p: any, idx: number) => {
+                                        const isFD = p.settlementSource === 'Front Desk' || (p.reference && String(p.reference).includes('Front Desk'));
+                                        return (
+                                          <span key={idx} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-300 border border-zinc-750">
+                                            <span className="capitalize">{p.method}</span>
+                                            <span className={cn(
+                                              "text-[8px] font-bold px-1 rounded",
+                                              isFD ? "bg-blue-500/20 text-blue-400" : "bg-zinc-700 text-emerald-400"
+                                            )}>
+                                              {isFD ? 'Front Desk' : (p.settlementSource || 'F&B Outlet')}
+                                            </span>
                                           </span>
-                                        </span>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
@@ -1871,7 +1890,7 @@ export function FandB() {
                                     <span className="flex items-center gap-1">
                                       <CheckCircle2 size={12} /> Completely Settled
                                     </span>
-                                    <span>Fully Paid</span>
+                                    <span>{frontDeskSettled > 0 ? 'Settled via Front Desk' : 'Fully Paid'}</span>
                                   </div>
                                 )}
                               </div>
@@ -2760,7 +2779,7 @@ export function FandB() {
                       {/* Payment Methods Breakdown */}
                       {(() => {
                         const pTotal = printingOrder.totalAmount || printingOrder.price || 0;
-                        let pPayments: { amount: number; method: string }[] = [];
+                        let pPayments: { amount: number; method: string; settlementSource?: string; reference?: string }[] = [];
                         if (Array.isArray(printingOrder.payments) && printingOrder.payments.length > 0) {
                           pPayments = printingOrder.payments;
                         } else if (printingOrder.paidAmount !== undefined && printingOrder.paidAmount > 0) {
@@ -2768,25 +2787,41 @@ export function FandB() {
                         } else if (printingOrder.paymentMethod) {
                           pPayments = [{ amount: pTotal, method: printingOrder.paymentMethod }];
                         }
-                        const pDirectPaid = pPayments.filter(p => p.method !== 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
-                        const pRoomCharged = pPayments.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                        const pOutletPayments = pPayments.filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk' && !p.reference?.includes('Front Desk') && (p.amount || 0) > 0);
+                        const pFrontDeskPayments = pPayments.filter(p => (p.settlementSource === 'Front Desk' || p.reference?.includes('Front Desk')) && (p.amount || 0) > 0);
+                        const pRoomCharged = printingOrder.roomChargedAmount !== undefined
+                          ? printingOrder.roomChargedAmount
+                          : pPayments.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                        const pOutletPaid = pOutletPayments.reduce((s, p) => s + (p.amount || 0), 0);
+                        const pFrontDeskSettled = pFrontDeskPayments.reduce((s, p) => s + (p.amount || 0), 0);
+                        const isSettled = (pOutletPaid + pFrontDeskSettled >= pTotal - 0.01) || printingOrder.financialStatus === 'paid';
 
                         return (
                           <div className="pt-2 border-t border-black space-y-1">
-                            {pPayments.filter(p => p.method !== 'room' && (p.amount || 0) > 0).map((pay, idx) => (
+                            {pOutletPayments.map((pay, idx) => (
                               <div key={idx} className="flex justify-between font-bold text-xs">
-                                <span className="uppercase">PAID ({pay.method}):</span>
+                                <span className="uppercase">PAID ({pay.method} - OUTLET):</span>
                                 <span>{formatCurrency(pay.amount, currency, exchangeRate)}</span>
                               </div>
                             ))}
-                            {pRoomCharged > 0 && (
+                            {pFrontDeskPayments.map((pay, idx) => (
+                              <div key={`fd-${idx}`} className="flex justify-between font-bold text-xs text-blue-900">
+                                <span className="uppercase">SETTLED (FRONT DESK):</span>
+                                <span>{formatCurrency(pay.amount, currency, exchangeRate)}</span>
+                              </div>
+                            ))}
+                            {pRoomCharged > 0 && !isSettled && (
                               <div className="flex justify-between font-bold text-xs text-amber-800">
-                                <span>ROOM CHARGE:</span>
+                                <span>ROOM CHARGE (FOLIO):</span>
                                 <span>{formatCurrency(pRoomCharged, currency, exchangeRate)}</span>
                               </div>
                             )}
                             <div className="pt-2 text-center font-black text-xs uppercase tracking-widest text-emerald-800">
-                              ✓ {pRoomCharged > 0 && pDirectPaid > 0 ? 'PARTIAL OUTLET PAYMENT - BALANCE ON FOLIO' : 'PAID IN FULL'}
+                              ✓ {isSettled 
+                                  ? (pFrontDeskSettled > 0 ? 'SETTLED VIA FRONT DESK FOLIO' : 'PAID IN FULL') 
+                                  : (pRoomCharged > 0 && pOutletPaid > 0 ? 'PARTIAL OUTLET PAYMENT - BALANCE ON FOLIO' : 'CHARGED TO ROOM FOLIO')}
                             </div>
                           </div>
                         );
