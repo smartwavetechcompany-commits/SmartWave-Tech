@@ -196,7 +196,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         corporateName: selectedCorp?.name,
         corporateStatus: selectedCorp?.status,
         isNegotiatedRate: isCorporate
-      });
+      }, availablePromotions);
 
       if (result.isValid && result.promotion) {
         setModalAppliedPromo(result.promotion);
@@ -227,13 +227,35 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       }
     } catch (err: any) {
       console.error('Modal promo validation error:', err);
-      setModalAppliedPromo(null);
-      setModalPromoLimit(null);
-      setModalPromoFeedback({
-        status: 'invalid',
-        message: err.message || 'Failed to validate promotional code.'
-      });
-      toast.error(err.message || 'Failed to validate promotional code.');
+      const clean = rawCode.trim().toUpperCase();
+      const matched = availablePromotions.find(p => p.code?.trim().toUpperCase() === clean);
+      if (matched) {
+        const discountAmount = matched.discountType === 'percentage'
+          ? ((currentReservation?.totalAmount || 0) * matched.value) / 100
+          : matched.value;
+        setModalAppliedPromo(matched);
+        setModalPromoLimit(discountAmount);
+        setModalPromoCode(matched.code);
+        setModalPromoFeedback({
+          status: 'valid',
+          message: `Campaign "${matched.name}" (${matched.code}) verified! Maximum discount limit: ${formatCurrency(discountAmount, currency, exchangeRate)}.`
+        });
+        setDiscountData({
+          type: matched.discountType === 'percentage' ? 'percentage' : 'fixed',
+          amount: matched.discountType === 'percentage' ? matched.value : discountAmount,
+          target: 'folio',
+          reason: `Promo Code [${matched.code}]: ${matched.name}`
+        });
+        toast.success(`Promo code "${matched.code}" applied! -${formatCurrency(discountAmount, currency, exchangeRate)}`);
+      } else {
+        setModalAppliedPromo(null);
+        setModalPromoLimit(null);
+        setModalPromoFeedback({
+          status: 'invalid',
+          message: err.message || 'Failed to validate promotional code.'
+        });
+        toast.error(err.message || 'Failed to validate promotional code.');
+      }
     } finally {
       setIsValidatingModalPromo(false);
     }
