@@ -236,14 +236,6 @@ export function calculateReservationAccount(
     totalPayments = directPayments;
     totalCredits = directPayments + discountCredits;
 
-    // If reservation already has an authoritative ledgerBalance recorded, ensure totalCharges matches to prevent flashing
-    if (res.ledgerBalance !== undefined && Math.abs(res.ledgerBalance) > 0.01) {
-      const stableTotal = directPayments + discountCredits + res.ledgerBalance;
-      if (stableTotal > totalCharges) {
-        totalCharges = stableTotal;
-      }
-    }
-
     if (res.paymentStatus === 'paid') {
       totalCredits = Math.max(totalCharges, directPayments + discountCredits);
       totalPayments = Math.max(0, totalCredits - discountCredits);

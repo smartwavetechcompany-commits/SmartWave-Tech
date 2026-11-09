@@ -54,7 +54,6 @@ const safeDateFormat = (val: any, formatStr: string, fallback: string = 'N/A'): 
 };
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
-import { SafeModalBoundary } from './SafeModalBoundary';
 import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
 import { DigitalKeyModal } from './DigitalKeyModal';
@@ -2504,12 +2503,10 @@ export function GuestManagement() {
       )}
 
       {showFolio && (
-        <SafeModalBoundary onClose={() => setShowFolio(null)}>
-          <GuestFolio 
-            reservation={showFolio} 
-            onClose={() => setShowFolio(null)} 
-          />
-        </SafeModalBoundary>
+        <GuestFolio 
+          reservation={showFolio} 
+          onClose={() => setShowFolio(null)} 
+        />
       )}
 
       {showDigitalKey && (

@@ -9,7 +9,6 @@ import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { GuestFolio } from './GuestFolio';
-import { SafeModalBoundary } from './SafeModalBoundary';
 import { OutstandingGuestLedger } from './OutstandingGuestLedger';
 import { RevenueHeatmap } from './RevenueHeatmap';
 import { 
@@ -3634,18 +3633,13 @@ export function Finance() {
         </div>
       )}
       {showFolio && selectedReservation && (
-        <SafeModalBoundary onClose={() => {
-          setShowFolio(false);
-          setSelectedReservation(null);
-        }}>
-          <GuestFolio 
-            reservation={selectedReservation} 
-            onClose={() => {
-              setShowFolio(false);
-              setSelectedReservation(null);
-            }} 
-          />
-        </SafeModalBoundary>
+        <GuestFolio 
+          reservation={selectedReservation} 
+          onClose={() => {
+            setShowFolio(false);
+            setSelectedReservation(null);
+          }} 
+        />
       )}
     </div>
   );

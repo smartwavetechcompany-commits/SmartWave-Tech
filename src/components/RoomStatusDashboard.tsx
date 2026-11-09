@@ -29,7 +29,6 @@ import { safeFormatDate } from '../utils/dateUtils';
 import { getRoomDetailedReservationInfo, RoomReservationInfo } from '../utils/roomUtils';
 import { hasPermission } from '../utils/permissions';
 import { GuestFolio } from './GuestFolio';
-import { SafeModalBoundary } from './SafeModalBoundary';
 import { toast } from 'sonner';
 import { createAuditLog } from '../utils/database';
 
@@ -1104,20 +1103,14 @@ export function RoomStatusDashboard() {
 
       {/* GUEST FOLIO MODAL */}
       {showFolio && activeReservation && (
-        <SafeModalBoundary onClose={() => {
-          setShowFolio(false);
-          setActiveRoom(null);
-          setActiveReservation(null);
-        }}>
-          <GuestFolio
-            reservation={activeReservation}
-            onClose={() => {
-              setShowFolio(false);
-              setActiveRoom(null);
-              setActiveReservation(null);
-            }}
-          />
-        </SafeModalBoundary>
+        <GuestFolio
+          reservation={activeReservation}
+          onClose={() => {
+            setShowFolio(false);
+            setActiveRoom(null);
+            setActiveReservation(null);
+          }}
+        />
       )}
     </div>
   );

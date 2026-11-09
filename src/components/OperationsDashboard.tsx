@@ -40,7 +40,6 @@ import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
 import { RoomStatusDashboard } from './RoomStatusDashboard';
 import { GuestFolio } from './GuestFolio';
-import { SafeModalBoundary } from './SafeModalBoundary';
 import { QuickCheckInModal } from './QuickCheckInModal';
 import { Pagination } from './Pagination';
 import { motion, AnimatePresence } from 'motion/react';
@@ -2077,12 +2076,10 @@ export function OperationsDashboard() {
       )}
 
       {selectedFolioRes && (
-        <SafeModalBoundary onClose={() => setSelectedFolioRes(null)}>
-          <GuestFolio
-            reservation={selectedFolioRes}
-            onClose={() => setSelectedFolioRes(null)}
-          />
-        </SafeModalBoundary>
+        <GuestFolio
+          reservation={selectedFolioRes}
+          onClose={() => setSelectedFolioRes(null)}
+        />
       )}
 
       {/* Quick Check-in Floating Action Button (FAB) - Draggable & Floatable */}
