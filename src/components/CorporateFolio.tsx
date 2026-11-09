@@ -67,6 +67,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       if (snap.exists()) {
         setCurrentAccount({ id: snap.id, ...snap.data() } as CorporateAccount);
       }
+    }, (err) => {
+      console.warn("Corporate account snapshot error:", err);
     });
 
     // Listen to ledger entries for this corporate account
@@ -88,6 +90,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       setLedgerEntries(sortedEntries);
       setLoading(false);
     }, (err) => {
+      setLoading(false);
+      console.warn("Corporate ledger snapshot warning:", err);
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
     });
 
@@ -101,6 +105,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       const allRes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
       // Client-side filtering to avoid composite index
       setIndividualReservations(allRes.filter(r => r.status === 'checked_in'));
+    }, (err) => {
+      console.warn("Corporate reservations snapshot error:", err);
     });
 
     return () => {
@@ -118,6 +124,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         .map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount))
         .filter(acc => acc.id !== account.id)
       );
+    }, (err) => {
+      console.warn("Corporate accounts list snapshot error:", err);
     });
     return () => unsub();
   }, [hotel?.id, account.id]);

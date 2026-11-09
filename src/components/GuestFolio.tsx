@@ -739,6 +739,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         });
 
       setOtherReservations(filtered);
+    }, (err) => {
+      console.warn("Other reservations snapshot error:", err);
     });
 
     return () => unsubOther();
@@ -758,10 +760,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
         .filter(r => r.id !== reservation.id);
       setActiveReservationsForSearch(active);
+    }, (err) => {
+      console.warn("Active reservations snapshot error:", err);
     });
 
     const unsubCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), (snap) => {
       setCorporateAccountsList(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    }, (err) => {
+      console.warn("Corporate accounts snapshot error:", err);
     });
 
     return () => {
@@ -776,12 +782,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const qHistory = query(
       collection(db, 'hotels', hotel.id, 'reservations'),
-      where('guestId', '==', reservation.guestId),
-      orderBy('checkIn', 'desc')
+      where('guestId', '==', reservation.guestId)
     );
 
     const unsub = onSnapshot(qHistory, (snap) => {
-      setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      const history = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
+        .sort((a, b) => (b.checkIn || '').localeCompare(a.checkIn || ''));
+      setGuestHistory(history);
+    }, (err) => {
+      console.warn("Guest history snapshot error:", err);
     });
 
     return () => unsub();
