@@ -72,6 +72,7 @@ import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
 import { Pagination } from './Pagination';
+import { SafeModalBoundary } from './SafeModalBoundary';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -674,42 +675,46 @@ export function FrontDesk() {
 
     const unsubRooms = onSnapshot(roomsRef, (snap) => {
       setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
-    });
+    }, (err) => console.warn("Rooms listener error:", err));
 
     const unsubTypes = onSnapshot(typesRef, (snap) => {
       setRoomTypes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomType)));
-    });
+    }, (err) => console.warn("Room types listener error:", err));
 
     const unsubGuests = onSnapshot(guestsRef, (snap) => {
       setGuests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Guest)));
-    });
+    }, (err) => console.warn("Guests listener error:", err));
 
     const unsubCorp = onSnapshot(corpRef, (snap) => {
       setCorporateAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
-    });
+    }, (err) => console.warn("Corp accounts listener error:", err));
 
     const unsubStaff = onSnapshot(collection(db, 'hotels', hotel.id, 'staff'), (snap) => {
       setStaffMembers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.warn("Staff listener error:", err));
 
     const unsubBlockings = onSnapshot(collection(db, 'hotels', hotel.id, 'room_blockings'), (snap) => {
       setRoomBlockings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RoomBlocking)));
-    });
+    }, (err) => console.warn("Room blockings listener error:", err));
 
     const unsubCheckInHist = onSnapshot(collection(db, 'hotels', hotel.id, 'checkin_history'), (snap) => {
       setCheckInHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.warn("CheckIn history listener error:", err));
 
     const unsubCheckOutHist = onSnapshot(collection(db, 'hotels', hotel.id, 'checkout_history'), (snap) => {
       setCheckOutHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.warn("CheckOut history listener error:", err));
 
     const unsubRateConfigs = onSnapshot(collection(db, 'hotels', hotel.id, 'rate_configurations'), (snap) => {
       setRateConfigs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.warn("Rate configs listener error:", err));
 
     const unsubLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
       setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+      setIsFetching(false);
+    }, (err) => {
+      console.warn("Ledger listener error:", err);
+      setIsFetching(false);
     });
 
     const unsubPromo = subscribePromotions(hotel.id, (promos) => {
@@ -5649,14 +5654,16 @@ export function FrontDesk() {
       )}
 
       {showFolioModal && (
-        <GuestFolio 
-          reservation={showFolioModal} 
-          onClose={() => setShowFolioModal(null)}
-          onPostCharge={() => {
-            setShowFolioModal(null);
-            setShowChargeModal(showFolioModal);
-          }}
-        />
+        <SafeModalBoundary onClose={() => setShowFolioModal(null)}>
+          <GuestFolio 
+            reservation={showFolioModal} 
+            onClose={() => setShowFolioModal(null)}
+            onPostCharge={() => {
+              setShowFolioModal(null);
+              setShowChargeModal(showFolioModal);
+            }}
+          />
+        </SafeModalBoundary>
       )}
 
       {showPostponeModal && (

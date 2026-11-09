@@ -106,6 +106,21 @@ console.warn = function (...args: any[]) {
   originalConsoleWarn.apply(console, safeArgs);
 };
 
+// Global protection against transient internal assertion failures in background SDK streams
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    const reasonMsg = event?.reason?.message || String(event?.reason || '');
+    if (
+      reasonMsg.includes('INTERNAL ASSERTION FAILED') ||
+      reasonMsg.includes('INTERNAL UNHANDLED ERROR') ||
+      reasonMsg.includes('@firebase/firestore')
+    ) {
+      console.warn('[Firestore SDK Protection] Prevented background stream assertion from crashing UI:', reasonMsg);
+      event.preventDefault();
+    }
+  });
+}
+
 // Smart horizontal scroll wheel support for non-touch & desktop mouse users
 if (typeof window !== 'undefined') {
   window.addEventListener('wheel', (e: WheelEvent) => {

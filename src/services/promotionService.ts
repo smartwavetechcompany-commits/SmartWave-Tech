@@ -67,15 +67,45 @@ export async function getPromotions(hotelId: string): Promise<Promotion[]> {
 /**
  * Fetches a single promotion by its unique code for a hotel
  */
-export async function getPromotionByCode(hotelId: string, rawCode: string): Promise<Promotion | null> {
+export async function getPromotionByCode(
+  hotelId: string, 
+  rawCode: string, 
+  cachedPromotions?: Promotion[]
+): Promise<Promotion | null> {
   if (!hotelId || !rawCode) return null;
   const cleanCode = rawCode.trim().toUpperCase();
-  const promotionsRef = collection(db, 'hotels', hotelId, 'promotions');
-  const q = query(promotionsRef, where('code', '==', cleanCode));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return null;
-  const firstDoc = snapshot.docs[0];
-  return { id: firstDoc.id, ...firstDoc.data() } as Promotion;
+
+  // 1. Direct in-memory match if cached/available promotions list is provided
+  if (cachedPromotions && cachedPromotions.length > 0) {
+    const matched = cachedPromotions.find(p => p.code?.trim().toUpperCase() === cleanCode);
+    if (matched) return matched;
+  }
+
+  // 2. Safe collection read without sub-query filter to avoid Firestore limbo target assertions
+  try {
+    const promotionsRef = collection(db, 'hotels', hotelId, 'promotions');
+    const snapshot = await getDocs(promotionsRef);
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data() as Promotion;
+      if (data.code?.trim().toUpperCase() === cleanCode) {
+        return { id: docSnap.id, ...data };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[getPromotionByCode] Collection scan error, attempting query fallback:', err);
+    try {
+      const promotionsRef = collection(db, 'hotels', hotelId, 'promotions');
+      const q = query(promotionsRef, where('code', '==', cleanCode));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const firstDoc = snapshot.docs[0];
+        return { id: firstDoc.id, ...firstDoc.data() } as Promotion;
+      }
+    } catch (innerErr) {
+      console.warn('[getPromotionByCode] Query fallback also failed:', innerErr);
+    }
+  }
+  return null;
 }
 
 export interface PromotionValidationContext {
@@ -111,7 +141,8 @@ export interface PromotionValidationResult {
 export async function validatePromotion(
   hotelId: string, 
   rawCode: string, 
-  context: PromotionValidationContext
+  context: PromotionValidationContext,
+  availablePromotions?: Promotion[]
 ): Promise<PromotionValidationResult> {
   const originalCharge = Number(context.subtotal || 0);
 
@@ -125,7 +156,7 @@ export async function validatePromotion(
     };
   }
 
-  const promo = await getPromotionByCode(hotelId, rawCode);
+  const promo = await getPromotionByCode(hotelId, rawCode, availablePromotions);
   if (!promo) {
     return {
       isValid: false,

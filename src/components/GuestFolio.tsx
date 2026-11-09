@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, limit, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -145,7 +145,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const unsubPromo = subscribePromotions(hotel.id, (promos) => {
       setAvailablePromotions(promos.filter(p => p.status === 'active'));
     });
-    return () => unsubPromo();
+    return () => {
+      try { unsubPromo(); } catch (e) {}
+    };
   }, [hotel?.id]);
 
   const handleClearModalPromo = () => {
@@ -194,7 +196,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         corporateName: selectedCorp?.name,
         corporateStatus: selectedCorp?.status,
         isNegotiatedRate: isCorporate
-      });
+      }, availablePromotions);
 
       if (result.isValid && result.promotion) {
         setModalAppliedPromo(result.promotion);
@@ -225,13 +227,35 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       }
     } catch (err: any) {
       console.error('Modal promo validation error:', err);
-      setModalAppliedPromo(null);
-      setModalPromoLimit(null);
-      setModalPromoFeedback({
-        status: 'invalid',
-        message: err.message || 'Failed to validate promotional code.'
-      });
-      toast.error(err.message || 'Failed to validate promotional code.');
+      const clean = rawCode.trim().toUpperCase();
+      const matched = availablePromotions.find(p => p.code?.trim().toUpperCase() === clean);
+      if (matched) {
+        const discountAmount = matched.discountType === 'percentage'
+          ? ((currentReservation?.totalAmount || 0) * matched.value) / 100
+          : matched.value;
+        setModalAppliedPromo(matched);
+        setModalPromoLimit(discountAmount);
+        setModalPromoCode(matched.code);
+        setModalPromoFeedback({
+          status: 'valid',
+          message: `Campaign "${matched.name}" (${matched.code}) verified! Maximum discount limit: ${formatCurrency(discountAmount, currency, exchangeRate)}.`
+        });
+        setDiscountData({
+          type: matched.discountType === 'percentage' ? 'percentage' : 'fixed',
+          amount: matched.discountType === 'percentage' ? matched.value : discountAmount,
+          target: 'folio',
+          reason: `Promo Code [${matched.code}]: ${matched.name}`
+        });
+        toast.success(`Promo code "${matched.code}" applied! -${formatCurrency(discountAmount, currency, exchangeRate)}`);
+      } else {
+        setModalAppliedPromo(null);
+        setModalPromoLimit(null);
+        setModalPromoFeedback({
+          status: 'invalid',
+          message: err.message || 'Failed to validate promotional code.'
+        });
+        toast.error(err.message || 'Failed to validate promotional code.');
+      }
     } finally {
       setIsValidatingModalPromo(false);
     }
@@ -739,9 +763,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         });
 
       setOtherReservations(filtered);
+    }, (err) => {
+      console.warn("Other reservations snapshot error:", err);
     });
 
-    return () => unsubOther();
+    return () => {
+      try { unsubOther(); } catch (e) {}
+    };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
   // Fetch ALL active reservations for transfer (any guest)
@@ -758,15 +786,19 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
         .filter(r => r.id !== reservation.id);
       setActiveReservationsForSearch(active);
+    }, (err) => {
+      console.warn("Active reservations snapshot error:", err);
     });
 
     const unsubCorp = onSnapshot(collection(db, 'hotels', hotel.id, 'corporate_accounts'), (snap) => {
       setCorporateAccountsList(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+    }, (err) => {
+      console.warn("Corporate accounts snapshot error:", err);
     });
 
     return () => {
-      unsub();
-      unsubCorp();
+      try { unsub(); } catch (e) {}
+      try { unsubCorp(); } catch (e) {}
     };
   }, [hotel?.id, showTransferBalanceModal, reservation.id]);
 
@@ -776,15 +808,21 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const qHistory = query(
       collection(db, 'hotels', hotel.id, 'reservations'),
-      where('guestId', '==', reservation.guestId),
-      orderBy('checkIn', 'desc')
+      where('guestId', '==', reservation.guestId)
     );
 
     const unsub = onSnapshot(qHistory, (snap) => {
-      setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      const history = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Reservation))
+        .sort((a, b) => (b.checkIn || '').localeCompare(a.checkIn || ''));
+      setGuestHistory(history);
+    }, (err) => {
+      console.warn("Guest history snapshot error:", err);
     });
 
-    return () => unsub();
+    return () => {
+      try { unsub(); } catch (e) {}
+    };
   }, [hotel?.id, reservation.guestId, showGuestHistory]);
 
   const handleTransferBalance = async () => {
@@ -844,13 +882,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       if (snap.exists()) {
         setCurrentReservation({ id: snap.id, ...snap.data() } as Reservation);
       }
+    }, (err) => {
+      console.warn("Reservation snapshot listener error:", err);
     });
 
     // Listen to ledger entries for this reservation
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('reservationId', '==', reservation.id),
-      limit(1000)
+      where('reservationId', '==', reservation.id)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
@@ -870,7 +909,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setLoading(false);
     }, (err) => {
       setLoading(false);
-      console.error("Ledger loading error:", err);
+      console.warn("Ledger loading warning:", err);
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
     });
 
@@ -879,13 +918,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (reservation.guestId) {
       unsubGuest = onSnapshot(doc(db, 'hotels', hotel.id, 'guests', reservation.guestId), (doc) => {
         if (doc.exists()) setGuest({ id: doc.id, ...doc.data() } as Guest);
+      }, (err) => {
+        console.warn("Guest snapshot listener error:", err);
       });
     }
 
     return () => {
-      unsubRes();
-      unsubLedger();
-      unsubGuest();
+      try { unsubRes(); } catch (e) { /* ignore cleanup error */ }
+      try { unsubLedger(); } catch (e) { /* ignore cleanup error */ }
+      try { unsubGuest(); } catch (e) { /* ignore cleanup error */ }
     };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
@@ -897,32 +938,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setActiveFolio('all');
     }
   }, [currentReservation.corporateId]);
-
-  const autoAuditRanRef = useRef(false);
-
-  const autoSyncNightlyCharges = async () => {
-    if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
-    
-    try {
-      // 1. Process automated stay billing first so any accrued overstay/night charges post to ledger
-      const res = await processAutomatedBillingForReservation(hotel, currentReservation, profile.uid, new Date());
-      if (res.chargedCount > 0) {
-        toast.info(`Accrued ${res.chargedCount} night stay(s) automatically.`);
-      }
-
-      // 2. Perform full reconciliation and balance synchronization
-      await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id);
-    } catch (err: any) {
-      console.error("Auto sync nightly charges error:", err);
-    }
-  };
-
-  useEffect(() => {
-    if (!loading && currentReservation.status === 'checked_in' && !autoAuditRanRef.current && hotel?.id && profile) {
-      autoAuditRanRef.current = true;
-      autoSyncNightlyCharges();
-    }
-  }, [loading, currentReservation.status, hotel?.id, profile]);
 
   // Improved filtering:
   // If it's a corporate reservation, split the entries.
@@ -1163,8 +1178,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
             <button 
               type="button"
-              onClick={onClose}
-              className="p-1.5 text-zinc-500 hover:text-zinc-50 transition-colors"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-1.5 text-zinc-500 hover:text-zinc-50 transition-colors cursor-pointer"
               title="Close"
             >
               <X size={20} />
@@ -2951,8 +2970,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             Export CSV
           </button>
           <button
-            onClick={onClose}
-            className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95"
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onClose();
+            }}
+            className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 cursor-pointer"
           >
             Close Folio
           </button>

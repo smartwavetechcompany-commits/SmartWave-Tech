@@ -127,7 +127,9 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      try { unsubscribe(); } catch (e) {}
+    };
   }, [hotel?.id, reservation?.id, reservation?.guestId]);
 
   // Toggle log expansion for deep metadata inspection
