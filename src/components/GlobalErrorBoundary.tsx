@@ -46,7 +46,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     );
     if (isFirestoreAssertion) {
       console.warn('[GlobalErrorBoundary] Transient Firestore assertion intercepted safely:', error);
-      this.setState({ hasError: false, error: null, errorInfo: null });
       return;
     }
     errorService.handleError(error, {

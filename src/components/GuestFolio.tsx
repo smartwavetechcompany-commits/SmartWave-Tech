@@ -145,7 +145,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     const unsubPromo = subscribePromotions(hotel.id, (promos) => {
       setAvailablePromotions(promos.filter(p => p.status === 'active'));
     });
-    return () => unsubPromo();
+    return () => {
+      try { unsubPromo(); } catch (e) {}
+    };
   }, [hotel?.id]);
 
   const handleClearModalPromo = () => {
@@ -743,7 +745,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       console.warn("Other reservations snapshot error:", err);
     });
 
-    return () => unsubOther();
+    return () => {
+      try { unsubOther(); } catch (e) {}
+    };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
   // Fetch ALL active reservations for transfer (any guest)
@@ -771,8 +775,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     });
 
     return () => {
-      unsub();
-      unsubCorp();
+      try { unsub(); } catch (e) {}
+      try { unsubCorp(); } catch (e) {}
     };
   }, [hotel?.id, showTransferBalanceModal, reservation.id]);
 
@@ -794,7 +798,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       console.warn("Guest history snapshot error:", err);
     });
 
-    return () => unsub();
+    return () => {
+      try { unsub(); } catch (e) {}
+    };
   }, [hotel?.id, reservation.guestId, showGuestHistory]);
 
   const handleTransferBalance = async () => {
@@ -896,9 +902,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
 
     return () => {
-      unsubRes();
-      unsubLedger();
-      unsubGuest();
+      try { unsubRes(); } catch (e) { /* ignore cleanup error */ }
+      try { unsubLedger(); } catch (e) { /* ignore cleanup error */ }
+      try { unsubGuest(); } catch (e) { /* ignore cleanup error */ }
     };
   }, [hotel?.id, reservation.id, reservation.guestId]);
 
@@ -1150,8 +1156,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             </button>
             <button 
               type="button"
-              onClick={onClose}
-              className="p-1.5 text-zinc-500 hover:text-zinc-50 transition-colors"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-1.5 text-zinc-500 hover:text-zinc-50 transition-colors cursor-pointer"
               title="Close"
             >
               <X size={20} />
@@ -2939,8 +2949,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           </button>
           <button
             type="button"
-            onClick={onClose}
-            className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onClose();
+            }}
+            className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95 cursor-pointer"
           >
             Close Folio
           </button>

@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
+import { SafeModalBoundary } from './SafeModalBoundary';
 import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -2864,13 +2865,18 @@ export function Rooms() {
       </AnimatePresence>
 
       {showFolio && selectedReservation && (
-        <GuestFolio 
-          reservation={selectedReservation}
-          onClose={() => {
-            setShowFolio(false);
-            setSelectedReservation(null);
-          }}
-        />
+        <SafeModalBoundary onClose={() => {
+          setShowFolio(false);
+          setSelectedReservation(null);
+        }}>
+          <GuestFolio 
+            reservation={selectedReservation}
+            onClose={() => {
+              setShowFolio(false);
+              setSelectedReservation(null);
+            }}
+          />
+        </SafeModalBoundary>
       )}
 
       {/* Edit Room Modal */}
