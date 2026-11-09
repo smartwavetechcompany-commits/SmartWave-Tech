@@ -657,24 +657,14 @@ export const settleLedger = async (
 
   // Synchronize any F&B kitchen orders charged to this room that are settled via Front Desk
   try {
-    const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-    const resSnap = await getDoc(resRef);
-    const resData = resSnap.exists() ? (resSnap.data() as Reservation) : null;
-    const roomNum = resData?.roomNumber ? String(resData.roomNumber).trim() : null;
-
-    const koRef = collection(db, 'hotels', hotelId, 'kitchen_orders');
-    const [koSnapRes, koSnapRoom] = await Promise.all([
-      getDocs(query(koRef, where('reservationId', '==', reservationId))),
-      roomNum ? getDocs(query(koRef, where('roomNumber', '==', roomNum))) : Promise.resolve({ docs: [] } as any)
-    ]);
-    const koDocsMap = new Map<string, any>();
-    koSnapRes.docs.forEach(d => koDocsMap.set(d.id, d));
-    koSnapRoom.docs.forEach((d: any) => koDocsMap.set(d.id, d));
-    const koDocs = Array.from(koDocsMap.values());
-
+    const koQuery = query(
+      collection(db, 'hotels', hotelId, 'kitchen_orders'),
+      where('reservationId', '==', reservationId)
+    );
+    const koSnap = await getDocs(koQuery);
     let remainingAllocation = amount;
 
-    for (const kDoc of koDocs) {
+    for (const kDoc of koSnap.docs) {
       if (remainingAllocation <= 0.001) break;
       const kData = kDoc.data() as any;
       

@@ -343,20 +343,16 @@ export function FandB() {
       const finalPrice = subtotalAfterDiscount + totalExclusiveTax + (serviceConfig?.isInclusive ? 0 : serviceChargeAmount);
 
       // 4. Payment breakdown (Module 2, 3, 6)
-      let directPaid = newOrder.payments
+      const directPaid = newOrder.payments
         .filter(p => p.method !== 'room')
         .reduce((sum, p) => sum + (p.amount || 0), 0);
+      let roomCharged = newOrder.payments
+        .filter(p => p.method === 'room')
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-      // Check if user typed an amount under 'room' that was less than finalPrice while directPaid is 0
-      // (e.g. user entered 1,000 thinking of what guest paid without toggling dropdown to 'cash')
-      const roomPaymentEntry = newOrder.payments.find(p => p.method === 'room');
-      const roomEnteredAmount = roomPaymentEntry ? Number(roomPaymentEntry.amount || 0) : 0;
-      if (isRoomOrder && res && directPaid === 0 && roomEnteredAmount > 0 && roomEnteredAmount < finalPrice - 0.01) {
-        directPaid = roomEnteredAmount;
-      }
-
-      let roomCharged = 0;
-      if (isRoomOrder && res) {
+      // Auto-fallback: If order is for a checked-in room and direct payments don't cover full price,
+      // or if user selected "room" as payment method:
+      if (isRoomOrder && res && (hasRoomPayment || directPaid < finalPrice - 0.01)) {
         roomCharged = Math.max(0, Number((finalPrice - directPaid).toFixed(2)));
       }
 
@@ -392,32 +388,19 @@ export function FandB() {
         financialStatus = 'partially_settled';
       }
 
-      const nonRoomPayments = newOrder.payments.filter(p => p.method !== 'room' && (p.amount || 0) > 0);
-      const resolvedPayments: any[] = [];
-      if (nonRoomPayments.length > 0) {
-        resolvedPayments.push(...nonRoomPayments.map(p => ({
-          ...p,
-          settlementSource: p.settlementSource || 'F&B Outlet',
-          date: p.date || new Date().toISOString()
-        })));
-      } else if (directPaid > 0) {
-        resolvedPayments.push({
-          amount: directPaid,
-          method: 'cash',
-          settlementSource: 'F&B Outlet',
-          reference: 'F&B Outlet Payment (Cash)',
-          date: new Date().toISOString()
-        });
-      }
-
+      let resolvedPayments = [...newOrder.payments];
       if (roomCharged > 0) {
-        resolvedPayments.push({
-          amount: roomCharged,
-          method: 'room',
-          date: new Date().toISOString(),
-          settlementSource: 'F&B Outlet',
-          reference: directPaid > 0 ? 'Balance Charged to Room Folio' : 'Charged to Room Folio'
-        });
+        const nonRoomPayments = resolvedPayments.filter(p => p.method !== 'room' && (p.amount || 0) > 0);
+        resolvedPayments = [
+          ...nonRoomPayments,
+          {
+            amount: roomCharged,
+            method: 'room',
+            date: new Date().toISOString(),
+            settlementSource: 'F&B Outlet',
+            reference: 'Charged to Room Folio'
+          }
+        ];
       }
 
       const orderData: any = {
@@ -535,7 +518,7 @@ export function FandB() {
 
       // Record direct payments in Finance as income (Module 2 & Module 6)
       // DO NOT post to room ledger!
-      for (const pay of resolvedPayments) {
+      for (const pay of newOrder.payments) {
         if (pay.amount > 0 && pay.method !== 'room') {
           const source = pay.settlementSource || 'F&B Outlet';
           await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
@@ -924,12 +907,9 @@ export function FandB() {
 
     const isRoomOrder = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in';
     const res = isRoomOrder 
-      ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === String(settleOrderModal.roomNumber).trim().toLowerCase() && r.status === 'checked_in') || 
-         (settleOrderModal.reservationId ? reservations.find(r => r.id === settleOrderModal.reservationId) : undefined) ||
-         reservations.find(r => r.guestId === settleOrderModal.guestId && r.status === 'checked_in') ||
-         reservations.find(r => String(r.roomNumber).trim().toLowerCase() === String(settleOrderModal.roomNumber).trim().toLowerCase()))
+      ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === String(settleOrderModal.roomNumber).trim().toLowerCase() && r.status === 'checked_in') || reservations.find(r => r.id === settleOrderModal.guestId))
       : undefined;
-    const guestId = res?.guestId || settleOrderModal.guestId || 'unknown';
+    const guestId = settleOrderModal.guestId || res?.guestId;
 
     // Direct Charge to Room flow from Settle Modal
     if (settleMethod === 'room') {
@@ -1025,29 +1005,21 @@ export function FandB() {
       };
 
       const updatedPayments = [...currentPayments, newPaymentRecord];
-      const remainingRoomCharge = Math.max(0, Number((orderTotal - newDirectPaid).toFixed(2)));
       
       // If room order and remaining uncollected balance exists, reflect remaining room charge
-      if (isRoomOrder && remainingRoomCharge > 0) {
+      if (isRoomOrder && newDirectPaid < orderTotal) {
         updatedPayments.push({
-          amount: remainingRoomCharge,
+          amount: Math.max(0, orderTotal - newDirectPaid),
           method: 'room',
           date: new Date().toISOString(),
           reference: 'Charged to Room Folio'
         });
       }
 
-      const newFinancialStatus = newDirectPaid >= orderTotal - 0.01 
-        ? 'paid' 
-        : (remainingRoomCharge > 0 ? (newDirectPaid > 0 ? 'partially_settled' : 'posted_to_room') : 'paid');
-
       // 1. Update Kitchen Order in Firestore
       await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', settleOrderModal.id), {
         payments: updatedPayments,
         paidAmount: newDirectPaid,
-        directPaidAmount: newDirectPaid,
-        roomChargedAmount: remainingRoomCharge,
-        financialStatus: newFinancialStatus,
         settlementSource: settleSource,
         lastPaymentAt: new Date().toISOString()
       }, {
@@ -1085,8 +1057,7 @@ export function FandB() {
       const wasChargedToRoom = Boolean(
         (settleOrderModal.roomChargedAmount && settleOrderModal.roomChargedAmount > 0) ||
         settleOrderModal.financialStatus === 'posted_to_room' ||
-        settleOrderModal.ledgerEntryId ||
-        (isRoomOrder && res)
+        settleOrderModal.ledgerEntryId
       );
       if (wasChargedToRoom && isRoomOrder && res && guestId) {
         await postToLedger(hotel.id, guestId, res.id, {
@@ -3323,46 +3294,29 @@ export function FandB() {
                           }
                         }
                         const grandTotal = newOrder.price + totalExclusiveTax - discountAmount;
-                        const isRoomEligible = Boolean(
-                          newOrder.roomNumber && 
-                          newOrder.roomNumber !== 'Walk-in' && 
-                          reservations.find(r => String(r.roomNumber).trim() === String(newOrder.roomNumber).trim() && r.status === 'checked_in')
-                        );
-                        const directCollected = newOrder.payments.filter(p => p.method !== 'room').reduce((acc, p) => acc + (p.amount || 0), 0);
                         const totalCollected = newOrder.payments.reduce((acc, p) => acc + (p.amount || 0), 0);
-                        const posOwing = Math.max(0, grandTotal - directCollected);
-                        const posChange = Math.max(0, directCollected - grandTotal);
+                        const posOwing = grandTotal - totalCollected;
+                        const posChange = totalCollected - grandTotal;
 
                         return (
                           <div className="space-y-1.5 pt-2 border-t border-zinc-900">
                             <div className="flex justify-between items-center">
-                              <span className="text-[10px] text-zinc-500 uppercase font-bold">
-                                {isRoomEligible ? 'Paid at Outlet (POS)' : 'Total Collected'}
-                              </span>
+                              <span className="text-[10px] text-zinc-500 uppercase font-bold">Total Collection</span>
                               <span className={cn(
                                 "text-xs font-bold",
-                                directCollected >= grandTotal ? "text-emerald-500" : (directCollected > 0 ? "text-blue-400" : "text-zinc-400")
+                                totalCollected >= grandTotal ? "text-emerald-500" : "text-amber-500"
                               )}>
-                                {formatCurrency(directCollected, currency, exchangeRate)} / {formatCurrency(grandTotal, currency, exchangeRate)}
+                                {formatCurrency(totalCollected, currency, exchangeRate)} / {formatCurrency(grandTotal, currency, exchangeRate)}
                               </span>
                             </div>
 
                             {posOwing > 0 ? (
-                              isRoomEligible ? (
-                                <div className="flex justify-between items-center p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold text-xs">
-                                  <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
-                                    <BedDouble size={12} /> Balance Charged to Room
-                                  </span>
-                                  <span>{formatCurrency(posOwing, currency, exchangeRate)}</span>
-                                </div>
-                              ) : (
-                                <div className="flex justify-between items-center p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-xs">
-                                  <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
-                                    <AlertCircle size={12} /> Owing / Balance Due
-                                  </span>
-                                  <span>{formatCurrency(posOwing, currency, exchangeRate)}</span>
-                                </div>
-                              )
+                              <div className="flex justify-between items-center p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 font-bold text-xs">
+                                <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
+                                  <AlertCircle size={12} /> Owing / Balance Due
+                                </span>
+                                <span>{formatCurrency(posOwing, currency, exchangeRate)}</span>
+                              </div>
                             ) : posChange > 0 ? (
                               <div className="flex justify-between items-center p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-bold text-xs">
                                 <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
@@ -3370,14 +3324,7 @@ export function FandB() {
                                 </span>
                                 <span>{formatCurrency(posChange, currency, exchangeRate)}</span>
                               </div>
-                            ) : (
-                              <div className="flex justify-between items-center p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-xs">
-                                <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
-                                  <CheckCircle2 size={12} /> Fully Paid at Outlet
-                                </span>
-                                <span>{formatCurrency(grandTotal, currency, exchangeRate)}</span>
-                              </div>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })()}
