@@ -186,6 +186,20 @@ export function calculateReservationAccount(
     totalServiceCharges = ancillarySum + exclusiveTaxDebitsSum;
     totalCharges = totalRoomCharges + totalServiceCharges;
 
+    // Synchronize with authoritative ledger debits sum (including tax/service entries)
+    const ledgerDebitsSum = resLedger.filter(e => e.type === 'debit' && e.category !== 'refund').reduce((sum, e) => sum + e.amount, 0);
+    let unpostedStayCharges = 0;
+    if (res.status === 'checked_in' && res.autoNightDeduction !== false) {
+      const legitimateTotalNights = duration.totalNights;
+      const totalRoomStayRequired = legitimateTotalNights * nightly;
+      if (totalRoomStayRequired > postedRoomSum) {
+        unpostedStayCharges = totalRoomStayRequired - postedRoomSum;
+      }
+    }
+    if (ledgerDebitsSum > 0) {
+      totalCharges = Math.max(totalCharges, ledgerDebitsSum + unpostedStayCharges);
+    }
+
     // If reservation has a recorded discount on its document that is not reflected in ledger credits:
     const hasDiscountInLedger = resLedger.some(e => e.type === 'credit' && (e.category === 'discount' || (e.description || '').toLowerCase().includes('discount')));
     const unpostedDiscount = !hasDiscountInLedger ? Math.max(0, res.totalDiscount || res.discountAmount || 0) : 0;
