@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { initializeFirestore, setLogLevel, getDocFromServer, doc, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { initializeFirestore, setLogLevel, getDocFromServer, doc, memoryLocalCache, memoryLruGarbageCollector } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { OperationType, FirestoreErrorInfo } from "./types";
 import { safeStringify } from "./utils";
@@ -14,14 +14,30 @@ const app = initializeApp(firebaseConfig);
 setLogLevel('silent');
 
 export const auth = getAuth(app);
-// Use initializeFirestore with persistent local cache to prevent quota exhaustion and avoid streaming drops
+
+// Use in-memory cache to completely prevent IndexedDB multi-tab assertion crashes and stale-data hallucinations
 export const db = initializeFirestore(app, {
   ignoreUndefinedProperties: true,
   experimentalAutoDetectLongPolling: true,
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
+  localCache: memoryLocalCache({
+    garbageCollector: memoryLruGarbageCollector()
   })
 });
+
+// Clean up any stale/corrupted legacy IndexedDB databases in the browser to prevent multi-tab conflicts
+if (typeof window !== 'undefined' && window.indexedDB) {
+  try {
+    if (typeof window.indexedDB.databases === 'function') {
+      window.indexedDB.databases().then(dbs => {
+        dbs.forEach(d => {
+          if (d.name && (d.name.includes('firestore') || d.name.includes('[DEFAULT]'))) {
+            try { window.indexedDB.deleteDatabase(d.name); } catch (_) {}
+          }
+        });
+      }).catch(() => {});
+    }
+  } catch (_) {}
+}
 export const storage = getStorage(app);
 
 /**
@@ -196,5 +212,11 @@ export function handleFirestoreError(error: any, operationType: OperationType, p
   (cleanError as any).code = error?.code;
   (cleanError as any).diagnostic = diagnostic;
   
+  // For LIST and GET queries / snapshot listeners, log safely so that background listener dropouts do not crash the view
+  if (operationType === OperationType.LIST || operationType === OperationType.GET) {
+    console.warn(`[Firestore Safe Handler] Handled ${operationType} on ${path}:`, cleanError);
+    return cleanError;
+  }
+
   throw cleanError;
 }

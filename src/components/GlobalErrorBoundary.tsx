@@ -40,7 +40,19 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   private handleReset = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
-    window.location.reload();
+    if (typeof window !== 'undefined' && window.indexedDB && typeof window.indexedDB.databases === 'function') {
+      window.indexedDB.databases().then(dbs => {
+        dbs.forEach(d => {
+          if (d.name && (d.name.includes('firestore') || d.name.includes('[DEFAULT]'))) {
+            try { window.indexedDB.deleteDatabase(d.name); } catch (_) {}
+          }
+        });
+      }).finally(() => {
+        window.location.reload();
+      });
+    } else {
+      window.location.reload();
+    }
   };
 
   private handleGoHome = () => {

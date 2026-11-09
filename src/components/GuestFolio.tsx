@@ -844,6 +844,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       if (snap.exists()) {
         setCurrentReservation({ id: snap.id, ...snap.data() } as Reservation);
       }
+    }, (err) => {
+      console.warn("Reservation snapshot listener error:", err);
     });
 
     // Listen to ledger entries for this reservation
@@ -870,7 +872,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setLoading(false);
     }, (err) => {
       setLoading(false);
-      console.error("Ledger loading error:", err);
+      console.warn("Ledger loading warning:", err);
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/ledger`);
     });
 
@@ -879,6 +881,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     if (reservation.guestId) {
       unsubGuest = onSnapshot(doc(db, 'hotels', hotel.id, 'guests', reservation.guestId), (doc) => {
         if (doc.exists()) setGuest({ id: doc.id, ...doc.data() } as Guest);
+      }, (err) => {
+        console.warn("Guest snapshot listener error:", err);
       });
     }
 
