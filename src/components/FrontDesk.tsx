@@ -72,7 +72,6 @@ import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
 import { Pagination } from './Pagination';
-import { LedgerAuditErrorBoundary } from './LedgerAuditErrorBoundary';
 
 export function FrontDesk() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -5654,20 +5653,14 @@ export function FrontDesk() {
       )}
 
       {showFolioModal && (
-        <LedgerAuditErrorBoundary 
-          folioId={showFolioModal.id} 
-          guestId={showFolioModal.guestId} 
+        <GuestFolio 
+          reservation={showFolioModal} 
           onClose={() => setShowFolioModal(null)}
-        >
-          <GuestFolio 
-            reservation={showFolioModal} 
-            onClose={() => setShowFolioModal(null)}
-            onPostCharge={() => {
-              setShowFolioModal(null);
-              setShowChargeModal(showFolioModal);
-            }}
-          />
-        </LedgerAuditErrorBoundary>
+          onPostCharge={() => {
+            setShowFolioModal(null);
+            setShowChargeModal(showFolioModal);
+          }}
+        />
       )}
 
       {showPostponeModal && (

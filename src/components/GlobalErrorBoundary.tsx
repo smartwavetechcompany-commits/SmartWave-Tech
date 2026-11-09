@@ -26,6 +26,14 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
+    const isFirestoreAssertion = error?.message && (
+      error.message.includes('INTERNAL ASSERTION FAILED') ||
+      error.message.includes('FIRESTORE') ||
+      error.message.includes('Unexpected state')
+    );
+    if (isFirestoreAssertion) {
+      return { hasError: false, error: null, errorInfo: null };
+    }
     return { hasError: true, error, errorInfo: null };
   }
 
@@ -37,7 +45,8 @@ export class GlobalErrorBoundary extends Component<Props, State> {
       error.message.includes('Unexpected state')
     );
     if (isFirestoreAssertion) {
-      this.handleReset();
+      console.warn('[GlobalErrorBoundary] Transient Firestore assertion intercepted safely:', error);
+      this.setState({ hasError: false, error: null, errorInfo: null });
       return;
     }
     errorService.handleError(error, {
@@ -49,19 +58,6 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   private handleReset = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
-    if (typeof window !== 'undefined' && window.indexedDB && typeof window.indexedDB.databases === 'function') {
-      window.indexedDB.databases().then(dbs => {
-        dbs.forEach(d => {
-          if (d.name && (d.name.includes('firestore') || d.name.includes('[DEFAULT]'))) {
-            try { window.indexedDB.deleteDatabase(d.name); } catch (_) {}
-          }
-        });
-      }).finally(() => {
-        window.location.reload();
-      });
-    } else {
-      window.location.reload();
-    }
   };
 
   private handleGoHome = () => {

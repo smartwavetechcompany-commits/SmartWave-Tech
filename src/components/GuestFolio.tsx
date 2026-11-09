@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, limit, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -861,8 +861,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     // Listen to ledger entries for this reservation
     const q = query(
       collection(db, 'hotels', hotel.id, 'ledger'),
-      where('reservationId', '==', reservation.id),
-      limit(1000)
+      where('reservationId', '==', reservation.id)
     );
 
     const unsubLedger = onSnapshot(q, (snap) => {
@@ -911,32 +910,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setActiveFolio('all');
     }
   }, [currentReservation.corporateId]);
-
-  const autoAuditRanRef = useRef(false);
-
-  const autoSyncNightlyCharges = async () => {
-    if (!hotel?.id || !profile || currentReservation.status !== 'checked_in') return;
-    
-    try {
-      // 1. Process automated stay billing first so any accrued overstay/night charges post to ledger
-      const res = await processAutomatedBillingForReservation(hotel, currentReservation, profile.uid, new Date());
-      if (res.chargedCount > 0) {
-        toast.info(`Accrued ${res.chargedCount} night stay(s) automatically.`);
-      }
-
-      // 2. Perform full reconciliation and balance synchronization
-      await reconcileAndRepairReservationFinancials(hotel.id, currentReservation.id);
-    } catch (err: any) {
-      console.error("Auto sync nightly charges error:", err);
-    }
-  };
-
-  useEffect(() => {
-    if (!loading && currentReservation.status === 'checked_in' && !autoAuditRanRef.current && hotel?.id && profile) {
-      autoAuditRanRef.current = true;
-      autoSyncNightlyCharges();
-    }
-  }, [loading, currentReservation.status, hotel?.id, profile]);
 
   // Improved filtering:
   // If it's a corporate reservation, split the entries.
@@ -2965,6 +2938,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             Export CSV
           </button>
           <button
+            type="button"
             onClick={onClose}
             className="flex-1 py-3 bg-emerald-500 text-black rounded-xl font-bold hover:bg-emerald-400 transition-all active:scale-95"
           >
