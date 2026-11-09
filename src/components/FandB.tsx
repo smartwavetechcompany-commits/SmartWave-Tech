@@ -482,15 +482,13 @@ export function FandB() {
 
       const effectiveGuestId = newOrder.guestId || res?.guestId || res?.id || 'unknown';
 
-      // POST TO GUEST FOLIO ONLY IF ROOM CHARGED (Module 3 & Module 6)
-      // If paid entirely at outlet, NO room debit is posted!
-      if (roomCharged > 0 && isRoomOrder && res) {
-        const ledgerDescription = directPaid > 0
-          ? `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber} - Partial Room Charge): ${newOrder.items} (Bill: ${formatCurrency(finalPrice, currency, exchangeRate)}, Paid at Outlet: ${formatCurrency(directPaid, currency, exchangeRate)})`
-          : `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber}): ${newOrder.items}`;
+      // POST TO GUEST FOLIO FOR ROOM GUESTS (Module 3 & Module 6)
+      // Posts the full order charge debit and records any immediate outlet payment as a credit so it reflects on the folio and receipt!
+      if (isRoomOrder && res) {
+        const ledgerDescription = `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber}): ${newOrder.items}`;
 
         const postedEntry = await postToLedger(hotel.id, effectiveGuestId, res.id, {
-          amount: roomCharged, // EXACT room charge debit!
+          amount: finalPrice, // Full order charge debit
           type: 'debit',
           category: 'F & B',
           description: ledgerDescription,
@@ -516,11 +514,32 @@ export function FandB() {
           displayName: profile?.displayName || (profile as any)?.name || 'Staff'
         });
 
+        // If customer paid part or all directly at the outlet (e.g. 1k cash paid immediately), post the credit to the folio!
+        if (directPaid > 0) {
+          const directPayMethod = nonRoomPayments[0]?.method || 'cash';
+          await postToLedger(hotel.id, effectiveGuestId, res.id, {
+            amount: directPaid,
+            type: 'credit',
+            category: 'payment',
+            description: `F & B Direct Payment [F&B Outlet] (${String(directPayMethod).toUpperCase()}): Bill #${billNumber}`,
+            referenceId: `${orderRef.id}_DIRECT_PAY`,
+            idempotencyKey: `FB_PAY_${orderRef.id}`,
+            postedBy: profile.uid,
+            paymentMethod: directPayMethod as any,
+            settlementSource: 'F&B Outlet'
+          }, profile.uid, undefined, directPayMethod as any, {
+            uid: profile?.uid,
+            email: profile?.email,
+            role: profile?.role || 'staff',
+            displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+          });
+        }
+
         if (postedEntry?.id) {
           await database.safeUpdate(doc(db, 'hotels', hotel.id, 'kitchen_orders', orderRef.id), {
             ledgerEntryId: postedEntry.id,
             roomChargedAmount: roomCharged,
-            financialStatus: roomCharged >= finalPrice - 0.01 ? 'posted_to_room' : 'partially_settled'
+            financialStatus: roomCharged >= finalPrice - 0.01 ? 'posted_to_room' : (directPaid >= finalPrice - 0.01 ? 'paid' : 'partially_settled')
           }, {
             hotelId: hotel.id,
             module: 'F & B',

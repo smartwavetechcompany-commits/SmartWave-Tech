@@ -31,15 +31,14 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
-    const isFirestoreAssertion = error?.message && error.message.includes('INTERNAL ASSERTION FAILED');
+    const isFirestoreAssertion = error?.message && (
+      error.message.includes('INTERNAL ASSERTION FAILED') ||
+      error.message.includes('FIRESTORE') ||
+      error.message.includes('Unexpected state')
+    );
     if (isFirestoreAssertion) {
-      const lastAutoReload = sessionStorage.getItem('pms_fs_assertion_reload');
-      const now = Date.now();
-      if (!lastAutoReload || (now - Number(lastAutoReload) > 30000)) {
-        sessionStorage.setItem('pms_fs_assertion_reload', String(now));
-        this.handleReset();
-        return;
-      }
+      this.handleReset();
+      return;
     }
     errorService.handleError(error, {
       module: 'ComponentBoundary',
