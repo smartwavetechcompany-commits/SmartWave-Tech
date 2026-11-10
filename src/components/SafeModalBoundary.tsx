@@ -24,11 +24,13 @@ export class SafeModalBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.warn('[SafeModalBoundary] Safely contained modal error without system refresh:', error?.message || error);
     if (this.props.onClose) {
-      try {
-        this.props.onClose();
-      } catch (closeErr) {
-        console.warn('[SafeModalBoundary] Error during safe onClose:', closeErr);
-      }
+      setTimeout(() => {
+        try {
+          this.props.onClose?.();
+        } catch (closeErr) {
+          console.warn('[SafeModalBoundary] Error during safe onClose:', closeErr);
+        }
+      }, 0);
     }
   }
 

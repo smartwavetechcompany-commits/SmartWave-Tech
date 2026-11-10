@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -94,6 +94,9 @@ export function FrontDesk() {
     reservation: Reservation;
   } | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
+  const auditRunningRef = useRef(false);
+  const auditAttemptedDateRef = useRef<string | null>(null);
+  const overstayRunningRef = useRef(false);
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
   const [selectedResForGraceModal, setSelectedResForGraceModal] = useState<Reservation | null>(null);
 
@@ -103,7 +106,7 @@ export function FrontDesk() {
     
     const checkAndRunAudit = async () => {
       const today = format(new Date(), 'yyyy-MM-dd');
-      if (hotel.lastAuditDate !== today) {
+      if (hotel.lastAuditDate !== today && auditAttemptedDateRef.current !== today && !auditRunningRef.current) {
         // Only run if user has explicit night audit permission
         const canRunAudit = profile.role === 'hotelAdmin' || 
                             profile.role === 'superAdmin' ||
@@ -111,6 +114,7 @@ export function FrontDesk() {
                             hasPermission(profile, 'nightly_audit', customRoles);
         
         if (canRunAudit) {
+          auditAttemptedDateRef.current = today;
           console.log("Running automatic nightly audit for", today);
           await runNightlyAudit();
         }
@@ -1033,7 +1037,7 @@ export function FrontDesk() {
         corporateName: selectedCorp?.name,
         corporateStatus: selectedCorp?.status,
         isNegotiatedRate
-      });
+      }, availablePromotions);
 
       if (res.isValid && res.promotion) {
         setPromoValidationResult({
@@ -1846,7 +1850,7 @@ export function FrontDesk() {
         corporateName: selectedCorp?.name,
         corporateStatus: selectedCorp?.status,
         isNegotiatedRate: isCorporate
-      });
+      }, availablePromotions);
 
       if (result.isValid && result.promotion) {
         setModalAppliedPromo(result.promotion);
@@ -2011,29 +2015,33 @@ export function FrontDesk() {
   };
 
   const runNightlyAudit = async () => {
-    if (!hotel?.id || !profile || isAuditing) return;
+    if (!hotel?.id || !profile || isAuditing || auditRunningRef.current) return;
     
     try {
+      auditRunningRef.current = true;
       setIsAuditing(true);
-      const today = startOfDay(new Date());
       let auditCount = 0;
       let totalCharged = 0;
 
-      // 1. Get all checked-in reservations
-      const q = query(
-        collection(db, 'hotels', hotel.id, 'reservations'),
-        where('status', '==', 'checked_in')
-      );
-      const querySnapshot = await getDocs(q);
+      // 1. Get all checked-in reservations - prefer active in-memory reservations
+      const checkedInReservations = reservations.length > 0
+        ? reservations.filter(r => r.status === 'checked_in')
+        : (await getDocs(query(
+            collection(db, 'hotels', hotel.id, 'reservations'),
+            where('status', '==', 'checked_in')
+          ))).docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
       
-      for (const resDoc of querySnapshot.docs) {
-        const res = { id: resDoc.id, ...resDoc.data() } as Reservation;
+      for (const res of checkedInReservations) {
         if (!res.guestId || !res.autoNightDeduction) continue;
 
-        const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
-        if (result.chargedCount > 0) {
-          auditCount += result.chargedCount;
-          totalCharged += result.totalAmount;
+        try {
+          const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
+          if (result.chargedCount > 0) {
+            auditCount += result.chargedCount;
+            totalCharged += result.totalAmount;
+          }
+        } catch (resAuditErr) {
+          console.warn(`[NightlyAudit] Skipped reservation ${res.id} due to isolated issue:`, resAuditErr);
         }
       }
 
@@ -2043,7 +2051,7 @@ export function FrontDesk() {
         toast.info("Nightly audit completed. No new charges to post.");
       }
       
-      // Update hotel last audit date
+      // Update hotel last audit date to prevent infinite audit loops on re-render
       await database.safeUpdate(doc(db, 'hotels', hotel.id), {
         lastAuditDate: format(new Date(), 'yyyy-MM-dd')
       }, {
@@ -2059,7 +2067,7 @@ export function FrontDesk() {
         profile,
         'NIGHTLY_AUDIT_RUN',
         'Finance',
-        `Nightly audit processed ${querySnapshot.docs.length} stays`,
+        `Nightly audit processed ${checkedInReservations.length} stays`,
         undefined,
         null,
         { auditCount, totalCharged }
@@ -2069,13 +2077,14 @@ export function FrontDesk() {
       console.error("Audit error:", err.message || safeStringify(err));
       toast.error(`Failed to run nightly audit: ${err.message || "Unknown error"}`);
     } finally {
+      auditRunningRef.current = false;
       setIsAuditing(false);
       setShowNightAuditModal(false);
     }
   };
 
   const checkAndChargeActiveOverstays = async () => {
-    if (!hotel?.id || !profile) return;
+    if (!hotel?.id || !profile || auditRunningRef.current || isAuditing || overstayRunningRef.current) return;
     
     // Only run if user has permission to write front desk / ledger entries
     const canChange = profile.role === 'hotelAdmin' || 
@@ -2083,6 +2092,7 @@ export function FrontDesk() {
     if (!canChange) return;
 
     try {
+      overstayRunningRef.current = true;
       const activeCheckedInRes = reservations.filter(res => {
         return res.status === 'checked_in' && res.autoNightDeduction && res.guestId;
       });
@@ -2093,10 +2103,14 @@ export function FrontDesk() {
       let totalAmountCharged = 0;
 
       for (const res of activeCheckedInRes) {
-        const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
-        if (result.chargedCount > 0) {
-          chargedCount += result.chargedCount;
-          totalAmountCharged += result.totalAmount;
+        try {
+          const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
+          if (result.chargedCount > 0) {
+            chargedCount += result.chargedCount;
+            totalAmountCharged += result.totalAmount;
+          }
+        } catch (resOverstayErr) {
+          console.warn(`[OverstayCharge] Skipped reservation ${res.id}:`, resOverstayErr);
         }
       }
 
@@ -2105,6 +2119,8 @@ export function FrontDesk() {
       }
     } catch (err) {
       console.error("Error auto-charging active stays:", err);
+    } finally {
+      overstayRunningRef.current = false;
     }
   };
 

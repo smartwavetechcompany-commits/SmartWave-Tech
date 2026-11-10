@@ -105,22 +105,11 @@ class ErrorService {
   private notifyUser(error: AppError) {
     const toastId = `error-${error.code}-${error.module}`;
     
-    if (error.severity === ErrorSeverity.CRITICAL) {
-      toast.error('Critical System Error', {
-        description: error.message,
-        duration: Infinity,
-        id: toastId,
-        action: {
-          label: 'Reload',
-          onClick: () => window.location.reload()
-        }
-      });
-    } else {
-      toast.error(error.message, {
-        id: toastId,
-        description: `Source: ${error.module}`
-      });
-    }
+    toast.error(error.message, {
+      id: toastId,
+      description: `Source: ${error.module}`,
+      duration: 5000
+    });
   }
 }
 

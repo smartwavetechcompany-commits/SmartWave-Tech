@@ -81,7 +81,7 @@ export async function getPromotionByCode(
     if (matched) return matched;
   }
 
-  // 2. Safe collection read without sub-query filter to avoid Firestore limbo target assertions
+  // 2. Safe collection read with comprehensive error suppression
   try {
     const promotionsRef = collection(db, 'hotels', hotelId, 'promotions');
     const snapshot = await getDocs(promotionsRef);
@@ -92,18 +92,7 @@ export async function getPromotionByCode(
       }
     }
   } catch (err: any) {
-    console.warn('[getPromotionByCode] Collection scan error, attempting query fallback:', err);
-    try {
-      const promotionsRef = collection(db, 'hotels', hotelId, 'promotions');
-      const q = query(promotionsRef, where('code', '==', cleanCode));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const firstDoc = snapshot.docs[0];
-        return { id: firstDoc.id, ...firstDoc.data() } as Promotion;
-      }
-    } catch (innerErr) {
-      console.warn('[getPromotionByCode] Query fallback also failed:', innerErr);
-    }
+    console.warn('[getPromotionByCode] Safe handling of collection read:', err?.message || err);
   }
   return null;
 }

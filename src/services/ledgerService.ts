@@ -578,7 +578,8 @@ export const recalculateReservationAccountFromLedger = async (
 
 export const purgeCorruptedLedgerEntries = async (
   hotelId: string,
-  entryIds: string[]
+  entryIds: string[],
+  skipRecalculate = false
 ) => {
   if (!hotelId || !entryIds || entryIds.length === 0) return;
   const reservationIdsToSync = new Set<string>();
@@ -602,8 +603,10 @@ export const purgeCorruptedLedgerEntries = async (
     }
   }
 
-  for (const resId of reservationIdsToSync) {
-    await recalculateReservationAccountFromLedger(hotelId, resId);
+  if (!skipRecalculate) {
+    for (const resId of reservationIdsToSync) {
+      await recalculateReservationAccountFromLedger(hotelId, resId);
+    }
   }
 };
 
@@ -1089,7 +1092,7 @@ export const reconcileAndRepairReservationFinancials = async (
     });
 
     console.warn(`[FolioReconciliation] Purging ${duplicateIds.length} duplicate/excess charges for reservation ${reservationId}`, duplicateIds);
-    await purgeCorruptedLedgerEntries(hotelId, duplicateIds);
+    await purgeCorruptedLedgerEntries(hotelId, duplicateIds, true);
   }
 
   // Remaining clean ledger entries
@@ -1217,7 +1220,7 @@ export const detectAndPurgeDuplicateOverstayCharges = async (
   });
 
   if (duplicateIds.length > 0) {
-    await purgeCorruptedLedgerEntries(hotelId, duplicateIds);
+    await purgeCorruptedLedgerEntries(hotelId, duplicateIds, true);
   }
   return duplicateIds;
 };
@@ -1473,26 +1476,31 @@ export const deleteReservationWithFinancialReversal = async (
 
   // 1. Gather all ledger entry references associated with this reservation
   const targetDocIds = new Set<string>();
-  try {
-    const ledgerQuery = query(
-      collection(db, 'hotels', hotelId, 'ledger'),
-      where('reservationId', '==', reservationId)
-    );
-    const ledgerSnap = await getDocs(ledgerQuery);
-    ledgerSnap.docs.forEach((docSnap) => {
-      targetDocIds.add(docSnap.id);
-    });
-  } catch (err) {
-    console.warn('[deleteReservationWithFinancialReversal] Direct ledger query failed, using cached entries if available:', err);
-  }
 
-  // Also include cached entries if provided to ensure zero orphan entries
+  // Prioritize active in-memory cached entries if provided to avoid query collisions
   if (cachedLedgerEntries && cachedLedgerEntries.length > 0) {
     cachedLedgerEntries.forEach((entry) => {
-      if (entry.reservationId === reservationId && entry.id) {
-        targetDocIds.add(entry.id);
+      if (entry.reservationId === reservationId) {
+        const id = (entry as any).firestoreId || entry.id;
+        if (id) targetDocIds.add(id);
       }
     });
+  }
+
+  // If no cached entries found, query collection as fallback
+  if (targetDocIds.size === 0) {
+    try {
+      const ledgerQuery = query(
+        collection(db, 'hotels', hotelId, 'ledger'),
+        where('reservationId', '==', reservationId)
+      );
+      const ledgerSnap = await getDocs(ledgerQuery);
+      ledgerSnap.docs.forEach((docSnap) => {
+        targetDocIds.add(docSnap.id);
+      });
+    } catch (err) {
+      console.warn('[deleteReservationWithFinancialReversal] Ledger query notice:', err);
+    }
   }
 
   // 2. Delete the reservation document directly

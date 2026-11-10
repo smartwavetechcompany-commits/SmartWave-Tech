@@ -22,14 +22,6 @@ export class LedgerAuditErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    const isFirestoreAssertion = error?.message && (
-      error.message.includes('INTERNAL ASSERTION FAILED') ||
-      error.message.includes('FIRESTORE') ||
-      error.message.includes('Unexpected state')
-    );
-    if (isFirestoreAssertion) {
-      return { hasError: false, error: null };
-    }
     return { hasError: true, error };
   }
 
