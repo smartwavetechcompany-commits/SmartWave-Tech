@@ -1,6 +1,6 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { initializeFirestore, setLogLevel, getDocFromServer, doc, memoryLocalCache, memoryLruGarbageCollector } from "firebase/firestore";
+import { initializeFirestore, getFirestore, setLogLevel, getDocFromServer, doc, memoryLocalCache, Firestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { OperationType, FirestoreErrorInfo } from "./types";
 import { safeStringify } from "./utils";
@@ -8,36 +8,25 @@ import { errorService, ErrorSeverity } from "./services/errorService";
 import firebaseConfig from "../firebase-applet-config.json";
 
 export { firebaseConfig };
-const app = initializeApp(firebaseConfig);
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 // Completely silence Firestore internal network/quota/backoff logging
 setLogLevel('silent');
 
 export const auth = getAuth(app);
 
-// Use in-memory cache to completely prevent IndexedDB multi-tab assertion crashes and stale-data hallucinations
-export const db = initializeFirestore(app, {
-  ignoreUndefinedProperties: true,
-  experimentalAutoDetectLongPolling: true,
-  localCache: memoryLocalCache({
-    garbageCollector: memoryLruGarbageCollector()
-  })
-});
-
-// Clean up any stale/corrupted legacy IndexedDB databases in the browser to prevent multi-tab conflicts
-if (typeof window !== 'undefined' && window.indexedDB) {
-  try {
-    if (typeof window.indexedDB.databases === 'function') {
-      window.indexedDB.databases().then(dbs => {
-        dbs.forEach(d => {
-          if (d.name && (d.name.includes('firestore') || d.name.includes('[DEFAULT]'))) {
-            try { window.indexedDB.deleteDatabase(d.name); } catch (_) {}
-          }
-        });
-      }).catch(() => {});
-    }
-  } catch (_) {}
+// Use in-memory cache with standard WebChannel streaming to eliminate dual-transport probe race conditions
+let firestoreDb: Firestore;
+try {
+  firestoreDb = initializeFirestore(app, {
+    ignoreUndefinedProperties: true,
+    localCache: memoryLocalCache()
+  });
+} catch (_) {
+  firestoreDb = getFirestore(app);
 }
+
+export const db = firestoreDb;
 export const storage = getStorage(app);
 
 /**

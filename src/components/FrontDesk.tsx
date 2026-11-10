@@ -1533,7 +1533,8 @@ export function FrontDesk() {
           const { deletedEntriesCount } = await deleteReservationWithFinancialReversal(
             hotel.id,
             res,
-            { uid: profile.uid, email: profile.email || '', role: profile.role }
+            { uid: profile.uid, email: profile.email || '', role: profile.role },
+            ledgerEntries
           );
 
           await logActivity(

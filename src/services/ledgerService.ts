@@ -1462,7 +1462,8 @@ export const processAutomatedBillingForReservation = async (
 export const deleteReservationWithFinancialReversal = async (
   hotelId: string,
   reservation: Reservation,
-  userProfile?: { uid: string; email: string; role: string } | null
+  userProfile?: { uid: string; email: string; role: string } | null,
+  cachedLedgerEntries?: LedgerEntry[]
 ): Promise<{ success: boolean; deletedEntriesCount: number }> => {
   if (!hotelId || !reservation?.id) {
     throw new Error('Invalid parameters: hotelId and reservation ID are required.');
@@ -1471,16 +1472,34 @@ export const deleteReservationWithFinancialReversal = async (
   const reservationId = reservation.id;
   const batch = writeBatch(db);
 
-  // 1. Query all ledger entries associated with this reservation
-  const ledgerQuery = query(
-    collection(db, 'hotels', hotelId, 'ledger'),
-    where('reservationId', '==', reservationId)
-  );
-  const ledgerSnap = await getDocs(ledgerQuery);
+  // 1. Gather all ledger entry references associated with this reservation
+  const targetDocIds = new Set<string>();
+  try {
+    const ledgerQuery = query(
+      collection(db, 'hotels', hotelId, 'ledger'),
+      where('reservationId', '==', reservationId)
+    );
+    const ledgerSnap = await getDocs(ledgerQuery);
+    ledgerSnap.docs.forEach((docSnap) => {
+      targetDocIds.add(docSnap.id);
+    });
+  } catch (err) {
+    console.warn('[deleteReservationWithFinancialReversal] Direct ledger query failed, using cached entries if available:', err);
+  }
+
+  // Also include cached entries if provided to ensure zero orphan entries
+  if (cachedLedgerEntries && cachedLedgerEntries.length > 0) {
+    cachedLedgerEntries.forEach((entry) => {
+      if (entry.reservationId === reservationId && entry.id) {
+        targetDocIds.add(entry.id);
+      }
+    });
+  }
 
   let deletedEntriesCount = 0;
-  ledgerSnap.docs.forEach((ledgerDoc) => {
-    batch.delete(ledgerDoc.ref);
+  targetDocIds.forEach((docId) => {
+    const docRef = doc(db, 'hotels', hotelId, 'ledger', docId);
+    batch.delete(docRef);
     deletedEntriesCount++;
   });
 
