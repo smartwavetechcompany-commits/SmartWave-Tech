@@ -8,6 +8,7 @@ import { AuthPage } from './components/AuthPage';
 import { Dashboard } from './components/Dashboard';
 import { SuperAdmin } from './components/SuperAdmin';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
+import { ModuleErrorBoundary } from './components/ModuleErrorBoundary';
 import { Rooms } from './components/Rooms';
 import { FrontDesk } from './components/FrontDesk';
 import { StaffManagement } from './components/StaffManagement';
@@ -276,8 +277,9 @@ function AppContent() {
           <TopBar onMenuClick={() => setSidebarOpen(true)} />
         </div>
         <div className="flex-1 overflow-y-auto relative print:overflow-visible print:h-auto">
-          <AnimatePresence mode="wait">
-          <Routes location={location} key={location.pathname}>
+          <ModuleErrorBoundary key={location.pathname}>
+            <AnimatePresence mode="wait">
+            <Routes location={location} key={location.pathname}>
             <Route path="/" element={<DashboardRoute />} />
             <Route path="/rooms" element={
               <PermissionGuard moduleId="rooms" showError>
@@ -412,6 +414,7 @@ function AppContent() {
             <Route path="*" element={<div className="p-8 text-zinc-500">Module under development...</div>} />
           </Routes>
         </AnimatePresence>
+        </ModuleErrorBoundary>
       </div>
     </main>
   </div>

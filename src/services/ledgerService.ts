@@ -1470,7 +1470,6 @@ export const deleteReservationWithFinancialReversal = async (
   }
 
   const reservationId = reservation.id;
-  const batch = writeBatch(db);
 
   // 1. Gather all ledger entry references associated with this reservation
   const targetDocIds = new Set<string>();
@@ -1496,35 +1495,54 @@ export const deleteReservationWithFinancialReversal = async (
     });
   }
 
-  let deletedEntriesCount = 0;
-  targetDocIds.forEach((docId) => {
-    const docRef = doc(db, 'hotels', hotelId, 'ledger', docId);
-    batch.delete(docRef);
-    deletedEntriesCount++;
-  });
-
-  // 2. Delete the reservation document
+  // 2. Delete the reservation document directly
   const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-  batch.delete(resRef);
+  try {
+    await deleteDoc(resRef);
+  } catch (deleteResErr) {
+    console.warn('[deleteReservationWithFinancialReversal] Direct deleteDoc failed:', deleteResErr);
+  }
 
-  // 3. If checked in and assigned to a room, mark the room as clean/available
+  // 3. Purge all ledger transactions associated with this reservation
+  let deletedEntriesCount = 0;
+  for (const docId of targetDocIds) {
+    try {
+      const entryRef = doc(db, 'hotels', hotelId, 'ledger', docId);
+      await deleteDoc(entryRef);
+      deletedEntriesCount++;
+    } catch (delErr) {
+      console.warn(`[deleteReservationWithFinancialReversal] Could not delete ledger doc ${docId}:`, delErr);
+    }
+  }
+
+  // 4. If checked in and assigned to a room, mark the room as clean/available safely
   if (
     reservation.status === 'checked_in' &&
     reservation.roomId &&
     typeof reservation.roomId === 'string' &&
     reservation.roomId.trim() !== ''
   ) {
-    const roomRef = doc(db, 'hotels', hotelId, 'rooms', reservation.roomId.trim());
-    batch.update(roomRef, { status: 'clean' });
+    try {
+      const roomRef = doc(db, 'hotels', hotelId, 'rooms', reservation.roomId.trim());
+      const roomSnap = await getDoc(roomRef);
+      if (roomSnap.exists()) {
+        await updateDoc(roomRef, { status: 'clean' });
+      }
+    } catch (roomErr) {
+      console.warn('[deleteReservationWithFinancialReversal] Room status update skipped:', roomErr);
+    }
   }
 
-  // Commit batch atomically
-  await database.commitBatch(hotelId, batch, {
-    module: 'Front Desk',
-    action: 'DELETE_RESERVATION_WITH_FINANCIAL_REVERSAL',
-    details: `Deleted reservation ${reservationId} (${reservation.guestName || 'Guest'}) and purged ${deletedEntriesCount} associated ledger transaction(s)`,
-    userContext: userProfile ? { uid: userProfile.uid, email: userProfile.email, role: userProfile.role } : undefined
-  });
+  // 5. Record audit log
+  createAuditLog(
+    hotelId,
+    'Front Desk',
+    'DELETE_RESERVATION_WITH_FINANCIAL_REVERSAL',
+    `Deleted reservation ${reservationId} (${reservation.guestName || 'Guest'}) and purged ${deletedEntriesCount} associated ledger transaction(s)`,
+    'success',
+    { reservationId, deletedEntriesCount },
+    userProfile ? { uid: userProfile.uid, email: userProfile.email, role: userProfile.role } : undefined
+  );
 
   // 4. Recalculate Guest Profile Outstanding Balance
   if (reservation.guestId) {

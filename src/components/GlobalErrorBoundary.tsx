@@ -26,32 +26,16 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    const isFirestoreAssertion = error?.message && (
-      error.message.includes('INTERNAL ASSERTION FAILED') ||
-      error.message.includes('FIRESTORE') ||
-      error.message.includes('Unexpected state')
-    );
-    if (isFirestoreAssertion) {
-      return { hasError: false, error: null, errorInfo: null };
-    }
     return { hasError: true, error, errorInfo: null };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
-    const isFirestoreAssertion = error?.message && (
-      error.message.includes('INTERNAL ASSERTION FAILED') ||
-      error.message.includes('FIRESTORE') ||
-      error.message.includes('Unexpected state')
-    );
-    if (isFirestoreAssertion) {
-      console.warn('[GlobalErrorBoundary] Transient Firestore assertion intercepted safely:', error);
-      return;
-    }
+    console.error('[GlobalErrorBoundary] Caught unexpected view crash:', error?.message || error);
     errorService.handleError(error, {
       module: 'ComponentBoundary',
-      severity: ErrorSeverity.CRITICAL,
-      silent: false
+      severity: ErrorSeverity.HIGH,
+      silent: true
     });
   }
 

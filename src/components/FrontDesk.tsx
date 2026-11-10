@@ -722,18 +722,18 @@ export function FrontDesk() {
     });
 
     return () => {
-      unsubRes();
-      unsubRooms();
-      unsubTypes();
-      unsubGuests();
-      unsubCorp();
-      unsubStaff();
-      unsubBlockings();
-      unsubCheckInHist();
-      unsubCheckOutHist();
-      unsubRateConfigs();
-      unsubLedger();
-      unsubPromo();
+      try { unsubRes(); } catch (_) {}
+      try { unsubRooms(); } catch (_) {}
+      try { unsubTypes(); } catch (_) {}
+      try { unsubGuests(); } catch (_) {}
+      try { unsubCorp(); } catch (_) {}
+      try { unsubStaff(); } catch (_) {}
+      try { unsubBlockings(); } catch (_) {}
+      try { unsubCheckInHist(); } catch (_) {}
+      try { unsubCheckOutHist(); } catch (_) {}
+      try { unsubRateConfigs(); } catch (_) {}
+      try { unsubLedger(); } catch (_) {}
+      try { unsubPromo(); } catch (_) {}
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -819,7 +819,9 @@ export function FrontDesk() {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts/${newBooking.corporateId}/rates`);
     });
 
-    return () => unsubRates();
+    return () => {
+      try { unsubRates(); } catch (_) {}
+    };
   }, [hotel?.id, newBooking.corporateId]);
 
   // Recalculate price when room, dates or corporate account changes
@@ -1527,36 +1529,30 @@ export function FrontDesk() {
     try {
       setLoading(true);
       
-      await executeRequest(
-        `delete-reservation-${res.id}`,
-        async () => {
-          const { deletedEntriesCount } = await deleteReservationWithFinancialReversal(
-            hotel.id,
-            res,
-            { uid: profile.uid, email: profile.email || '', role: profile.role },
-            ledgerEntries
-          );
-
-          await logActivity(
-            hotel.id,
-            profile,
-            'DELETE_RESERVATION',
-            'Front Desk',
-            `Deleted reservation for ${res.guestName} (Room ${res.roomNumber || 'N/A'}) with financial reversal (${deletedEntriesCount} ledger entries purged)`,
-            res.id,
-            res,
-            null
-          );
-
-          // Reset modal and selection states
-          if (showFolioModal?.id === res.id) setShowFolioModal(null);
-          if (editingReservation?.id === res.id) setEditingReservation(null);
-          setSelectedReservations(prev => prev.filter(id => id !== res.id));
-
-          toast.success('Reservation and associated financial transactions deleted successfully');
-        },
-        { loadingMessage: `Deleting reservation & executing financial reversal...`, showOverlay: true }
+      const { deletedEntriesCount } = await deleteReservationWithFinancialReversal(
+        hotel.id,
+        res,
+        { uid: profile.uid, email: profile.email || '', role: profile.role },
+        ledgerEntries
       );
+
+      await logActivity(
+        hotel.id,
+        profile,
+        'DELETE_RESERVATION',
+        'Front Desk',
+        `Deleted reservation for ${res.guestName} (Room ${res.roomNumber || 'N/A'}) with financial reversal (${deletedEntriesCount} ledger entries purged)`,
+        res.id,
+        res,
+        null
+      );
+
+      // Reset modal and selection states
+      if (showFolioModal?.id === res.id) setShowFolioModal(null);
+      if (editingReservation?.id === res.id) setEditingReservation(null);
+      setSelectedReservations(prev => prev.filter(id => id !== res.id));
+
+      toast.success('Reservation and associated financial transactions deleted successfully');
     } catch (err: any) {
       console.error("Delete reservation error:", err.message || safeStringify(err));
       toast.error('Failed to delete reservation: ' + (err.message || 'Unknown error'));
@@ -1691,10 +1687,10 @@ export function FrontDesk() {
       } else {
         await updateReservationStatus(res, action);
       }
-      setShowConfirmAction(null);
     } catch (err: any) {
       console.error("Confirm action error:", err.message || safeStringify(err));
     } finally {
+      setShowConfirmAction(null);
       setLoading(false);
     }
   };
