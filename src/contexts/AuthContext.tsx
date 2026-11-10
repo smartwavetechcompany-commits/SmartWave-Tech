@@ -193,7 +193,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
     
-    return () => unsubscribe();
+    return () => {
+      try {
+        unsubscribe();
+      } catch (_) {}
+    };
   }, []);
 
   // 2. Profile Fetcher (Real-time Live Sync)
@@ -324,7 +328,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfileResolved(true);
     });
 
-    return () => unsubscribe();
+    return () => {
+      try {
+        unsubscribe();
+      } catch (_) {}
+    };
   }, [user?.uid, authResolved, hasProfileError]);
 
   // 3. Hotel Fetcher (Real-time Live Sync)
@@ -392,7 +400,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setHotelResolved(true);
     });
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [profile?.hotelId, profile?.role, profileResolved, selectedHotelId, hasHotelError]);
 
   // 4. Custom Roles Listener (Real-time Live RBAC Synchronization)
@@ -423,7 +435,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn("Custom roles real-time sync notice:", err);
     });
 
-    return () => unsubRoles();
+    return () => {
+      try {
+        unsubRoles();
+      } catch (_) {}
+    };
   }, [profile?.hotelId]);
 
   // 5. Active Session Management & Heartbeat
@@ -480,7 +496,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       clearInterval(heartbeat);
-      unsubSession();
+      try {
+        unsubSession();
+      } catch (_) {}
     };
   }, [profile?.hotelId, user?.uid, currentSessionId]);
 

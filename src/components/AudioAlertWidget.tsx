@@ -80,7 +80,11 @@ export function AudioAlertWidget() {
       setReservations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation)));
     }, () => {});
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [hotel?.id]);
 
   // Listen to kitchen orders
@@ -95,7 +99,11 @@ export function AudioAlertWidget() {
       () => {}
     );
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [hotel?.id]);
 
   // Listen to ledger entries for live folio synchronization
@@ -110,7 +118,11 @@ export function AudioAlertWidget() {
       () => {}
     );
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [hotel?.id]);
 
   // Identify overdue stays

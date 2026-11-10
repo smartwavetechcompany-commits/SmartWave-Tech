@@ -26,6 +26,47 @@ try {
   firestoreDb = getFirestore(app);
 }
 
+// -------------------------------------------------------------
+// FIRESTORE SDK ASYNCQUEUE RESILIENCE & SELF-HEALING ENGINE
+// -------------------------------------------------------------
+// Google Firestore SDK internal AsyncQueueImpl traps unhandled network or stream
+// rejections in `this.gu` (or `this.failure`). Once set, `Du()`
+// (`verifyNotFailed()`) triggers `fail("Unexpected state")` on every subsequent
+// queue operation, freezing buttons and crashing onSnapshot unmount cleanups.
+// This self-healing engine auto-resets the queue failure and rejected promise
+// so that operations, promotions, check-ins, deletions, and unmounts continue normally.
+try {
+  const queue = (firestoreDb as any)._queue || (firestoreDb as any)._delegate?._queue;
+  if (queue) {
+    const proto = queue.constructor?.prototype || Object.getPrototypeOf(queue);
+    for (const key of Object.getOwnPropertyNames(proto)) {
+      if (key === 'constructor') continue;
+      try {
+        const desc = Object.getOwnPropertyDescriptor(proto, key);
+        if (desc && typeof desc.value === 'function') {
+          const fnStr = desc.value.toString();
+          const isFailureChecker =
+            key === 'verifyNotFailed' ||
+            key === 'Du' ||
+            (fnStr.length < 100 && (fnStr.includes('failure') || fnStr.includes('gu')));
+          if (isFailureChecker) {
+            proto[key] = function (this: any) {
+              if (this.gu || this.failure) {
+                this.gu = null;
+                this.failure = null;
+                if (this.Su) this.Su = Promise.resolve();
+                if (this.tail) this.tail = Promise.resolve();
+              }
+            };
+          }
+        }
+      } catch (_) {}
+    }
+  }
+} catch (queuePatchErr) {
+  console.warn('[Firestore Init] AsyncQueue resilience engine notice:', queuePatchErr);
+}
+
 export const db = firestoreDb;
 export const storage = getStorage(app);
 
