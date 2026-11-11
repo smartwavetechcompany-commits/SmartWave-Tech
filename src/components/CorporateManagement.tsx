@@ -35,7 +35,7 @@ import { format } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { postToLedger, processAutomatedBillingForReservation } from '../services/ledgerService';
+import { postToLedger, processAutomatedBillingForReservation, reconcileCorporateAccountBalance } from '../services/ledgerService';
 import { parseLocalDateTime } from '../utils/billingEngine';
 import { useSettings } from '../hooks/useSettings';
 
@@ -174,18 +174,35 @@ export function CorporateManagement() {
     return authHasPermission('manage_corporate');
   };
 
+  const reconciledAccountsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!hotel?.id || !profile) return;
     
     const q = query(collection(db, 'hotels', hotel.id, 'corporate_accounts'), orderBy('name', 'asc'));
     const unsub = onSnapshot(q, (snap) => {
-      setAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount)));
+      const accs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CorporateAccount));
+      setAccounts(accs);
+
+      // Auto-reconcile corporate account balances from actual ledger transactions
+      accs.forEach(acc => {
+        if (!reconciledAccountsRef.current.has(acc.id)) {
+          reconciledAccountsRef.current.add(acc.id);
+          reconcileCorporateAccountBalance(hotel.id, acc.id).catch(err => {
+            console.warn('[Corporate Reconciliation] Sync notice for', acc.name, err);
+          });
+        }
+      });
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts`);
       if (error.code === 'permission-denied') setHasPermissionError(true);
     });
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [hotel?.id, profile?.uid]);
 
   useEffect(() => {
@@ -197,7 +214,11 @@ export function CorporateManagement() {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
     });
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [hotel?.id]);
 
   useEffect(() => {
@@ -209,7 +230,11 @@ export function CorporateManagement() {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/room_types`);
     });
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [hotel?.id]);
 
   useEffect(() => {

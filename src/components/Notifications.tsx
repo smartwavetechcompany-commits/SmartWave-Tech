@@ -59,7 +59,11 @@ export function Notifications() {
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      try {
+        unsubscribe();
+      } catch (_) {}
+    };
   }, [hotel?.id, profile?.uid]);
 
   const markAsRead = async (id: string) => {

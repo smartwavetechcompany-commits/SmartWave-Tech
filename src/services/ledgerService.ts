@@ -1,6 +1,6 @@
 import { db } from '../firebase';
 import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, writeBatch, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { LedgerEntry, Reservation, FinanceRecord, Hotel } from '../types';
+import { LedgerEntry, Reservation, FinanceRecord, Hotel, CorporateAccount } from '../types';
 import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
@@ -115,25 +115,23 @@ export const postToLedger = async (
     shouldFetchHotel ? getDoc(hotelRef) : Promise.resolve(null)
   ]);
 
-  if (!finalCorporateId && entry.category === 'payment' && entry.type === 'credit') {
-    if (resSnap.exists()) {
-      const resData = resSnap.data() as Reservation;
-      if (resData.corporateId) {
-        finalCorporateId = resData.corporateId;
-      } else {
-        // Query to see if there is any city ledger debit transfer entry
-        const q = query(
-          collection(db, 'hotels', hotelId, 'ledger'),
-          where('reservationId', '==', reservationId)
-        );
-        const querySnap = await getDocs(q);
-        const foundEntry = querySnap.docs.find(doc => {
-          const d = doc.data() as LedgerEntry;
-          return d.category === 'city_ledger' && d.type === 'debit' && d.corporateId;
-        });
-        if (foundEntry) {
-          finalCorporateId = (foundEntry.data() as LedgerEntry).corporateId;
-        }
+  if (!finalCorporateId && resSnap && resSnap.exists()) {
+    const resData = resSnap.data() as Reservation;
+    if (resData.corporateId) {
+      finalCorporateId = resData.corporateId;
+    } else if (entry.category === 'payment' && entry.type === 'credit') {
+      // Query to see if there is any city ledger debit transfer entry
+      const q = query(
+        collection(db, 'hotels', hotelId, 'ledger'),
+        where('reservationId', '==', reservationId)
+      );
+      const querySnap = await getDocs(q);
+      const foundEntry = querySnap.docs.find(doc => {
+        const d = doc.data() as LedgerEntry;
+        return d.category === 'city_ledger' && d.type === 'debit' && d.corporateId;
+      });
+      if (foundEntry) {
+        finalCorporateId = (foundEntry.data() as LedgerEntry).corporateId;
       }
     }
   }
@@ -286,12 +284,14 @@ export const postToLedger = async (
     }, { merge: true });
   }
 
-  if (corporateId && corpBalanceAdj !== 0) {
-    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
+  if (finalCorporateId && (corpBalanceAdj !== 0 || corpEntries.length > 0)) {
+    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', finalCorporateId);
+    const corpDebits = corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+    const corpCredits = corpEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
     batch.set(corpRef, {
       currentBalance: increment(corpBalanceAdj),
-      totalDebits: increment(corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
-      totalCredits: increment(corpEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
+      totalDebits: increment(corpDebits),
+      totalCredits: increment(corpCredits)
     }, { merge: true });
   }
 
@@ -1643,4 +1643,132 @@ export const deleteReservationWithFinancialReversal = async (
   }
 
   return { success: true, deletedEntriesCount };
+};
+
+/**
+ * Automatically reconciles a Corporate Account's debits, credits, and balance
+ * from its actual ledger entries and linked reservation records.
+ * Fixes any past out-of-sync balances or orphaned corporate charges/settlements.
+ */
+export const reconcileCorporateAccountBalance = async (
+  hotelId: string,
+  corporateId: string
+): Promise<{
+  currentBalance: number;
+  totalDebits: number;
+  totalCredits: number;
+  reconciled: boolean;
+}> => {
+  if (!hotelId || !corporateId) {
+    return { currentBalance: 0, totalDebits: 0, totalCredits: 0, reconciled: false };
+  }
+
+  try {
+    const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
+    const corpSnap = await getDoc(corpRef);
+    if (!corpSnap.exists()) {
+      return { currentBalance: 0, totalDebits: 0, totalCredits: 0, reconciled: false };
+    }
+    const corpData = corpSnap.data() as CorporateAccount;
+
+    // 1. Fetch all reservations linked to this corporate account
+    const resQuery = query(
+      collection(db, 'hotels', hotelId, 'reservations'),
+      where('corporateId', '==', corporateId)
+    );
+    const resSnap = await getDocs(resQuery);
+    const linkedResIds = new Set<string>(resSnap.docs.map(d => d.id));
+
+    // 2. Fetch all ledger entries linked directly to this corporateId
+    const corpLedgerQuery = query(
+      collection(db, 'hotels', hotelId, 'ledger'),
+      where('corporateId', '==', corporateId)
+    );
+    const corpLedgerSnap = await getDocs(corpLedgerQuery);
+
+    const allEntriesMap = new Map<string, LedgerEntry & { docRef: any }>();
+    corpLedgerSnap.docs.forEach(d => {
+      allEntriesMap.set(d.id, { ...(d.data() as LedgerEntry), docRef: d.ref });
+    });
+
+    // 3. For any reservations linked to this corporate account, check their ledger entries too
+    const batch = writeBatch(db);
+    let updatedOrphans = 0;
+
+    for (const resId of linkedResIds) {
+      const resLedgerQuery = query(
+        collection(db, 'hotels', hotelId, 'ledger'),
+        where('reservationId', '==', resId)
+      );
+      const resLedgerSnap = await getDocs(resLedgerQuery);
+      resLedgerSnap.docs.forEach(d => {
+        const data = d.data() as LedgerEntry;
+        // If entry belonged to this corporate reservation but corporateId was omitted, fix it!
+        if (!data.corporateId) {
+          batch.update(d.ref, { corporateId });
+          updatedOrphans++;
+        }
+        allEntriesMap.set(d.id, { ...data, corporateId, docRef: d.ref });
+      });
+    }
+
+    if (updatedOrphans > 0) {
+      await batch.commit().catch(e => console.warn('[Corporate Reconciliation] Batch commit notice:', e));
+    }
+
+    // 4. Calculate actual valid debits and credits
+    const validEntries = Array.from(allEntriesMap.values())
+      .filter(e => validateLedgerTransaction(e).isValid);
+
+    const actualDebits = validEntries
+      .filter(e => e.type === 'debit')
+      .reduce((acc, e) => acc + (e.amount || 0), 0);
+
+    const actualCredits = validEntries
+      .filter(e => e.type === 'credit')
+      .reduce((acc, e) => acc + (e.amount || 0), 0);
+
+    const actualBalance = Number((actualDebits - actualCredits).toFixed(2));
+    const roundedDebits = Number(actualDebits.toFixed(2));
+    const roundedCredits = Number(actualCredits.toFixed(2));
+
+    const needsUpdate =
+      corpData.currentBalance !== actualBalance ||
+      corpData.totalDebits !== roundedDebits ||
+      corpData.totalCredits !== roundedCredits;
+
+    if (needsUpdate) {
+      await database.safeUpdate(
+        corpRef,
+        {
+          currentBalance: actualBalance,
+          totalDebits: roundedDebits,
+          totalCredits: roundedCredits,
+          lastReconciledAt: new Date().toISOString()
+        },
+        {
+          hotelId,
+          module: 'Corporate',
+          action: 'RECONCILE_CORPORATE_ACCOUNT',
+          details: `Reconciled corporate account ${corporateId}: debits=${roundedDebits}, credits=${roundedCredits}, balance=${actualBalance}`
+        }
+      );
+      return {
+        currentBalance: actualBalance,
+        totalDebits: roundedDebits,
+        totalCredits: roundedCredits,
+        reconciled: true
+      };
+    }
+
+    return {
+      currentBalance: corpData.currentBalance || 0,
+      totalDebits: corpData.totalDebits || 0,
+      totalCredits: corpData.totalCredits || 0,
+      reconciled: false
+    };
+  } catch (err) {
+    console.warn('[reconcileCorporateAccountBalance] Notice:', err);
+    return { currentBalance: 0, totalDebits: 0, totalCredits: 0, reconciled: false };
+  }
 };

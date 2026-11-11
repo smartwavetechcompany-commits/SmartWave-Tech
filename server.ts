@@ -157,6 +157,7 @@ async function startServer() {
         return res.status(404).json({ error: "Reservation not found." });
       }
       const resData = resSnap.data();
+      const finalCorporateId = corporateId || resData?.corporateId || null;
 
       // 3. Process, Calculate Taxes, & Validate inputs
       const batch = writeBatch(db);
@@ -190,7 +191,7 @@ async function startServer() {
           hotelId,
           guestId,
           reservationId,
-          corporateId,
+          corporateId: finalCorporateId,
           idempotencyKey,
           isImmutable: true
         };
@@ -229,7 +230,7 @@ async function startServer() {
               hotelId,
               guestId,
               reservationId,
-              corporateId,
+              corporateId: finalCorporateId,
               type: 'debit',
               amount: taxAmount,
               description: `${tax.name} (${tax.percentage}%) ${tax.isInclusive ? '[Inclusive]' : ''} for ${mainEntry.description}`,
@@ -308,13 +309,13 @@ async function startServer() {
       }
 
       // Update Corporate balance
-      if (corporateId && corpBalanceAdj !== 0) {
-        const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
-        batch.update(corpRef, {
+      if (finalCorporateId && (corpBalanceAdj !== 0 || finalEntriesToPost.some(e => e.corporateId))) {
+        const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', finalCorporateId);
+        batch.set(corpRef, {
           currentBalance: increment(corpBalanceAdj),
           totalDebits: increment(finalEntriesToPost.filter(e => e.corporateId && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
           totalCredits: increment(finalEntriesToPost.filter(e => e.corporateId && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
-        });
+        }, { merge: true });
       }
 
       // Update reservation total invoice and payment records

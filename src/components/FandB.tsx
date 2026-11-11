@@ -507,7 +507,7 @@ export function FandB() {
           roomChargedAmount: roomCharged,
           directPaidAmount: directPaid,
           settlementSource: 'F&B Outlet'
-        }, profile.uid, undefined, 'cash', {
+        }, profile.uid, res.corporateId || undefined, 'cash', {
           uid: profile?.uid,
           email: profile?.email,
           role: profile?.role || 'staff',
@@ -527,7 +527,7 @@ export function FandB() {
             postedBy: profile.uid,
             paymentMethod: directPayMethod as any,
             settlementSource: 'F&B Outlet'
-          }, profile.uid, undefined, directPayMethod as any, {
+          }, profile.uid, res.corporateId || undefined, directPayMethod as any, {
             uid: profile?.uid,
             email: profile?.email,
             role: profile?.role || 'staff',
@@ -979,7 +979,7 @@ export function FandB() {
           roomChargedAmount: (settleOrderModal.roomChargedAmount || 0) + settleAmount,
           directPaidAmount: prevDirectPaid,
           settlementSource: 'F&B Outlet'
-        }, profile.uid, undefined, 'cash', {
+        }, profile.uid, res.corporateId || undefined, 'cash', {
           uid: profile?.uid,
           email: profile?.email,
           role: profile?.role || 'staff',
@@ -1117,7 +1117,7 @@ export function FandB() {
           postedBy: profile.uid,
           paymentMethod: settleMethod as any,
           settlementSource: settleSource
-        }, profile.uid, undefined, settleMethod as any, {
+        }, profile.uid, res.corporateId || undefined, settleMethod as any, {
           uid: profile?.uid,
           email: profile?.email,
           role: profile?.role || 'staff',
@@ -1306,7 +1306,7 @@ export function FandB() {
           description: `F & B Order Additional Items (Room ${addItemsOrderModal.roomNumber}): ${addedItemsString}`,
           referenceId: `${addItemsOrderModal.id}_ADD_${Date.now()}`,
           postedBy: profile.uid
-        }, profile.uid, undefined, 'cash', {
+        }, profile.uid, res.corporateId || undefined, 'cash', {
           uid: profile?.uid,
           email: profile?.email,
           role: profile?.role || 'staff',

@@ -42,7 +42,11 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
     }, (error) => {
       console.error('Error listening to hotels for SuperAdmin in TopBar:', error);
     });
-    return () => unsub();
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
   }, [isSuperAdmin]);
 
   useEffect(() => {

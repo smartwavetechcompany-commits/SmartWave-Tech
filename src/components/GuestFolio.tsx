@@ -484,7 +484,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               split.amount, 
               split.method, 
               profile.uid, 
-              activeFolio === 'company' ? (currentReservation.corporateId || undefined) : undefined,
+              currentReservation.corporateId || undefined,
               (split as any).referenceCode,
               (split as any).proofUrl,
               {
@@ -684,7 +684,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             reservationId: currentReservation.id,
             items: finalItems,
             postedBy: profile.uid,
-            corporateId: activeFolio === 'company' ? currentReservation.corporateId : undefined,
+            corporateId: currentReservation.corporateId || undefined,
             idempotencyKey
           })
         });
@@ -716,7 +716,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             quantity: item.quantity,
             price: item.price,
             idempotencyKey
-          }, profile.uid, activeFolio === 'company' ? currentReservation.corporateId : undefined, 'cash', {
+          }, profile.uid, currentReservation.corporateId || undefined, 'cash', {
             uid: profile?.uid,
             email: profile?.email,
             role: profile?.role || 'staff',

@@ -365,11 +365,11 @@ class CentralSettingsManager {
 
   private cleanupListeners() {
     if (this.unsubscribeHotel) {
-      this.unsubscribeHotel();
+      try { this.unsubscribeHotel(); } catch (_) {}
       this.unsubscribeHotel = null;
     }
     if (this.unsubscribeRates) {
-      this.unsubscribeRates();
+      try { this.unsubscribeRates(); } catch (_) {}
       this.unsubscribeRates = null;
     }
   }

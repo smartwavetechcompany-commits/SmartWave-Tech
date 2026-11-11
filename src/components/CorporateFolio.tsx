@@ -28,7 +28,7 @@ import { format } from 'date-fns';
 import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { transferCorporateBalance } from '../services/ledgerService';
+import { transferCorporateBalance, reconcileCorporateAccountBalance } from '../services/ledgerService';
 
 interface CorporateFolioProps {
   account: CorporateAccount;
@@ -61,6 +61,11 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
 
   useEffect(() => {
     if (!hotel?.id || !account.id) return;
+
+    // Auto-reconcile balance from ledger to ensure accurate real-time debits, credits & deposits
+    reconcileCorporateAccountBalance(hotel.id, account.id).catch(err => {
+      console.warn('[CorporateFolio] Balance reconciliation notice:', err);
+    });
 
     // Listen to account document for real-time updates
     const unsubAccount = onSnapshot(doc(db, 'hotels', hotel.id, 'corporate_accounts', account.id), (snap) => {
@@ -110,9 +115,9 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     });
 
     return () => {
-      unsubAccount();
-      unsubLedger();
-      unsubRes();
+      try { unsubAccount(); } catch (_) {}
+      try { unsubLedger(); } catch (_) {}
+      try { unsubRes(); } catch (_) {}
     };
   }, [hotel?.id, account.id]);
 
@@ -127,7 +132,9 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     }, (err) => {
       console.warn("Corporate accounts list snapshot error:", err);
     });
-    return () => unsub();
+    return () => {
+      try { unsub(); } catch (_) {}
+    };
   }, [hotel?.id, account.id]);
 
   const handleSettlePayment = async (e: React.FormEvent) => {
