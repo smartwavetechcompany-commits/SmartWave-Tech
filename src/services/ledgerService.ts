@@ -8,6 +8,33 @@ import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
+/**
+ * Distinguishes corporate account credits (corporate payments, bulk settlements, deposits, or adjustments)
+ * from individual guest room checkout payments that settle an individual stay.
+ */
+export const isCorporateCreditEntry = (e: any): boolean => {
+  if (e.type !== 'credit') return false;
+  const resId = e.reservationId || '';
+  const cat = (e.category || '').toLowerCase();
+  const desc = (e.description || '').toLowerCase();
+
+  // Direct corporate settlements, bulk settlements, or manual adjustments
+  if (resId === 'CORPORATE_SETTLEMENT' || resId === 'BULK_SETTLEMENT' || resId === 'MANUAL_ADJUSTMENT') {
+    return true;
+  }
+  // Explicit corporate payment categories
+  if (cat === 'corporate_payment' || cat === 'city_ledger') {
+    return true;
+  }
+  // Entries posted directly to corporate without individual reservation ID, or explicit corporate deposits
+  if (!resId || resId.startsWith('CORP_') || desc.includes('corporate settlement') || desc.includes('bulk settlement')) {
+    return true;
+  }
+  // All other credits (e.g. guest room folio checkout payment for res_xxx) settle the reservation folio,
+  // not the corporate credit line
+  return false;
+};
+
 export const postToLedger = async (
   hotelId: string,
   guestId: string,
@@ -268,7 +295,9 @@ export const postToLedger = async (
   const corpEntries = entries.filter(e => !!e.corporateId);
 
   const guestBalanceAdj = guestEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
-  const corpBalanceAdj = corpEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
+  const corpDebits = corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const corpCredits = corpEntries.filter(e => isCorporateCreditEntry(e)).reduce((acc, e) => acc + e.amount, 0);
+  const corpBalanceAdj = corpDebits - corpCredits;
 
   const nightCountAdj = guestEntries.filter(e => e.type === 'debit' && e.category === 'room').length;
 
@@ -284,10 +313,8 @@ export const postToLedger = async (
     }, { merge: true });
   }
 
-  if (finalCorporateId && (corpBalanceAdj !== 0 || corpEntries.length > 0)) {
+  if (finalCorporateId && (corpBalanceAdj !== 0 || corpDebits > 0 || corpCredits > 0)) {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', finalCorporateId);
-    const corpDebits = corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-    const corpCredits = corpEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
     batch.set(corpRef, {
       currentBalance: increment(corpBalanceAdj),
       totalDebits: increment(corpDebits),
@@ -1607,36 +1634,7 @@ export const deleteReservationWithFinancialReversal = async (
   // 5. Recalculate Corporate Account Balance if applicable
   if (reservation.corporateId) {
     try {
-      const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', reservation.corporateId);
-      const corpSnap = await getDoc(corpRef);
-      if (corpSnap.exists()) {
-        const corpLedgerSnap = await getDocs(
-          query(
-            collection(db, 'hotels', hotelId, 'ledger'),
-            where('corporateId', '==', reservation.corporateId)
-          )
-        );
-        const corpEntries = corpLedgerSnap.docs
-          .filter(d => d.data().reservationId !== reservationId)
-          .map(d => d.data() as LedgerEntry);
-
-        const newCorpBalance = corpEntries.reduce((acc, e) => {
-          if (e.type === 'debit') return acc + e.amount;
-          if (e.type === 'credit') return acc - e.amount;
-          return acc;
-        }, 0);
-
-        await database.safeUpdate(
-          corpRef,
-          { currentBalance: Number(newCorpBalance.toFixed(2)) },
-          {
-            hotelId,
-            module: 'Corporate',
-            action: 'RECALCULATE_CORPORATE_BALANCE',
-            details: `Recalculated corporate account ${reservation.corporateId} balance after deleting reservation ${reservationId}`
-          }
-        );
-      }
+      await reconcileCorporateAccountBalance(hotelId, reservation.corporateId);
     } catch (cErr) {
       console.warn("Could not recalculate corporate balance after reservation deletion:", cErr);
     }
@@ -1725,7 +1723,7 @@ export const reconcileCorporateAccountBalance = async (
       .reduce((acc, e) => acc + (e.amount || 0), 0);
 
     const actualCredits = validEntries
-      .filter(e => e.type === 'credit')
+      .filter(e => isCorporateCreditEntry(e))
       .reduce((acc, e) => acc + (e.amount || 0), 0);
 
     const actualBalance = Number((actualDebits - actualCredits).toFixed(2));

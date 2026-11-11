@@ -272,6 +272,95 @@ async function runTests() {
   assertEqual(billing10.grandTotal, 90000, 'Grand total should remain 90,000');
   assertEqual(billing10.balance, 90000, 'Outstanding balance should be exactly 90,000');
 
+  // Test Case 11: Corporate Ledger Accounting & Available Credit Integrity
+  console.log('\nTest Case 11: Corporate Ledger Accounting (User Scenario: 1M credit, 100k charges, stay checkout)');
+  const { isCorporateCreditEntry } = await import('./src/services/ledgerService');
+
+  const creditLimit = 1000000;
+  const corporateEntries: any[] = [
+    // Room charge for corporate guest
+    {
+      id: 'l_room_105',
+      corporateId: 'corp_argon',
+      reservationId: 'res_goodness',
+      type: 'debit',
+      category: 'room',
+      amount: 90000,
+      description: 'Room Charge 1 Night'
+    },
+    // Extra charge posted to room
+    {
+      id: 'l_extra_105',
+      corporateId: 'corp_argon',
+      reservationId: 'res_goodness',
+      type: 'debit',
+      category: 'restaurant',
+      amount: 10000,
+      description: 'Dinner charge'
+    },
+    // Guest folio checkout settlement at Front Desk (settles room folio)
+    {
+      id: 'l_guest_settle_105',
+      corporateId: 'corp_argon',
+      reservationId: 'res_goodness',
+      type: 'credit',
+      category: 'payment',
+      amount: 100000,
+      description: 'Payment via CASH'
+    }
+  ];
+
+  // Verify that room checkout payment does NOT count as a corporate settlement credit
+  const isRoomSettleCorpCredit = isCorporateCreditEntry(corporateEntries[2]);
+  if (isRoomSettleCorpCredit !== false) {
+    throw new Error('FAIL: Guest room checkout payment should NOT be recognized as corporate credit!');
+  }
+  console.log('  [PASS] Guest room checkout payment is correctly separated from corporate debt reduction');
+
+  // Calculate corporate debits and credits
+  const totalCorpDebits = corporateEntries
+    .filter(e => e.type === 'debit')
+    .reduce((acc, e) => acc + e.amount, 0);
+
+  const totalCorpCredits = corporateEntries
+    .filter(e => isCorporateCreditEntry(e))
+    .reduce((acc, e) => acc + e.amount, 0);
+
+  const outstandingDebt = totalCorpDebits - totalCorpCredits;
+  const availableCredit = creditLimit - outstandingDebt;
+
+  assertEqual(totalCorpDebits, 100000, 'Corporate Accrued Debits must be 100,000 (90k + 10k)');
+  assertEqual(totalCorpCredits, 0, 'Corporate Receipts must be 0 until company makes a direct corporate payment');
+  assertEqual(outstandingDebt, 100000, 'Corporate Outstanding Debt must be 100,000');
+  assertEqual(availableCredit, 900000, 'Corporate Available Credit must be 900,000 (1,000,000 - 100,000, NOT 1M)');
+
+  // Now simulate direct corporate payment / settlement from CorporateFolio
+  const directCorporatePayment = {
+    id: 'l_corp_settle_1',
+    corporateId: 'corp_argon',
+    reservationId: 'CORPORATE_SETTLEMENT',
+    type: 'credit',
+    category: 'payment',
+    amount: 100000,
+    description: 'Corporate Settlement: Argon'
+  };
+
+  if (!isCorporateCreditEntry(directCorporatePayment)) {
+    throw new Error('FAIL: Direct CORPORATE_SETTLEMENT must be recognized as corporate credit!');
+  }
+  console.log('  [PASS] Direct Corporate Settlement payment recognized as valid corporate debt credit');
+
+  const allWithPayment = [...corporateEntries, directCorporatePayment];
+  const postPaymentCredits = allWithPayment
+    .filter(e => isCorporateCreditEntry(e))
+    .reduce((acc, e) => acc + e.amount, 0);
+  const postPaymentDebt = totalCorpDebits - postPaymentCredits;
+  const postPaymentAvailableCredit = creditLimit - postPaymentDebt;
+
+  assertEqual(postPaymentCredits, 100000, 'Corporate Receipts after corporate payment is 100,000');
+  assertEqual(postPaymentDebt, 0, 'Corporate Outstanding Debt after payment is 0');
+  assertEqual(postPaymentAvailableCredit, 1000000, 'Corporate Available Credit restored to 1,000,000 after corporate payment');
+
   console.log('\n--- ALL ENTERPRISE PMS BILLING ENGINE TESTS PASSED SUCCESSFULLY! ---');
 }
 
@@ -280,3 +369,4 @@ runTests().catch(err => {
   console.error(err);
   process.exit(1);
 });
+

@@ -272,11 +272,29 @@ async function startServer() {
         });
 
         const isCorp = !!e.corporateId;
-        const change = e.type === 'debit' ? e.amount : -e.amount;
+        const resId = e.reservationId || '';
+        const cat = (e.category || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        const isCorpCredit = e.type === 'credit' && (
+          resId === 'CORPORATE_SETTLEMENT' ||
+          resId === 'BULK_SETTLEMENT' ||
+          resId === 'MANUAL_ADJUSTMENT' ||
+          cat === 'corporate_payment' ||
+          cat === 'city_ledger' ||
+          !resId ||
+          resId.startsWith('CORP_') ||
+          desc.includes('corporate settlement') ||
+          desc.includes('bulk settlement')
+        );
 
         if (isCorp) {
-          corpBalanceAdj += change;
+          if (e.type === 'debit') {
+            corpBalanceAdj += e.amount;
+          } else if (isCorpCredit) {
+            corpBalanceAdj -= e.amount;
+          }
         } else {
+          const change = e.type === 'debit' ? e.amount : -e.amount;
           guestBalanceAdj += change;
           if (e.type === 'debit' && e.category === 'room') {
             roomDebitCount++;
@@ -309,12 +327,29 @@ async function startServer() {
       }
 
       // Update Corporate balance
-      if (finalCorporateId && (corpBalanceAdj !== 0 || finalEntriesToPost.some(e => e.corporateId))) {
+      const corpDebits = finalEntriesToPost.filter(e => e.corporateId && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+      const corpCredits = finalEntriesToPost.filter(e => {
+        if (!e.corporateId || e.type !== 'credit') return false;
+        const resId = e.reservationId || '';
+        const cat = (e.category || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        return resId === 'CORPORATE_SETTLEMENT' ||
+          resId === 'BULK_SETTLEMENT' ||
+          resId === 'MANUAL_ADJUSTMENT' ||
+          cat === 'corporate_payment' ||
+          cat === 'city_ledger' ||
+          !resId ||
+          resId.startsWith('CORP_') ||
+          desc.includes('corporate settlement') ||
+          desc.includes('bulk settlement');
+      }).reduce((acc, e) => acc + e.amount, 0);
+
+      if (finalCorporateId && (corpBalanceAdj !== 0 || corpDebits > 0 || corpCredits > 0)) {
         const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', finalCorporateId);
         batch.set(corpRef, {
           currentBalance: increment(corpBalanceAdj),
-          totalDebits: increment(finalEntriesToPost.filter(e => e.corporateId && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0)),
-          totalCredits: increment(finalEntriesToPost.filter(e => e.corporateId && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0))
+          totalDebits: increment(corpDebits),
+          totalCredits: increment(corpCredits)
         }, { merge: true });
       }
 
