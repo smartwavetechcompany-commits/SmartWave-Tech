@@ -866,7 +866,7 @@ export function CorporateManagement() {
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
           <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Available Credit</div>
           <div className="text-xl font-bold text-emerald-400">
-            {formatCurrency(accounts.reduce((acc, a) => acc + Math.max(0, a.creditLimit - (a.currentBalance || 0)), 0), currency, exchangeRate)}
+            {formatCurrency(accounts.reduce((acc, a) => acc + Math.max(0, (a.creditLimit || 0) - Math.max(a.totalDebits || 0, a.currentBalance || 0)), 0), currency, exchangeRate)}
           </div>
         </div>
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl">
@@ -1053,7 +1053,7 @@ export function CorporateManagement() {
                       Payments: {formatCurrency(account.totalCredits || 0, currency, exchangeRate)}
                     </div>
                     <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                      Limit: {formatCurrency(account.creditLimit, currency, exchangeRate)}
+                      Limit: {formatCurrency(account.creditLimit, currency, exchangeRate)} | Available: {formatCurrency(Math.max(0, (account.creditLimit || 0) - Math.max(account.totalDebits || 0, account.currentBalance || 0)), currency, exchangeRate)}
                     </div>
                   </td>
                   <td className="px-6 py-4">

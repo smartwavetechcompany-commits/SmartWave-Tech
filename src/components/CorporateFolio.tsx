@@ -463,6 +463,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                   <span className="text-zinc-500">Credit Limit</span>
                   <span className="text-white font-bold">{formatCurrency(currentAccount.creditLimit, currency, exchangeRate)}</span>
                 </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Available Credit</span>
+                  <span className="text-emerald-400 font-bold">{formatCurrency(Math.max(0, (currentAccount.creditLimit || 0) - Math.max(totalDebits, balance)), currency, exchangeRate)}</span>
+                </div>
               </div>
             </div>
 

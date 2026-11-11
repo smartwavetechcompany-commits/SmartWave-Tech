@@ -296,7 +296,7 @@ export const postToLedger = async (
 
   const guestBalanceAdj = guestEntries.reduce((acc, e) => acc + (e.type === 'debit' ? e.amount : -e.amount), 0);
   const corpDebits = corpEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const corpCredits = corpEntries.filter(e => isCorporateCreditEntry(e)).reduce((acc, e) => acc + e.amount, 0);
+  const corpCredits = corpEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
   const corpBalanceAdj = corpDebits - corpCredits;
 
   const nightCountAdj = guestEntries.filter(e => e.type === 'debit' && e.category === 'room').length;
@@ -1723,7 +1723,7 @@ export const reconcileCorporateAccountBalance = async (
       .reduce((acc, e) => acc + (e.amount || 0), 0);
 
     const actualCredits = validEntries
-      .filter(e => isCorporateCreditEntry(e))
+      .filter(e => e.type === 'credit')
       .reduce((acc, e) => acc + (e.amount || 0), 0);
 
     const actualBalance = Number((actualDebits - actualCredits).toFixed(2));
