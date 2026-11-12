@@ -135,6 +135,7 @@ export function Finance() {
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -143,23 +144,53 @@ export function Finance() {
     if (!guests.length) return balanceMap;
 
     guests.forEach(guest => {
-      const account = calculateGuestAccount(guest, reservations, hotel);
-      balanceMap[guest.id] = account.outstandingBalance;
+      // Find non-cancelled reservations for this guest
+      const guestRes = reservations.filter(r => 
+        r.status !== 'cancelled' && 
+        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      );
+
+      // Corporate stays belong to the corporate account; only personal non-corporate stays are guest individual debts
+      const individualRes = guestRes.filter(r => !r.corporateId);
+
+      if (individualRes.length > 0) {
+        const bal = individualRes.reduce((sum, r) => {
+          return sum + getReservationLiveBalance(r, hotel, ledgerEntries);
+        }, 0);
+        balanceMap[guest.id] = Number(bal.toFixed(2));
+      } else if (guestRes.length > 0) {
+        // Guest only has corporate reservations; their stay is direct-billed to corporate partner
+        balanceMap[guest.id] = 0;
+      } else {
+        // Direct or historical guest balance
+        balanceMap[guest.id] = Number((guest.ledgerBalance ?? (guest as any).balance ?? 0).toFixed(2));
+      }
     });
 
     return balanceMap;
-  }, [guests, reservations, hotel]);
+  }, [guests, reservations, hotel, ledgerEntries]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
-    return guestLiveBalances[guest.id] ?? calculateGuestAccount(guest, reservations, hotel).outstandingBalance;
-  }, [guestLiveBalances, reservations, hotel]);
+    if (guestLiveBalances[guest.id] !== undefined) {
+      return guestLiveBalances[guest.id];
+    }
+    const guestRes = reservations.filter(r => 
+      r.status !== 'cancelled' && 
+      (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+    );
+    const individualRes = guestRes.filter(r => !r.corporateId);
+    if (individualRes.length > 0) {
+      return individualRes.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel, ledgerEntries), 0);
+    }
+    if (guestRes.length > 0) return 0;
+    return guest.ledgerBalance ?? (guest as any).balance ?? 0;
+  }, [guestLiveBalances, reservations, hotel, ledgerEntries]);
 
   const categories = {
     income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
     expense: ['Salaries', 'Maintenance', 'Utilities', 'Supplies', 'Marketing', 'Taxes', 'Other']
   };
 
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [paymentsSearch, setPaymentsSearch] = useState('');
   const [paymentsMethodFilter, setPaymentsMethodFilter] = useState<string>('all');
 
@@ -474,7 +505,7 @@ export function Finance() {
       }
       
       const isCorporate = 'contactPerson' in entity;
-      const currentBalance = isCorporate ? (entity as CorporateAccount).currentBalance : (entity as Guest).ledgerBalance;
+      const currentBalance = isCorporate ? ((entity as CorporateAccount).currentBalance || 0) : getGuestLiveBalance(entity as Guest);
       const entityId = entity.id;
 
       // Find the most recent reservation for this entity to post the ledger entry
@@ -1828,7 +1859,7 @@ export function Finance() {
                               <div className="text-xs text-zinc-400">{corp.contactPerson}</div>
                               <div className="text-[10px] text-zinc-500">{corp.email}</div>
                             </td>
-                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (corp.currentBalance || 0) < 0 ? "text-red-500" : "text-emerald-500")}>
+                            <td className={cn("px-6 py-4 text-right font-bold text-sm", (corp.currentBalance || 0) > 0.01 ? "text-red-500" : (corp.currentBalance || 0) < -0.01 ? "text-emerald-500" : "text-zinc-400")}>
                               {formatCurrency(corp.currentBalance || 0, currency, exchangeRate)}
                             </td>
                             <td className="px-6 py-4 text-right">
@@ -2023,14 +2054,14 @@ export function Finance() {
                               <td className="px-6 py-4">
                                 <span className={cn(
                                   "px-2 py-1 rounded text-[10px] font-bold uppercase",
-                                  'ledgerBalance' in account ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"
+                                  'currentBalance' in account ? "bg-purple-500/10 text-purple-500" : "bg-blue-500/10 text-blue-500"
                                 )}>
-                                  {'ledgerBalance' in account ? 'Individual' : 'Corporate'}
+                                  {'currentBalance' in account ? 'Corporate' : 'Individual'}
                                 </span>
                               </td>
                               <td className={cn(
                                 "px-6 py-4 text-right font-bold",
-                                balance > 0 ? "text-red-500" : "text-emerald-500"
+                                balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-emerald-500" : "text-zinc-400"
                               )}>
                                 {formatCurrency(balance, currency, exchangeRate)}
                               </td>

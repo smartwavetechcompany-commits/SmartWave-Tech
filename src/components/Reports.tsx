@@ -355,7 +355,7 @@ export function Reports() {
           .filter(res => res.status === 'checked_in')
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
-            const bal = getReservationLiveBalance(res, hotel);
+            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
             return {
               Room: res.roomNumber,
               'Guest Name': res.guestName,
@@ -382,7 +382,8 @@ export function Reports() {
           })
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
-            const bal = getReservationLiveBalance(res, hotel);
+            const billingState = calculateBilling(res, hotel, rawLedgerEntries);
+            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
             return {
               'Res #': (res.id || '').slice(-6).toUpperCase(),
               'Guest Name': res.guestName,
@@ -392,8 +393,8 @@ export function Reports() {
               Departure: res.checkOut,
               'Stay Duration': formatStayDuration(res.checkIn, res.checkOut, res.overstayNights || 0),
               Status: res.status.replace('_', ' ').toUpperCase(),
-              'Total Charges': res.totalAmount,
-              'Total Paid': res.paidAmount || 0,
+              'Total Charges': billingState.totalCharges,
+              'Total Paid': billingState.totalPayments,
               Balance: bal,
               _id: res.id,
               _collection: 'reservations',
@@ -578,7 +579,7 @@ export function Reports() {
           const noshowStays = guestRes.filter(r => r.status === 'no_show').length;
           const totalVisits = completedStays + activeStays;
           
-          const pos = calculateGuestFinancialPosition(guest, guestRes, hotel);
+          const pos = calculateGuestFinancialPosition(guest, guestRes, hotel, rawLedgerEntries);
           const totalSpent = Math.max(0, pos.totalPayments - pos.totalRefunds);
           const revenueGenerated = pos.totalCharges;
           const outstandingDebt = pos.netAmountDue;
@@ -774,7 +775,7 @@ export function Reports() {
           const c = g.nationality || (g as any).country || 'Domestic / Local';
           if (!countryMap[c]) countryMap[c] = { count: 0, completed: 0, active: 0, spent: 0 };
           countryMap[c].count += 1;
-          const pos = calculateGuestFinancialPosition(g, reservations, hotel);
+          const pos = calculateGuestFinancialPosition(g, reservations, hotel, rawLedgerEntries);
           countryMap[c].spent += Math.max(0, pos.totalPayments - pos.totalRefunds);
         });
         reservations.forEach(r => {
