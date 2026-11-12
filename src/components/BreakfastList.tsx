@@ -216,13 +216,27 @@ export function BreakfastList() {
   // Helper to compute entries for any single target date string
   const getEntriesForDate = (targetDateStr: string): BreakfastEntry[] => {
     const targetDate = startOfDay(parseISO(targetDateStr));
+    const today = startOfDay(new Date());
 
     return reservations
       .filter(res => {
         if (res.status === 'cancelled' || res.status === 'no_show') return false;
 
         const checkInDate = startOfDay(parseISO(res.checkIn));
-        const checkOutDate = startOfDay(parseISO(res.checkOut));
+        let checkOutDate = startOfDay(parseISO(res.checkOut));
+
+        // If the guest is actively checked in or has recorded overstay nights, their stay extends through their actual occupancy
+        if (res.status === 'checked_in') {
+          if (today > checkOutDate) {
+            checkOutDate = today;
+          }
+        }
+        if (res.overstayNights && res.overstayNights > 0) {
+          const extendedDate = addDays(startOfDay(parseISO(res.checkOut)), res.overstayNights);
+          if (extendedDate > checkOutDate) {
+            checkOutDate = extendedDate;
+          }
+        }
 
         const isInHouse = targetDate >= checkInDate && targetDate <= checkOutDate;
         if (!isInHouse) return false;

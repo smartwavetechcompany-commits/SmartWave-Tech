@@ -270,9 +270,18 @@ export function Reports() {
     while (curr <= endDate) {
       const dayStr = format(curr, 'MMM d');
       const activeOnDay = reservations.filter(res => {
-        const checkIn = new Date(res.checkIn);
-        const checkOut = new Date(res.checkOut);
-        return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut);
+        if (res.status === 'cancelled' || res.status === 'no_show') return false;
+        const checkIn = startOfDay(new Date(res.checkIn));
+        let checkOut = endOfDay(new Date(res.checkOut));
+        if (res.status === 'checked_in') {
+          const today = endOfDay(new Date());
+          if (today > checkOut) checkOut = today;
+        }
+        if (res.overstayNights && res.overstayNights > 0) {
+          const extended = endOfDay(addDays(new Date(res.checkOut), res.overstayNights));
+          if (extended > checkOut) checkOut = extended;
+        }
+        return curr >= checkIn && curr <= checkOut;
       }).length;
       
       trend.push({
@@ -336,9 +345,18 @@ export function Reports() {
         while (curr <= endDate) {
           const dayStr = format(curr, 'yyyy-MM-dd');
           const occupied = reservations.filter(res => {
-            const checkIn = new Date(res.checkIn);
-            const checkOut = new Date(res.checkOut);
-            return curr >= startOfDay(checkIn) && curr < startOfDay(checkOut) && (res.status === 'checked_in' || res.status === 'checked_out');
+            if (res.status === 'cancelled' || res.status === 'no_show') return false;
+            const checkIn = startOfDay(new Date(res.checkIn));
+            let checkOut = endOfDay(new Date(res.checkOut));
+            if (res.status === 'checked_in') {
+              const today = endOfDay(new Date());
+              if (today > checkOut) checkOut = today;
+            }
+            if (res.overstayNights && res.overstayNights > 0) {
+              const extended = endOfDay(addDays(new Date(res.checkOut), res.overstayNights));
+              if (extended > checkOut) checkOut = extended;
+            }
+            return curr >= checkIn && curr <= checkOut && (res.status === 'checked_in' || res.status === 'checked_out');
           }).length;
           data.push({
             Date: dayStr,
@@ -481,7 +499,7 @@ export function Reports() {
       }
       case 'payments': {
         return ledgerEntries
-          .filter(e => e.category === 'payment' && e.type === 'credit')
+          .filter(e => (e.category === 'payment' || e.category === 'city_ledger') && e.type === 'credit')
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
@@ -506,7 +524,7 @@ export function Reports() {
       }
       case 'staff_payments': {
         return ledgerEntries
-          .filter(e => e.category === 'payment' && e.type === 'credit')
+          .filter(e => (e.category === 'payment' || e.category === 'city_ledger') && e.type === 'credit')
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);

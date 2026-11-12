@@ -29,6 +29,7 @@ import {
   startOfMonth, 
   endOfMonth, 
   subDays, 
+  addDays,
   isWithinInterval 
 } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
@@ -148,7 +149,20 @@ export function DSSGuestReport() {
         if (res.status === 'cancelled' || res.status === 'no_show') return false;
 
         const checkInDate = startOfDay(parseISO(res.checkIn));
-        const checkOutDate = endOfDay(parseISO(res.checkOut));
+        let checkOutDate = endOfDay(parseISO(res.checkOut));
+
+        if (res.status === 'checked_in') {
+          const today = endOfDay(new Date());
+          if (today > checkOutDate) {
+            checkOutDate = today;
+          }
+        }
+        if (res.overstayNights && res.overstayNights > 0) {
+          const extended = endOfDay(addDays(parseISO(res.checkOut), res.overstayNights));
+          if (extended > checkOutDate) {
+            checkOutDate = extended;
+          }
+        }
 
         // Check if stay overlaps with target interval
         const overlaps = (
