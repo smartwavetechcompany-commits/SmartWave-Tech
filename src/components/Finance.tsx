@@ -3,7 +3,7 @@ import { collection, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, 
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount } from '../types';
+import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount, LedgerEntry } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
 import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
@@ -159,6 +159,81 @@ export function Finance() {
     expense: ['Salaries', 'Maintenance', 'Utilities', 'Supplies', 'Marketing', 'Taxes', 'Other']
   };
 
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [paymentsSearch, setPaymentsSearch] = useState('');
+  const [paymentsMethodFilter, setPaymentsMethodFilter] = useState<string>('all');
+
+  const allIncomeCategories = useMemo(() => {
+    const dynamic = new Set<string>(categories.income);
+    records.filter(r => r.type === 'income').forEach(r => {
+      if (r.category && r.category.trim()) dynamic.add(r.category.trim());
+    });
+    return Array.from(dynamic);
+  }, [records, categories.income]);
+
+  const unifiedPayments = useMemo(() => {
+    const list: Array<{
+      id: string;
+      timestamp: string;
+      payer: string;
+      roomNumber: string;
+      amount: number;
+      method: string;
+      source: string;
+      description: string;
+      recordedBy: string;
+    }> = [];
+
+    const seenIds = new Set<string>();
+
+    // 1. From live ledger credits
+    ledgerEntries
+      .filter(e => e.type === 'credit' && (e.category === 'payment' || e.category === 'city_ledger'))
+      .forEach(e => {
+        seenIds.add(e.id);
+        const res = reservations.find(r => r.id === e.reservationId);
+        const payer = res?.guestName || (e as any).guestName || (e as any).companyName ||
+          (e.description?.startsWith('Corporate Settlement:') ? e.description.split(':')[1]?.split('(')[0]?.trim() : '') ||
+          'Guest / Entity';
+        const method = e.paymentMethod || e.description?.match(/via\s+(\w+)/i)?.[1] || e.description?.match(/\((\w+)\)/)?.[1] || 'Cash';
+        const source = e.settlementSource || (e.description?.includes('[F&B Outlet]') || e.description?.includes('F & B') ? 'F&B Outlet' : res ? 'Front Desk Folio' : 'Corporate Accounts');
+        list.push({
+          id: e.id,
+          timestamp: e.timestamp || '',
+          payer,
+          roomNumber: res?.roomNumber || 'N/A',
+          amount: e.amount,
+          method: method.toLowerCase(),
+          source,
+          description: e.description || 'Payment Transaction',
+          recordedBy: (e as any).staffName || (e as any).postedBy || 'System'
+        });
+      });
+
+    // 2. From finance records (standalone income not tracked directly on room folios)
+    records
+      .filter(r => r.type === 'income')
+      .forEach(r => {
+        if (r.id && seenIds.has(r.id)) return;
+        if (r.referenceId && seenIds.has(r.referenceId)) return;
+        const res = reservations.find(resItem => resItem.id === (r as any).reservationId || resItem.id === r.referenceId);
+        const payer = (r as any).guestName || res?.guestName || (r as any).customerName || (r as any).payer || 'Guest / Customer';
+        list.push({
+          id: r.id,
+          timestamp: r.timestamp || '',
+          payer,
+          roomNumber: res?.roomNumber || (r as any).roomNumber || 'N/A',
+          amount: r.amount,
+          method: (r.paymentMethod || 'cash').toLowerCase(),
+          source: r.category || 'Finance Income',
+          description: r.description || 'Income Receipt',
+          recordedBy: (r as any).recordedBy || (r as any).staffName || 'Staff'
+        });
+      });
+
+    return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [ledgerEntries, records, reservations]);
+
   const [showSettleModal, setShowSettleModal] = useState<Guest | CorporateAccount | null>(null);
   const [settleType, setSettleType] = useState<'payment' | 'refund'>('payment');
   const [settleData, setSettleData] = useState({ 
@@ -263,6 +338,17 @@ export function Finance() {
     });
 
     return () => unsub();
+  }, [hotel?.id, profile?.uid, hasPermissionError]);
+
+  // Real-time live ledger entries listener
+  useEffect(() => {
+    if (!hotel?.id || !profile || hasPermissionError) return;
+    const qLedger = query(collection(db, 'hotels', hotel.id, 'ledger'), orderBy('timestamp', 'desc'));
+    const unsubLedger = onSnapshot(qLedger, (snap) => {
+      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+    }, () => {});
+
+    return () => unsubLedger();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
   // Sync ledger entries in real-time for the selected diagnostics reservation
@@ -1092,12 +1178,12 @@ export function Finance() {
       headers = ['Guest Name', 'Room', 'Check-In', 'Check-Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'];
       const debtorsList = reservations.filter(r => {
         const opStatus = r.operationalStatus || r.status;
-        const bal = getReservationLiveBalance(r, hotel);
+        const bal = getReservationLiveBalance(r, hotel, ledgerEntries);
         const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
         return opStatus === 'checked_out' && finStatus !== 'SETTLED' && bal > 0.01;
       });
       rows = debtorsList.map(d => {
-        const bal = getReservationLiveBalance(d, hotel);
+        const bal = getReservationLiveBalance(d, hotel, ledgerEntries);
         return [
           d.guestName,
           d.roomNumber,
@@ -1307,7 +1393,7 @@ export function Finance() {
                     Revenue by Category
                   </h3>
                   <div className="space-y-4">
-                    {categories.income.map(cat => {
+                    {allIncomeCategories.map(cat => {
                       const amount = records
                         .filter(r => r.type === 'income' && r.category === cat)
                         .reduce((acc, r) => acc + r.amount, 0);
@@ -1797,9 +1883,13 @@ export function Finance() {
                     <div>
                       <p className="text-xs font-bold text-zinc-500 uppercase">Overdue (&gt;30 Days)</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
-                        {/* Simplified calculation for now */}
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) > 100000 ? getGuestLiveBalance(g) : 0), 0),
+                          reservations
+                            .filter(r => r.status === 'checked_out' && getReservationLiveBalance(r, hotel, ledgerEntries) > 0.01 && r.checkOut && differenceInDays(new Date(), new Date(r.checkOut)) > 30)
+                            .reduce((acc, r) => acc + getReservationLiveBalance(r, hotel, ledgerEntries), 0) +
+                          corporateAccounts
+                            .filter(c => (c.currentBalance || 0) > 0 && c.createdAt && differenceInDays(new Date(), new Date(c.createdAt)) > 30)
+                            .reduce((acc, c) => acc + (c.currentBalance || 0), 0),
                           currency, exchangeRate
                         )}
                       </h3>
@@ -1816,7 +1906,11 @@ export function Finance() {
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
                           guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) < 0 ? Math.abs(getGuestLiveBalance(g)) : 0), 0) +
-                          corporateAccounts.reduce((acc, c) => acc + (c.currentBalance < 0 ? Math.abs(c.currentBalance) : 0), 0),
+                          corporateAccounts.reduce((acc, c) => {
+                            const creditLimit = Number(c.creditLimit) || 0;
+                            const used = Math.max(Number(c.totalDebits) || 0, Number(c.currentBalance) || 0);
+                            return acc + Math.max(0, creditLimit - used);
+                          }, 0),
                           currency, exchangeRate
                         )}
                       </h3>
@@ -1969,7 +2063,7 @@ export function Finance() {
               {(() => {
                 const debtors = reservations.filter(r => {
                   const opStatus = r.operationalStatus || r.status;
-                  const bal = getReservationLiveBalance(r, hotel);
+                  const bal = getReservationLiveBalance(r, hotel, ledgerEntries);
                   const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
                   return opStatus === 'checked_out' && finStatus !== 'SETTLED' && bal > 0.01;
                 }).filter(r => {
@@ -1982,7 +2076,7 @@ export function Finance() {
                   );
                 });
 
-                const totalDebt = debtors.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel), 0);
+                const totalDebt = debtors.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel, ledgerEntries), 0);
 
                 return (
                   <div className="space-y-6">
@@ -2044,7 +2138,7 @@ export function Finance() {
                               onClick={() => {
                                 exportToCSV(
                                   debtors.map(d => {
-                                    const bal = getReservationLiveBalance(d, hotel);
+                                    const bal = getReservationLiveBalance(d, hotel, ledgerEntries);
                                     return {
                                       Guest: d.guestName,
                                       Room: d.roomNumber,
@@ -2087,7 +2181,7 @@ export function Finance() {
                                   filename: `${cleanHotel}_debtors_report_${format(new Date(), 'yyyy-MM-dd')}.pdf`,
                                   headers: ['Guest Name', 'Room', 'Check In', 'Check Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'],
                                   rows: debtors.map(d => {
-                                    const bal = getReservationLiveBalance(d, hotel);
+                                    const bal = getReservationLiveBalance(d, hotel, ledgerEntries);
                                     return [
                                       d.guestName,
                                       d.roomNumber,
@@ -2133,7 +2227,7 @@ export function Finance() {
                               </tr>
                             ) : (
                               debtors.map((res) => {
-                                const bal = getReservationLiveBalance(res, hotel);
+                                const bal = getReservationLiveBalance(res, hotel, ledgerEntries);
                                 const opStatus = res.operationalStatus || res.status;
                                 return (
                                   <tr key={res.id} className="hover:bg-zinc-800/40 transition-colors">
@@ -2433,6 +2527,200 @@ export function Finance() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'payments' && (
+            <div className="space-y-6">
+              {(() => {
+                const filteredPayments = unifiedPayments.filter(p => {
+                  if (paymentsMethodFilter !== 'all' && p.method !== paymentsMethodFilter) return false;
+                  if (!paymentsSearch) return true;
+                  const q = paymentsSearch.toLowerCase();
+                  return (
+                    p.payer.toLowerCase().includes(q) ||
+                    p.roomNumber.toLowerCase().includes(q) ||
+                    p.description.toLowerCase().includes(q) ||
+                    p.id.toLowerCase().includes(q) ||
+                    p.source.toLowerCase().includes(q)
+                  );
+                });
+
+                const totalPaid = filteredPayments.reduce((s, p) => s + p.amount, 0);
+                const cashPaid = filteredPayments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0);
+                const cardPaid = filteredPayments.filter(p => p.method === 'card' || p.method === 'pos').reduce((s, p) => s + p.amount, 0);
+                const transferPaid = filteredPayments.filter(p => p.method === 'transfer' || p.method === 'bank transfer').reduce((s, p) => s + p.amount, 0);
+
+                return (
+                  <div className="space-y-6">
+                    {/* Header Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <CreditCard size={20} className="text-emerald-400" />
+                          <span className="text-[10px] font-black uppercase text-emerald-500 bg-emerald-500/20 px-2 py-0.5 rounded">Total Inflow</span>
+                        </div>
+                        <div className="text-2xl font-black text-emerald-400 font-mono">
+                          {formatCurrency(totalPaid, currency, exchangeRate)}
+                        </div>
+                        <div className="text-xs text-emerald-300/70 mt-1 font-bold">Total Verified Collections</div>
+                      </div>
+
+                      <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <Wallet size={20} className="text-amber-400" />
+                          <span className="text-[10px] font-black uppercase text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded">Cash</span>
+                        </div>
+                        <div className="text-2xl font-black text-zinc-50 font-mono">
+                          {formatCurrency(cashPaid, currency, exchangeRate)}
+                        </div>
+                        <div className="text-xs text-zinc-400 mt-1 font-bold">Cash Receipts</div>
+                      </div>
+
+                      <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <CreditCard size={20} className="text-sky-400" />
+                          <span className="text-[10px] font-black uppercase text-sky-500 bg-sky-500/10 px-2 py-0.5 rounded">Card / POS</span>
+                        </div>
+                        <div className="text-2xl font-black text-zinc-50 font-mono">
+                          {formatCurrency(cardPaid, currency, exchangeRate)}
+                        </div>
+                        <div className="text-xs text-zinc-400 mt-1 font-bold">Electronic Terminal</div>
+                      </div>
+
+                      <div className="p-5 bg-zinc-900 border border-zinc-800 rounded-2xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <Building2 size={20} className="text-indigo-400" />
+                          <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded">Transfer</span>
+                        </div>
+                        <div className="text-2xl font-black text-zinc-50 font-mono">
+                          {formatCurrency(transferPaid, currency, exchangeRate)}
+                        </div>
+                        <div className="text-xs text-zinc-400 mt-1 font-bold">Direct Bank Transfers</div>
+                      </div>
+                    </div>
+
+                    {/* Table Container */}
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                      <div className="p-6 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                          <h3 className="font-bold text-zinc-50">Payments & Collections Ledger</h3>
+                          <p className="text-xs text-zinc-500">Live record of all verified payment inflows across hotel operations</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                            <input
+                              type="text"
+                              value={paymentsSearch}
+                              onChange={(e) => setPaymentsSearch(e.target.value)}
+                              placeholder="Search payer, room, ref..."
+                              className="pl-9 pr-4 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <select
+                            value={paymentsMethodFilter}
+                            onChange={(e) => setPaymentsMethodFilter(e.target.value)}
+                            className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="all">All Methods</option>
+                            <option value="cash">Cash</option>
+                            <option value="card">Card / POS</option>
+                            <option value="transfer">Bank Transfer</option>
+                          </select>
+
+                          <button
+                            onClick={() => {
+                              exportToCSV(
+                                filteredPayments.map(p => ({
+                                  Date: safeFormatDate(p.timestamp, 'yyyy-MM-dd HH:mm'),
+                                  Payer: p.payer,
+                                  Room: p.roomNumber,
+                                  Amount: p.amount,
+                                  Method: p.method.toUpperCase(),
+                                  Source: p.source,
+                                  Description: p.description,
+                                  RecordedBy: p.recordedBy
+                                })),
+                                `payments_report_${format(new Date(), 'yyyy-MM-dd')}`
+                              );
+                              toast.success('Payments CSV exported successfully');
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                            title="Export payments as CSV"
+                          >
+                            <Download size={13} /> CSV
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="bg-zinc-950/50 border-b border-zinc-800">
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Date & Time</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payer / Guest</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Method</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Source / Channel</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Recorded By</th>
+                              <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-800">
+                            {filteredPayments.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-6 py-12 text-center text-zinc-500 italic">
+                                  No payment transactions recorded matching your search.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredPayments.map((p) => (
+                                <tr key={p.id} className="hover:bg-zinc-800/40 transition-colors">
+                                  <td className="px-6 py-4 text-xs text-zinc-400 font-mono">
+                                    {safeFormatDate(p.timestamp, 'MMM d, yyyy HH:mm')}
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <div className="text-sm font-bold text-zinc-50">{p.payer}</div>
+                                    <div className="text-[10px] text-zinc-500 truncate max-w-xs">{p.description}</div>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <span className="px-2 py-0.5 bg-zinc-950 border border-zinc-800 rounded text-xs font-mono font-bold text-zinc-300">
+                                      {p.roomNumber}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <span className={cn(
+                                      "px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider",
+                                      p.method === 'cash' ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+                                      p.method === 'transfer' ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" :
+                                      "bg-sky-500/10 text-sky-400 border border-sky-500/20"
+                                    )}>
+                                      {p.method}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-xs text-zinc-400 font-medium">
+                                    {p.source}
+                                  </td>
+                                  <td className="px-6 py-4 text-xs text-zinc-400">
+                                    {p.recordedBy}
+                                  </td>
+                                  <td className="px-6 py-4 text-right">
+                                    <span className="text-sm font-bold font-mono text-emerald-400">
+                                      +{formatCurrency(p.amount, currency, exchangeRate)}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 

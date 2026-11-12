@@ -439,7 +439,7 @@ export function Reports() {
       case 'monthly_sales': {
         const months: Record<string, { roomRev: number; fbRev: number; otherRev: number; taxRev: number; paidCollected: number }> = {};
         
-        ledgerEntries.forEach(e => {
+        rawLedgerEntries.forEach(e => {
           const mDate = new Date(e.timestamp);
           const monthStr = format(mDate, 'yyyy-MM');
           if (!months[monthStr]) {
@@ -485,13 +485,14 @@ export function Reports() {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
             const source = e.settlementSource || (e.description?.includes('[F&B Outlet]') || e.description?.includes('F & B') ? 'F&B Outlet' : 'Front Desk');
+            const payerName = res?.guestName || (e as any).guestName || (e as any).companyName || (e.description?.startsWith('Corporate Settlement:') ? e.description.split(':')[1]?.split('(')[0]?.trim() : 'Guest / Entity');
             return {
               Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
-              Guest: res?.guestName || 'Unknown',
+              Guest: payerName,
               Room: res?.roomNumber || 'N/A',
               Method: e.description.split('via ')[1] || e.paymentMethod?.toUpperCase() || 'Cash',
               'Settlement Source': source,
-              Reference: (res?.id || '').slice(-6).toUpperCase(),
+              Reference: (res?.id || e.id || '').slice(-6).toUpperCase(),
               Amount: e.amount,
               'Recorded By': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
               'User Role': staffMember?.role || 'Staff',
@@ -509,11 +510,12 @@ export function Reports() {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
             const source = e.settlementSource || (e.description?.includes('[F&B Outlet]') || e.description?.includes('F & B') ? 'F&B Outlet' : 'Front Desk');
+            const payerName = res?.guestName || (e as any).guestName || (e as any).companyName || (e.description?.startsWith('Corporate Settlement:') ? e.description.split(':')[1]?.split('(')[0]?.trim() : 'Guest / Entity');
             return {
               'Staff Name': staffMember?.name || staffMember?.displayName || e.postedBy || 'System',
               'User Role': staffMember?.role || 'Staff',
               Date: safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
-              Guest: res?.guestName || 'Unknown',
+              Guest: payerName,
               Room: res?.roomNumber || 'N/A',
               Amount: e.amount,
               Method: e.description.split('via ')[1] || e.paymentMethod?.toUpperCase() || 'Cash',
@@ -525,13 +527,13 @@ export function Reports() {
       case 'balance': {
         return reservations
           .filter(res => {
-            const bal = getReservationLiveBalance(res, hotel);
+            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
             return res.status === 'checked_in' || (res.status === 'checked_out' && Math.abs(bal) > 0.01);
           })
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
-            const billingState = calculateBilling(res, hotel);
-            const bal = getReservationLiveBalance(res, hotel);
+            const billingState = calculateBilling(res, hotel, rawLedgerEntries);
+            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
             return {
               'Guest Name': res.guestName,
               Room: res.roomNumber,

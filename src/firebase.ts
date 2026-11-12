@@ -39,28 +39,50 @@ try {
   const queue = (firestoreDb as any)._queue || (firestoreDb as any)._delegate?._queue;
   if (queue) {
     const proto = queue.constructor?.prototype || Object.getPrototypeOf(queue);
-    for (const key of Object.getOwnPropertyNames(proto)) {
-      if (key === 'constructor') continue;
+    const targetObjects = [proto, queue].filter(Boolean);
+
+    for (const obj of targetObjects) {
+      for (const failProp of ['gu', 'failure', '_failure']) {
+        try {
+          Object.defineProperty(obj, failProp, {
+            get() { return null; },
+            set(err) {
+              if (this.Su) this.Su = Promise.resolve();
+              if (this.tail) this.tail = Promise.resolve();
+              if (this.vu) this.vu = Promise.resolve();
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (_) {}
+      }
+
       try {
-        const desc = Object.getOwnPropertyDescriptor(proto, key);
-        if (desc && typeof desc.value === 'function') {
-          const fnStr = desc.value.toString();
-          const isFailureChecker =
-            key === 'verifyNotFailed' ||
-            key === 'Du' ||
-            (fnStr.length < 100 && (fnStr.includes('failure') || fnStr.includes('gu')));
-          if (isFailureChecker) {
-            proto[key] = function (this: any) {
-              if (this.gu || this.failure) {
-                this.gu = null;
-                this.failure = null;
+        (obj as any).Du = function () {};
+        (obj as any).verifyNotFailed = function () {};
+      } catch (_) {}
+    }
+
+    if (proto) {
+      for (const key of Object.getOwnPropertyNames(proto)) {
+        if (key === 'constructor') continue;
+        try {
+          const desc = Object.getOwnPropertyDescriptor(proto, key);
+          if (desc && typeof desc.value === 'function') {
+            const fnStr = desc.value.toString();
+            const isFailureChecker =
+              key === 'verifyNotFailed' ||
+              key === 'Du' ||
+              (fnStr.length < 80 && (fnStr.includes('failure') || fnStr.includes('gu') || fnStr.includes('fail')));
+            if (isFailureChecker) {
+              proto[key] = function (this: any) {
                 if (this.Su) this.Su = Promise.resolve();
                 if (this.tail) this.tail = Promise.resolve();
-              }
-            };
+              };
+            }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
   }
 } catch (queuePatchErr) {

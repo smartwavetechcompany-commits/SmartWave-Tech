@@ -380,13 +380,21 @@ export function Dashboard() {
 
   // LIVE CALCULATION: Overall outstanding amount owing across the hotel
   const inHouseOutstanding = inHouseReservations.reduce((acc, res) => {
-    const balance = getReservationLiveBalance(res, hotel);
+    const balance = getReservationLiveBalance(res, hotel, ledgerEntries);
     return acc + Math.max(0, balance);
   }, 0);
 
+  const debtorReservationIds = new Set(debts.map(d => d.reservationId).filter(Boolean));
+  const departedReservationsOwing = reservations
+    .filter(r => r.status === 'checked_out' && !debtorReservationIds.has(r.id))
+    .reduce((acc, r) => {
+      const bal = getReservationLiveBalance(r, hotel, ledgerEntries);
+      return acc + (bal > 0.01 ? bal : 0);
+    }, 0);
+
   const debtorOutstanding = debts
     .filter(d => d.status === 'outstanding' || d.status === 'partially_paid')
-    .reduce((acc, d) => acc + Math.max(0, d.outstandingAmount || 0), 0);
+    .reduce((acc, d) => acc + Math.max(0, d.outstandingAmount || 0), 0) + departedReservationsOwing;
 
   const totalOutstandingOwing = inHouseOutstanding + debtorOutstanding;
 

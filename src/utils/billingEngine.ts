@@ -765,13 +765,20 @@ export function getReservationLiveBalance(
     return Number(res.ledgerBalance.toFixed(2));
   }
 
-  // If reservation is marked paid or credits cover the charges:
-  if (res.paymentStatus === 'paid' && account.outstandingBalance <= 0.01) {
+  // 4. If reservation is marked paid or paidAmount covers totalAmount, debt is completely settled:
+  if (
+    res.paymentStatus === 'paid' || 
+    res.financialStatus === 'SETTLED' || 
+    ((res.totalAmount || 0) > 0 && (res.paidAmount || 0) >= (res.totalAmount || 0) - 0.01)
+  ) {
+    if (res.ledgerBalance !== undefined && Math.abs(res.ledgerBalance) > 0.01) {
+      return Number(res.ledgerBalance.toFixed(2));
+    }
     return 0;
   }
 
   // Fallback to calculated reservation account (room charges + debits - payments)
-  // Prevents uninitialized ledgerBalance (e.g. 0) on new/checked-in reservations from masquerading as settled
+  // Prevents uninitialized ledgerBalance on new/unbilled reservations from masquerading as settled
   return account.outstandingBalance;
 }
 
