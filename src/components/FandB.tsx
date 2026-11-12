@@ -1724,15 +1724,15 @@ export function FandB() {
 
                   // Total payments received for this order (capped at orderTotal)
                   const totalPaidByGuest = Math.min(orderTotal, outletDirectPaid + frontDeskSettled);
-                  const isCompletelySettled = (outletDirectPaid + frontDeskSettled >= orderTotal - 0.01) || order.financialStatus === 'paid';
+                  const isCompletelySettled = (outletDirectPaid + frontDeskSettled >= orderTotal - 0.01) || order.financialStatus === 'paid' || order.status === 'paid';
 
                   // Change owed is STRICTLY excess cash tendered at the outlet
                   const weOweGuest = Math.max(0, outletDirectPaid - orderTotal);
 
                   // Accounted at checkout vs remaining
-                  const totalAccounted = outletDirectPaid + roomCharged;
-                  const balanceOwing = Math.max(0, orderTotal - totalAccounted);
+                  const totalAccounted = outletDirectPaid + roomCharged + frontDeskSettled;
                   const unsettledBalance = isCompletelySettled ? 0 : Math.max(0, orderTotal - (outletDirectPaid + frontDeskSettled));
+                  const balanceOwing = isCompletelySettled || unsettledBalance <= 0.01 ? 0 : Math.max(0, orderTotal - totalAccounted);
 
                   return (
                     <motion.div
@@ -1881,7 +1881,14 @@ export function FandB() {
                                   </div>
                                 )}
 
-                                {balanceOwing > 0 ? (
+                                {isCompletelySettled || unsettledBalance <= 0.01 ? (
+                                  <div className="flex items-center justify-between p-1.5 mt-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
+                                    <span className="flex items-center gap-1">
+                                      <CheckCircle2 size={12} /> Completely Settled
+                                    </span>
+                                    <span>{frontDeskSettled > 0 ? 'Settled via Front Desk' : 'Fully Paid'}</span>
+                                  </div>
+                                ) : balanceOwing > 0 ? (
                                   <div className="flex items-center justify-between p-2 mt-1 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 font-bold">
                                     <span className="text-[10px] uppercase tracking-wider flex items-center gap-1">
                                       <AlertCircle size={12} /> Owing / Balance Due
