@@ -134,7 +134,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
   // Filter entries based on folioType if reservation is corporate
   const filteredEntries = (reservation?.corporateId && folioType && folioType !== 'all')
-    ? activeLedger.filter(e => folioType === 'company' ? !!e.corporateId : !e.corporateId)
+    ? activeLedger.filter(e => {
+        if (folioType === 'company') {
+          return !!e.corporateId;
+        }
+        // Guest receipt: Include personal charges plus payments and credits applied to this reservation so payments received and balance due reflect settlements accurately
+        return !e.corporateId || e.type === 'credit';
+      })
     : activeLedger;
   
   // Merge hidden taxes into their parent entries based on active settings

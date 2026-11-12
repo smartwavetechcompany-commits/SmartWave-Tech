@@ -947,7 +947,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   );
   
   const guestEntries = ledgerEntries.filter(e => 
-    !e.corporateId
+    !e.corporateId || (e.type === 'credit' && (e.category === 'payment' || e.category === 'city_ledger'))
   );
 
   let displayedEntries = currentReservation.corporateId

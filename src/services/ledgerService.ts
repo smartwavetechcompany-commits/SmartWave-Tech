@@ -660,6 +660,118 @@ export const deleteLedgerEntry = async (
 };
 
 
+/**
+ * Synchronizes room-charged F&B kitchen orders when a room folio or corporate settlement payment is processed
+ */
+export const syncKitchenOrdersForReservation = async (
+  hotelId: string,
+  reservationId: string,
+  amount?: number,
+  paymentMethod: 'cash' | 'card' | 'transfer' = 'cash',
+  postedBy: string = 'system',
+  referenceCode?: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
+  sourcePrefix: string = 'Front Desk Folio Settlement'
+) => {
+  try {
+    const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+    const resSnap = await getDoc(resRef);
+    const resData = resSnap.exists() ? (resSnap.data() as Reservation) : null;
+    const roomNum = resData?.roomNumber ? String(resData.roomNumber).trim() : null;
+
+    const koRef = collection(db, 'hotels', hotelId, 'kitchen_orders');
+    const [koSnapRes, koSnapRoom] = await Promise.all([
+      getDocs(query(koRef, where('reservationId', '==', reservationId))),
+      roomNum ? getDocs(query(koRef, where('roomNumber', '==', roomNum))) : Promise.resolve({ docs: [] } as any)
+    ]);
+    const koDocsMap = new Map<string, any>();
+    koSnapRes.docs.forEach(d => koDocsMap.set(d.id, d));
+    koSnapRoom.docs.forEach((d: any) => koDocsMap.set(d.id, d));
+    const koDocs = Array.from(koDocsMap.values());
+
+    const isFullySettledRes = (resData?.ledgerBalance || 0) <= 0.01;
+    let remainingAllocation = amount !== undefined ? amount : (isFullySettledRes ? 999999999 : 0);
+
+    for (const kDoc of koDocs) {
+      if (remainingAllocation <= 0.001) break;
+      const kData = kDoc.data() as any;
+      
+      // Determine what portion of this order was charged to the room
+      const roomTarget = kData.roomChargedAmount !== undefined
+        ? Number(kData.roomChargedAmount)
+        : (kData.financialStatus === 'posted_to_room' ? Number(kData.totalAmount || kData.price || 0) : 0);
+
+      if (roomTarget <= 0.001) continue;
+
+      const existingPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
+
+      // Calculate how much has already been settled via Front Desk or Corporate for this specific order
+      const alreadySettledAtFrontDesk = existingPayments
+        .filter((p: any) => p.settlementSource === 'Front Desk' || (p.reference && (String(p.reference).includes('Front Desk') || String(p.reference).includes('Corporate'))))
+        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+      // What remains to be settled for this room charge
+      const roomStillOwed = Math.max(0, roomTarget - alreadySettledAtFrontDesk);
+
+      if (roomStillOwed <= 0.001) {
+        if (kData.financialStatus !== 'paid') {
+          await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
+            financialStatus: 'paid',
+            status: kData.status === 'delivered' || kData.status === 'ready' ? 'paid' : kData.status
+          }, {
+            hotelId,
+            module: 'F & B',
+            action: 'SETTLE_ORDER_CLEARED',
+            details: `Kitchen order ${kDoc.id} room charge verified paid`
+          });
+        }
+        continue;
+      }
+
+      const allocatedToThisOrder = Math.min(remainingAllocation, roomStillOwed);
+      remainingAllocation -= allocatedToThisOrder;
+
+      const isFullySettledNow = (alreadySettledAtFrontDesk + allocatedToThisOrder) >= roomTarget - 0.01;
+
+      existingPayments.push({
+        amount: allocatedToThisOrder,
+        method: paymentMethod,
+        date: new Date().toISOString(),
+        reference: `${sourcePrefix} (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
+        settlementSource: 'Front Desk',
+        processedBy: {
+          uid: userContext?.uid || postedBy,
+          name: userContext?.displayName || (typeof postedBy === 'string' && postedBy.includes('@') ? postedBy : 'Front Desk Staff'),
+          role: userContext?.role || 'staff'
+        }
+      });
+
+      const orderTotal = kData.totalAmount || kData.price || 0;
+      const outletPaid = (kData.directPaidAmount || 0);
+      const totalSettledNow = Math.min(orderTotal, outletPaid + alreadySettledAtFrontDesk + allocatedToThisOrder);
+
+      await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
+        financialStatus: isFullySettledNow ? 'paid' : 'partially_settled',
+        status: isFullySettledNow && (kData.status === 'delivered' || kData.status === 'ready') ? 'paid' : kData.status,
+        paidAmount: totalSettledNow,
+        settlementSource: 'Front Desk',
+        settledAt: isFullySettledNow ? new Date().toISOString() : (kData.settledAt || null),
+        settledBy: isFullySettledNow ? postedBy : (kData.settledBy || null),
+        settledByName: isFullySettledNow ? (userContext?.displayName || 'Front Desk Staff') : (kData.settledByName || null),
+        lastPaymentAt: new Date().toISOString(),
+        payments: existingPayments
+      }, {
+        hotelId,
+        module: 'F & B',
+        action: isFullySettledNow ? 'SETTLE_ORDER_VIA_FRONT_DESK' : 'PARTIAL_SETTLE_ORDER_VIA_FRONT_DESK',
+        details: `${sourcePrefix} ${isFullySettledNow ? 'settled' : 'partially settled'} room charge of ${allocatedToThisOrder} for Order ${kDoc.id}`
+      });
+    }
+  } catch (koErr) {
+    console.warn('[syncKitchenOrdersForReservation] Notice:', koErr);
+  }
+};
+
 export const settleLedger = async (
   hotelId: string,
   guestId: string,
@@ -685,93 +797,17 @@ export const settleLedger = async (
     settlementSource: settlementSource || 'Front Desk'
   } as any, postedBy, corporateId, paymentMethod, userContext);
 
-  // Synchronize any F&B kitchen orders charged to this room that are settled via Front Desk
-  try {
-    const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
-    const resSnap = await getDoc(resRef);
-    const resData = resSnap.exists() ? (resSnap.data() as Reservation) : null;
-    const roomNum = resData?.roomNumber ? String(resData.roomNumber).trim() : null;
-
-    const koRef = collection(db, 'hotels', hotelId, 'kitchen_orders');
-    const [koSnapRes, koSnapRoom] = await Promise.all([
-      getDocs(query(koRef, where('reservationId', '==', reservationId))),
-      roomNum ? getDocs(query(koRef, where('roomNumber', '==', roomNum))) : Promise.resolve({ docs: [] } as any)
-    ]);
-    const koDocsMap = new Map<string, any>();
-    koSnapRes.docs.forEach(d => koDocsMap.set(d.id, d));
-    koSnapRoom.docs.forEach((d: any) => koDocsMap.set(d.id, d));
-    const koDocs = Array.from(koDocsMap.values());
-
-    let remainingAllocation = amount;
-
-    for (const kDoc of koDocs) {
-      if (remainingAllocation <= 0.001) break;
-      const kData = kDoc.data() as any;
-      
-      // Determine what portion of this order was charged to the room
-      const roomTarget = kData.roomChargedAmount !== undefined
-        ? Number(kData.roomChargedAmount)
-        : (kData.financialStatus === 'posted_to_room' ? Number(kData.totalAmount || kData.price || 0) : 0);
-
-      if (roomTarget <= 0.001) continue;
-
-      const existingPayments = Array.isArray(kData.payments) ? [...kData.payments] : [];
-
-      // Calculate how much has already been settled via Front Desk for this specific order
-      const alreadySettledAtFrontDesk = existingPayments
-        .filter((p: any) => p.settlementSource === 'Front Desk' || (p.reference && String(p.reference).includes('Front Desk')))
-        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-
-      // What remains to be settled for this room charge
-      const roomStillOwed = Math.max(0, roomTarget - alreadySettledAtFrontDesk);
-
-      if (roomStillOwed <= 0.001) {
-        // Order room charge is already completely settled at Front Desk
-        continue;
-      }
-
-      const allocatedToThisOrder = Math.min(remainingAllocation, roomStillOwed);
-      remainingAllocation -= allocatedToThisOrder;
-
-      const isFullySettledNow = (alreadySettledAtFrontDesk + allocatedToThisOrder) >= roomTarget - 0.01;
-
-      existingPayments.push({
-        amount: allocatedToThisOrder,
-        method: paymentMethod,
-        date: new Date().toISOString(),
-        reference: `Front Desk Folio Settlement (${paymentMethod.toUpperCase()})${referenceCode ? ` Ref: ${referenceCode}` : ''}`,
-        settlementSource: 'Front Desk',
-        processedBy: {
-          uid: userContext?.uid || postedBy,
-          name: userContext?.displayName || 'Front Desk Staff',
-          role: userContext?.role || 'staff'
-        }
-      });
-
-      const orderTotal = kData.totalAmount || kData.price || 0;
-      const outletPaid = (kData.directPaidAmount || 0);
-      const totalSettledNow = Math.min(orderTotal, outletPaid + alreadySettledAtFrontDesk + allocatedToThisOrder);
-
-      await database.safeUpdate(doc(db, 'hotels', hotelId, 'kitchen_orders', kDoc.id), {
-        financialStatus: isFullySettledNow ? 'paid' : 'partially_settled',
-        status: isFullySettledNow && (kData.status === 'delivered' || kData.status === 'ready') ? 'paid' : kData.status,
-        paidAmount: totalSettledNow,
-        settlementSource: 'Front Desk',
-        settledAt: isFullySettledNow ? new Date().toISOString() : (kData.settledAt || null),
-        settledBy: isFullySettledNow ? postedBy : (kData.settledBy || null),
-        settledByName: isFullySettledNow ? (userContext?.displayName || 'Front Desk Staff') : (kData.settledByName || null),
-        lastPaymentAt: new Date().toISOString(),
-        payments: existingPayments
-      }, {
-        hotelId,
-        module: 'F & B',
-        action: isFullySettledNow ? 'SETTLE_ORDER_VIA_FRONT_DESK' : 'PARTIAL_SETTLE_ORDER_VIA_FRONT_DESK',
-        details: `Front Desk ${isFullySettledNow ? 'settled' : 'partially settled'} room charge of ${allocatedToThisOrder} for Order ${kDoc.id}`
-      });
-    }
-  } catch (koErr) {
-    console.warn('[settleLedger] Failed to synchronize kitchen_orders settlement:', koErr);
-  }
+  // Synchronize any F&B kitchen orders charged to this room that are settled via Front Desk or Corporate Folio
+  await syncKitchenOrdersForReservation(
+    hotelId,
+    reservationId,
+    amount,
+    paymentMethod,
+    postedBy,
+    referenceCode,
+    userContext,
+    'Front Desk Folio Settlement'
+  );
 
   return result;
 };
@@ -1712,6 +1748,64 @@ export const reconcileCorporateAccountBalance = async (
 
     if (updatedOrphans > 0) {
       await batch.commit().catch(e => console.warn('[Corporate Reconciliation] Batch commit notice:', e));
+    }
+
+    // 3b. Automatically link unallocated corporate settlement credits to corporate debtor reservations
+    // so that guest folios, receipts, and room-charged kitchen orders balance out immediately
+    const unallocatedCreditDocs = corpLedgerSnap.docs.filter(d => {
+      const data = d.data() as LedgerEntry;
+      return data.type === 'credit' && (
+        !data.reservationId ||
+        data.reservationId === 'CORPORATE_SETTLEMENT' ||
+        data.reservationId === 'BULK_SETTLEMENT'
+      );
+    });
+
+    if (unallocatedCreditDocs.length > 0 && resSnap.docs.length > 0) {
+      for (const creditDoc of unallocatedCreditDocs) {
+        const creditData = creditDoc.data() as LedgerEntry;
+        const creditAmount = creditData.amount || 0;
+        if (creditAmount <= 0.001) continue;
+
+        // Search among linked reservations for any reservation that has outstanding debt
+        for (const resDoc of resSnap.docs) {
+          const rData = resDoc.data() as Reservation;
+          const rDebt = Math.max(0, (rData.ledgerBalance !== undefined ? rData.ledgerBalance : ((rData.totalAmount || 0) - (rData.paidAmount || 0))));
+          if (rDebt > 0.001) {
+            // Found debtor reservation under this corporate account
+            await updateDoc(creditDoc.ref, {
+              reservationId: resDoc.id,
+              guestId: rData.guestId || null
+            });
+            const mapped = allEntriesMap.get(creditDoc.id);
+            if (mapped) {
+              mapped.reservationId = resDoc.id;
+              mapped.guestId = rData.guestId || undefined;
+            }
+            await recalculateReservationAccountFromLedger(hotelId, resDoc.id);
+            await syncKitchenOrdersForReservation(
+              hotelId,
+              resDoc.id,
+              creditAmount,
+              (creditData.paymentMethod as any) || 'cash',
+              creditData.postedBy || 'system',
+              creditData.referenceCode,
+              undefined,
+              'Corporate Folio Settlement'
+            );
+            break;
+          }
+        }
+      }
+    }
+
+    // 3c. For all reservations linked to this corporate account that are fully paid, ensure kitchen orders are synced
+    for (const resDoc of resSnap.docs) {
+      const rData = resDoc.data() as Reservation;
+      const rBalance = rData.ledgerBalance !== undefined ? rData.ledgerBalance : ((rData.totalAmount || 0) - (rData.paidAmount || 0));
+      if (rBalance <= 0.01 && (rData.paidAmount || 0) > 0) {
+        await syncKitchenOrdersForReservation(hotelId, resDoc.id);
+      }
     }
 
     // 4. Calculate actual valid debits and credits

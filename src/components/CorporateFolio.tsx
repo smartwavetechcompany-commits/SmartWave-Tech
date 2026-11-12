@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, doc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -28,7 +28,7 @@ import { format } from 'date-fns';
 import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { transferCorporateBalance, reconcileCorporateAccountBalance } from '../services/ledgerService';
+import { transferCorporateBalance, reconcileCorporateAccountBalance, settleLedger, postToLedger } from '../services/ledgerService';
 
 interface CorporateFolioProps {
   account: CorporateAccount;
@@ -121,6 +121,14 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     };
   }, [hotel?.id, account.id]);
 
+  // Auto-reconcile corporate account and link any unallocated settlements to debtor reservations
+  useEffect(() => {
+    if (!hotel?.id || !account?.id) return;
+    reconcileCorporateAccountBalance(hotel.id, account.id).catch(err => {
+      console.warn('[CorporateFolio] Initial reconciliation notice:', err);
+    });
+  }, [hotel?.id, account.id]);
+
   useEffect(() => {
     if (!hotel?.id) return;
     const q = query(collection(db, 'hotels', hotel.id, 'corporate_accounts'));
@@ -143,7 +151,6 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
 
     try {
       setIsSaving(true);
-      const timestamp = new Date().toISOString();
       const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
 
       if (totalAmount <= 0) {
@@ -151,56 +158,84 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         return;
       }
 
-      // 1. Update account balance (total amount)
-      await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', currentAccount.id), {
-        currentBalance: increment(-totalAmount),
-        totalCredits: increment(totalAmount)
-      }, {
-        hotelId: hotel.id,
-        module: 'Corporate',
-        action: 'BALANCE_UPDATE',
-        details: `Updated balance for ${currentAccount.name} by ${-totalAmount}`
-      });
+      // Query reservations linked to this corporate account to allocate payment to active debtors
+      const qRes = query(
+        collection(db, 'hotels', hotel.id, 'reservations'),
+        where('corporateId', '==', currentAccount.id)
+      );
+      const resSnap = await getDocs(qRes);
+      const debtorList = resSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Reservation))
+        .filter(r => {
+          const owed = r.ledgerBalance !== undefined ? r.ledgerBalance : ((r.totalAmount || 0) - (r.paidAmount || 0));
+          return owed > 0.001;
+        })
+        .sort((a, b) => new Date(a.checkIn || 0).getTime() - new Date(b.checkIn || 0).getTime());
 
-      // 2. Process each split
+      const userCtx = {
+        uid: profile.uid,
+        email: profile.email || '',
+        role: profile.role,
+        displayName: profile.name || profile.displayName || profile.email
+      };
+
       for (const split of settleData.splits) {
-        if (split.amount > 0) {
-          // Add to Ledger
-          await database.safeAdd(collection(db, 'hotels', hotel.id, 'ledger'), {
-            hotelId: hotel.id,
-            corporateId: currentAccount.id,
-            reservationId: 'CORPORATE_SETTLEMENT',
-            timestamp,
-            amount: split.amount,
-            type: 'credit',
-            category: 'payment',
-            description: settleData.notes || `Corporate Settlement: ${currentAccount.name} (${split.method})`,
-            paymentMethod: split.method,
-            postedBy: profile.uid
-          }, {
-            hotelId: hotel.id,
-            module: 'Ledger',
-            action: 'PAYMENT_POST',
-            details: `Posted payment of ${split.amount} via ${split.method} for ${currentAccount.name}`
-          });
+        if (split.amount <= 0) continue;
+        let remainingSplit = split.amount;
 
-          // Log to finance
-          await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
-            type: 'income',
-            amount: split.amount,
-            category: 'Corporate Payment',
-            description: `Corporate Settlement: ${currentAccount.name}`,
-            timestamp,
-            paymentMethod: split.method,
-            referenceId: currentAccount.id
-          }, {
-            hotelId: hotel.id,
-            module: 'Finance',
-            action: 'FINANCE_LOG',
-            details: `Logged finance entry for corporate settlement: ${split.amount}`
-          });
+        // Allocate across debtor reservations in FIFO order so folios, receipts, and kitchen orders are immediately updated
+        for (const debtor of debtorList) {
+          if (remainingSplit <= 0.001) break;
+          const currentOwed = debtor.ledgerBalance !== undefined ? debtor.ledgerBalance : ((debtor.totalAmount || 0) - (debtor.paidAmount || 0));
+          if (currentOwed <= 0.001) continue;
+
+          const alloc = Math.min(remainingSplit, currentOwed);
+          remainingSplit -= alloc;
+
+          await settleLedger(
+            hotel.id,
+            debtor.guestId,
+            debtor.id,
+            alloc,
+            split.method,
+            profile.uid,
+            currentAccount.id,
+            undefined,
+            undefined,
+            userCtx,
+            'Front Desk'
+          );
+
+          if (debtor.ledgerBalance !== undefined) {
+            debtor.ledgerBalance = Math.max(0, debtor.ledgerBalance - alloc);
+          }
+          if (debtor.paidAmount !== undefined) {
+            debtor.paidAmount = (debtor.paidAmount || 0) + alloc;
+          }
+        }
+
+        // If any remaining amount exceeds debtor reservations, post as general corporate credit
+        if (remainingSplit > 0.001) {
+          await postToLedger(
+            hotel.id,
+            '',
+            'CORPORATE_SETTLEMENT',
+            {
+              amount: remainingSplit,
+              type: 'credit',
+              category: 'payment',
+              description: settleData.notes || `Corporate Settlement: ${currentAccount.name} (${split.method})`,
+              referenceId: currentAccount.id
+            } as any,
+            profile.uid,
+            currentAccount.id,
+            split.method,
+            userCtx
+          );
         }
       }
+
+      await reconcileCorporateAccountBalance(hotel.id, currentAccount.id);
 
       toast.success('Payment settled successfully');
       setShowSettlePayment(false);
@@ -531,10 +566,13 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                         </td>
                         <td className={cn(
                           "px-6 py-4 text-right text-sm font-bold",
-                          (res.ledgerBalance || 0) > 0 ? "text-red-500" : "text-emerald-500"
+                          (res.ledgerBalance || 0) > 0.01 ? "text-red-500" : "text-emerald-500"
                         )}>
-                          {formatCurrency(Math.abs(res.ledgerBalance || 0), currency, exchangeRate)}
-                          {(res.ledgerBalance || 0) > 0 ? " (Debt)" : (res.ledgerBalance || 0) < 0 ? " (Credit)" : ""}
+                          {(res.ledgerBalance || 0) > 0.01
+                            ? `${formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)} (Debt)`
+                            : (res.ledgerBalance || 0) < -0.01
+                              ? `${formatCurrency(Math.abs(res.ledgerBalance || 0), currency, exchangeRate)} (Credit)`
+                              : `${formatCurrency(0, currency, exchangeRate)} (Settled)`}
                         </td>
                       </tr>
                     ))}
