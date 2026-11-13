@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   DollarSign, 
   Search, 
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { collection, getDocs, query, where, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount, Guest } from '../types';
+import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount, Guest, Reservation, LedgerEntry } from '../types';
 import { formatCurrency } from '../utils';
 import { 
   getOutstandingDebts, 
@@ -34,8 +34,11 @@ import {
   transferDebt, 
   writeOffDebt, 
   adjustDebt,
-  repairErroneousFolioCredit 
+  repairErroneousFolioCredit,
+  syncOutstandingDebtWithReservation
 } from '../services/debtService';
+import { reconcileLedgerEntries } from '../services/financialService';
+import { getReservationLiveBalance } from '../utils/billingEngine';
 import { hasPermission } from '../utils/permissions';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
@@ -61,6 +64,11 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
   const [selectedFilter, setSelectedFilter] = useState<'all_active' | '0-30' | '31-60' | '61-90' | '90+' | 'paid' | 'transferred' | 'written_off' | 'all'>('all_active');
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [resLoaded, setResLoaded] = useState(false);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
+  const syncedStaleDebtIdsRef = useRef<Set<string>>(new Set());
   
   // Modals
   const [activePaymentDebt, setActivePaymentDebt] = useState<OutstandingDebt | null>(null);
@@ -115,6 +123,16 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       const guestsSnap = await getDocs(guestsRef);
       const guestList = guestsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
       setGuests(guestList);
+
+      // Load live reservations & ledger entries for check-out/settlement synchronization
+      const [resSnap, ledgerSnap] = await Promise.all([
+        getDocs(collection(db, 'hotels', hotel.id, 'reservations')),
+        getDocs(collection(db, 'hotels', hotel.id, 'ledger'))
+      ]);
+      setReservations(resSnap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation)));
+      setLedgerEntries(ledgerSnap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry)));
+      setResLoaded(true);
+      setLedgerLoaded(true);
     } catch (err: any) {
       console.error("Failed to load outstanding debts:", err);
       toast.error("Failed to load debts: " + err.message);
@@ -186,24 +204,135 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       }
     );
 
+    // 4. Real-time Reservations synchronization
+    setResLoaded(false);
+    const unsubRes = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      (resSnap) => {
+        setReservations(resSnap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation)));
+        setResLoaded(true);
+      },
+      (err) => {
+        console.warn("Real-time reservations notice in DebtLedger:", err);
+        setResLoaded(true);
+      }
+    );
+
+    // 5. Real-time Ledger synchronization
+    setLedgerLoaded(false);
+    const unsubLedger = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'ledger'),
+      (ledgerSnap) => {
+        setLedgerEntries(ledgerSnap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry)));
+        setLedgerLoaded(true);
+      },
+      (err) => {
+        console.warn("Real-time ledger notice in DebtLedger:", err);
+        setLedgerLoaded(true);
+      }
+    );
+
     return () => {
       unsubDebts();
       unsubCorp();
       unsubGuests();
+      unsubRes();
+      unsubLedger();
     };
   }, [hotel?.id]);
 
+  const validLedgerEntries = useMemo(() => {
+    return reconcileLedgerEntries(ledgerEntries, reservations, resLoaded);
+  }, [ledgerEntries, reservations, resLoaded]);
+
+  // Synchronize outstanding debt records with live reservation status & folio ledger balance
+  const reconciledDebts = useMemo(() => {
+    const reservationMap = new Map<string, Reservation>();
+    reservations.forEach(r => {
+      if (r.id) reservationMap.set(r.id, r);
+    });
+
+    return debts.map(debt => {
+      if (debt.status === 'written_off' || debt.status === 'transferred') {
+        return debt;
+      }
+
+      const res = debt.reservationId ? reservationMap.get(debt.reservationId) : undefined;
+
+      if (resLoaded && !res) {
+        return { ...debt, outstandingAmount: 0, status: 'paid' as const };
+      }
+
+      if (res) {
+        if (res.status === 'cancelled' || res.status === 'no_show' || res.status !== 'checked_out') {
+          return { ...debt, outstandingAmount: 0, status: 'paid' as const };
+        }
+
+        const liveBalance = getReservationLiveBalance(res, hotel, validLedgerEntries);
+        const isSettled =
+          liveBalance <= 0.01 ||
+          (!ledgerLoaded && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED')) ||
+          (validLedgerEntries.length === 0 && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED'));
+
+        if (isSettled) {
+          return {
+            ...debt,
+            outstandingAmount: 0,
+            status: (res.corporateId ? 'transferred' : 'paid') as OutstandingDebt['status']
+          };
+        }
+
+        const roundedLive = Number(liveBalance.toFixed(2));
+        const liveStatus: OutstandingDebt['status'] =
+          (res.paidAmount || 0) > 0 || roundedLive < (debt.originalDebt || 0) - 0.01
+            ? 'partially_paid'
+            : 'outstanding';
+
+        return {
+          ...debt,
+          outstandingAmount: roundedLive,
+          status: liveStatus
+        };
+      }
+
+      return debt;
+    });
+  }, [debts, reservations, resLoaded, ledgerLoaded, hotel, validLedgerEntries]);
+
+  // Background one-shot heal for stale Firestore debt docs whose reservation has already settled/closed
+  useEffect(() => {
+    if (!hotel?.id || !resLoaded || !ledgerLoaded || debts.length === 0) return;
+
+    const reconciledById = new Map(reconciledDebts.map(d => [d.id, d]));
+    debts.forEach(raw => {
+      const reconciled = reconciledById.get(raw.id);
+      if (!reconciled) return;
+      const wasActive = (raw.status === 'outstanding' || raw.status === 'partially_paid') && (raw.outstandingAmount || 0) > 0.01;
+      const nowResolved = reconciled.outstandingAmount <= 0.01 || (reconciled.status !== 'outstanding' && reconciled.status !== 'partially_paid');
+      if (wasActive && nowResolved && !syncedStaleDebtIdsRef.current.has(raw.id)) {
+        syncedStaleDebtIdsRef.current.add(raw.id);
+        syncOutstandingDebtWithReservation(hotel.id, raw.reservationId || raw.id, {
+          reason: 'Auto-synced with reservation check-out and folio settlement status'
+        }).catch(() => {});
+      }
+    });
+  }, [hotel?.id, resLoaded, ledgerLoaded, debts, reconciledDebts]);
+
   // Statistics
   const stats = useMemo(() => {
-    const activeDebts = debts.filter(d => d.status === 'outstanding' || d.status === 'partially_paid');
+    const activeDebts = reconciledDebts.filter(
+      d => (d.status === 'outstanding' || d.status === 'partially_paid') && (d.outstandingAmount || 0) > 0.01
+    );
     const totalOutstanding = activeDebts.reduce((sum, d) => sum + (d.outstandingAmount || 0), 0);
     const activeDebtorsCount = new Set(activeDebts.map(d => d.guestId || d.guestName)).size;
     const overdue30Plus = activeDebts
       .filter(d => (d.agingDays || 0) > 30)
       .reduce((sum, d) => sum + (d.outstandingAmount || 0), 0);
-    const resolvedCount = debts.filter(d => d.status === 'paid' || d.status === 'transferred' || d.status === 'written_off').length;
-    const totalOriginalDebt = debts.reduce((sum, d) => sum + (d.originalDebt || 0), 0);
-    const totalCollected = debts.reduce((sum, d) => {
+    const resolvedCount = reconciledDebts.filter(
+      d => d.status === 'paid' || d.status === 'transferred' || d.status === 'written_off' || (d.outstandingAmount || 0) <= 0.01
+    ).length;
+    const totalOriginalDebt = reconciledDebts.reduce((sum, d) => sum + (d.originalDebt || 0), 0);
+    const totalCollected = reconciledDebts.reduce((sum, d) => {
       const paid = (d.originalDebt || 0) - (d.outstandingAmount || 0);
       return sum + (paid > 0 ? paid : 0);
     }, 0);
@@ -216,11 +345,11 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       totalOriginalDebt,
       totalCollected
     };
-  }, [debts]);
+  }, [reconciledDebts]);
 
   // Filtering
   const filteredDebts = useMemo(() => {
-    return debts.filter(d => {
+    return reconciledDebts.filter(d => {
       // Search match
       const queryStr = searchTerm.toLowerCase().trim();
       const matchesSearch = 
@@ -233,24 +362,26 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
 
       if (!matchesSearch) return false;
 
+      const isActiveDebt = (d.status === 'outstanding' || d.status === 'partially_paid') && (d.outstandingAmount || 0) > 0.01;
+
       // Status/Aging filter
       if (selectedFilter === 'all_active') {
-        return (d.status === 'outstanding' || d.status === 'partially_paid') && d.outstandingAmount > 0.01;
+        return isActiveDebt;
       }
       if (selectedFilter === '0-30') {
-        return (d.status === 'outstanding' || d.status === 'partially_paid') && (d.agingDays || 0) <= 30;
+        return isActiveDebt && (d.agingDays || 0) <= 30;
       }
       if (selectedFilter === '31-60') {
-        return (d.status === 'outstanding' || d.status === 'partially_paid') && (d.agingDays || 0) > 30 && (d.agingDays || 0) <= 60;
+        return isActiveDebt && (d.agingDays || 0) > 30 && (d.agingDays || 0) <= 60;
       }
       if (selectedFilter === '61-90') {
-        return (d.status === 'outstanding' || d.status === 'partially_paid') && (d.agingDays || 0) > 60 && (d.agingDays || 0) <= 90;
+        return isActiveDebt && (d.agingDays || 0) > 60 && (d.agingDays || 0) <= 90;
       }
       if (selectedFilter === '90+') {
-        return (d.status === 'outstanding' || d.status === 'partially_paid') && (d.agingDays || 0) > 90;
+        return isActiveDebt && (d.agingDays || 0) > 90;
       }
       if (selectedFilter === 'paid') {
-        return d.status === 'paid' || d.outstandingAmount <= 0.01;
+        return d.status === 'paid' || (d.status !== 'transferred' && d.status !== 'written_off' && (d.outstandingAmount || 0) <= 0.01);
       }
       if (selectedFilter === 'transferred') {
         return d.status === 'transferred';
@@ -260,7 +391,7 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       }
       return true;
     });
-  }, [debts, searchTerm, selectedFilter]);
+  }, [reconciledDebts, searchTerm, selectedFilter]);
 
   const [debtsPage, setDebtsPage] = useState<number>(1);
   const [debtsPageSize, setDebtsPageSize] = useState<number>(15);

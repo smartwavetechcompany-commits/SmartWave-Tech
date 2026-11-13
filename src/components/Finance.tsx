@@ -1897,13 +1897,17 @@ export function Finance() {
                               </button>
                               <button
                                 onClick={() => {
-                                  // Find the active reservation for this guest to open folio
-                                  const activeRes = reservations.find(r => r.guestId === guest.id && (r.status === 'checked_in' || r.status === 'pending'));
+                                  // Find the active or most recent non-cancelled reservation for this guest to open folio
+                                  const activeRes =
+                                    reservations.find(r => r.guestId === guest.id && (r.status === 'checked_in' || r.status === 'pending')) ||
+                                    reservations
+                                      .filter(r => r.guestId === guest.id && r.status !== 'cancelled')
+                                      .sort((a, b) => new Date(b.checkOut || b.checkIn || 0).getTime() - new Date(a.checkOut || a.checkIn || 0).getTime())[0];
                                   if (activeRes) {
                                     setSelectedReservation(activeRes);
                                     setShowFolio(true);
                                   } else {
-                                    toast.error('No active reservation found for this guest');
+                                    toast.error('No reservation found for this guest');
                                   }
                                 }}
                                 className="text-xs font-bold text-zinc-400 hover:text-zinc-200"

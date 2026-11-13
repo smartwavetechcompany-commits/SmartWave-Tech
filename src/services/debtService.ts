@@ -18,7 +18,8 @@ import { OutstandingDebt, OutstandingDebtAuditEntry, Reservation, Guest, Corpora
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { postToLedger } from './ledgerService';
 import { hasPermission } from '../utils/permissions';
-import { calculateGuestFinancialPosition } from './financialService';
+import { calculateGuestFinancialPosition, validateLedgerTransaction } from './financialService';
+import { getReservationLiveBalance } from '../utils/billingEngine';
 
 /**
  * Single source of truth for Debt / Accounts Receivable management.
@@ -768,4 +769,144 @@ export const repairErroneousFolioCredit = async (
   }
 
   return { repaired: false, restoredAmount: 0 };
+};
+
+/**
+ * Synchronizes an existing outstanding_debt_ledger document with the live reservation status
+ * and ledger balance without altering any underlying accounting formulas.
+ * Ensures checked-out settled, cancelled, deleted, or transferred folios are removed from active AR.
+ */
+export const syncOutstandingDebtWithReservation = async (
+  hotelId: string,
+  reservationId: string,
+  options?: {
+    statusHint?: 'paid' | 'transferred';
+    reason?: string;
+    userContext?: { uid?: string; displayName?: string; role?: string };
+  }
+): Promise<{ synced: boolean; status?: OutstandingDebt['status']; outstandingAmount?: number }> => {
+  if (!hotelId || !reservationId) return { synced: false };
+
+  const debtRef = doc(db, 'hotels', hotelId, 'outstanding_debt_ledger', reservationId);
+  const debtSnap = await getDoc(debtRef);
+  if (!debtSnap.exists()) return { synced: false };
+
+  const debt = debtSnap.data() as OutstandingDebt;
+  const now = new Date();
+  const userName = options?.userContext?.displayName || 'System Sync';
+
+  const [resSnap, hotelSnap, ledgerSnap] = await Promise.all([
+    getDoc(doc(db, 'hotels', hotelId, 'reservations', reservationId)),
+    getDoc(doc(db, 'hotels', hotelId)),
+    getDocs(query(collection(db, 'hotels', hotelId, 'ledger'), where('reservationId', '==', reservationId)))
+  ]);
+
+  if (!resSnap.exists()) {
+    const resolvedStatus: OutstandingDebt['status'] =
+      debt.status === 'written_off' || debt.status === 'transferred' ? debt.status : 'paid';
+    if ((debt.outstandingAmount || 0) > 0.01 || debt.status === 'outstanding' || debt.status === 'partially_paid') {
+      const auditEntry: OutstandingDebtAuditEntry = {
+        id: crypto.randomUUID ? crypto.randomUUID() : `audit-${Date.now()}`,
+        action: 'adjustment',
+        date: format(now, 'yyyy-MM-dd'),
+        time: format(now, 'HH:mm:ss'),
+        user: userName,
+        userId: options?.userContext?.uid,
+        userRole: options?.userContext?.role,
+        amount: debt.outstandingAmount || 0,
+        previousBalance: debt.outstandingAmount || 0,
+        newBalance: 0,
+        details: options?.reason || 'Automatically closed: linked reservation no longer exists'
+      };
+      await database.safeUpdate(debtRef, {
+        outstandingAmount: 0,
+        status: resolvedStatus,
+        auditHistory: arrayUnion(auditEntry),
+        updatedAt: now.toISOString()
+      }, {
+        hotelId,
+        module: 'DebtLedger',
+        action: 'SYNC_DEBT_CLOSED',
+        details: `Closed debt ledger ${debt.folioNumber} (linked reservation removed)`
+      });
+    }
+    return { synced: true, status: resolvedStatus, outstandingAmount: 0 };
+  }
+
+  const res = { id: resSnap.id, ...resSnap.data() } as Reservation;
+  const hotel = hotelSnap.exists() ? ({ id: hotelSnap.id, ...hotelSnap.data() } as any) : null;
+  const validEntries = ledgerSnap.docs
+    .map(d => ({ id: d.id, ...d.data() } as any))
+    .filter(e => validateLedgerTransaction(e).isValid);
+
+  const liveBalance = getReservationLiveBalance(res, hotel, validEntries);
+  const isInactiveStatus = res.status === 'cancelled' || res.status === 'no_show' || res.status !== 'checked_out';
+  const isSettled = liveBalance <= 0.01 || (validEntries.length === 0 && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED'));
+
+  if (isInactiveStatus || isSettled) {
+    const resolvedStatus: OutstandingDebt['status'] =
+      debt.status === 'written_off'
+        ? 'written_off'
+        : debt.status === 'transferred'
+        ? 'transferred'
+        : (options?.statusHint || (res.corporateId ? 'transferred' : 'paid'));
+
+    if ((debt.outstandingAmount || 0) > 0.01 || debt.status !== resolvedStatus) {
+      const reasonText =
+        options?.reason ||
+        (isInactiveStatus
+          ? `Synchronized with reservation status (${res.status})`
+          : 'Automatically settled via folio ledger reconciliation');
+      const auditEntry: OutstandingDebtAuditEntry = {
+        id: crypto.randomUUID ? crypto.randomUUID() : `audit-${Date.now()}`,
+        action: resolvedStatus === 'transferred' ? 'transfer' : 'payment',
+        date: format(now, 'yyyy-MM-dd'),
+        time: format(now, 'HH:mm:ss'),
+        user: userName,
+        userId: options?.userContext?.uid,
+        userRole: options?.userContext?.role,
+        amount: debt.outstandingAmount || 0,
+        previousBalance: debt.outstandingAmount || 0,
+        newBalance: 0,
+        details: reasonText
+      };
+      await database.safeUpdate(debtRef, {
+        outstandingAmount: 0,
+        status: resolvedStatus,
+        auditHistory: arrayUnion(auditEntry),
+        updatedAt: now.toISOString()
+      }, {
+        hotelId,
+        module: 'DebtLedger',
+        action: 'SYNC_DEBT_SETTLED',
+        details: `Synchronized ${debt.folioNumber} as ${resolvedStatus} (${reasonText})`
+      });
+    }
+    return { synced: true, status: resolvedStatus, outstandingAmount: 0 };
+  }
+
+  // Reservation is checked_out with active live balance > 0.01
+  if (debt.status !== 'written_off' && debt.status !== 'transferred') {
+    const roundedLive = Number(liveBalance.toFixed(2));
+    const newStatus: OutstandingDebt['status'] =
+      (res.paidAmount || 0) > 0 || roundedLive < (debt.originalDebt || 0) - 0.01
+        ? 'partially_paid'
+        : 'outstanding';
+
+    if (Math.abs((debt.outstandingAmount || 0) - roundedLive) > 0.01 || debt.status !== newStatus) {
+      await database.safeUpdate(debtRef, {
+        outstandingAmount: roundedLive,
+        status: newStatus,
+        updatedAt: now.toISOString()
+      }, {
+        hotelId,
+        module: 'DebtLedger',
+        action: 'SYNC_DEBT_BALANCE',
+        details: `Synchronized ${debt.folioNumber} balance to ${roundedLive}`
+      });
+    }
+    return { synced: true, status: newStatus, outstandingAmount: roundedLive };
+  }
+
+  return { synced: true, status: debt.status, outstandingAmount: debt.outstandingAmount };
 };

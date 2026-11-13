@@ -5,7 +5,7 @@ import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { SafeModalBoundary } from './SafeModalBoundary';
-import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
+import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType, RoomType, Reservation, UserProfile, RoomBlocking, RateConfiguration, InventoryConsumptionRule, InventoryItem, LedgerEntry } from '../types';
@@ -847,6 +847,15 @@ export function Rooms() {
 
           toast.success(`Guest checked out successfully. Active outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} preserved in Outstanding Guest Ledger.`, { id: toastId });
         } else {
+          await syncOutstandingDebtWithReservation(hotel.id, res.id, {
+            statusHint: 'paid',
+            reason: 'Checked out with settled balance',
+            userContext: {
+              uid: profile?.uid,
+              displayName: profile?.displayName || (profile as any)?.name || profile?.email,
+              role: profile?.role
+            }
+          }).catch(() => {});
           toast.success(`Guest checked out successfully`, { id: toastId });
         }
 

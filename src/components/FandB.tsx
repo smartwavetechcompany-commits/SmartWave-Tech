@@ -1431,7 +1431,16 @@ export function FandB() {
       .reduce((s, p) => s + (p.amount || 0), 0);
     const frontDeskSettled = frontDeskPayments.reduce((s, p) => s + (p.amount || 0), 0);
 
-    const rawRoomCharged = o.roomChargedAmount !== undefined ? o.roomChargedAmount : roomFromArray;
+    const legacyIsRoomOrder =
+      paymentsList.length === 0 &&
+      o.roomChargedAmount === undefined &&
+      (o.paymentMethod === 'room' || o.financialStatus === 'posted_to_room');
+
+    const rawRoomCharged = o.roomChargedAmount !== undefined
+      ? o.roomChargedAmount
+      : (paymentsList.length > 0
+          ? roomFromArray
+          : (legacyIsRoomOrder ? Math.max(0, orderTotal - (o.directPaidAmount || 0)) : 0));
     const roomCharged = Math.max(rawRoomCharged, frontDeskSettled);
 
     let directPaid = 0;
@@ -1445,18 +1454,18 @@ export function FandB() {
     } else if (o.directPaidAmount !== undefined) {
       directPaid = o.directPaidAmount;
       if (directPaid > 0) {
-        const m = o.paymentMethod || 'cash';
+        const m = o.paymentMethod === 'room' ? 'cash' : (o.paymentMethod || 'cash');
         if (m === 'cash') cash = directPaid;
         else if (m === 'card') card = directPaid;
         else if (m === 'transfer') transfer = directPaid;
       }
-    } else if (o.paidAmount !== undefined && o.paidAmount > 0 && o.paymentMethod !== 'room' && frontDeskSettled === 0) {
+    } else if (o.paidAmount !== undefined && o.paidAmount > 0 && o.paymentMethod !== 'room' && frontDeskSettled === 0 && o.financialStatus !== 'posted_to_room') {
       directPaid = o.paidAmount;
       const m = o.paymentMethod || 'cash';
       if (m === 'cash') cash = directPaid;
       else if (m === 'card') card = directPaid;
       else if (m === 'transfer') transfer = directPaid;
-    } else if (roomCharged === 0 && frontDeskSettled === 0 && o.status === 'paid') {
+    } else if (roomCharged === 0 && frontDeskSettled === 0 && o.status === 'paid' && o.paymentMethod !== 'room') {
       directPaid = orderTotal;
       const m = o.paymentMethod || 'cash';
       if (m === 'cash') cash = directPaid;
@@ -1494,59 +1503,20 @@ export function FandB() {
     return false;
   }, [profile, isFrontDeskPayment]);
 
-  // Scoped orders: Managers see all orders; non-manager outlet staff see ONLY their own transactions for the selected date range
+  // Scoped orders: Managers see all orders for the selected date filter; non-manager outlet staff see ONLY their own transactions for the selected date range
   const scopedOrders = React.useMemo(() => {
-    if (isFandBManager) return orders;
-    return orders.filter(o => {
-      if (!isOrderHandledByUser(o)) return false;
-      if (matchesDateFilter(o.timestamp, myDateFilter)) return true;
-      return (
-        Array.isArray(o.payments) &&
-        o.payments.some(
-          p =>
-            p.processedBy?.uid === profile?.uid &&
-            !isFrontDeskPayment(p) &&
-            p.method !== 'room' &&
-            matchesDateFilter(p.date, myDateFilter)
-        )
-      );
-    });
-  }, [orders, isFandBManager, isOrderHandledByUser, isFrontDeskPayment, profile?.uid, myDateFilter]);
+    if (isFandBManager) {
+      return orders.filter(o => matchesDateFilter(o.timestamp, myDateFilter));
+    }
+    return orders.filter(o => isOrderHandledByUser(o) && matchesDateFilter(o.timestamp, myDateFilter));
+  }, [orders, isFandBManager, isOrderHandledByUser, myDateFilter]);
 
-  // Logged-in user's personal sales summary across outlets for the selected date range
-  const myDailyStats = React.useMemo(() => {
-    const myTodayOrders = orders.filter(o =>
-      o.status !== 'cancelled' &&
-      isOrderHandledByUser(o) &&
-      (matchesDateFilter(o.timestamp, myDateFilter) ||
-        (Array.isArray(o.payments) &&
-          o.payments.some(
-            p =>
-              p.processedBy?.uid === profile?.uid &&
-              !isFrontDeskPayment(p) &&
-              p.method !== 'room' &&
-              matchesDateFilter(p.date, myDateFilter)
-          )))
-    );
-
-    let totalGenerated = 0;
-    let totalDirectPaid = 0;
-    let totalCash = 0;
-    let totalCard = 0;
-    let totalTransfer = 0;
-    let totalRoomCharged = 0;
+  const summarizeOrdersList = React.useCallback((sourceOrders: KitchenOrder[], activeOutletId: string = 'all') => {
+    const validForDate = sourceOrders.filter(o => o.status !== 'cancelled');
     const byOutlet: Record<string, { outletId: string; outletName: string; count: number; total: number; direct: number; room: number }> = {};
 
-    for (const o of myTodayOrders) {
-      const { orderTotal, cash, card, transfer, directPaid, roomCharged } = getOrderPaymentBreakdown(o);
-
-      totalGenerated += orderTotal;
-      totalDirectPaid += directPaid;
-      totalCash += cash;
-      totalCard += card;
-      totalTransfer += transfer;
-      totalRoomCharged += roomCharged;
-
+    for (const o of validForDate) {
+      const { orderTotal, directPaid, roomCharged } = getOrderPaymentBreakdown(o);
       const oId = o.outletId || 'restaurant';
       const oName = o.outletName || configuredOutlets.find(x => x.id === oId)?.name || 'Main Restaurant';
       if (!byOutlet[oId]) {
@@ -1558,29 +1528,9 @@ export function FandB() {
       byOutlet[oId].room += roomCharged;
     }
 
-    return {
-      orders: myTodayOrders,
-      count: myTodayOrders.length,
-      totalGenerated,
-      totalDirectPaid,
-      totalCash,
-      totalCard,
-      totalTransfer,
-      totalRoomCharged,
-      byOutlet: Object.values(byOutlet).sort((a, b) => b.total - a.total)
-    };
-  }, [orders, isOrderHandledByUser, isFrontDeskPayment, getOrderPaymentBreakdown, profile?.uid, myDateFilter, configuredOutlets]);
-
-  // All-outlet sales summary for Managers/Admins matching the selected date filter
-  const allOutletStats = React.useMemo(() => {
-    const matchingOrders = orders.filter(o =>
-      o.status !== 'cancelled' &&
-      (matchesDateFilter(o.timestamp, myDateFilter) ||
-        (Array.isArray(o.payments) &&
-          o.payments.some(
-            p => !isFrontDeskPayment(p) && p.method !== 'room' && matchesDateFilter(p.date, myDateFilter)
-          )))
-    );
+    const matchingOrders = activeOutletId === 'all'
+      ? validForDate
+      : validForDate.filter(o => (o.outletId || 'restaurant') === activeOutletId);
 
     let totalGenerated = 0;
     let totalDirectPaid = 0;
@@ -1588,31 +1538,20 @@ export function FandB() {
     let totalCard = 0;
     let totalTransfer = 0;
     let totalRoomCharged = 0;
-    const byOutlet: Record<string, { outletId: string; outletName: string; count: number; total: number; direct: number; room: number }> = {};
 
     for (const o of matchingOrders) {
       const { orderTotal, cash, card, transfer, directPaid, roomCharged } = getOrderPaymentBreakdown(o);
-
       totalGenerated += orderTotal;
       totalDirectPaid += directPaid;
       totalCash += cash;
       totalCard += card;
       totalTransfer += transfer;
       totalRoomCharged += roomCharged;
-
-      const oId = o.outletId || 'restaurant';
-      const oName = o.outletName || configuredOutlets.find(x => x.id === oId)?.name || 'Main Restaurant';
-      if (!byOutlet[oId]) {
-        byOutlet[oId] = { outletId: oId, outletName: oName, count: 0, total: 0, direct: 0, room: 0 };
-      }
-      byOutlet[oId].count += 1;
-      byOutlet[oId].total += orderTotal;
-      byOutlet[oId].direct += directPaid;
-      byOutlet[oId].room += roomCharged;
     }
 
     return {
       orders: matchingOrders,
+      allPeriodOrders: validForDate,
       count: matchingOrders.length,
       totalGenerated,
       totalDirectPaid,
@@ -1622,14 +1561,43 @@ export function FandB() {
       totalRoomCharged,
       byOutlet: Object.values(byOutlet).sort((a, b) => b.total - a.total)
     };
-  }, [orders, isFrontDeskPayment, getOrderPaymentBreakdown, myDateFilter, configuredOutlets]);
+  }, [getOrderPaymentBreakdown, configuredOutlets]);
 
-  const bannerStats = isFandBManager ? allOutletStats : myDailyStats;
+  // Logged-in user's personal sales summary across outlets for the selected date range
+  const myDailyStats = React.useMemo(() => {
+    const myTodayOrders = orders.filter(o =>
+      o.status !== 'cancelled' &&
+      isOrderHandledByUser(o) &&
+      matchesDateFilter(o.timestamp, myDateFilter)
+    );
+    return summarizeOrdersList(myTodayOrders, 'all');
+  }, [orders, isOrderHandledByUser, myDateFilter, summarizeOrdersList]);
 
-  const filteredOrders = scopedOrders.filter(o => {
+  // Personal sales filtered by selected outlet in My Sales & Transactions / Orders tab
+  const myOutletBannerStats = React.useMemo(() => {
+    return summarizeOrdersList(myDailyStats.allPeriodOrders, outletFilter);
+  }, [myDailyStats.allPeriodOrders, outletFilter, summarizeOrdersList]);
+
+  // All-outlet sales summary for Managers/Admins matching the selected date filter & outlet filter
+  const allOutletStats = React.useMemo(() => {
+    const matchingOrders = orders.filter(o =>
+      o.status !== 'cancelled' &&
+      matchesDateFilter(o.timestamp, myDateFilter)
+    );
+    return summarizeOrdersList(matchingOrders, outletFilter);
+  }, [orders, myDateFilter, outletFilter, summarizeOrdersList]);
+
+  const bannerStats = isFandBManager ? allOutletStats : myOutletBannerStats;
+
+  const scopedOutletOrders = React.useMemo(() => {
+    return outletFilter === 'all'
+      ? scopedOrders
+      : scopedOrders.filter(o => (o.outletId || 'restaurant') === outletFilter);
+  }, [scopedOrders, outletFilter]);
+
+  const filteredOrders = scopedOutletOrders.filter(o => {
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
-    const matchesOutlet = outletFilter === 'all' || (o.outletId || 'restaurant') === outletFilter;
     const q = searchQuery.toLowerCase();
     const matchesSearch = !q ||
       (o.roomNumber || '').toLowerCase().includes(q) ||
@@ -1638,7 +1606,7 @@ export function FandB() {
       (o.billNumber?.toLowerCase() || '').includes(q) ||
       (o.cashierName?.toLowerCase() || '').includes(q) ||
       (o.outletName?.toLowerCase() || '').includes(q);
-    return matchesFilter && matchesCategory && matchesOutlet && matchesSearch;
+    return matchesFilter && matchesCategory && matchesSearch;
   });
 
   // F&B Orders Pagination
@@ -1654,7 +1622,7 @@ export function FandB() {
     setCashiersPage(1);
     setRoomChargesPage(1);
     setDailyReconPage(1);
-  }, [reportFilter.startDate, reportFilter.endDate, reconciliationSubTab, userOutletFilter, userOutletSearch, userOutletTodayOnly]);
+  }, [reportFilter.startDate, reportFilter.endDate, reportFilter.outlet, reportFilter.type, reconciliationSubTab, userOutletFilter, userOutletSearch, userOutletTodayOnly]);
 
   useEffect(() => {
     setMyTxPage(1);
@@ -1670,12 +1638,12 @@ export function FandB() {
     return tables.slice(startIndex, startIndex + tablesPageSize);
   }, [tables, tablesPage, tablesPageSize]);
 
-  const activeOrdersCount = scopedOrders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled').length;
+  const activeOrdersCount = scopedOutletOrders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled').length;
 
   const stats = [
-    { label: isFandBManager ? 'Active Orders' : 'My Active Orders Today', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
-    { label: isFandBManager ? 'Preparing' : 'My Preparing Today', count: scopedOrders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
-    { label: isFandBManager ? 'Ready for Pickup' : 'My Ready Today', count: scopedOrders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
+    { label: isFandBManager ? 'Active Orders' : 'My Active Orders', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
+    { label: isFandBManager ? 'Preparing' : 'My Preparing', count: scopedOutletOrders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
+    { label: isFandBManager ? 'Ready for Pickup' : 'My Ready', count: scopedOutletOrders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
   ];
 
   const getWaitTime = (timestamp: string) => {
@@ -1776,7 +1744,9 @@ export function FandB() {
         const orderDate = new Date(order.timestamp);
         const matchesDate = orderDate >= start && orderDate <= end;
         const matchesType = reportFilter.type === 'all' || order.category === reportFilter.type;
-        return matchesDate && matchesType;
+        const activeOut = reportFilter.outlet !== 'all' ? reportFilter.outlet : userOutletFilter;
+        const matchesOutlet = activeOut === 'all' || (order.outletId || 'restaurant') === activeOut;
+        return matchesDate && matchesType && matchesOutlet;
       })
       .map(order => {
         const { orderTotal, directPaid, roomCharged, frontDeskSettled } = getOrderPaymentBreakdown(order);
@@ -1973,26 +1943,31 @@ export function FandB() {
                   {isFandBManager ? (
                     <>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                        All Outlets
+                        {outletFilter === 'all'
+                          ? 'All Outlets'
+                          : configuredOutlets.find(o => o.id === outletFilter)?.name || outletFilter}
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 font-medium">
                         My Orders: {myDailyStats.count} ({formatCurrency(myDailyStats.totalGenerated, currency, exchangeRate)})
                       </span>
                     </>
                   ) : (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
-                      Personal Scope
-                    </span>
+                    <>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
+                        Personal Scope
+                      </span>
+                      {outletFilter !== 'all' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+                          {configuredOutlets.find(o => o.id === outletFilter)?.name || outletFilter}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
                 <p className="text-xs text-zinc-500 mt-0.5">
                   {isFandBManager
-                    ? (isMyDateToday
-                        ? 'All orders and total revenue generated today across all F&B outlets'
-                        : `All orders and total revenue generated for ${myDateRangeLabel} across all F&B outlets`)
-                    : (isMyDateToday
-                        ? 'Your orders and total revenue generated today across F&B outlets'
-                        : `Your orders and total revenue generated for ${myDateRangeLabel} across F&B outlets`)}
+                    ? `All orders and total revenue generated for ${isMyDateToday ? 'today' : myDateRangeLabel} (${outletFilter === 'all' ? 'all F&B outlets' : configuredOutlets.find(o => o.id === outletFilter)?.name || outletFilter})`
+                    : `Your orders and total revenue generated for ${isMyDateToday ? 'today' : myDateRangeLabel} (${outletFilter === 'all' ? 'across F&B outlets' : configuredOutlets.find(o => o.id === outletFilter)?.name || outletFilter})`}
                 </p>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -2038,13 +2013,27 @@ export function FandB() {
                       ? (isMyDateToday ? 'Outlets Today:' : 'Outlets:')
                       : (isMyDateToday ? 'My Outlets Today:' : 'My Outlets:')}
                   </span>
-                  {bannerStats.byOutlet.map(ob => (
-                    <div key={ob.outletId} className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-xs">
-                      <span className="font-bold text-zinc-200">{ob.outletName}</span>
-                      <span className="text-zinc-500">({ob.count})</span>
-                      <span className="font-mono font-bold text-emerald-400">{formatCurrency(ob.total, currency, exchangeRate)}</span>
-                    </div>
-                  ))}
+                  {bannerStats.byOutlet.map(ob => {
+                    const isSelectedOutlet = outletFilter === ob.outletId;
+                    return (
+                      <button
+                        type="button"
+                        key={ob.outletId}
+                        onClick={() => setOutletFilter(prev => prev === ob.outletId ? 'all' : ob.outletId)}
+                        className={cn(
+                          "inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border text-xs transition-colors",
+                          isSelectedOutlet
+                            ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-300"
+                            : "bg-zinc-950 border-zinc-800 hover:border-zinc-700 text-zinc-200"
+                        )}
+                        title={isSelectedOutlet ? 'Click to show all outlets' : `Filter by ${ob.outletName}`}
+                      >
+                        <span className="font-bold">{ob.outletName}</span>
+                        <span className="text-zinc-500">({ob.count})</span>
+                        <span className="font-mono font-bold text-emerald-400">{formatCurrency(ob.total, currency, exchangeRate)}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2571,116 +2560,150 @@ export function FandB() {
         </div>
       ) : !isFandBManager ? (
         /* Scoped Personal Daily Sales & Transactions View for Outlet Staff */
-        <div className="space-y-6">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
-                <DollarSign className="text-emerald-400" size={22} />
-                My Sales & Transactions ({myDateRangeLabel})
-              </h2>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                Showing only your personal transactions and outlet earnings for {isMyDateToday ? 'today' : myDateRangeLabel}
-              </p>
-            </div>
-            <DateFilterControl value={myDateFilter} onChange={setMyDateFilter} compact />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
-              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
-                <span>{isMyDateToday ? 'My Total Revenue Today' : 'My Total Revenue'}</span>
-                <UtensilsCrossed size={16} className="text-emerald-400" />
-              </div>
-              <div className="text-2xl font-black text-zinc-50">{formatCurrency(myDailyStats.totalGenerated, currency, exchangeRate)}</div>
-              <div className="text-[10px] text-zinc-500 mt-1">{myDailyStats.count} orders handled</div>
-            </div>
-
-            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
-              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
-                <span>My Direct Collections</span>
-                <DollarSign size={16} className="text-emerald-400" />
-              </div>
-              <div className="text-2xl font-black text-emerald-400">{formatCurrency(myDailyStats.totalDirectPaid, currency, exchangeRate)}</div>
-              <div className="text-[10px] text-zinc-500 mt-1">
-                Cash: {formatCurrency(myDailyStats.totalCash, currency, exchangeRate)} · Card: {formatCurrency(myDailyStats.totalCard, currency, exchangeRate)} · Transfer: {formatCurrency(myDailyStats.totalTransfer, currency, exchangeRate)}
-              </div>
-            </div>
-
-            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
-              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
-                <span>Charged to Room Folios</span>
-                <Building2 size={16} className="text-amber-400" />
-              </div>
-              <div className="text-2xl font-black text-amber-400">{formatCurrency(myDailyStats.totalRoomCharged, currency, exchangeRate)}</div>
-              <div className="text-[10px] text-zinc-500 mt-1">Room charges posted by you</div>
-            </div>
-
-            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
-              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
-                <span>Active Outlets Used</span>
-                <Utensils size={16} className="text-blue-400" />
-              </div>
-              <div className="text-2xl font-black text-zinc-100">{myDailyStats.byOutlet.length}</div>
-              <div className="text-[10px] text-zinc-500 mt-1">Outlets with your sales</div>
-            </div>
-          </div>
-
-          {/* My Revenue by Outlet */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-zinc-200">My Earnings by Outlet ({myDateRangeLabel})</h3>
-              <span className="text-xs text-zinc-500">{myDailyStats.byOutlet.length} outlets</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
-                  <tr>
-                    <th className="p-4">Outlet</th>
-                    <th className="p-4 text-center">Orders</th>
-                    <th className="p-4 text-right">Direct POS Collected</th>
-                    <th className="p-4 text-right">Charged to Room</th>
-                    <th className="p-4 text-right">Total Made</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-800 text-zinc-300">
-                  {myDailyStats.byOutlet.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="p-8 text-center text-zinc-500">No sales recorded for you in this period.</td>
-                    </tr>
-                  ) : myDailyStats.byOutlet.map(ob => (
-                    <tr key={ob.outletId} className="hover:bg-zinc-800/40 transition-colors">
-                      <td className="p-4 font-bold text-zinc-100">{ob.outletName}</td>
-                      <td className="p-4 text-center font-bold">{ob.count}</td>
-                      <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(ob.direct, currency, exchangeRate)}</td>
-                      <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(ob.room, currency, exchangeRate)}</td>
-                      <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(ob.total, currency, exchangeRate)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* My Transactions Table (Paginated) */}
-          {(() => {
-            const myFilteredTx = myDailyStats.orders.filter(o => {
-              const matchesOutlet = myTxOutletFilter === 'all' || (o.outletId || 'restaurant') === myTxOutletFilter;
-              const q = myTxSearch.toLowerCase();
-              const matchesSearch = !q ||
-                (o.billNumber || '').toLowerCase().includes(q) ||
-                (o.guestName || '').toLowerCase().includes(q) ||
-                (o.roomNumber || '').toLowerCase().includes(q) ||
-                (o.items || '').toLowerCase().includes(q);
-              return matchesOutlet && matchesSearch;
-            });
-            const pagedMyTx = myFilteredTx.slice((myTxPage - 1) * myTxPageSize, myTxPage * myTxPageSize);
-
+        (() => {
+          const myScopedStats = summarizeOrdersList(myDailyStats.allPeriodOrders, myTxOutletFilter);
+          const myFilteredTx = myScopedStats.orders.filter(o => {
+            const q = myTxSearch.toLowerCase();
             return (
+              !q ||
+              (o.billNumber || '').toLowerCase().includes(q) ||
+              (o.guestName || '').toLowerCase().includes(q) ||
+              (o.roomNumber || '').toLowerCase().includes(q) ||
+              (o.items || '').toLowerCase().includes(q)
+            );
+          });
+          const pagedMyTx = myFilteredTx.slice((myTxPage - 1) * myTxPageSize, myTxPage * myTxPageSize);
+          const selectedOutletLabel =
+            myTxOutletFilter === 'all'
+              ? 'All My Outlets'
+              : configuredOutlets.find(out => out.id === myTxOutletFilter)?.name || myTxOutletFilter;
+
+          return (
+            <div className="space-y-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
+                    <DollarSign className="text-emerald-400" size={22} />
+                    My Sales & Transactions ({myDateRangeLabel})
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Showing only your personal transactions and outlet earnings for {isMyDateToday ? 'today' : myDateRangeLabel} · {selectedOutletLabel}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={myTxOutletFilter}
+                    onChange={(e) => setMyTxOutletFilter(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="all">All Outlets</option>
+                    {configuredOutlets.map(out => (
+                      <option key={out.id} value={out.id}>{out.name}</option>
+                    ))}
+                  </select>
+                  <DateFilterControl value={myDateFilter} onChange={setMyDateFilter} compact />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>{isMyDateToday ? 'My Total Revenue Today' : 'My Total Revenue'}</span>
+                    <UtensilsCrossed size={16} className="text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-black text-zinc-50">{formatCurrency(myScopedStats.totalGenerated, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">{myScopedStats.count} orders handled</div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>My Direct Collections</span>
+                    <DollarSign size={16} className="text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-black text-emerald-400">{formatCurrency(myScopedStats.totalDirectPaid, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">
+                    Cash: {formatCurrency(myScopedStats.totalCash, currency, exchangeRate)} · Card: {formatCurrency(myScopedStats.totalCard, currency, exchangeRate)} · Transfer: {formatCurrency(myScopedStats.totalTransfer, currency, exchangeRate)}
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>Charged to Room Folios</span>
+                    <Building2 size={16} className="text-amber-400" />
+                  </div>
+                  <div className="text-2xl font-black text-amber-400">{formatCurrency(myScopedStats.totalRoomCharged, currency, exchangeRate)}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">Room charges posted by you</div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <span>Active Outlets Used</span>
+                    <Utensils size={16} className="text-blue-400" />
+                  </div>
+                  <div className="text-2xl font-black text-zinc-100">{myDailyStats.byOutlet.length}</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">Click an outlet row below to filter</div>
+                </div>
+              </div>
+
+              {/* My Revenue by Outlet */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-zinc-200">My Earnings by Outlet ({myDateRangeLabel})</h3>
+                  <span className="text-xs text-zinc-500">{myDailyStats.byOutlet.length} outlets</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Outlet</th>
+                        <th className="p-4 text-center">Orders</th>
+                        <th className="p-4 text-right">Direct POS Collected</th>
+                        <th className="p-4 text-right">Charged to Room</th>
+                        <th className="p-4 text-right">Total Made</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {myDailyStats.byOutlet.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-8 text-center text-zinc-500">No sales recorded for you in this period.</td>
+                        </tr>
+                      ) : myDailyStats.byOutlet.map(ob => {
+                        const isSelected = myTxOutletFilter === ob.outletId;
+                        return (
+                          <tr
+                            key={ob.outletId}
+                            onClick={() => setMyTxOutletFilter(prev => prev === ob.outletId ? 'all' : ob.outletId)}
+                            className={cn(
+                              "cursor-pointer transition-colors",
+                              isSelected ? "bg-emerald-500/10" : "hover:bg-zinc-800/40"
+                            )}
+                          >
+                            <td className="p-4 font-bold text-zinc-100 flex items-center gap-2">
+                              <span>{ob.outletName}</span>
+                              {isSelected && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                                  Filtered
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-4 text-center font-bold">{ob.count}</td>
+                            <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(ob.direct, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(ob.room, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(ob.total, currency, exchangeRate)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* My Transactions Table (Paginated) */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
                 <div className="p-4 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-bold text-zinc-200">My Transactions ({myDateRangeLabel})</h3>
-                    <p className="text-[11px] text-zinc-500">Only your transactions processed in this period</p>
+                    <p className="text-[11px] text-zinc-500">Only your transactions processed in this period · {selectedOutletLabel}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2720,7 +2743,7 @@ export function FandB() {
                     <tbody className="divide-y divide-zinc-800 text-zinc-300">
                       {pagedMyTx.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="p-8 text-center text-zinc-500">No transactions found for today.</td>
+                          <td colSpan={9} className="p-8 text-center text-zinc-500">No transactions found for this period.</td>
                         </tr>
                       ) : pagedMyTx.map(order => {
                         const { orderTotal, directPaid, roomCharged } = getOrderPaymentBreakdown(order);
@@ -2761,9 +2784,9 @@ export function FandB() {
                   itemLabel="transactions"
                 />
               </div>
-            );
-          })()}
-        </div>
+            </div>
+          );
+        })()
       ) : (
         /* Financial Reconciliation & Audit View (Admin/Manager/Finance Scope) */
         <div className="space-y-6">
@@ -2777,7 +2800,20 @@ export function FandB() {
                 Multi-outlet revenue tracking, per-user outlet generation, direct POS collections, room charge folios, and cashier balancing
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={userOutletFilter}
+                onChange={(e) => {
+                  setUserOutletFilter(e.target.value);
+                  setReportFilter(prev => ({ ...prev, outlet: e.target.value }));
+                }}
+                className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+              >
+                <option value="all">All Outlets</option>
+                {configuredOutlets.map(outlet => (
+                  <option key={outlet.id} value={outlet.id}>{outlet.name}</option>
+                ))}
+              </select>
               <input
                 type="date"
                 value={reportFilter.startDate}
@@ -2821,17 +2857,26 @@ export function FandB() {
 
           {/* KPI Metrics Cards */}
           {(() => {
-            const start = new Date(reportFilter.startDate + 'T00:00:00');
-            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const useTodayWindow = reconciliationSubTab === 'outlets' && userOutletTodayOnly;
+            const start = useTodayWindow ? startOfDay(now) : new Date(reportFilter.startDate + 'T00:00:00');
+            const end = useTodayWindow ? endOfDay(now) : new Date(reportFilter.endDate + 'T23:59:59');
             const rangeOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
-              return d >= start && d <= end;
+              const matchesDate = d >= start && d <= end;
+              const matchesOutlet = userOutletFilter === 'all' || (o.outletId || 'restaurant') === userOutletFilter;
+              const matchesType = reportFilter.type === 'all' || o.category === reportFilter.type;
+              return matchesDate && matchesOutlet && matchesType;
             });
             const validOrders = rangeOrders.filter(o => o.status !== 'cancelled');
 
             const totalSales = validOrders.reduce((acc, o) => acc + (o.totalAmount || o.price || 0), 0);
             const totalDirectPaid = validOrders.reduce((acc, o) => acc + getOrderPaymentBreakdown(o).directPaid, 0);
             const totalRoomCharged = validOrders.reduce((acc, o) => acc + getOrderPaymentBreakdown(o).roomCharged, 0);
+            const totalRoomSettledFD = validOrders.reduce((acc, o) => {
+              const bd = getOrderPaymentBreakdown(o);
+              return acc + Math.min(bd.roomCharged, bd.frontDeskSettled);
+            }, 0);
+            const totalRoomPending = Math.max(0, totalRoomCharged - totalRoomSettledFD);
             const totalVoided = rangeOrders.filter(o => o.status === 'cancelled').reduce((acc, o) => acc + (o.totalAmount || o.price || 0), 0);
 
             return (
@@ -2860,7 +2905,9 @@ export function FandB() {
                     <Building2 size={16} className="text-amber-400" />
                   </div>
                   <div className="text-2xl font-black text-amber-400">{formatCurrency(totalRoomCharged, currency, exchangeRate)}</div>
-                  <div className="text-[10px] text-zinc-500 mt-1">Pending checkout settlement</div>
+                  <div className="text-[10px] text-zinc-500 mt-1">
+                    {formatCurrency(totalRoomPending, currency, exchangeRate)} pending · {formatCurrency(totalRoomSettledFD, currency, exchangeRate)} settled via Front Desk
+                  </div>
                 </div>
 
                 <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
@@ -2881,7 +2928,8 @@ export function FandB() {
             const end = userOutletTodayOnly ? endOfDay(now) : new Date(reportFilter.endDate + 'T23:59:59');
             const validOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
-              return d >= start && d <= end && o.status !== 'cancelled';
+              const matchesType = reportFilter.type === 'all' || o.category === reportFilter.type;
+              return d >= start && d <= end && o.status !== 'cancelled' && matchesType;
             });
 
             // Build User × Outlet map
@@ -2944,6 +2992,20 @@ export function FandB() {
               })
               .sort((a, b) => b.total - a.total);
 
+            const userOutletTotals = userOutletRows.reduce(
+              (acc, r) => ({
+                count: acc.count + r.count,
+                direct: acc.direct + r.direct,
+                room: acc.room + r.room,
+                total: acc.total + r.total
+              }),
+              { count: 0, direct: 0, room: 0, total: 0 }
+            );
+
+            const visibleOutlets = userOutletFilter === 'all'
+              ? configuredOutlets
+              : configuredOutlets.filter(outlet => outlet.id === userOutletFilter);
+
             const pagedUserOutletRows = userOutletRows.slice((userOutletPage - 1) * userOutletPageSize, userOutletPage * userOutletPageSize);
 
             return (
@@ -2951,7 +3013,7 @@ export function FandB() {
                 <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
                   <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
                     <h3 className="text-sm font-bold text-zinc-200">Revenue Breakdown by Outlet</h3>
-                    <span className="text-xs text-zinc-500">{configuredOutlets.length} active outlets</span>
+                    <span className="text-xs text-zinc-500">{visibleOutlets.length} outlet{visibleOutlets.length === 1 ? '' : 's'}</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
@@ -2967,7 +3029,7 @@ export function FandB() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-800 text-zinc-300">
-                        {configuredOutlets.map(outlet => {
+                        {visibleOutlets.map(outlet => {
                           const outletOrders = validOrders.filter(o => o.outletId === outlet.id || (outlet.id === 'restaurant' && !o.outletId));
                           const grossSales = outletOrders.reduce((sum, o) => sum + (o.totalAmount || o.price || 0), 0);
                           const directPaid = outletOrders.reduce((sum, o) => sum + getOrderPaymentBreakdown(o).directPaid, 0);
@@ -3007,7 +3069,9 @@ export function FandB() {
                   <div className="p-4 border-b border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-bold text-zinc-200">Revenue Generated by Each User & Outlet</h3>
-                      <p className="text-[11px] text-zinc-500">Shows exactly how much each staff member generates per outlet</p>
+                      <p className="text-[11px] text-zinc-500">
+                        {userOutletTotals.count} orders · Direct: {formatCurrency(userOutletTotals.direct, currency, exchangeRate)} · Room: {formatCurrency(userOutletTotals.room, currency, exchangeRate)} · Total: {formatCurrency(userOutletTotals.total, currency, exchangeRate)}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
@@ -3031,7 +3095,10 @@ export function FandB() {
                       />
                       <select
                         value={userOutletFilter}
-                        onChange={(e) => setUserOutletFilter(e.target.value)}
+                        onChange={(e) => {
+                          setUserOutletFilter(e.target.value);
+                          setReportFilter(prev => ({ ...prev, outlet: e.target.value }));
+                        }}
                         className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="all">All Outlets</option>
@@ -3122,7 +3189,9 @@ export function FandB() {
             const end = new Date(reportFilter.endDate + 'T23:59:59');
             const validOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
-              return d >= start && d <= end && o.status !== 'cancelled';
+              const matchesOutlet = userOutletFilter === 'all' || (o.outletId || 'restaurant') === userOutletFilter;
+              const matchesType = reportFilter.type === 'all' || o.category === reportFilter.type;
+              return d >= start && d <= end && o.status !== 'cancelled' && matchesOutlet && matchesType;
             });
 
             const methodTotals: Record<string, { count: number; amount: number }> = {
@@ -3209,7 +3278,9 @@ export function FandB() {
             const end = new Date(reportFilter.endDate + 'T23:59:59');
             const validOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
-              return d >= start && d <= end && o.status !== 'cancelled';
+              const matchesOutlet = userOutletFilter === 'all' || (o.outletId || 'restaurant') === userOutletFilter;
+              const matchesType = reportFilter.type === 'all' || o.category === reportFilter.type;
+              return d >= start && d <= end && o.status !== 'cancelled' && matchesOutlet && matchesType;
             });
 
             const cashierMap: Record<string, { name: string; outlets: Set<string>; count: number; direct: number; room: number; total: number }> = {};
@@ -3292,7 +3363,9 @@ export function FandB() {
               const d = new Date(o.timestamp);
               const { roomCharged } = getOrderPaymentBreakdown(o);
               const isRoom = roomCharged > 0 || (o.payments || []).some(p => p.method === 'room' || isFrontDeskPayment(p));
-              return d >= start && d <= end && isRoom;
+              const matchesOutlet = userOutletFilter === 'all' || (o.outletId || 'restaurant') === userOutletFilter;
+              const matchesType = reportFilter.type === 'all' || o.category === reportFilter.type;
+              return d >= start && d <= end && isRoom && matchesOutlet && matchesType;
             });
             const pagedRoomOrders = roomOrders.slice((roomChargesPage - 1) * roomChargesPageSize, roomChargesPage * roomChargesPageSize);
 
@@ -3367,7 +3440,9 @@ export function FandB() {
             const end = new Date(reportFilter.endDate + 'T23:59:59');
             const rangeOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
-              return d >= start && d <= end;
+              const matchesOutlet = userOutletFilter === 'all' || (o.outletId || 'restaurant') === userOutletFilter;
+              const matchesType = reportFilter.type === 'all' || o.category === reportFilter.type;
+              return d >= start && d <= end && matchesOutlet && matchesType;
             });
 
             const dailyMap: Record<string, { count: number; gross: number; taxes: number; direct: number; room: number; voided: number }> = {};

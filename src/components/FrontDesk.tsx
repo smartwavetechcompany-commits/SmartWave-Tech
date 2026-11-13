@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
-import { recordOutstandingDebt, checkReturningGuestDebt } from '../services/debtService';
+import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { ConfirmModal } from './ConfirmModal';
 import { ReceiptGenerator } from './ReceiptGenerator';
@@ -2499,6 +2499,15 @@ export function FrontDesk() {
 
           toast.success(`Guest checked out successfully. Active outstanding balance of ${formatCurrency(outstandingBalance, currency, exchangeRate)} preserved in Outstanding Guest Ledger.`);
         } else {
+          await syncOutstandingDebtWithReservation(hotel.id, res.id, {
+            statusHint: 'paid',
+            reason: 'Checked out with settled balance',
+            userContext: {
+              uid: profile?.uid,
+              displayName: profile?.displayName || (profile as any)?.name || profile?.email,
+              role: profile?.role
+            }
+          }).catch(() => {});
           toast.success('Guest checked out successfully.');
         }
 

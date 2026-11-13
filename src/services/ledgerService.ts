@@ -573,11 +573,21 @@ export const recalculateReservationAccountFromLedger = async (
       paymentStatus = 'unpaid';
     }
 
+    const financialStatus =
+      ledgerBalance <= 0.01
+        ? 'SETTLED'
+        : resData.status === 'checked_out'
+        ? 'DEBTOR'
+        : totalPaid > 0
+        ? 'PARTIALLY_PAID'
+        : 'OUTSTANDING';
+
     await database.safeUpdate(resRef, {
       ledgerBalance,
       paidAmount: totalPaid,
       totalAmount: totalDebits > 0 ? totalDebits : (resData.totalAmount || 0),
-      paymentStatus
+      paymentStatus,
+      financialStatus
     }, {
       hotelId,
       module: 'Reservation',
@@ -599,6 +609,14 @@ export const recalculateReservationAccountFromLedger = async (
         });
       }
     }
+
+    import('./debtService')
+      .then(({ syncOutstandingDebtWithReservation }) =>
+        syncOutstandingDebtWithReservation(hotelId, reservationId, {
+          reason: 'Synchronized with reservation folio ledger'
+        })
+      )
+      .catch(() => {});
   } catch (err) {
     console.error(`Failed to recalculate reservation account ${reservationId}:`, err);
   }
@@ -929,6 +947,16 @@ export const transferToCityLedger = async (
     const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
     await updateDoc(resRef, { corporateId });
   }
+
+  import('./debtService')
+    .then(({ syncOutstandingDebtWithReservation }) =>
+      syncOutstandingDebtWithReservation(hotelId, reservationId, {
+        statusHint: 'transferred',
+        reason: 'Transferred to City Ledger / Corporate Account',
+        userContext
+      })
+    )
+    .catch(() => {});
 };
 
 export const transferCorporateBalance = async (
@@ -1239,6 +1267,14 @@ export const reconcileAndRepairReservationFinancials = async (
       });
     }
   }
+
+  import('./debtService')
+    .then(({ syncOutstandingDebtWithReservation }) =>
+      syncOutstandingDebtWithReservation(hotelId, reservationId, {
+        reason: 'Synchronized with folio reconciliation'
+      })
+    )
+    .catch(() => {});
 
   return {
     reservationId,
