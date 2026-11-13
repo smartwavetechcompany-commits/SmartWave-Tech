@@ -47,9 +47,8 @@ try {
           Object.defineProperty(obj, failProp, {
             get() { return null; },
             set(err) {
-              if (this.Su) this.Su = Promise.resolve();
-              if (this.tail) this.tail = Promise.resolve();
-              if (this.vu) this.vu = Promise.resolve();
+              if (this.Su && typeof this.Su !== 'function') this.Su = Promise.resolve();
+              if (this.tail && typeof this.tail !== 'function') this.tail = Promise.resolve();
             },
             configurable: true,
             enumerable: true
@@ -76,8 +75,8 @@ try {
               (fnStr.length < 80 && (fnStr.includes('failure') || fnStr.includes('gu') || fnStr.includes('fail')));
             if (isFailureChecker) {
               proto[key] = function (this: any) {
-                if (this.Su) this.Su = Promise.resolve();
-                if (this.tail) this.tail = Promise.resolve();
+                if (this.Su && typeof this.Su !== 'function') this.Su = Promise.resolve();
+                if (this.tail && typeof this.tail !== 'function') this.tail = Promise.resolve();
               };
             }
           }
