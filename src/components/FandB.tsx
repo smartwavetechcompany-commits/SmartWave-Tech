@@ -563,7 +563,8 @@ export function FandB() {
             idempotencyKey: `FB_PAY_${orderRef.id}`,
             postedBy: profile.uid,
             paymentMethod: directPayMethod as any,
-            settlementSource: 'F&B Outlet'
+            settlementSource: 'F&B Outlet',
+            skipFinanceMirror: true
           }, profile.uid, res.corporateId || undefined, directPayMethod as any, {
             uid: profile?.uid,
             email: profile?.email,
@@ -603,6 +604,8 @@ export function FandB() {
             paymentMethod: pay.method,
             settlementSource: source,
             referenceId: orderRef.id,
+            reservationId: res?.id || null,
+            guestId: effectiveGuestId !== 'unknown' ? effectiveGuestId : null,
             postedBy: profile.uid,
             processedBy: {
               uid: profile.uid,
@@ -1123,6 +1126,8 @@ export function FandB() {
         paymentMethod: settleMethod,
         settlementSource: settleSource,
         referenceId: settleOrderModal.id,
+        reservationId: res?.id || null,
+        guestId: guestId !== 'unknown' ? guestId : null,
         postedBy: profile.uid,
         processedBy: {
           uid: profile.uid,
@@ -1153,7 +1158,8 @@ export function FandB() {
           referenceId: `${settleOrderModal.id}_PAY_${Date.now()}`,
           postedBy: profile.uid,
           paymentMethod: settleMethod as any,
-          settlementSource: settleSource
+          settlementSource: settleSource,
+          skipFinanceMirror: true
         }, profile.uid, res.corporateId || undefined, settleMethod as any, {
           uid: profile?.uid,
           email: profile?.email,

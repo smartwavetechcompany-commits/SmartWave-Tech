@@ -484,6 +484,27 @@ export function reconcileFinanceRecords(
     if (le.id) ledgerById.set(le.id, le);
   });
 
+  const fbIncomeRecords = records.filter(
+    r => r.type === 'income' && r.category === 'F & B Revenue'
+  );
+
+  const getRecordTimeMs = (rec: any): number => {
+    const ts = rec?.timestamp || rec?.createdAt;
+    if (!ts) return 0;
+    if (typeof ts?.toDate === 'function') {
+      try { return ts.toDate().getTime(); } catch { return 0; }
+    }
+    if (typeof ts?.seconds === 'number') return ts.seconds * 1000;
+    const ms = new Date(ts).getTime();
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+
+  const extractFbBillTag = (desc?: string): string | null => {
+    if (!desc) return null;
+    const m = desc.match(/Bill\s*#(FB-[A-Za-z0-9-]+)/i);
+    return m ? m[1].toUpperCase() : null;
+  };
+
   return records.filter(r => {
     const recResId = (r as any).reservationId as string | undefined | null;
     if (
@@ -517,6 +538,40 @@ export function reconcileFinanceRecords(
           !isSpecialNonReservationId(linkedLedger.reservationId) &&
           !resIdSet.has(linkedLedger.reservationId)
         ) {
+          return false;
+        }
+      }
+
+      // Deduplicate legacy duplicate pairs where F&B posted both an 'F & B Revenue' record
+      // and a ledger-mirrored 'Room Revenue' ('F & B Direct Payment ...') record for the same payment.
+      if (
+        r.type === 'income' &&
+        r.category === 'Room Revenue' &&
+        (r.description || '').startsWith('F & B Direct Payment')
+      ) {
+        const rAmt = Number(r.amount) || 0;
+        const rTs = getRecordTimeMs(r);
+        const rBillTag = extractFbBillTag(r.description);
+
+        const hasMatchingFbRecord = fbIncomeRecords.some(fb => {
+          if (fb.id === r.id) return false;
+          if (fb.referenceId && linkedLedger?.referenceId && linkedLedger.referenceId.startsWith(`${fb.referenceId}_`)) {
+            return true;
+          }
+          const fbAmt = Number(fb.amount) || 0;
+          if (Math.abs(fbAmt - rAmt) >= 0.01) return false;
+          if (rBillTag) {
+            const fbBillTag = extractFbBillTag(fb.description);
+            if (fbBillTag && fbBillTag === rBillTag) return true;
+          }
+          const fbTs = getRecordTimeMs(fb);
+          if (rTs && fbTs && Math.abs(rTs - fbTs) <= 120000) {
+            return true;
+          }
+          return false;
+        });
+
+        if (hasMatchingFbRecord) {
           return false;
         }
       }

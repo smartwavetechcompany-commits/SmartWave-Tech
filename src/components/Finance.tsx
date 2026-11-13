@@ -294,9 +294,13 @@ export function Finance() {
         if (recInvoiceId && seenInvoiceOrRefIds.has(recInvoiceId)) return;
         const rTs = new Date(r.timestamp || (r as any).createdAt || 0).getTime();
         const matchesCorporateOrTimedLedger = ledgerPaymentsList.some(e => {
+          const eTs = new Date(e.timestamp || (e as any).createdAt || 0).getTime();
+          if (r.referenceId && e.referenceId && e.referenceId.startsWith(`${r.referenceId}_`)) {
+            if (Math.abs((Number(e.amount) || 0) - (Number(r.amount) || 0)) < 0.01) return true;
+            if (rTs && eTs && Math.abs(rTs - eTs) <= 120000) return true;
+          }
           if (Math.abs((Number(e.amount) || 0) - (Number(r.amount) || 0)) >= 0.01) return false;
           if (e.corporateId && r.referenceId === e.corporateId) return true;
-          const eTs = new Date(e.timestamp || (e as any).createdAt || 0).getTime();
           return Boolean(rTs && eTs && Math.abs(rTs - eTs) <= 120000);
         });
         if (matchesCorporateOrTimedLedger) return;

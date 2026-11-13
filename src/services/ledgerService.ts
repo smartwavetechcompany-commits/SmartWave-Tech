@@ -279,9 +279,10 @@ export const postToLedger = async (
   
   entries.forEach(e => {
     const newDocRef = doc(ledgerRef);
+    const { skipFinanceMirror: _skipFinanceMirror, ...persistableEntry } = e;
     // Ensure every entry has a timestamp for stable ordering
     const finalEntry = {
-      ...e,
+      ...persistableEntry,
       timestamp: e.timestamp || nowISO,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -389,7 +390,7 @@ export const postToLedger = async (
 
 
   // 6. Finance records
-  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund'));
+  const payments = entries.filter(e => (e.category === 'payment' || e.category === 'refund') && !e.skipFinanceMirror);
   const financeRef = collection(db, 'hotels', hotelId, 'finance');
   payments.forEach(p => {
     const financeDocRef = doc(financeRef);

@@ -454,11 +454,15 @@ export function Dashboard() {
       const eAmt = Number(e.amount) || 0;
 
       const hasMirroredFinance = financeIncome.some(f => {
+        const fTs = new Date(getRecordDateString(f.timestamp || (f as any).createdAt) || 0).getTime();
+        if (f.referenceId && e.referenceId && e.referenceId.startsWith(`${f.referenceId}_`)) {
+          if (Math.abs((Number(f.amount) || 0) - eAmt) < 0.01) return true;
+          if (fTs && eTs && Math.abs(fTs - eTs) <= 120000) return true;
+        }
         const fAmt = Number(f.amount) || 0;
         if (Math.abs(fAmt - eAmt) >= 0.01) return false;
         if (e.corporateId && f.referenceId === e.corporateId) return true;
         if (e.reservationId && (f as any).reservationId === e.reservationId) return true;
-        const fTs = new Date(getRecordDateString(f.timestamp || (f as any).createdAt) || 0).getTime();
         if (fTs && eTs && Math.abs(fTs - eTs) <= 120000) return true;
         return false;
       });

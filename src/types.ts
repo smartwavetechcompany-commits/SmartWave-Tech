@@ -1060,6 +1060,7 @@ export interface LedgerEntry {
   roomChargedAmount?: number;
   directPaidAmount?: number;
   skipAutomaticTax?: boolean;
+  skipFinanceMirror?: boolean;
 }
 
 export interface CorporateAccount {
