@@ -175,26 +175,17 @@ export function Finance() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
-    const personalReservations = reservations.filter(r => !r.corporateId);
+    const nonCancelledReservations = reservations.filter(r => r.status !== 'cancelled');
 
     guests.forEach(guest => {
-      const hasAnyStay = reservations.some(r =>
-        r.status !== 'cancelled' &&
-        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      const guestAllRes = nonCancelledReservations.filter(r =>
+        r.guestId === guest.id ||
+        (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim())
       );
 
-      // Corporate stays belong to the corporate account; only personal non-corporate stays are guest individual debts
-      const guestPersonalRes = personalReservations.filter(r =>
-        r.status !== 'cancelled' &&
-        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
-      );
-
-      if (guestPersonalRes.length > 0) {
-        const position = calculateGuestFinancialPosition(guest, guestPersonalRes, hotel, validLedgerEntries);
+      if (guestAllRes.length > 0) {
+        const position = calculateGuestFinancialPosition(guest, guestAllRes, hotel, validLedgerEntries);
         balanceMap[guest.id] = position.outstandingBalance;
-      } else if (hasAnyStay) {
-        // Guest only has corporate reservations; their stay is direct-billed to corporate partner
-        balanceMap[guest.id] = 0;
       } else {
         balanceMap[guest.id] = calculateGuestFinancialPosition(guest, [], hotel, validLedgerEntries).outstandingBalance;
       }
@@ -211,13 +202,26 @@ export function Finance() {
       r.status !== 'cancelled' &&
       (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
     );
+    if (guestRes.length > 0) {
+      return calculateGuestFinancialPosition(guest, guestRes, hotel, validLedgerEntries).outstandingBalance;
+    }
+    return calculateGuestFinancialPosition(guest, [], hotel, validLedgerEntries).outstandingBalance;
+  }, [guestLiveBalances, reservations, hotel, validLedgerEntries]);
+
+  // Non-corporate guest balance helper used strictly when summing guests + corporateAccounts together
+  // so corporate-linked stays are not double-counted in City Ledger aggregate totals
+  const getGuestNonCorporateLiveBalance = useCallback((guest: Guest) => {
+    const guestRes = reservations.filter(r =>
+      r.status !== 'cancelled' &&
+      (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+    );
     const individualRes = guestRes.filter(r => !r.corporateId);
     if (individualRes.length > 0) {
       return calculateGuestFinancialPosition(guest, individualRes, hotel, validLedgerEntries).outstandingBalance;
     }
     if (guestRes.length > 0) return 0;
     return calculateGuestFinancialPosition(guest, [], hotel, validLedgerEntries).outstandingBalance;
-  }, [guestLiveBalances, reservations, hotel, validLedgerEntries]);
+  }, [reservations, hotel, validLedgerEntries]);
 
   const categories = {
     income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
@@ -1305,7 +1309,6 @@ export function Finance() {
       filename = `guest_debtors_${dateStamp}.pdf`;
       headers = ['Guest Name', 'Room', 'Check-In', 'Check-Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'];
       const debtorsList = reservations.filter(r => {
-        if (r.corporateId) return false;
         const opStatus = r.operationalStatus || r.status;
         const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
         const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
@@ -2015,7 +2018,7 @@ export function Finance() {
                       <p className="text-xs font-bold text-zinc-500 uppercase">Total Receivables</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) > 0 ? getGuestLiveBalance(g) : 0), 0) +
+                          guests.reduce((acc, g) => acc + (getGuestNonCorporateLiveBalance(g) > 0 ? getGuestNonCorporateLiveBalance(g) : 0), 0) +
                           corporateAccounts.reduce((acc, c) => acc + (c.currentBalance > 0 ? c.currentBalance : 0), 0),
                           currency, exchangeRate
                         )}
@@ -2053,7 +2056,7 @@ export function Finance() {
                       <p className="text-xs font-bold text-zinc-500 uppercase">Credit Available</p>
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
-                          guests.reduce((acc, g) => acc + (getGuestLiveBalance(g) < 0 ? Math.abs(getGuestLiveBalance(g)) : 0), 0) +
+                          guests.reduce((acc, g) => acc + (getGuestNonCorporateLiveBalance(g) < 0 ? Math.abs(getGuestNonCorporateLiveBalance(g)) : 0), 0) +
                           corporateAccounts.reduce((acc, c) => {
                             const creditLimit = Number(c.creditLimit) || 0;
                             const used = Math.max(Number(c.totalDebits) || 0, Number(c.currentBalance) || 0);
@@ -2225,7 +2228,6 @@ export function Finance() {
             <div className="space-y-6">
               {(() => {
                 const debtors = reservations.filter(r => {
-                  if (r.corporateId) return false;
                   const opStatus = r.operationalStatus || r.status;
                   const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
                   const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');

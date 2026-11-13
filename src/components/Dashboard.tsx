@@ -420,13 +420,13 @@ export function Dashboard() {
 
   const debtorReservationIds = new Set(validDebts.map(d => d.reservationId).filter(Boolean));
   const departedReservationsOwing = reservations
-    .filter(r => r.status === 'checked_out' && !r.corporateId && !debtorReservationIds.has(r.id) && r.financialStatus !== 'SETTLED' && r.paymentStatus !== 'paid')
+    .filter(r => r.status === 'checked_out' && !debtorReservationIds.has(r.id) && r.financialStatus !== 'SETTLED' && r.paymentStatus !== 'paid')
     .reduce((acc, r) => {
       const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
       if (bal <= 0.01) return acc;
       if (r.guestId) {
-        const guestPersonalRes = reservations.filter(x => !x.corporateId && x.status !== 'cancelled' && x.guestId === r.guestId);
-        const guestPos = calculateGuestFinancialPosition({ id: r.guestId, email: r.guestEmail }, guestPersonalRes, hotel, validLedgerEntries);
+        const guestRes = reservations.filter(x => x.status !== 'cancelled' && x.guestId === r.guestId);
+        const guestPos = calculateGuestFinancialPosition({ id: r.guestId, email: r.guestEmail }, guestRes, hotel, validLedgerEntries);
         if (guestPos.netAmountDue <= 0.01) return acc;
       }
       return acc + bal;

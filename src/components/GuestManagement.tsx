@@ -211,23 +211,17 @@ export function GuestManagement() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
-    const personalReservations = allReservations.filter(r => !r.corporateId);
+    const nonCancelledReservations = allReservations.filter(r => r.status !== 'cancelled');
 
     guests.forEach(guest => {
-      const hasAnyStay = allReservations.some(r =>
-        r.status !== 'cancelled' &&
-        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
-      );
-      const guestPersonalRes = personalReservations.filter(r =>
-        r.status !== 'cancelled' &&
-        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      const guestResList = nonCancelledReservations.filter(r =>
+        r.guestId === guest.id ||
+        (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim())
       );
 
-      if (guestPersonalRes.length > 0) {
-        const position = calculateGuestFinancialPosition(guest, guestPersonalRes, hotel, allLedgerEntries);
+      if (guestResList.length > 0) {
+        const position = calculateGuestFinancialPosition(guest, guestResList, hotel, allLedgerEntries);
         balanceMap[guest.id] = position.outstandingBalance;
-      } else if (hasAnyStay) {
-        balanceMap[guest.id] = 0;
       } else {
         balanceMap[guest.id] = Number((guest.ledgerBalance ?? 0).toFixed(2));
       }
@@ -240,8 +234,8 @@ export function GuestManagement() {
     if (guestLiveBalances[guest.id] !== undefined) {
       return guestLiveBalances[guest.id];
     }
-    const personalRes = allReservations.filter(r => !r.corporateId && r.status !== 'cancelled');
-    return calculateGuestFinancialPosition(guest, personalRes, hotel, allLedgerEntries).outstandingBalance;
+    const activeRes = allReservations.filter(r => r.status !== 'cancelled');
+    return calculateGuestFinancialPosition(guest, activeRes, hotel, allLedgerEntries).outstandingBalance;
   }, [guestLiveBalances, allReservations, hotel, allLedgerEntries]);
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
@@ -294,11 +288,7 @@ export function GuestManagement() {
       const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
       const visitsCount = completedCount + activeCount;
 
-      const individualGuestRes = guestRes.filter(r => !r.corporateId);
       const position = calculateGuestFinancialPosition(g, guestRes, hotel, allLedgerEntries);
-      const personalPosition = individualGuestRes.length > 0
-        ? calculateGuestFinancialPosition(g, individualGuestRes, hotel, allLedgerEntries)
-        : null;
       const calculatedNights = position.totalNights;
       const bookingNights = position.bookingNights !== undefined ? position.bookingNights : calculatedNights;
       const overstayNights = position.overstayNights || 0;
@@ -310,7 +300,7 @@ export function GuestManagement() {
       // Revenue Generated = All posted charges (Room charges + Service charges + Taxes + Overstay)
       const totalRevenueVal = position.totalCharges;
       const totalDiscountsVal = position.totalDiscounts || 0;
-      const outstandingDebtVal = personalPosition ? personalPosition.netAmountDue : (guestRes.length > 0 ? 0 : Math.max(0, g.ledgerBalance || 0));
+      const outstandingDebtVal = guestRes.length > 0 ? position.netAmountDue : Math.max(0, g.ledgerBalance || 0);
 
       statsMap[g.id] = {
         visitsCount,

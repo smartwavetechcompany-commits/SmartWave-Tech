@@ -631,10 +631,10 @@ export function Reports() {
           const pos = calculateGuestFinancialPosition(guest, guestRes, hotel, validLedgerEntries);
           const totalSpent = Math.max(0, pos.totalPayments - pos.totalRefunds);
           const revenueGenerated = pos.totalCharges;
-          const individualGuestRes = guestRes.filter(r => !r.corporateId && r.status !== 'cancelled');
-          const outstandingDebt = individualGuestRes.length > 0
-            ? individualGuestRes.reduce((sum, r) => sum + Math.max(0, getReservationLiveBalance(r, hotel, validLedgerEntries)), 0)
-            : (guestRes.length > 0 ? 0 : pos.netAmountDue);
+          const nonCancelledGuestRes = guestRes.filter(r => r.status !== 'cancelled');
+          const outstandingDebt = nonCancelledGuestRes.length > 0
+            ? nonCancelledGuestRes.reduce((sum, r) => sum + Math.max(0, getReservationLiveBalance(r, hotel, validLedgerEntries)), 0)
+            : pos.netAmountDue;
 
           return {
             'Guest Name': guest.name,
