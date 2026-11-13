@@ -19,6 +19,7 @@ import { cn, safeStringify } from '../utils';
 import { errorService, ErrorSeverity } from '../services/errorService';
 import { format } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
+import { Pagination } from './Pagination';
 
 interface Notification {
   id: string;
@@ -37,6 +38,8 @@ export function Notifications() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [notifPage, setNotifPage] = useState(1);
+  const notifPageSize = 6;
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;
@@ -184,54 +187,68 @@ export function Notifications() {
                 )}
               </div>
 
-              <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+              <div>
                 {notifications.length === 0 ? (
                   <div className="p-8 text-center text-zinc-500">
                     <Bell size={32} className="mx-auto mb-2 opacity-20" />
                     <p className="text-xs">No notifications yet</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-zinc-800">
-                    {notifications.map((notification) => (
-                      <div 
-                        key={notification.id}
-                        className={cn(
-                          "p-4 transition-colors hover:bg-zinc-800/50 flex gap-3 cursor-pointer group",
-                          !notification.read && "bg-emerald-500/5"
-                        )}
-                        onClick={() => handleNotificationClick(notification)}
-                      >
-                        <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform",
-                          notification.type === 'info' ? "bg-blue-500/10 text-blue-500" :
-                          notification.type === 'warning' ? "bg-amber-500/10 text-amber-500" :
-                          notification.type === 'error' ? "bg-red-500/10 text-red-500" :
-                          "bg-emerald-500/10 text-emerald-500"
-                        )}>
-                          {notification.type === 'info' && <Info size={16} />}
-                          {notification.type === 'warning' && <AlertTriangle size={16} />}
-                          {notification.type === 'error' && <AlertCircle size={16} />}
-                          {notification.type === 'success' && <Check size={16} />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <h4 className="text-xs font-bold text-zinc-50 group-hover:text-emerald-400 transition-colors truncate">
-                              {notification.title}
-                            </h4>
-                            <span className="text-[10px] text-zinc-500 whitespace-nowrap">
-                              {safeFormatDate(notification.timestamp, 'HH:mm')}
-                            </span>
+                  <>
+                    <div className="divide-y divide-zinc-800">
+                      {notifications.slice((notifPage - 1) * notifPageSize, notifPage * notifPageSize).map((notification) => (
+                        <div 
+                          key={notification.id}
+                          className={cn(
+                            "p-4 transition-colors hover:bg-zinc-800/50 flex gap-3 cursor-pointer group",
+                            !notification.read && "bg-emerald-500/5"
+                          )}
+                          onClick={() => handleNotificationClick(notification)}
+                        >
+                          <div className={cn(
+                            "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform",
+                            notification.type === 'info' ? "bg-blue-500/10 text-blue-500" :
+                            notification.type === 'warning' ? "bg-amber-500/10 text-amber-500" :
+                            notification.type === 'error' ? "bg-red-500/10 text-red-500" :
+                            "bg-emerald-500/10 text-emerald-500"
+                          )}>
+                            {notification.type === 'info' && <Info size={16} />}
+                            {notification.type === 'warning' && <AlertTriangle size={16} />}
+                            {notification.type === 'error' && <AlertCircle size={16} />}
+                            {notification.type === 'success' && <Check size={16} />}
                           </div>
-                          <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
-                            {notification.message}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <h4 className="text-xs font-bold text-zinc-50 group-hover:text-emerald-400 transition-colors truncate">
+                                {notification.title}
+                              </h4>
+                              <span className="text-[10px] text-zinc-500 whitespace-nowrap">
+                                {safeFormatDate(notification.timestamp, 'HH:mm')}
+                              </span>
+                            </div>
+                            <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
+                              {notification.message}
+                            </p>
+                          </div>
+                          {!notification.read && (
+                            <div className="w-2 h-2 bg-emerald-500 rounded-full mt-1.5 shrink-0" />
+                          )}
                         </div>
-                        {!notification.read && (
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full mt-1.5 shrink-0" />
-                        )}
+                      ))}
+                    </div>
+                    {notifications.length > notifPageSize && (
+                      <div className="px-3 py-2 border-t border-zinc-800 bg-zinc-950/30">
+                        <Pagination
+                          currentPage={notifPage}
+                          totalItems={notifications.length}
+                          pageSize={notifPageSize}
+                          onPageChange={setNotifPage}
+                          itemLabel="alerts"
+                          compact
+                        />
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
               </div>
 

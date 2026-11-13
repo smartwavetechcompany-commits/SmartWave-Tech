@@ -16,6 +16,7 @@ import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc, increment } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface ProcurementProps {
   vendors: InventoryVendor[];
@@ -29,6 +30,10 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showAddPO, setShowAddPO] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [poPage, setPoPage] = useState(1);
+  const [poPageSize, setPoPageSize] = useState(10);
+  const [vendorPage, setVendorPage] = useState(1);
+  const [vendorPageSize, setVendorPageSize] = useState(9);
 
   // Vendor Form State
   const [vendorForm, setVendorForm] = useState({
@@ -222,7 +227,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
           </div>
 
           <div className="grid grid-cols-1 gap-4">
-            {purchaseOrders.map((po) => {
+            {purchaseOrders.slice((poPage - 1) * poPageSize, poPage * poPageSize).map((po) => {
               const vendor = vendors.find(v => v.id === po.supplierId);
               return (
                 <div key={po.id} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 hover:border-zinc-700 transition-all group">
@@ -295,6 +300,18 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
               );
             })}
           </div>
+          <Pagination
+            currentPage={poPage}
+            totalItems={purchaseOrders.length}
+            pageSize={poPageSize}
+            onPageChange={setPoPage}
+            onPageSizeChange={(size) => {
+              setPoPageSize(size);
+              setPoPage(1);
+            }}
+            itemLabel="orders"
+            className="rounded-2xl border border-zinc-800"
+          />
         </div>
       ) : (
         <div className="space-y-6">
@@ -310,7 +327,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {vendors.map((vendor) => (
+            {vendors.slice((vendorPage - 1) * vendorPageSize, vendorPage * vendorPageSize).map((vendor) => (
               <div key={vendor.id} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 hover:border-zinc-700 transition-all">
                 <div className="flex items-start justify-between mb-6">
                   <div className="w-12 h-12 bg-zinc-800 rounded-2xl flex items-center justify-center text-zinc-400">
@@ -351,6 +368,19 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
               </div>
             ))}
           </div>
+          <Pagination
+            currentPage={vendorPage}
+            totalItems={vendors.length}
+            pageSize={vendorPageSize}
+            onPageChange={setVendorPage}
+            onPageSizeChange={(size) => {
+              setVendorPageSize(size);
+              setVendorPage(1);
+            }}
+            pageSizeOptions={[9, 18, 36]}
+            itemLabel="vendors"
+            className="rounded-2xl border border-zinc-800"
+          />
         </div>
       )}
 

@@ -54,6 +54,7 @@ import { getRoomDisplayStatus, getRoomDetailedReservationInfo, RoomReservationIn
 import { hasPermission } from '../utils/permissions';
 import { useNavigate } from 'react-router-dom';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
+import { Pagination } from './Pagination';
 
 export function Rooms() {
   const navigate = useNavigate();
@@ -107,6 +108,7 @@ export function Rooms() {
   };
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [returningGuestDebtModalData, setReturningGuestDebtModalData] = useState<{
     debts: any[];
     totalDebt: number;
@@ -141,6 +143,20 @@ export function Rooms() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [calendarStartDate, setCalendarStartDate] = useState(startOfDay(new Date()));
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
+  const [roomPage, setRoomPage] = useState<number>(1);
+  const [roomPageSize, setRoomPageSize] = useState<number>(24);
+  const [blockPage, setBlockPage] = useState<number>(1);
+  const [blockPageSize, setBlockPageSize] = useState<number>(6);
+  const [ratePage, setRatePage] = useState<number>(1);
+  const [ratePageSize, setRatePageSize] = useState<number>(6);
+  const [rulePage, setRulePage] = useState<number>(1);
+  const [rulePageSize, setRulePageSize] = useState<number>(6);
+  const [typePage, setTypePage] = useState<number>(1);
+  const [typePageSize, setTypePageSize] = useState<number>(6);
+
+  useEffect(() => {
+    setRoomPage(1);
+  }, [searchQuery, statusFilter, typeFilter, capacityFilter, view]);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [selectedRoomForBlocking, setSelectedRoomForBlocking] = useState<string | null>(null);
   const [isAddingRoom, setIsAddingRoom] = useState(false);
@@ -235,6 +251,17 @@ export function Rooms() {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
     });
 
+    return () => unsub();
+  }, [hotel?.id, profile?.uid]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile) return;
+    const ledgerRef = collection(db, 'hotels', hotel.id, 'ledger');
+    const unsub = onSnapshot(ledgerRef, (snap) => {
+      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+    }, (err: any) => {
+      console.warn("Rooms ledger listener notice:", err);
+    });
     return () => unsub();
   }, [hotel?.id, profile?.uid]);
 
@@ -678,7 +705,8 @@ export function Rooms() {
       try {
         const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
         const now = new Date();
-        const billingState = calculateBilling(res, hotel);
+        const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+        const billingState = calculateBilling(res, hotel, resLedger);
         const nightsStayed = billingState.nightsCount;
         // 1. Authoritative financial reconciliation & stay billing before checkout
         await reconcileAndRepairReservationFinancials(hotel.id, res.id);
@@ -892,7 +920,8 @@ export function Rooms() {
   };
 
   const getCheckoutPreviewData = (res: Reservation) => {
-    const billing = calculateBilling(res, hotel);
+    const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+    const billing = calculateBilling(res, hotel, resLedger);
     const { checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
     const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
     
@@ -1571,7 +1600,7 @@ export function Rooms() {
               <div className="space-y-6">
                 <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Active Blockings</h4>
                 <div className="space-y-3">
-                  {blockings.map(b => (
+                  {blockings.slice((blockPage - 1) * blockPageSize, blockPage * blockPageSize).map(b => (
                     <div key={b.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
                       <div>
                         <div className="font-bold text-zinc-50">Room {rooms.find(r => r.id === b.roomId)?.roomNumber}</div>
@@ -1602,6 +1631,19 @@ export function Rooms() {
                       </button>
                     </div>
                   ))}
+                  {blockings.length > blockPageSize && (
+                    <Pagination
+                      compact
+                      currentPage={blockPage}
+                      totalItems={blockings.length}
+                      pageSize={blockPageSize}
+                      onPageChange={setBlockPage}
+                      onPageSizeChange={setBlockPageSize}
+                      pageSizeOptions={[6, 12, 24]}
+                      itemLabel="blockings"
+                      className="rounded-xl border border-zinc-800"
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -1851,82 +1893,97 @@ export function Rooms() {
                       <p className="text-zinc-500 text-sm">No rate rules configured yet</p>
                     </div>
                   ) : (
-                    rateConfigs.map(c => {
-                      const type = roomTypes.find(t => t.id === c.roomTypeId);
-                      return (
-                        <div key={c.id} className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center justify-between group hover:border-emerald-500/30 transition-colors">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="font-black text-zinc-50 uppercase tracking-tighter text-lg">{type?.name || 'Unknown Type'}</span>
-                              <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[8px] font-bold uppercase">Rate Rule</span>
-                            </div>
-                            
-                            <div className="grid grid-cols-3 gap-4">
-                              <div>
-                                <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Base Rate</div>
-                                <div className="text-sm font-bold text-emerald-500">{formatCurrency(c.baseRate, currency, exchangeRate)}</div>
+                    <>
+                      {rateConfigs.slice((ratePage - 1) * ratePageSize, ratePage * ratePageSize).map(c => {
+                        const type = roomTypes.find(t => t.id === c.roomTypeId);
+                        return (
+                          <div key={c.id} className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl flex items-center justify-between group hover:border-emerald-500/30 transition-colors">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="font-black text-zinc-50 uppercase tracking-tighter text-lg">{type?.name || 'Unknown Type'}</span>
+                                <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded text-[8px] font-bold uppercase">Rate Rule</span>
                               </div>
-                              {c.weekendRate > 0 && (
+                              
+                              <div className="grid grid-cols-3 gap-4">
                                 <div>
-                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Weekend</div>
-                                  <div className="text-sm font-bold text-amber-500">{formatCurrency(c.weekendRate, currency, exchangeRate)}</div>
+                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Base Rate</div>
+                                  <div className="text-sm font-bold text-emerald-500">{formatCurrency(c.baseRate, currency, exchangeRate)}</div>
                                 </div>
-                              )}
-                              {c.weekdayRate > 0 && (
-                                <div>
-                                  <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Weekday</div>
-                                  <div className="text-sm font-bold text-blue-500">{formatCurrency(c.weekdayRate, currency, exchangeRate)}</div>
-                                </div>
-                              )}
-                            </div>
-
-                            {c.seasonalRates && c.seasonalRates.length > 0 && (
-                              <div className="mt-3 pt-3 border-t border-zinc-800 flex flex-wrap gap-2">
-                                <span className="text-[8px] font-bold text-zinc-600 uppercase w-full mb-1">Has {c.seasonalRates.length} Seasonal Rules</span>
-                                {c.seasonalRates.slice(0, 2).map((s: any) => (
-                                  <div key={s.id} className="flex items-center gap-1.5 bg-emerald-500/5 px-2 py-1 rounded text-[9px] border border-emerald-500/10">
-                                    <span className="text-emerald-500 font-bold">{s.name}:</span>
-                                    <span className="text-zinc-400 font-medium">{formatCurrency(s.rate, currency, exchangeRate)}</span>
+                                {c.weekendRate > 0 && (
+                                  <div>
+                                    <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Weekend</div>
+                                    <div className="text-sm font-bold text-amber-500">{formatCurrency(c.weekendRate, currency, exchangeRate)}</div>
                                   </div>
-                                ))}
-                                {c.seasonalRates.length > 2 && <span className="text-[9px] text-zinc-600">+{c.seasonalRates.length - 2} more</span>}
+                                )}
+                                {c.weekdayRate > 0 && (
+                                  <div>
+                                    <div className="text-[8px] font-bold text-zinc-500 uppercase mb-0.5">Weekday</div>
+                                    <div className="text-sm font-bold text-blue-500">{formatCurrency(c.weekdayRate, currency, exchangeRate)}</div>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all pl-4">
-                            <button 
-                              onClick={() => setEditingRateConfig(c)}
-                              className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
-                              title="Edit Configuration"
-                            >
-                              <Edit2 size={18} />
-                            </button>
-                            {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+
+                              {c.seasonalRates && c.seasonalRates.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-zinc-800 flex flex-wrap gap-2">
+                                  <span className="text-[8px] font-bold text-zinc-600 uppercase w-full mb-1">Has {c.seasonalRates.length} Seasonal Rules</span>
+                                  {c.seasonalRates.slice(0, 2).map((s: any) => (
+                                    <div key={s.id} className="flex items-center gap-1.5 bg-emerald-500/5 px-2 py-1 rounded text-[9px] border border-emerald-500/10">
+                                      <span className="text-emerald-500 font-bold">{s.name}:</span>
+                                      <span className="text-zinc-400 font-medium">{formatCurrency(s.rate, currency, exchangeRate)}</span>
+                                    </div>
+                                  ))}
+                                  {c.seasonalRates.length > 2 && <span className="text-[9px] text-zinc-600">+{c.seasonalRates.length - 2} more</span>}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all pl-4">
                               <button 
-                                onClick={async () => {
-                                  if (!hotel?.id || !confirm('Permanently delete this rate rule?')) return;
-                                  try {
-                                    await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
-                                      hotelId: hotel.id,
-                                      module: 'Rooms',
-                                      action: 'DELETE_RATE_RULE',
-                                      details: `Deleted rate rule for room type ${type?.name || c.roomTypeId}`
-                                    });
-                                    toast.success('Rate rule deleted');
-                                  } catch (err) {
-                                    handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
-                                  }
-                                }}
-                                className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                title="Delete Rule"
+                                onClick={() => setEditingRateConfig(c)}
+                                className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                title="Edit Configuration"
                               >
-                                <Trash2 size={18} />
+                                <Edit2 size={18} />
                               </button>
-                            )}
+                              {(profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                                <button 
+                                  onClick={async () => {
+                                    if (!hotel?.id || !confirm('Permanently delete this rate rule?')) return;
+                                    try {
+                                      await database.safeDelete(doc(db, 'hotels', hotel.id, 'rate_configurations', c.id), {
+                                        hotelId: hotel.id,
+                                        module: 'Rooms',
+                                        action: 'DELETE_RATE_RULE',
+                                        details: `Deleted rate rule for room type ${type?.name || c.roomTypeId}`
+                                      });
+                                      toast.success('Rate rule deleted');
+                                    } catch (err) {
+                                      handleFirestoreError(err, OperationType.DELETE, `hotels/${hotel.id}/rate_configurations/${c.id}`);
+                                    }
+                                  }}
+                                  className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                  title="Delete Rule"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })}
+                      {rateConfigs.length > ratePageSize && (
+                        <Pagination
+                          compact
+                          currentPage={ratePage}
+                          totalItems={rateConfigs.length}
+                          pageSize={ratePageSize}
+                          onPageChange={setRatePage}
+                          onPageSizeChange={setRatePageSize}
+                          pageSizeOptions={[6, 12, 24]}
+                          itemLabel="rules"
+                          className="rounded-xl border border-zinc-800"
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -2011,7 +2068,7 @@ export function Rooms() {
               <div className="space-y-6">
                 <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Active Rules</h4>
                 <div className="space-y-3">
-                  {consumptionRules.map(r => (
+                  {consumptionRules.slice((rulePage - 1) * rulePageSize, rulePage * rulePageSize).map(r => (
                     <div key={r.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between">
                       <div>
                         <div className="font-bold text-zinc-50">{inventoryItems.find(i => i.id === r.itemId)?.name}</div>
@@ -2042,6 +2099,19 @@ export function Rooms() {
                       )}
                     </div>
                   ))}
+                  {consumptionRules.length > rulePageSize && (
+                    <Pagination
+                      compact
+                      currentPage={rulePage}
+                      totalItems={consumptionRules.length}
+                      pageSize={rulePageSize}
+                      onPageChange={setRulePage}
+                      onPageSizeChange={setRulePageSize}
+                      pageSizeOptions={[6, 12, 24]}
+                      itemLabel="rules"
+                      className="rounded-xl border border-zinc-800"
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -2180,7 +2250,7 @@ export function Rooms() {
               <div className="space-y-6">
                 <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Existing Types</h4>
                 <div className="space-y-3">
-                  {roomTypes.map(type => (
+                  {roomTypes.slice((typePage - 1) * typePageSize, typePage * typePageSize).map(type => (
                     <div key={type.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-xl flex items-center justify-between group">
                       <div>
                         <div className="font-bold text-zinc-50 flex items-center gap-2">
@@ -2234,6 +2304,19 @@ export function Rooms() {
                       </div>
                     </div>
                   ))}
+                  {roomTypes.length > typePageSize && (
+                    <Pagination
+                      compact
+                      currentPage={typePage}
+                      totalItems={roomTypes.length}
+                      pageSize={typePageSize}
+                      onPageChange={setTypePage}
+                      onPageSizeChange={setTypePageSize}
+                      pageSizeOptions={[6, 12, 24]}
+                      itemLabel="types"
+                      className="rounded-xl border border-zinc-800"
+                    />
+                  )}
                   {roomTypes.length === 0 && (
                     <div className="text-center py-8 text-zinc-600 border border-dashed border-zinc-800 rounded-xl">
                       No custom room types defined yet.
@@ -2267,6 +2350,7 @@ export function Rooms() {
       />
 
       {view === 'grid' ? (
+        <div className="space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5 sm:gap-4">
           {filteredRooms.length === 0 ? (
             <div className="col-span-full py-20 text-center text-zinc-500 bg-zinc-900/50 border border-dashed border-zinc-800 rounded-2xl">
@@ -2274,7 +2358,7 @@ export function Rooms() {
               <p>No rooms found matching your filters</p>
             </div>
           ) : (
-            filteredRooms.map((room) => {
+            filteredRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map((room) => {
               const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings);
               const displayStatus = resInfo.displayStatus;
               return (
@@ -2427,6 +2511,19 @@ export function Rooms() {
         })
       )}
     </div>
+          {filteredRooms.length > 0 && (
+            <Pagination
+              currentPage={roomPage}
+              totalItems={filteredRooms.length}
+              pageSize={roomPageSize}
+              onPageChange={setRoomPage}
+              onPageSizeChange={setRoomPageSize}
+              pageSizeOptions={[16, 24, 48, 96]}
+              itemLabel="rooms"
+              className="rounded-2xl border border-zinc-800"
+            />
+          )}
+        </div>
       ) : view === 'list' ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
           <table className="w-full text-left">
@@ -2453,7 +2550,7 @@ export function Rooms() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredRooms.map((room) => {
+              {filteredRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map((room) => {
                 const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings);
                 const displayStatus = resInfo.displayStatus;
               return (
@@ -2584,6 +2681,15 @@ export function Rooms() {
             })}
             </tbody>
           </table>
+          <Pagination
+            currentPage={roomPage}
+            totalItems={filteredRooms.length}
+            pageSize={roomPageSize}
+            onPageChange={setRoomPage}
+            onPageSizeChange={setRoomPageSize}
+            pageSizeOptions={[16, 24, 48, 96]}
+            itemLabel="rooms"
+          />
         </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col">
@@ -2638,7 +2744,7 @@ export function Rooms() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRooms.map(room => (
+                {filteredRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map(room => (
                   <tr key={room.id} className="group">
                     <td className="sticky left-0 z-10 bg-zinc-900 border-r border-b border-zinc-800 p-4 font-bold text-zinc-50 group-hover:bg-zinc-800 transition-colors">
                       <div className="flex flex-col">
@@ -2760,6 +2866,15 @@ export function Rooms() {
               <span className="text-[10px] font-bold text-zinc-500 uppercase">Available</span>
             </div>
           </div>
+          <Pagination
+            currentPage={roomPage}
+            totalItems={filteredRooms.length}
+            pageSize={roomPageSize}
+            onPageChange={setRoomPage}
+            onPageSizeChange={setRoomPageSize}
+            pageSizeOptions={[16, 24, 48, 96]}
+            itemLabel="rooms"
+          />
         </div>
       )}
 
@@ -3034,7 +3149,7 @@ export function Rooms() {
 
       {checkoutPreviewRes && (() => {
         const preview = getCheckoutPreviewData(checkoutPreviewRes);
-        const bal = getReservationLiveBalance(checkoutPreviewRes, hotel);
+        const bal = getReservationLiveBalance(checkoutPreviewRes, hotel, ledgerEntries.filter(e => e.reservationId === checkoutPreviewRes.id));
         
         return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">

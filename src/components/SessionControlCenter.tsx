@@ -17,6 +17,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Pagination } from './Pagination';
 
 export function SessionControlCenter() {
   const { profile, hotel, currentSessionId } = useAuth();
@@ -25,6 +26,12 @@ export function SessionControlCenter() {
   const [sessions, setSessions] = useState<ActiveSession[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isRevoking, setIsRevoking] = useState<string | null>(null);
+  const [sessionPage, setSessionPage] = useState(1);
+  const [sessionPageSize, setSessionPageSize] = useState(10);
+
+  useEffect(() => {
+    setSessionPage(1);
+  }, [searchTerm]);
 
   useEffect(() => {
     if (!hotelId || hotelId === 'system') return;
@@ -192,7 +199,7 @@ export function SessionControlCenter() {
                   </td>
                 </tr>
               ) : (
-                filteredSessions.map((session) => {
+                filteredSessions.slice((sessionPage - 1) * sessionPageSize, sessionPage * sessionPageSize).map((session) => {
                   const isCurrent = session.id === currentSessionId;
                   const isActive = session.status === 'active';
 
@@ -277,6 +284,16 @@ export function SessionControlCenter() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="p-4 border-t border-zinc-800">
+          <Pagination
+            currentPage={sessionPage}
+            totalItems={filteredSessions.length}
+            pageSize={sessionPageSize}
+            onPageChange={setSessionPage}
+            onPageSizeChange={(size) => { setSessionPageSize(size); setSessionPage(1); }}
+            itemLabel="sessions"
+          />
         </div>
       </div>
     </div>

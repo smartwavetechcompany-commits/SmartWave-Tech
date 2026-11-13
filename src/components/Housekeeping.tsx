@@ -70,6 +70,7 @@ import { HousekeepingLinen } from './housekeeping/HousekeepingLinen';
 import { HousekeepingChemicals } from './housekeeping/HousekeepingChemicals';
 import { HousekeepingDailyLogView } from './housekeeping/HousekeepingDailyLog';
 import { HousekeepingStaffManagement } from './housekeeping/HousekeepingStaffManagement';
+import { Pagination } from './Pagination';
 
 // Standard Checklists based on Housekeeping Blueprint
 const BEDROOM_CHECKLIST_ITEMS = [
@@ -170,6 +171,37 @@ export function Housekeeping() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [isLoading, setIsLoading] = useState(true);
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [roomPage, setRoomPage] = useState<number>(1);
+  const [roomPageSize, setRoomPageSize] = useState<number>(12);
+  const [cleaningPage, setCleaningPage] = useState<number>(1);
+  const [cleaningPageSize, setCleaningPageSize] = useState<number>(9);
+  const [assignPage, setAssignPage] = useState<number>(1);
+  const [assignPageSize, setAssignPageSize] = useState<number>(10);
+  const [awaitingInspPage, setAwaitingInspPage] = useState<number>(1);
+  const [awaitingInspPageSize, setAwaitingInspPageSize] = useState<number>(9);
+  const [inspLogPage, setInspLogPage] = useState<number>(1);
+  const [inspLogPageSize, setInspLogPageSize] = useState<number>(10);
+  const [briefingPage, setBriefingPage] = useState<number>(1);
+  const [briefingPageSize, setBriefingPageSize] = useState<number>(9);
+  const [requestPage, setRequestPage] = useState<number>(1);
+  const [requestPageSize, setRequestPageSize] = useState<number>(9);
+  const [reportPage, setReportPage] = useState<number>(1);
+  const [reportPageSize, setReportPageSize] = useState<number>(10);
+
+  useEffect(() => {
+    setRoomPage(1);
+  }, [filter, roomTypeFilter, floorFilter, staffFilter, searchQuery, sortBy, sortOrder]);
+
+  useEffect(() => {
+    setRoomPage(1);
+    setCleaningPage(1);
+    setAssignPage(1);
+    setAwaitingInspPage(1);
+    setInspLogPage(1);
+    setBriefingPage(1);
+    setRequestPage(1);
+    setReportPage(1);
+  }, [activeTab]);
 
   // Bulk Actions
   const [roomNotes, setRoomNotes] = useState<Record<string, string>>({});
@@ -1561,7 +1593,7 @@ export function Housekeeping() {
                   <p className="text-xs text-zinc-500">Try clearing filters or search query</p>
                 </div>
               ) : (
-                sortedRooms.map(room => {
+                sortedRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map(room => {
                   const activeRes = reservations.find(res => res.roomId === room.id);
                   const isSelected = selectedRoomIds.includes(room.id);
                   const cleaner = staff.find(s => s.uid === room.assignedTo);
@@ -1805,6 +1837,18 @@ export function Housekeeping() {
               )}
             </AnimatePresence>
           </div>
+          {!isLoading && sortedRooms.length > 0 && (
+            <Pagination
+              currentPage={roomPage}
+              totalItems={sortedRooms.length}
+              pageSize={roomPageSize}
+              onPageChange={setRoomPage}
+              onPageSizeChange={setRoomPageSize}
+              pageSizeOptions={[12, 24, 48, 96]}
+              itemLabel="rooms"
+              className="rounded-2xl border border-zinc-800"
+            />
+          )}
         </div>
       )}
 
@@ -1820,7 +1864,7 @@ export function Housekeeping() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {rooms.filter(r => r.status === 'cleaning' || r.status === 'dirty').map(room => {
+            {rooms.filter(r => r.status === 'cleaning' || r.status === 'dirty').slice((cleaningPage - 1) * cleaningPageSize, cleaningPage * cleaningPageSize).map(room => {
               const cleaner = staff.find(s => s.uid === room.assignedTo);
               return (
                 <div key={room.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
@@ -1880,6 +1924,16 @@ export function Housekeeping() {
               );
             })}
           </div>
+          <Pagination
+            currentPage={cleaningPage}
+            totalItems={rooms.filter(r => r.status === 'cleaning' || r.status === 'dirty').length}
+            pageSize={cleaningPageSize}
+            onPageChange={setCleaningPage}
+            onPageSizeChange={setCleaningPageSize}
+            pageSizeOptions={[9, 18, 36]}
+            itemLabel="rooms"
+            className="rounded-2xl border border-zinc-800"
+          />
         </div>
       )}
 
@@ -1921,7 +1975,7 @@ export function Housekeeping() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {rooms.map(room => {
+                {rooms.slice((assignPage - 1) * assignPageSize, assignPage * assignPageSize).map(room => {
                   const cleaner = staff.find(s => s.uid === room.assignedTo);
                   return (
                     <tr key={room.id} className="hover:bg-zinc-800/40 transition-colors">
@@ -1993,6 +2047,15 @@ export function Housekeeping() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={assignPage}
+            totalItems={rooms.length}
+            pageSize={assignPageSize}
+            onPageChange={setAssignPage}
+            onPageSizeChange={setAssignPageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            itemLabel="rooms"
+          />
         </div>
       )}
 
@@ -2015,7 +2078,7 @@ export function Housekeeping() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {rooms.filter(r => r.status === 'inspected' || r.housekeepingStatus === 'awaiting_inspection').map(room => {
+              {rooms.filter(r => r.status === 'inspected' || r.housekeepingStatus === 'awaiting_inspection').slice((awaitingInspPage - 1) * awaitingInspPageSize, awaitingInspPage * awaitingInspPageSize).map(room => {
                 const cleaner = staff.find(s => s.uid === room.assignedTo);
                 return (
                   <div key={room.id} className="bg-zinc-950 border border-amber-500/30 rounded-xl p-4 space-y-3">
@@ -2042,6 +2105,17 @@ export function Housekeeping() {
                 </div>
               )}
             </div>
+            <Pagination
+              compact
+              currentPage={awaitingInspPage}
+              totalItems={rooms.filter(r => r.status === 'inspected' || r.housekeepingStatus === 'awaiting_inspection').length}
+              pageSize={awaitingInspPageSize}
+              onPageChange={setAwaitingInspPage}
+              onPageSizeChange={setAwaitingInspPageSize}
+              pageSizeOptions={[9, 18, 36]}
+              itemLabel="rooms"
+              className="rounded-xl border border-zinc-800"
+            />
           </div>
 
           {/* Inspection History Log */}
@@ -2064,7 +2138,7 @@ export function Housekeeping() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800">
-                  {inspections.slice(0, 15).map((ins, i) => (
+                  {inspections.slice((inspLogPage - 1) * inspLogPageSize, inspLogPage * inspLogPageSize).map((ins, i) => (
                     <tr key={ins.id || i} className="hover:bg-zinc-800/40 transition-colors">
                       <td className="py-3 px-4 text-zinc-400">
                         {safeFormatDate(ins.timestamp, 'MMM d, HH:mm', 'N/A')}
@@ -2092,6 +2166,15 @@ export function Housekeeping() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={inspLogPage}
+              totalItems={inspections.length}
+              pageSize={inspLogPageSize}
+              onPageChange={setInspLogPage}
+              onPageSizeChange={setInspLogPageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemLabel="inspections"
+            />
           </div>
         </div>
       )}
@@ -2118,7 +2201,7 @@ export function Housekeeping() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {briefings.map((b, i) => (
+              {briefings.slice((briefingPage - 1) * briefingPageSize, briefingPage * briefingPageSize).map((b, i) => (
                 <div key={b.id || i} className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-bold text-emerald-400 uppercase tracking-wider">{b.shift} Shift</span>
@@ -2142,6 +2225,16 @@ export function Housekeeping() {
                 </div>
               )}
             </div>
+            <Pagination
+              currentPage={briefingPage}
+              totalItems={briefings.length}
+              pageSize={briefingPageSize}
+              onPageChange={setBriefingPage}
+              onPageSizeChange={setBriefingPageSize}
+              pageSizeOptions={[9, 18, 36]}
+              itemLabel="briefings"
+              className="rounded-xl border border-zinc-800"
+            />
           </div>
         </div>
       )}
@@ -2167,7 +2260,7 @@ export function Housekeeping() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {guestRequests.map((req, i) => (
+            {guestRequests.slice((requestPage - 1) * requestPageSize, requestPage * requestPageSize).map((req, i) => (
               <div key={req.id || i} className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-white text-base">Room {req.roomNumber}</span>
@@ -2205,6 +2298,16 @@ export function Housekeeping() {
               </div>
             )}
           </div>
+          <Pagination
+            currentPage={requestPage}
+            totalItems={guestRequests.length}
+            pageSize={requestPageSize}
+            onPageChange={setRequestPage}
+            onPageSizeChange={setRequestPageSize}
+            pageSizeOptions={[9, 18, 36]}
+            itemLabel="requests"
+            className="rounded-xl border border-zinc-800"
+          />
         </div>
       )}
 
@@ -2228,7 +2331,7 @@ export function Housekeeping() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800">
-                  {staff.map(s => {
+                  {staff.slice((reportPage - 1) * reportPageSize, reportPage * reportPageSize).map(s => {
                     const assignedCount = rooms.filter(r => r.assignedTo === s.uid).length;
                     const staffInspections = inspections.filter(ins => ins.housekeeperId === s.uid);
                     const passed = staffInspections.filter(ins => ins.result === 'passed').length;
@@ -2258,6 +2361,15 @@ export function Housekeeping() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={reportPage}
+              totalItems={staff.length}
+              pageSize={reportPageSize}
+              onPageChange={setReportPage}
+              onPageSizeChange={setReportPageSize}
+              pageSizeOptions={[10, 25, 50]}
+              itemLabel="staff members"
+            />
           </div>
         </div>
       )}

@@ -15,6 +15,7 @@ import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface InventoryAuditingProps {
   items: InventoryItem[];
@@ -30,6 +31,10 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
     locationId: string;
     items: { itemId: string; systemQty: number; physicalQty: number; reason: string }[];
   } | null>(null);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(8);
+  const [countPage, setCountPage] = useState(1);
+  const [countPageSize, setCountPageSize] = useState(15);
 
   const startNewAudit = (locationId: string) => {
     const auditItems = items.map(item => ({
@@ -39,6 +44,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
       reason: ''
     }));
     setActiveAudit({ locationId, items: auditItems });
+    setCountPage(1);
     setShowAuditModal(true);
   };
 
@@ -125,7 +131,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {audits.map((audit) => {
+        {audits.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize).map((audit) => {
           const location = locations.find(l => l.id === audit.locationId);
           const varianceCount = audit.items.filter(i => i.variance !== 0).length;
           return (
@@ -175,6 +181,18 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
             </div>
           )}
       </div>
+      <Pagination
+        currentPage={auditPage}
+        totalItems={audits.length}
+        pageSize={auditPageSize}
+        onPageChange={setAuditPage}
+        onPageSizeChange={(size) => {
+          setAuditPageSize(size);
+          setAuditPage(1);
+        }}
+        itemLabel="audits"
+        className="rounded-2xl border border-zinc-800"
+      />
 
       {/* Audit Modal */}
       <AnimatePresence>
@@ -212,7 +230,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {activeAudit.items.map((item, index) => {
+                    {activeAudit.items.slice((countPage - 1) * countPageSize, countPage * countPageSize).map((item) => {
                       const invItem = items.find(i => i.id === item.itemId);
                       const variance = item.physicalQty - item.systemQty;
                       return (
@@ -230,8 +248,11 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                               value={item.physicalQty}
                               onChange={(e) => {
                                 const newItems = [...activeAudit.items];
-                                newItems[index].physicalQty = parseInt(e.target.value) || 0;
-                                setActiveAudit({ ...activeAudit, items: newItems });
+                                const actualIndex = newItems.findIndex(x => x.itemId === item.itemId);
+                                if (actualIndex !== -1) {
+                                  newItems[actualIndex] = { ...newItems[actualIndex], physicalQty: parseInt(e.target.value) || 0 };
+                                  setActiveAudit({ ...activeAudit, items: newItems });
+                                }
                               }}
                               className="w-24 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
                             />
@@ -251,8 +272,11 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                               value={item.reason}
                               onChange={(e) => {
                                 const newItems = [...activeAudit.items];
-                                newItems[index].reason = e.target.value;
-                                setActiveAudit({ ...activeAudit, items: newItems });
+                                const actualIndex = newItems.findIndex(x => x.itemId === item.itemId);
+                                if (actualIndex !== -1) {
+                                  newItems[actualIndex] = { ...newItems[actualIndex], reason: e.target.value };
+                                  setActiveAudit({ ...activeAudit, items: newItems });
+                                }
                               }}
                               placeholder="e.g. Damage, Miscount"
                               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
@@ -263,6 +287,19 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                     })}
                   </tbody>
                 </table>
+                <Pagination
+                  compact
+                  currentPage={countPage}
+                  totalItems={activeAudit.items.length}
+                  pageSize={countPageSize}
+                  onPageChange={setCountPage}
+                  onPageSizeChange={(size) => {
+                    setCountPageSize(size);
+                    setCountPage(1);
+                  }}
+                  itemLabel="items"
+                  className="mt-4 rounded-xl border border-zinc-800"
+                />
               </div>
 
               <div className="p-8 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">

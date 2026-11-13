@@ -54,6 +54,7 @@ import { calculateStayDuration, formatStayDuration, StayDurationDisplay, parseTi
 import { calculateGuestAccount, calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { printDocument, generatePdfExport } from '../utils/printUtils';
+import { Pagination } from './Pagination';
 
 interface GuestFolioProps {
   reservation: Reservation;
@@ -88,6 +89,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [transferTargetId, setTransferTargetId] = useState('');
   const [showGuestHistory, setShowGuestHistory] = useState(false);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
+  const [folioPage, setFolioPage] = useState<number>(1);
+  const [folioPageSize, setFolioPageSize] = useState<number>(15);
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyPageSize, setHistoryPageSize] = useState<number>(8);
+
+  useEffect(() => {
+    setFolioPage(1);
+  }, [currentReservation.id]);
+
+  useEffect(() => {
+    if (showGuestHistory) setHistoryPage(1);
+  }, [showGuestHistory, guestHistory.length]);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrincipalManager, setShowPrincipalManager] = useState(false);
   const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
@@ -2151,7 +2164,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <p className="text-zinc-500">No previous reservations found.</p>
                     </div>
                   ) : (
-                    guestHistory.map(res => (
+                    guestHistory.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize).map(res => (
                       <div key={res.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between hover:border-zinc-700 transition-all">
                         <div className="flex items-center gap-4">
                           <div className={cn(
@@ -2177,6 +2190,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     ))
                   )}
                 </div>
+                {guestHistory.length > historyPageSize && (
+                  <Pagination
+                    compact
+                    currentPage={historyPage}
+                    totalItems={guestHistory.length}
+                    pageSize={historyPageSize}
+                    onPageChange={setHistoryPage}
+                    onPageSizeChange={setHistoryPageSize}
+                    pageSizeOptions={[8, 16, 32]}
+                    itemLabel="stays"
+                  />
+                )}
                 <div className="p-6 bg-zinc-950 border-t border-zinc-800">
                   <button 
                     onClick={() => setShowGuestHistory(false)}
@@ -2742,7 +2767,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       </td>
                     </tr>
                   ) : (
-                    sortedHistoryForDisplay.map((entry) => {
+                    sortedHistoryForDisplay.slice((folioPage - 1) * folioPageSize, folioPage * folioPageSize).map((entry) => {
                       const entryKey = entry.id || (entry as any).firestoreId || 'projected_room_stay_charge_virtual';
                       const runningInfo = runningBalancesMap.get(entryKey);
                       const isOwing = (runningInfo?.balance || 0) > 0;
@@ -2932,6 +2957,15 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </tfoot>
               </table>
             </div>
+            <Pagination
+              currentPage={folioPage}
+              totalItems={sortedHistoryForDisplay.length}
+              pageSize={folioPageSize}
+              onPageChange={setFolioPage}
+              onPageSizeChange={setFolioPageSize}
+              pageSizeOptions={[10, 15, 25, 50]}
+              itemLabel="entries"
+            />
           </div>
 
           {/* Complete Guest Activity Timeline (In-line beneath Transaction Ledger) */}

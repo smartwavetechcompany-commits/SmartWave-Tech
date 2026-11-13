@@ -29,6 +29,7 @@ import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { transferCorporateBalance, reconcileCorporateAccountBalance, settleLedger, postToLedger } from '../services/ledgerService';
+import { Pagination } from './Pagination';
 
 interface CorporateFolioProps {
   account: CorporateAccount;
@@ -58,6 +59,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
   });
   const [chargeData, setChargeData] = useState({ amount: 0, category: 'other', description: '' });
   const [isSaving, setIsSaving] = useState(false);
+  const [resPage, setResPage] = useState(1);
+  const [resPageSize, setResPageSize] = useState(5);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerPageSize, setLedgerPageSize] = useState(10);
 
   useEffect(() => {
     if (!hotel?.id || !account.id) return;
@@ -550,7 +555,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {individualReservations.map((res) => (
+                    {individualReservations.slice((resPage - 1) * resPageSize, resPage * resPageSize).map((res) => (
                       <tr key={res.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4">
                           <div className="text-sm text-white font-medium">{res.guestName}</div>
@@ -578,6 +583,18 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="p-4 border-t border-zinc-800">
+                <Pagination
+                  currentPage={resPage}
+                  totalItems={individualReservations.length}
+                  pageSize={resPageSize}
+                  onPageChange={setResPage}
+                  onPageSizeChange={(size) => { setResPageSize(size); setResPage(1); }}
+                  pageSizeOptions={[5, 10, 25]}
+                  itemLabel="guests"
+                  compact
+                />
               </div>
             </div>
           )}
@@ -613,7 +630,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                       </td>
                     </tr>
                   ) : (
-                    ledgerEntries.map((entry) => (
+                    ledgerEntries.slice((ledgerPage - 1) * ledgerPageSize, ledgerPage * ledgerPageSize).map((entry) => (
                       <tr 
                         key={entry.id} 
                         className={cn(
@@ -666,6 +683,17 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+            <div className="p-4 border-t border-zinc-800">
+              <Pagination
+                currentPage={ledgerPage}
+                totalItems={ledgerEntries.length}
+                pageSize={ledgerPageSize}
+                onPageChange={setLedgerPage}
+                onPageSizeChange={(size) => { setLedgerPageSize(size); setLedgerPage(1); }}
+                itemLabel="transactions"
+                compact
+              />
             </div>
           </div>
         </div>

@@ -6,9 +6,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { Room, Reservation, FinanceRecord, Hotel, OperationType, RoomBlocking, OutstandingDebt, LedgerEntry } from '../types';
 import { formatCurrency, cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
-import { getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
 import { hasFinancialVisibility } from '../utils/permissions';
+import {
+  reconcileFinanceRecords,
+  reconcileLedgerEntries,
+  isActualPaymentLedgerEntry,
+  calculateGuestFinancialPosition
+} from '../services/financialService';
 import { 
   Users, 
   BedDouble, 
@@ -195,10 +201,33 @@ export function Dashboard() {
   const [debts, setDebts] = useState<OutstandingDebt[]>(() => cachedData?.debts || []);
   const [finance, setFinance] = useState<FinanceRecord[]>(() => cachedData?.finance || []);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>(() => cachedData?.ledgerEntries || []);
+  const [resLoaded, setResLoaded] = useState(false);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
 
   const [loading, setLoading] = useState(() => !cachedData);
   const [refreshing, setRefreshing] = useState(false);
+
+  const validLedgerEntries = useMemo(() => {
+    return reconcileLedgerEntries(ledgerEntries, reservations, resLoaded);
+  }, [ledgerEntries, reservations, resLoaded]);
+
+  const validFinance = useMemo(() => {
+    return reconcileFinanceRecords(finance, ledgerEntries, reservations, {
+      ledgerLoaded,
+      reservationsLoaded: resLoaded
+    });
+  }, [finance, ledgerEntries, reservations, ledgerLoaded, resLoaded]);
+
+  const validDebts = useMemo(() => {
+    if (!resLoaded) return debts;
+    const resMap = new Map(reservations.map(r => [r.id, r]));
+    return debts.filter(d => {
+      if (!d.reservationId) return true;
+      const res = resMap.get(d.reservationId);
+      return Boolean(res && res.status !== 'cancelled');
+    });
+  }, [debts, reservations, resLoaded]);
 
   // RBAC: Determine if current user has Finance or Hotel Admin permissions
   const canViewFinances = hasFinancialVisibility(profile, customRoles);
@@ -269,9 +298,11 @@ export function Dashboard() {
         setReservations(allRes);
         const active = allRes.filter(r => ['confirmed', 'checked_in'].includes(r.status));
         setActiveReservations(active);
+        setResLoaded(true);
         setLoading(false);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+        setResLoaded(true);
       });
 
       // Live listener for room blockings
@@ -307,8 +338,11 @@ export function Dashboard() {
           return tB - tA;
         });
         setLedgerEntries(entries);
+        setLedgerLoaded(true);
         setLoading(false);
-      }, () => {});
+      }, () => {
+        setLedgerLoaded(true);
+      });
     }
 
     return () => {
@@ -380,113 +414,115 @@ export function Dashboard() {
 
   // LIVE CALCULATION: Overall outstanding amount owing across the hotel
   const inHouseOutstanding = inHouseReservations.reduce((acc, res) => {
-    const balance = getReservationLiveBalance(res, hotel, ledgerEntries);
+    const balance = getReservationLiveBalance(res, hotel, validLedgerEntries);
     return acc + Math.max(0, balance);
   }, 0);
 
-  const debtorReservationIds = new Set(debts.map(d => d.reservationId).filter(Boolean));
+  const debtorReservationIds = new Set(validDebts.map(d => d.reservationId).filter(Boolean));
   const departedReservationsOwing = reservations
-    .filter(r => r.status === 'checked_out' && !debtorReservationIds.has(r.id))
+    .filter(r => r.status === 'checked_out' && !r.corporateId && !debtorReservationIds.has(r.id) && r.financialStatus !== 'SETTLED' && r.paymentStatus !== 'paid')
     .reduce((acc, r) => {
-      const bal = getReservationLiveBalance(r, hotel, ledgerEntries);
-      return acc + (bal > 0.01 ? bal : 0);
+      const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
+      if (bal <= 0.01) return acc;
+      if (r.guestId) {
+        const guestPersonalRes = reservations.filter(x => !x.corporateId && x.status !== 'cancelled' && x.guestId === r.guestId);
+        const guestPos = calculateGuestFinancialPosition({ id: r.guestId, email: r.guestEmail }, guestPersonalRes, hotel, validLedgerEntries);
+        if (guestPos.netAmountDue <= 0.01) return acc;
+      }
+      return acc + bal;
     }, 0);
 
-  const debtorOutstanding = debts
+  const debtorOutstanding = validDebts
     .filter(d => d.status === 'outstanding' || d.status === 'partially_paid')
     .reduce((acc, d) => acc + Math.max(0, d.outstandingAmount || 0), 0) + departedReservationsOwing;
 
   const totalOutstandingOwing = inHouseOutstanding + debtorOutstanding;
 
-  // Total Collected: Authoritative verified money collected across hotel operations
+  // Identify actual payment ledger entries that do NOT already have a mirrored record in validFinance
+  const unlinkedPaymentLedgerEntries = useMemo(() => {
+    const financeIncome = validFinance.filter(f => f.type === 'income');
+    const financeRefIds = new Set(financeIncome.map(f => f.referenceId).filter(Boolean));
+    const financeInvoiceIds = new Set(financeIncome.map(f => (f as any).invoiceId).filter(Boolean));
+
+    return validLedgerEntries.filter(e => {
+      if (!isActualPaymentLedgerEntry(e)) return false;
+      if (e.id && financeRefIds.has(e.id)) return false;
+      if (e.referenceId && (financeInvoiceIds.has(e.referenceId) || financeRefIds.has(e.referenceId))) return false;
+
+      const eDate = getRecordDateString(e.timestamp || (e as any).createdAt);
+      const eTs = new Date(eDate || 0).getTime();
+      const eAmt = Number(e.amount) || 0;
+
+      const hasMirroredFinance = financeIncome.some(f => {
+        const fAmt = Number(f.amount) || 0;
+        if (Math.abs(fAmt - eAmt) >= 0.01) return false;
+        if (e.corporateId && f.referenceId === e.corporateId) return true;
+        if (e.reservationId && (f as any).reservationId === e.reservationId) return true;
+        const fTs = new Date(getRecordDateString(f.timestamp || (f as any).createdAt) || 0).getTime();
+        if (fTs && eTs && Math.abs(fTs - eTs) <= 120000) return true;
+        return false;
+      });
+
+      return !hasMirroredFinance;
+    });
+  }, [validFinance, validLedgerEntries]);
+
+  // Total Collected: Authoritative verified money collected matching Finance -> Overview
   const totalRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
 
-    // 1. All verified payments collected across reservations (room folios, stay payments, settled charges)
-    const reservationCollections = reservations.reduce((acc, r) => acc + (Number(r.paidAmount) || 0), 0);
-
-    // 2. Standalone walk-in income in finance that is NOT linked to any reservation or room folio
-    const standaloneFinanceIncome = finance
-      .filter(f => {
-        if (f.type !== 'income') return false;
-        if ((f as any).reservationId) return false;
-        if (f.referenceId && reservations.some(r => r.id === f.referenceId)) return false;
-        const desc = (f.description || '').toLowerCase();
-        if (reservations.some(r => r.roomNumber && desc.includes(`room ${r.roomNumber.toLowerCase()}`))) return false;
-        return true;
-      })
-      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-    // 3. Standalone walk-in ledger payments not associated with any reservation
-    const standaloneLedgerPayments = ledgerEntries
-      .filter(e => {
-        if (e.type !== 'credit' || e.category !== 'payment') return false;
-        if (e.reservationId) return false;
-        return true;
-      })
-      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-    if (reservations.length > 0) {
-      return reservationCollections + Math.max(standaloneFinanceIncome, standaloneLedgerPayments);
-    }
-
-    const finTotal = finance
+    const financeIncomeTotal = validFinance
       .filter(f => f.type === 'income')
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    const ledgTotal = ledgerEntries
-      .filter(e => e.type === 'credit' && e.category === 'payment')
+
+    const unlinkedLedgerTotal = unlinkedPaymentLedgerEntries
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    return Math.max(finTotal, ledgTotal);
-  }, [canViewFinances, reservations, finance, ledgerEntries]);
+
+    return Number((financeIncomeTotal + unlinkedLedgerTotal).toFixed(2));
+  }, [canViewFinances, validFinance, unlinkedPaymentLedgerEntries]);
 
   const todayRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
-    const finToday = finance
+    const finToday = validFinance
       .filter(f => f.type === 'income' && isRecordToday(f.timestamp || (f as any).createdAt))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    const ledgToday = ledgerEntries
-      .filter(e => e.type === 'credit' && e.category === 'payment' && isRecordToday(e.timestamp || (e as any).createdAt))
+    const ledgToday = unlinkedPaymentLedgerEntries
+      .filter(e => isRecordToday(e.timestamp || (e as any).createdAt))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    return Math.max(finToday, ledgToday);
-  }, [canViewFinances, finance, ledgerEntries]);
+    return Number((finToday + ledgToday).toFixed(2));
+  }, [canViewFinances, validFinance, unlinkedPaymentLedgerEntries]);
 
-  // Total transactions recorded across all hotel operations (ledger entries, finance records, and bill activities)
+  // Total actual financial transactions (matching Finance -> Transactions / Overview, excluding internal debit postings)
   const totalTransactionsCount = useMemo(() => {
-    const resLedgerCount = ledgerEntries.length;
-    const finCount = finance.length;
-    const reservationBillActivities = reservations.reduce((acc, r) => {
-      const entries = ledgerEntries.filter(e => e.reservationId === r.id);
-      return acc + Math.max(entries.length, (r as any).billActivitiesCount || 0);
-    }, 0);
-    return Math.max(resLedgerCount, finCount, reservationBillActivities);
-  }, [ledgerEntries, finance, reservations]);
+    return validFinance.length + unlinkedPaymentLedgerEntries.length;
+  }, [validFinance, unlinkedPaymentLedgerEntries]);
 
-  // Count of transactions that occurred today across all departments
+  // Count of actual financial transactions that occurred today across all departments
   const todayTransactionsCount = useMemo(() => {
-    const finTodayCount = finance.filter(f => isRecordToday(f.timestamp || (f as any).createdAt)).length;
-    const ledgTodayCount = ledgerEntries.filter(e => isRecordToday(e.timestamp || (e as any).createdAt)).length;
-    return Math.max(finTodayCount, ledgTodayCount);
-  }, [finance, ledgerEntries]);
+    const todayFinanceCount = validFinance.filter(f => isRecordToday(f.timestamp || (f as any).createdAt)).length;
+    const todayUnlinkedCount = unlinkedPaymentLedgerEntries.filter(e => isRecordToday(e.timestamp || (e as any).createdAt)).length;
+    return todayFinanceCount + todayUnlinkedCount;
+  }, [validFinance, unlinkedPaymentLedgerEntries]);
 
   // Staff individual collections for today
   const myCollectionsToday = useMemo(() => {
     if (!profile?.uid) return 0;
-    const ledgMy = ledgerEntries
-      .filter(e => {
-        const isMine = e.postedBy === profile.uid || (e as any).userId === profile.uid;
-        return isMine && e.type === 'credit' && e.category === 'payment' && isRecordToday(e.timestamp || (e as any).createdAt);
-      })
-      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-
-    const finMy = finance
+    const finMy = validFinance
       .filter(f => {
         const isMine = (f as any).postedBy === profile.uid || (f as any).userId === profile.uid;
         return isMine && f.type === 'income' && isRecordToday(f.timestamp || (f as any).createdAt);
       })
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
-    return Math.max(ledgMy, finMy);
-  }, [profile?.uid, ledgerEntries, finance]);
+    const ledgMy = unlinkedPaymentLedgerEntries
+      .filter(e => {
+        const isMine = e.postedBy === profile.uid || (e as any).userId === profile.uid;
+        return isMine && isRecordToday(e.timestamp || (e as any).createdAt);
+      })
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+    return Number((finMy + ledgMy).toFixed(2));
+  }, [profile?.uid, unlinkedPaymentLedgerEntries, validFinance]);
 
   // Process revenue chart data for last 7 days
   const revenueChartData = useMemo(() => {
@@ -497,38 +533,38 @@ export function Dashboard() {
     }).reverse();
 
     return last7Days.map(date => {
-      const finDay = finance
+      const finDay = validFinance
         .filter(r => r.type === 'income' && getRecordDateString(r.timestamp || (r as any).createdAt).startsWith(date))
         .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-      const ledgDay = ledgerEntries
-        .filter(r => r.type === 'credit' && r.category === 'payment' && getRecordDateString(r.timestamp || (r as any).createdAt).startsWith(date))
+      const ledgDay = unlinkedPaymentLedgerEntries
+        .filter(e => getRecordDateString(e.timestamp || (e as any).createdAt).startsWith(date))
         .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
       return {
         name: new Date(date).toLocaleDateString([], { weekday: 'short' }),
-        amount: Math.max(finDay, ledgDay)
+        amount: Number((finDay + ledgDay).toFixed(2))
       };
     });
-  }, [finance, ledgerEntries]);
+  }, [validFinance, unlinkedPaymentLedgerEntries]);
 
   const previousRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
     const todayStr = new Date().toISOString().split('T')[0];
-    const finPrev = finance
+    const finPrev = validFinance
       .filter(f => f.type === 'income' && !getRecordDateString(f.timestamp || (f as any).createdAt).startsWith(todayStr))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    const ledgPrev = ledgerEntries
-      .filter(e => e.type === 'credit' && e.category === 'payment' && !getRecordDateString(e.timestamp || (e as any).createdAt).startsWith(todayStr))
+    const ledgPrev = unlinkedPaymentLedgerEntries
+      .filter(e => !getRecordDateString(e.timestamp || (e as any).createdAt).startsWith(todayStr))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    return Math.max(finPrev, ledgPrev);
-  }, [canViewFinances, finance, ledgerEntries]);
+    return Number((finPrev + ledgPrev).toFixed(2));
+  }, [canViewFinances, validFinance, unlinkedPaymentLedgerEntries]);
 
   const revenueGrowth = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
   // Combined recent transactions for dashboard feed
   const recentTransactionsFeed = useMemo(() => {
-    if (finance.length > 0) return finance.slice(0, 5);
-    return ledgerEntries
-      .filter(e => e.type === 'credit' && e.category === 'payment')
+    if (validFinance.length > 0) return validFinance.slice(0, 5);
+    return validLedgerEntries
+      .filter(e => isActualPaymentLedgerEntry(e))
       .slice(0, 5)
       .map(e => ({
         id: e.id,
@@ -538,7 +574,7 @@ export function Dashboard() {
         amount: e.amount,
         timestamp: e.timestamp
       }));
-  }, [finance, ledgerEntries]);
+  }, [validFinance, validLedgerEntries]);
 
   // Role-Based Dashboard Stats Card Definition
   const stats = (profile?.role === 'superAdmin' && !hotel?.id)
@@ -681,7 +717,7 @@ export function Dashboard() {
       toast.error('Permission denied: Financial records are restricted to Finance and Hotel Admin users.');
       return;
     }
-    const dataToExport = (finance || []).slice(0, 100).map(f => ({
+    const dataToExport = (validFinance || []).slice(0, 100).map(f => ({
       Date: safeFormatTimestamp(f.timestamp, 'MMM d, yyyy HH:mm'),
       Type: f.type.toUpperCase(),
       Category: f.category,

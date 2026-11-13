@@ -5,6 +5,7 @@ import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount, LedgerEntry } from '../types';
 import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
+import { reconcileFinanceRecords, reconcileLedgerEntries, isActualPaymentLedgerEntry, calculateGuestFinancialPosition } from '../services/financialService';
 import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
 import { useRequestManager } from '../contexts/RequestManagerContext';
@@ -82,6 +83,24 @@ export function Finance() {
   const [ledgerBalanceType, setLedgerBalanceType] = useState<'all' | 'debt' | 'credit'>('all');
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerPageSize, setLedgerPageSize] = useState(10);
+  const [corpAccountsPage, setCorpAccountsPage] = useState(1);
+  const [corpAccountsPageSize, setCorpAccountsPageSize] = useState(10);
+  const [agingPage, setAgingPage] = useState(1);
+  const [agingPageSize, setAgingPageSize] = useState(10);
+  const [debtorsPage, setDebtorsPage] = useState(1);
+  const [debtorsPageSize, setDebtorsPageSize] = useState(10);
+  const [suppliersPage, setSuppliersPage] = useState(1);
+  const [suppliersPageSize, setSuppliersPageSize] = useState(10);
+  const [expensesPage, setExpensesPage] = useState(1);
+  const [expensesPageSize, setExpensesPageSize] = useState(15);
+  const [accountsPage, setAccountsPage] = useState(1);
+  const [accountsPageSize, setAccountsPageSize] = useState(15);
+  const [posPage, setPosPage] = useState(1);
+  const [posPageSize, setPosPageSize] = useState(10);
+  const [commissionsPage, setCommissionsPage] = useState(1);
+  const [commissionsPageSize, setCommissionsPageSize] = useState(10);
+  const [paymentsPage, setPaymentsPage] = useState(1);
+  const [paymentsPageSize, setPaymentsPageSize] = useState(15);
   const [newRecord, setNewRecord] = useState({
     description: '',
     amount: 0,
@@ -136,55 +155,69 @@ export function Finance() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
+  const [resLoaded, setResLoaded] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const validLedgerEntries = useMemo(() => {
+    return reconcileLedgerEntries(ledgerEntries, reservations, resLoaded);
+  }, [ledgerEntries, reservations, resLoaded]);
+
+  const validRecords = useMemo(() => {
+    return reconcileFinanceRecords(records, ledgerEntries, reservations, {
+      ledgerLoaded,
+      reservationsLoaded: resLoaded
+    });
+  }, [records, ledgerEntries, reservations, ledgerLoaded, resLoaded]);
 
   const guestLiveBalances = useMemo(() => {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
+    const personalReservations = reservations.filter(r => !r.corporateId);
+
     guests.forEach(guest => {
-      // Find non-cancelled reservations for this guest
-      const guestRes = reservations.filter(r => 
-        r.status !== 'cancelled' && 
+      const hasAnyStay = reservations.some(r =>
+        r.status !== 'cancelled' &&
         (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
       );
 
       // Corporate stays belong to the corporate account; only personal non-corporate stays are guest individual debts
-      const individualRes = guestRes.filter(r => !r.corporateId);
+      const guestPersonalRes = personalReservations.filter(r =>
+        r.status !== 'cancelled' &&
+        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      );
 
-      if (individualRes.length > 0) {
-        const bal = individualRes.reduce((sum, r) => {
-          return sum + getReservationLiveBalance(r, hotel, ledgerEntries);
-        }, 0);
-        balanceMap[guest.id] = Number(bal.toFixed(2));
-      } else if (guestRes.length > 0) {
+      if (guestPersonalRes.length > 0) {
+        const position = calculateGuestFinancialPosition(guest, guestPersonalRes, hotel, validLedgerEntries);
+        balanceMap[guest.id] = position.outstandingBalance;
+      } else if (hasAnyStay) {
         // Guest only has corporate reservations; their stay is direct-billed to corporate partner
         balanceMap[guest.id] = 0;
       } else {
-        // Direct or historical guest balance
-        balanceMap[guest.id] = Number((guest.ledgerBalance ?? (guest as any).balance ?? 0).toFixed(2));
+        balanceMap[guest.id] = calculateGuestFinancialPosition(guest, [], hotel, validLedgerEntries).outstandingBalance;
       }
     });
 
     return balanceMap;
-  }, [guests, reservations, hotel, ledgerEntries]);
+  }, [guests, reservations, hotel, validLedgerEntries]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
     if (guestLiveBalances[guest.id] !== undefined) {
       return guestLiveBalances[guest.id];
     }
-    const guestRes = reservations.filter(r => 
-      r.status !== 'cancelled' && 
+    const guestRes = reservations.filter(r =>
+      r.status !== 'cancelled' &&
       (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
     );
     const individualRes = guestRes.filter(r => !r.corporateId);
     if (individualRes.length > 0) {
-      return individualRes.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel, ledgerEntries), 0);
+      return calculateGuestFinancialPosition(guest, individualRes, hotel, validLedgerEntries).outstandingBalance;
     }
     if (guestRes.length > 0) return 0;
-    return guest.ledgerBalance ?? (guest as any).balance ?? 0;
-  }, [guestLiveBalances, reservations, hotel, ledgerEntries]);
+    return calculateGuestFinancialPosition(guest, [], hotel, validLedgerEntries).outstandingBalance;
+  }, [guestLiveBalances, reservations, hotel, validLedgerEntries]);
 
   const categories = {
     income: ['Room Revenue', 'Restaurant', 'Laundry', 'Events', 'Other'],
@@ -194,13 +227,21 @@ export function Finance() {
   const [paymentsSearch, setPaymentsSearch] = useState('');
   const [paymentsMethodFilter, setPaymentsMethodFilter] = useState<string>('all');
 
+  useEffect(() => {
+    setDebtorsPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setPaymentsPage(1);
+  }, [paymentsSearch, paymentsMethodFilter]);
+
   const allIncomeCategories = useMemo(() => {
     const dynamic = new Set<string>(categories.income);
-    records.filter(r => r.type === 'income').forEach(r => {
+    validRecords.filter(r => r.type === 'income').forEach(r => {
       if (r.category && r.category.trim()) dynamic.add(r.category.trim());
     });
     return Array.from(dynamic);
-  }, [records, categories.income]);
+  }, [validRecords, categories.income]);
 
   const unifiedPayments = useMemo(() => {
     const list: Array<{
@@ -216,12 +257,14 @@ export function Finance() {
     }> = [];
 
     const seenIds = new Set<string>();
+    const seenInvoiceOrRefIds = new Set<string>();
+    const ledgerPaymentsList = validLedgerEntries.filter(e => isActualPaymentLedgerEntry(e));
 
-    // 1. From live ledger credits
-    ledgerEntries
-      .filter(e => e.type === 'credit' && (e.category === 'payment' || e.category === 'city_ledger'))
+    // 1. From live ledger credits (actual payments collected, excluding AR city ledger transfers)
+    ledgerPaymentsList
       .forEach(e => {
-        seenIds.add(e.id);
+        if (e.id) seenIds.add(e.id);
+        if (e.referenceId) seenInvoiceOrRefIds.add(e.referenceId);
         const res = reservations.find(r => r.id === e.reservationId);
         const payer = res?.guestName || (e as any).guestName || (e as any).companyName ||
           (e.description?.startsWith('Corporate Settlement:') ? e.description.split(':')[1]?.split('(')[0]?.trim() : '') ||
@@ -241,12 +284,23 @@ export function Finance() {
         });
       });
 
-    // 2. From finance records (standalone income not tracked directly on room folios)
-    records
+    // 2. From finance records (standalone income not already covered by ledger entries)
+    validRecords
       .filter(r => r.type === 'income')
       .forEach(r => {
         if (r.id && seenIds.has(r.id)) return;
-        if (r.referenceId && seenIds.has(r.referenceId)) return;
+        if (r.referenceId && (seenIds.has(r.referenceId) || seenInvoiceOrRefIds.has(r.referenceId))) return;
+        const recInvoiceId = (r as any).invoiceId;
+        if (recInvoiceId && seenInvoiceOrRefIds.has(recInvoiceId)) return;
+        const rTs = new Date(r.timestamp || (r as any).createdAt || 0).getTime();
+        const matchesCorporateOrTimedLedger = ledgerPaymentsList.some(e => {
+          if (Math.abs((Number(e.amount) || 0) - (Number(r.amount) || 0)) >= 0.01) return false;
+          if (e.corporateId && r.referenceId === e.corporateId) return true;
+          const eTs = new Date(e.timestamp || (e as any).createdAt || 0).getTime();
+          return Boolean(rTs && eTs && Math.abs(rTs - eTs) <= 120000);
+        });
+        if (matchesCorporateOrTimedLedger) return;
+
         const res = reservations.find(resItem => resItem.id === (r as any).reservationId || resItem.id === r.referenceId);
         const payer = (r as any).guestName || res?.guestName || (r as any).customerName || (r as any).payer || 'Guest / Customer';
         list.push({
@@ -263,7 +317,7 @@ export function Finance() {
       });
 
     return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [ledgerEntries, records, reservations]);
+  }, [validLedgerEntries, validRecords, reservations]);
 
   const [showSettleModal, setShowSettleModal] = useState<Guest | CorporateAccount | null>(null);
   const [settleType, setSettleType] = useState<'payment' | 'refund'>('payment');
@@ -274,10 +328,12 @@ export function Finance() {
 
   useEffect(() => {
     if (showSettleModal) {
-      const balance = 'ledgerBalance' in showSettleModal ? showSettleModal.ledgerBalance : showSettleModal.currentBalance;
+      const balance = 'contactPerson' in showSettleModal
+        ? (showSettleModal.currentBalance || 0)
+        : getGuestLiveBalance(showSettleModal as Guest);
       setSettleType(balance > 0 ? 'payment' : 'refund');
     }
-  }, [showSettleModal]);
+  }, [showSettleModal, getGuestLiveBalance]);
   const [showFolio, setShowFolio] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
 
@@ -358,9 +414,15 @@ export function Finance() {
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
     
-    const q = query(collection(db, 'hotels', hotel.id, 'finance'), orderBy('timestamp', 'desc'));
+    const q = collection(db, 'hotels', hotel.id, 'finance');
     const unsub = onSnapshot(q, (snap) => {
-      setRecords(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord)));
+      const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinanceRecord));
+      items.sort((a, b) => {
+        const tA = new Date(a.timestamp || (a as any).createdAt || 0).getTime();
+        const tB = new Date(b.timestamp || (b as any).createdAt || 0).getTime();
+        return tB - tA;
+      });
+      setRecords(items);
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/finance`);
       if (error.code === 'permission-denied') {
@@ -374,10 +436,20 @@ export function Finance() {
   // Real-time live ledger entries listener
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
-    const qLedger = query(collection(db, 'hotels', hotel.id, 'ledger'), orderBy('timestamp', 'desc'));
+    setLedgerLoaded(false);
+    const qLedger = collection(db, 'hotels', hotel.id, 'ledger');
     const unsubLedger = onSnapshot(qLedger, (snap) => {
-      setLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
-    }, () => {});
+      const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+      items.sort((a, b) => {
+        const tA = new Date(a.timestamp || (a as any).createdAt || 0).getTime();
+        const tB = new Date(b.timestamp || (b as any).createdAt || 0).getTime();
+        return tB - tA;
+      });
+      setLedgerEntries(items);
+      setLedgerLoaded(true);
+    }, () => {
+      setLedgerLoaded(true);
+    });
 
     return () => unsubLedger();
   }, [hotel?.id, profile?.uid, hasPermissionError]);
@@ -415,6 +487,7 @@ export function Finance() {
 
   useEffect(() => {
     if (!hotel?.id || !profile || hasPermissionError) return;
+    setResLoaded(false);
     
     const q = collection(db, 'hotels', hotel.id, 'guests');
     const unsub = onSnapshot(q, (snap) => {
@@ -426,8 +499,10 @@ export function Finance() {
     // Fetch reservations and rooms for syncing
     const unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
       setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      setResLoaded(true);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/reservations`);
+      setResLoaded(true);
     });
 
     const unsubRooms = onSnapshot(collection(db, 'hotels', hotel.id, 'rooms'), (snap) => {
@@ -509,9 +584,15 @@ export function Finance() {
       const entityId = entity.id;
 
       // Find the most recent reservation for this entity to post the ledger entry
-      const lastRes = reservations
-        .filter(r => isCorporate ? r.corporateId === entityId : r.guestId === entityId)
-        .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())[0];
+      // For individual guests, prefer non-corporate reservations first so settlements apply to personal debt
+      const entityReservations = reservations
+        .filter(r => isCorporate ? r.corporateId === entityId : (r.guestId === entityId && !r.corporateId))
+        .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
+      const lastRes = entityReservations[0] || (!isCorporate
+        ? reservations
+            .filter(r => r.guestId === entityId)
+            .sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime())[0]
+        : undefined);
 
       if (!lastRes) {
         toast.error('No reservation found for this account to post the settlement.');
@@ -822,7 +903,7 @@ export function Finance() {
 
     switch (reportTitle) {
       case 'Expense Type Report': {
-        const expenseRecords = filterByDate(records.filter(r => r.type === 'expense'));
+        const expenseRecords = filterByDate(validRecords.filter(r => r.type === 'expense'));
         const byCategory = categories.expense.map(cat => ({
           Category: cat,
           Total: expenseRecords.filter(r => r.category === cat).reduce((acc, r) => acc + r.amount, 0)
@@ -833,7 +914,7 @@ export function Finance() {
         break;
       }
       case 'Net Income Report': {
-        const periodRecords = filterByDate(records);
+        const periodRecords = filterByDate(validRecords);
         const pIncome = periodRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
         const pExpense = periodRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
         data = [
@@ -850,7 +931,7 @@ export function Finance() {
         break;
       }
       case 'Transaction Report': {
-        data = filterByDate(records)
+        data = filterByDate(validRecords)
           .filter(r => reportFilter.category === 'all' || r.category === reportFilter.category)
           .map(r => ({
             Date: safeFormatDate(r.timestamp, 'yyyy-MM-dd HH:mm'),
@@ -908,7 +989,7 @@ export function Finance() {
         break;
       }
       case 'Store Balance': {
-        const periodStoreRecords = filterByDate(records);
+        const periodStoreRecords = filterByDate(validRecords);
         const methods = ['cash', 'card', 'transfer'];
         data = methods.map(method => ({
           'Store Point': method.toUpperCase(),
@@ -993,7 +1074,7 @@ export function Finance() {
   };
 
   const filteredRecords = useMemo(() => {
-    return records.filter(r => {
+    return validRecords.filter(r => {
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch = !q || 
         fuzzySearch(r.description || '', q) || 
@@ -1008,7 +1089,7 @@ export function Finance() {
 
       return matchesSearch && matchesType && matchesCategory && matchesMethod && matchesTime;
     });
-  }, [records, searchQuery, filterType, categoryFilter, methodFilter, transactionDateFilter]);
+  }, [validRecords, searchQuery, filterType, categoryFilter, methodFilter, transactionDateFilter]);
 
   const paginatedRecords = useMemo(() => {
     const start = (transactionPage - 1) * transactionPageSize;
@@ -1077,9 +1158,10 @@ export function Finance() {
       const monthEnd = endOfMonth(new Date());
       const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
+      const todayExclusiveStr = format(addDays(new Date(), 1), 'yyyy-MM-dd');
       const heatmapData = daysInMonth.map(d => {
         const dateStr = format(d, 'yyyy-MM-dd');
-        const directIncome = records
+        const directIncome = validRecords
           .filter(r => r.type === 'income' && 
             (r.category === 'Room Revenue' || r.category?.toLowerCase() === 'room' || r.description?.toLowerCase().includes('room')) &&
             format(new Date(r.timestamp), 'yyyy-MM-dd') === dateStr
@@ -1090,12 +1172,19 @@ export function Finance() {
           if (['cancelled', 'no_show'].includes(res.status)) return false;
           if (!res.checkIn || !res.checkOut) return false;
           const cinStr = format(new Date(res.checkIn), 'yyyy-MM-dd');
-          const coutStr = format(new Date(res.checkOut), 'yyyy-MM-dd');
+          let coutStr = format(new Date(res.checkOut), 'yyyy-MM-dd');
+          if (res.overstayNights && res.overstayNights > 0) {
+            const extendedStr = format(addDays(new Date(res.checkOut), res.overstayNights), 'yyyy-MM-dd');
+            if (extendedStr > coutStr) coutStr = extendedStr;
+          }
+          if (res.status === 'checked_in' && todayExclusiveStr > coutStr) {
+            coutStr = todayExclusiveStr;
+          }
           return cinStr <= dateStr && dateStr < coutStr;
         });
 
         const bookingDailyRev = activeBookings.reduce((sum, res) => {
-          const billing = calculateBilling(res, hotel);
+          const billing = calculateBilling(res, hotel, validLedgerEntries);
           const nights = Math.max(1, billing.nightsCount || differenceInDays(new Date(res.checkOut), new Date(res.checkIn)) || 1);
           const dailyRate = billing.nightlyRate > 0 ? billing.nightlyRate : ((res.totalAmount || 0) / nights);
           return sum + dailyRate;
@@ -1134,12 +1223,13 @@ export function Finance() {
         };
       } else {
         const guest = item as Guest;
+        const liveBal = getGuestLiveBalance(guest);
         return {
           Name: guest.name,
           Email: guest.email,
           Phone: guest.phone,
-          Balance: guest.ledgerBalance || 0,
-          Status: (guest.ledgerBalance || 0) > 0 ? 'Debt' : (guest.ledgerBalance || 0) < 0 ? 'Credit' : 'Balanced'
+          Balance: liveBal,
+          Status: liveBal > 0.01 ? 'Debt' : liveBal < -0.01 ? 'Credit' : 'Balanced'
         };
       }
     });
@@ -1183,13 +1273,16 @@ export function Finance() {
       title = 'Guest Ledger & Accounts';
       filename = `guest_ledger_${dateStamp}.pdf`;
       headers = ['Guest Name', 'Email', 'Phone', 'Balance', 'Status'];
-      rows = filteredLedger.map(g => [
-        g.name,
-        g.email || 'N/A',
-        g.phone || 'N/A',
-        formatCurrency(g.ledgerBalance || 0, currency, exchangeRate),
-        (g.ledgerBalance || 0) > 0 ? 'DEBT' : (g.ledgerBalance || 0) < 0 ? 'CREDIT' : 'BALANCED'
-      ]);
+      rows = filteredLedger.map(g => {
+        const liveBal = getGuestLiveBalance(g);
+        return [
+          g.name,
+          g.email || 'N/A',
+          g.phone || 'N/A',
+          formatCurrency(liveBal, currency, exchangeRate),
+          liveBal > 0.01 ? 'DEBT' : liveBal < -0.01 ? 'CREDIT' : 'BALANCED'
+        ];
+      });
     } else if (activeTab === 'city_ledger') {
       title = 'Corporate Accounts & City Ledger';
       filename = `city_ledger_${dateStamp}.pdf`;
@@ -1208,20 +1301,22 @@ export function Finance() {
       filename = `guest_debtors_${dateStamp}.pdf`;
       headers = ['Guest Name', 'Room', 'Check-In', 'Check-Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'];
       const debtorsList = reservations.filter(r => {
+        if (r.corporateId) return false;
         const opStatus = r.operationalStatus || r.status;
-        const bal = getReservationLiveBalance(r, hotel, ledgerEntries);
+        const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
         const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
         return opStatus === 'checked_out' && finStatus !== 'SETTLED' && bal > 0.01;
       });
       rows = debtorsList.map(d => {
-        const bal = getReservationLiveBalance(d, hotel, ledgerEntries);
+        const billing = calculateBilling(d, hotel, validLedgerEntries);
+        const bal = getReservationLiveBalance(d, hotel, validLedgerEntries);
         return [
           d.guestName,
           d.roomNumber,
           d.checkIn,
           d.checkOut,
-          formatCurrency(d.totalAmount, currency, exchangeRate),
-          formatCurrency(d.paidAmount || 0, currency, exchangeRate),
+          formatCurrency(billing.totalCharges, currency, exchangeRate),
+          formatCurrency(billing.totalPayments, currency, exchangeRate),
           formatCurrency(bal, currency, exchangeRate),
           'OVERDUE DEBT'
         ];
@@ -1252,9 +1347,9 @@ export function Finance() {
       filename = `pos_terminals_${dateStamp}.pdf`;
       headers = ['Terminal / Outlet', 'Category', 'Total Revenue'];
       rows = [
-        ['Main Restaurant', 'Food & Beverage', formatCurrency(records.filter(r => r.category === 'Restaurant').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)],
-        ['Lounge & Bar', 'Beverage', formatCurrency(records.filter(r => r.category === 'Bar').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)],
-        ['Laundry Point', 'Services', formatCurrency(records.filter(r => r.category === 'Laundry').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)]
+        ['Main Restaurant', 'Food & Beverage', formatCurrency(validRecords.filter(r => r.category === 'Restaurant').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)],
+        ['Lounge & Bar', 'Beverage', formatCurrency(validRecords.filter(r => r.category === 'Bar').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)],
+        ['Laundry Point', 'Services', formatCurrency(validRecords.filter(r => r.category === 'Laundry').reduce((s, r) => s + r.amount, 0), currency, exchangeRate)]
       ];
     } else if (activeTab === 'commissions') {
       title = 'Travel Agents & Broker Commissions';
@@ -1270,9 +1365,9 @@ export function Finance() {
     } else {
       title = 'Executive Financial Summary & Performance';
       filename = `financial_executive_summary_${dateStamp}.pdf`;
-      const totIncome = records.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
-      const totExpense = records.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
-      const totReceivables = guests.reduce((acc, g) => acc + Math.max(0, g.ledgerBalance || 0), 0) +
+      const totIncome = validRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+      const totExpense = validRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+      const totReceivables = guests.reduce((acc, g) => acc + Math.max(0, getGuestLiveBalance(g)), 0) +
         corporateAccounts.reduce((acc, c) => acc + Math.max(0, c.currentBalance || 0), 0);
       const totPayables = suppliers.reduce((acc, s) => acc + Math.max(0, s.balance || 0), 0);
 
@@ -1425,7 +1520,7 @@ export function Finance() {
                   </h3>
                   <div className="space-y-4">
                     {allIncomeCategories.map(cat => {
-                      const amount = records
+                      const amount = filteredRecords
                         .filter(r => r.type === 'income' && r.category === cat)
                         .reduce((acc, r) => acc + r.amount, 0);
                       const percentage = totalIncome > 0 ? (amount / totalIncome) * 100 : 0;
@@ -1452,11 +1547,12 @@ export function Finance() {
 
               {/* D3.js Daily Room Revenue Heatmap */}
               <RevenueHeatmap 
-                records={records}
+                records={validRecords}
                 reservations={reservations}
                 hotel={hotel}
                 currency={currency}
                 exchangeRate={exchangeRate}
+                ledgerEntries={validLedgerEntries}
               />
             </div>
           )}
@@ -1464,11 +1560,12 @@ export function Finance() {
           {activeTab === 'revenue_heatmap' && (
             <div className="space-y-6">
               <RevenueHeatmap 
-                records={records}
+                records={validRecords}
                 reservations={reservations}
                 hotel={hotel}
                 currency={currency}
                 exchangeRate={exchangeRate}
+                ledgerEntries={validLedgerEntries}
               />
             </div>
           )}
@@ -1545,7 +1642,7 @@ export function Finance() {
                         className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
                       >
                         <option value="all" className="bg-zinc-900 text-zinc-200">All Categories</option>
-                        {[...categories.income, ...categories.expense].map(cat => (
+                        {Array.from(new Set([...allIncomeCategories, ...categories.expense])).map(cat => (
                           <option key={cat} value={cat} className="bg-zinc-900 text-zinc-200">{cat}</option>
                         ))}
                       </select>
@@ -1849,10 +1946,13 @@ export function Finance() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
-                      {corporateAccounts.filter(c => c.currentBalance !== 0).length === 0 ? (
-                        <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No corporate accounts with outstanding balances</td></tr>
-                      ) : (
-                        corporateAccounts.filter(c => c.currentBalance !== 0).map((corp) => (
+                      {(() => {
+                        const corpWithBal = corporateAccounts.filter(c => Math.abs(c.currentBalance || 0) > 0.01);
+                        const pagedCorps = corpWithBal.slice((corpAccountsPage - 1) * corpAccountsPageSize, corpAccountsPage * corpAccountsPageSize);
+                        if (corpWithBal.length === 0) {
+                          return <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No corporate accounts with outstanding balances</td></tr>;
+                        }
+                        return pagedCorps.map((corp) => (
                           <tr key={corp.id} className="hover:bg-zinc-800/50 transition-colors">
                             <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{corp.name}</td>
                             <td className="px-6 py-4">
@@ -1863,7 +1963,7 @@ export function Finance() {
                               {formatCurrency(corp.currentBalance || 0, currency, exchangeRate)}
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <button
+                              <button 
                                 onClick={() => {
                                   setShowSettleModal(corp);
                                   setSettleData({ 
@@ -1877,11 +1977,20 @@ export function Finance() {
                               </button>
                             </td>
                           </tr>
-                        ))
-                      )}
+                        ));
+                      })()}
                     </tbody>
                   </table>
                 </div>
+                <Pagination
+                  currentPage={corpAccountsPage}
+                  totalItems={corporateAccounts.filter(c => Math.abs(c.currentBalance || 0) > 0.01).length}
+                  pageSize={corpAccountsPageSize}
+                  onPageChange={setCorpAccountsPage}
+                  onPageSizeChange={setCorpAccountsPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="corporate accounts"
+                />
               </div>
             </div>
           )}
@@ -1916,8 +2025,8 @@ export function Finance() {
                       <h3 className="text-2xl font-bold text-zinc-50">
                         {formatCurrency(
                           reservations
-                            .filter(r => r.status === 'checked_out' && getReservationLiveBalance(r, hotel, ledgerEntries) > 0.01 && r.checkOut && differenceInDays(new Date(), new Date(r.checkOut)) > 30)
-                            .reduce((acc, r) => acc + getReservationLiveBalance(r, hotel, ledgerEntries), 0) +
+                            .filter(r => !r.corporateId && r.status === 'checked_out' && getReservationLiveBalance(r, hotel, validLedgerEntries) > 0.01 && r.checkOut && differenceInDays(new Date(), new Date(r.checkOut)) > 30)
+                            .reduce((acc, r) => acc + getReservationLiveBalance(r, hotel, validLedgerEntries), 0) +
                           corporateAccounts
                             .filter(c => (c.currentBalance || 0) > 0 && c.createdAt && differenceInDays(new Date(), new Date(c.createdAt)) > 30)
                             .reduce((acc, c) => acc + (c.currentBalance || 0), 0),
@@ -2036,14 +2145,19 @@ export function Finance() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
-                      {[...guests, ...corporateAccounts]
-                        .filter(a => Math.abs('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0.01)
-                        .sort((a, b) => {
-                          const balA = 'currentBalance' in a ? (a.currentBalance || 0) : getGuestLiveBalance(a as Guest);
-                          const balB = 'currentBalance' in b ? (b.currentBalance || 0) : getGuestLiveBalance(b as Guest);
-                          return balB - balA; // Sort larger debts (positive) first
-                        })
-                        .map((account) => {
+                      {(() => {
+                        const agingAccounts = [...guests, ...corporateAccounts]
+                          .filter(a => Math.abs('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0.01)
+                          .sort((a, b) => {
+                            const balA = 'currentBalance' in a ? (a.currentBalance || 0) : getGuestLiveBalance(a as Guest);
+                            const balB = 'currentBalance' in b ? (b.currentBalance || 0) : getGuestLiveBalance(b as Guest);
+                            return balB - balA;
+                          });
+                        const pagedAging = agingAccounts.slice((agingPage - 1) * agingPageSize, agingPage * agingPageSize);
+                        if (agingAccounts.length === 0) {
+                          return <tr><td colSpan={6} className="px-6 py-12 text-center text-zinc-500 italic">No accounts receivable balances found</td></tr>;
+                        }
+                        return pagedAging.map((account) => {
                           const balance = 'currentBalance' in account ? account.currentBalance : getGuestLiveBalance(account as Guest);
                           return (
                             <tr key={account.id} className="hover:bg-zinc-800/50 transition-colors">
@@ -2081,10 +2195,20 @@ export function Finance() {
                               </td>
                             </tr>
                           );
-                        })}
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
+                <Pagination
+                  currentPage={agingPage}
+                  totalItems={[...guests, ...corporateAccounts].filter(a => Math.abs('currentBalance' in a ? a.currentBalance : getGuestLiveBalance(a as Guest)) > 0.01).length}
+                  pageSize={agingPageSize}
+                  onPageChange={setAgingPage}
+                  onPageSizeChange={setAgingPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="accounts"
+                />
               </div>
             </div>
           )}
@@ -2093,8 +2217,9 @@ export function Finance() {
             <div className="space-y-6">
               {(() => {
                 const debtors = reservations.filter(r => {
+                  if (r.corporateId) return false;
                   const opStatus = r.operationalStatus || r.status;
-                  const bal = getReservationLiveBalance(r, hotel, ledgerEntries);
+                  const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
                   const finStatus = r.financialStatus || (bal <= 0.01 ? 'SETTLED' : opStatus === 'checked_out' ? 'DEBTOR' : 'OUTSTANDING');
                   return opStatus === 'checked_out' && finStatus !== 'SETTLED' && bal > 0.01;
                 }).filter(r => {
@@ -2107,7 +2232,7 @@ export function Finance() {
                   );
                 });
 
-                const totalDebt = debtors.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel, ledgerEntries), 0);
+                const totalDebt = debtors.reduce((sum, r) => sum + getReservationLiveBalance(r, hotel, validLedgerEntries), 0);
 
                 return (
                   <div className="space-y-6">
@@ -2169,17 +2294,18 @@ export function Finance() {
                               onClick={() => {
                                 exportToCSV(
                                   debtors.map(d => {
-                                    const bal = getReservationLiveBalance(d, hotel, ledgerEntries);
+                                    const billing = calculateBilling(d, hotel, validLedgerEntries);
+                                    const bal = getReservationLiveBalance(d, hotel, validLedgerEntries);
                                     return {
                                       Guest: d.guestName,
                                       Room: d.roomNumber,
                                       'Check In': d.checkIn,
                                       'Check Out': d.checkOut,
-                                      Duration: formatStayDuration(d.checkIn, d.checkOut),
+                                      Duration: formatStayDuration(d.checkIn, d.checkOut, d.overstayNights || 0),
                                       OperationalStatus: 'CHECKED_OUT',
                                       FinancialStatus: 'DEBTOR',
-                                      TotalAmount: d.totalAmount,
-                                      PaidAmount: d.paidAmount || 0,
+                                      TotalAmount: billing.totalCharges,
+                                      PaidAmount: billing.totalPayments,
                                       OutstandingBalance: bal
                                     };
                                   }),
@@ -2212,14 +2338,15 @@ export function Finance() {
                                   filename: `${cleanHotel}_debtors_report_${format(new Date(), 'yyyy-MM-dd')}.pdf`,
                                   headers: ['Guest Name', 'Room', 'Check In', 'Check Out', 'Total Billed', 'Total Paid', 'Outstanding Debt', 'Status'],
                                   rows: debtors.map(d => {
-                                    const bal = getReservationLiveBalance(d, hotel, ledgerEntries);
+                                    const billing = calculateBilling(d, hotel, validLedgerEntries);
+                                    const bal = getReservationLiveBalance(d, hotel, validLedgerEntries);
                                     return [
                                       d.guestName,
                                       d.roomNumber,
                                       d.checkIn,
                                       d.checkOut,
-                                      formatCurrency(d.totalAmount, currency, exchangeRate),
-                                      formatCurrency(d.paidAmount || 0, currency, exchangeRate),
+                                      formatCurrency(billing.totalCharges, currency, exchangeRate),
+                                      formatCurrency(billing.totalPayments, currency, exchangeRate),
                                       formatCurrency(bal, currency, exchangeRate),
                                       'DEBTOR'
                                     ];
@@ -2257,8 +2384,9 @@ export function Finance() {
                                 </td>
                               </tr>
                             ) : (
-                              debtors.map((res) => {
-                                const bal = getReservationLiveBalance(res, hotel, ledgerEntries);
+                              debtors.slice((debtorsPage - 1) * debtorsPageSize, debtorsPage * debtorsPageSize).map((res) => {
+                                const billing = calculateBilling(res, hotel, validLedgerEntries);
+                                const bal = getReservationLiveBalance(res, hotel, validLedgerEntries);
                                 const opStatus = res.operationalStatus || res.status;
                                 return (
                                   <tr key={res.id} className="hover:bg-zinc-800/40 transition-colors">
@@ -2289,10 +2417,10 @@ export function Finance() {
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                       <div className="text-xs text-zinc-300 font-mono">
-                                        {formatCurrency(res.totalAmount, currency, exchangeRate)}
+                                        {formatCurrency(billing.totalCharges, currency, exchangeRate)}
                                       </div>
                                       <div className="text-[10px] text-emerald-400 font-mono">
-                                        Paid: {formatCurrency(res.paidAmount || 0, currency, exchangeRate)}
+                                        Paid: {formatCurrency(billing.totalPayments, currency, exchangeRate)}
                                       </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
@@ -2330,6 +2458,15 @@ export function Finance() {
                           </tbody>
                         </table>
                       </div>
+                      <Pagination
+                        currentPage={debtorsPage}
+                        totalItems={debtors.length}
+                        pageSize={debtorsPageSize}
+                        onPageChange={setDebtorsPage}
+                        onPageSizeChange={setDebtorsPageSize}
+                        pageSizeOptions={[10, 25, 50]}
+                        itemLabel="debtors"
+                      />
                     </div>
                   </div>
                 );
@@ -2376,7 +2513,7 @@ export function Finance() {
                     {suppliers.length === 0 ? (
                       <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No suppliers found</td></tr>
                     ) : (
-                      suppliers.map((s) => (
+                      suppliers.slice((suppliersPage - 1) * suppliersPageSize, suppliersPage * suppliersPageSize).map((s) => (
                         <tr key={s.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{s.name}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400">{s.category}</td>
@@ -2398,8 +2535,112 @@ export function Finance() {
                   </tbody>
                 </table>
               </div>
+              <Pagination
+                currentPage={suppliersPage}
+                totalItems={suppliers.length}
+                pageSize={suppliersPageSize}
+                onPageChange={setSuppliersPage}
+                onPageSizeChange={setSuppliersPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="suppliers"
+              />
             </div>
           )}
+
+          {activeTab === 'expenses' && (() => {
+            const expenseRecords = validRecords.filter(r => r.type === 'expense');
+            const totalExpensesAmt = expenseRecords.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+            const expenseCategories = Array.from(new Set([...categories.expense, ...expenseRecords.map(r => r.category).filter(Boolean)]));
+
+            return (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <TrendingDown size={20} className="text-red-400" />
+                      <span className="text-[10px] font-black uppercase text-red-500 bg-red-500/20 px-2 py-0.5 rounded">Total Expenses</span>
+                    </div>
+                    <div className="text-3xl font-black text-red-400 font-mono">
+                      {formatCurrency(totalExpensesAmt, currency, exchangeRate)}
+                    </div>
+                    <div className="text-xs text-red-300/70 mt-1 font-bold">{expenseRecords.length} Recorded Outflows</div>
+                  </div>
+                  <div className="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+                    <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Expense Breakdown by Category</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {expenseCategories.map(cat => {
+                        const catTotal = expenseRecords.filter(r => r.category === cat).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+                        return (
+                          <div key={cat} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3">
+                            <div className="text-[10px] font-bold text-zinc-500 uppercase truncate">{cat}</div>
+                            <div className="text-sm font-bold text-zinc-100 mt-1 font-mono">{formatCurrency(catTotal, currency, exchangeRate)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                  <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-zinc-50">Expense Records</h3>
+                      <p className="text-xs text-zinc-500">All verified hotel expenses and supplier payouts</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewRecord({ type: 'expense', category: categories.expense[0], amount: 0, description: '', paymentMethod: 'cash' });
+                        setShowAddModal(true);
+                      }}
+                      className="bg-red-500 hover:bg-red-600 text-zinc-50 px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                    >
+                      <Plus size={14} /> Record Expense
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-zinc-950 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                          <th className="px-6 py-4">Date</th>
+                          <th className="px-6 py-4">Description</th>
+                          <th className="px-6 py-4">Category</th>
+                          <th className="px-6 py-4">Method</th>
+                          <th className="px-6 py-4 text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800">
+                        {expenseRecords.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-12 text-center text-zinc-500 italic">No expense records recorded yet.</td>
+                          </tr>
+                        ) : (
+                          expenseRecords.slice((expensesPage - 1) * expensesPageSize, expensesPage * expensesPageSize).map(record => (
+                            <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
+                              <td className="px-6 py-4 text-xs text-zinc-300">{safeFormatDate(record.timestamp, 'yyyy-MM-dd HH:mm')}</td>
+                              <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
+                              <td className="px-6 py-4"><span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">{record.category}</span></td>
+                              <td className="px-6 py-4 text-xs text-zinc-500 capitalize">{record.paymentMethod}</td>
+                              <td className="px-6 py-4 text-right font-bold text-sm text-red-500">-{formatCurrency(record.amount, currency, exchangeRate)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination
+                    currentPage={expensesPage}
+                    totalItems={expenseRecords.length}
+                    pageSize={expensesPageSize}
+                    onPageChange={setExpensesPage}
+                    onPageSizeChange={setExpensesPageSize}
+                    pageSizeOptions={[15, 25, 50]}
+                    itemLabel="expenses"
+                  />
+                </div>
+              </div>
+            );
+          })()}
 
           {activeTab === 'accounts' && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -2429,7 +2670,7 @@ export function Finance() {
                     {accounts.length === 0 ? (
                       <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No accounts defined</td></tr>
                     ) : (
-                      accounts.map((a) => (
+                      accounts.slice((accountsPage - 1) * accountsPageSize, accountsPage * accountsPageSize).map((a) => (
                         <tr key={a.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4 text-xs text-zinc-500 font-mono">{a.code}</td>
                           <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{a.name}</td>
@@ -2441,6 +2682,15 @@ export function Finance() {
                   </tbody>
                 </table>
               </div>
+              <Pagination
+                currentPage={accountsPage}
+                totalItems={accounts.length}
+                pageSize={accountsPageSize}
+                onPageChange={setAccountsPage}
+                onPageSizeChange={setAccountsPageSize}
+                pageSizeOptions={[15, 25, 50]}
+                itemLabel="accounts"
+              />
             </div>
           )}
 
@@ -2473,7 +2723,7 @@ export function Finance() {
                     {purchaseOrders.length === 0 ? (
                       <tr><td colSpan={5} className="px-6 py-12 text-center text-zinc-500 italic">No purchase orders found</td></tr>
                     ) : (
-                      purchaseOrders.map((po) => (
+                      purchaseOrders.slice((posPage - 1) * posPageSize, posPage * posPageSize).map((po) => (
                         <tr key={po.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4 text-xs text-zinc-50 font-mono">{(po.id || '').slice(0, 8)}</td>
                           <td className="px-6 py-4 text-sm text-zinc-400">{suppliers.find(s => s.id === po.supplierId)?.name || 'Unknown'}</td>
@@ -2518,6 +2768,15 @@ export function Finance() {
                   </tbody>
                 </table>
               </div>
+              <Pagination
+                currentPage={posPage}
+                totalItems={purchaseOrders.length}
+                pageSize={posPageSize}
+                onPageChange={setPosPage}
+                onPageSizeChange={setPosPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="purchase orders"
+              />
             </div>
           )}
 
@@ -2541,7 +2800,7 @@ export function Finance() {
                     {commissions.length === 0 ? (
                       <tr><td colSpan={4} className="px-6 py-12 text-center text-zinc-500 italic">No commissions found</td></tr>
                     ) : (
-                      commissions.map((c) => (
+                      commissions.slice((commissionsPage - 1) * commissionsPageSize, commissionsPage * commissionsPageSize).map((c) => (
                         <tr key={c.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4 text-sm text-zinc-50 font-medium">{c.agentName}</td>
                           <td className="px-6 py-4 text-xs text-zinc-400">{c.reservationId}</td>
@@ -2558,6 +2817,15 @@ export function Finance() {
                   </tbody>
                 </table>
               </div>
+              <Pagination
+                currentPage={commissionsPage}
+                totalItems={commissions.length}
+                pageSize={commissionsPageSize}
+                onPageChange={setCommissionsPage}
+                onPageSizeChange={setCommissionsPageSize}
+                pageSizeOptions={[10, 25, 50]}
+                itemLabel="commissions"
+              />
             </div>
           )}
 
@@ -2707,7 +2975,7 @@ export function Finance() {
                                 </td>
                               </tr>
                             ) : (
-                              filteredPayments.map((p) => (
+                              filteredPayments.slice((paymentsPage - 1) * paymentsPageSize, paymentsPage * paymentsPageSize).map((p) => (
                                 <tr key={p.id} className="hover:bg-zinc-800/40 transition-colors">
                                   <td className="px-6 py-4 text-xs text-zinc-400 font-mono">
                                     {safeFormatDate(p.timestamp, 'MMM d, yyyy HH:mm')}
@@ -2748,6 +3016,15 @@ export function Finance() {
                           </tbody>
                         </table>
                       </div>
+                      <Pagination
+                        currentPage={paymentsPage}
+                        totalItems={filteredPayments.length}
+                        pageSize={paymentsPageSize}
+                        onPageChange={setPaymentsPage}
+                        onPageSizeChange={setPaymentsPageSize}
+                        pageSizeOptions={[15, 25, 50]}
+                        itemLabel="payments"
+                      />
                     </div>
                   </div>
                 );
@@ -2771,7 +3048,7 @@ export function Finance() {
                       className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="all">All Categories</option>
-                      {[...categories.income, ...categories.expense].map(cat => (
+                      {Array.from(new Set([...allIncomeCategories, ...categories.expense])).map(cat => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>
@@ -3317,7 +3594,9 @@ export function Finance() {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl my-auto"
           >
             {(() => {
-              const balance = 'ledgerBalance' in showSettleModal ? showSettleModal.ledgerBalance : showSettleModal.currentBalance;
+              const balance = 'contactPerson' in showSettleModal
+                ? (showSettleModal.currentBalance || 0)
+                : getGuestLiveBalance(showSettleModal as Guest);
               return (
                 <>
                   <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
@@ -3326,7 +3605,7 @@ export function Finance() {
                         {settleType === 'payment' ? 'Settle Outstanding Debt' : 'Process Refund / Overpayment'}
                       </h2>
                       <p className="text-sm text-zinc-500 mt-1">
-                        {'ledgerBalance' in showSettleModal ? 'Guest' : 'Corporate'}: {showSettleModal.name}
+                        {'contactPerson' in showSettleModal ? 'Corporate' : 'Guest'}: {showSettleModal.name}
                       </p>
                     </div>
                     <button

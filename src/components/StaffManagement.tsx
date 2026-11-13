@@ -46,6 +46,7 @@ import {
 } from 'lucide-react';
 import { cn, exportToCSV, safeStringify } from '../utils';
 import { toast } from 'sonner';
+import { Pagination } from './Pagination';
 
 const BASE_ROLES: { id: StaffRole; label: string }[] = [
   { id: 'frontDesk', label: 'Front Desk' },
@@ -118,6 +119,8 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
+  const [rolesPage, setRolesPage] = useState(1);
+  const [rolesPageSize, setRolesPageSize] = useState(9);
 
   // New staff form state with preset modules enabled by default
   const [newStaff, setNewStaff] = useState({
@@ -1099,8 +1102,9 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
               </button>
             </div>
           ) : (
+            <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {customRoles.map((role) => (
+              {customRoles.slice((rolesPage - 1) * rolesPageSize, rolesPage * rolesPageSize).map((role) => (
               <div 
                 key={role.id}
                 className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-zinc-700 transition-colors"
@@ -1159,6 +1163,17 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                 </div>
               </div>
             ))}
+          </div>
+          <Pagination
+            currentPage={rolesPage}
+            totalItems={customRoles.length}
+            pageSize={rolesPageSize}
+            onPageChange={setRolesPage}
+            onPageSizeChange={setRolesPageSize}
+            pageSizeOptions={[6, 9, 18, 36]}
+            itemLabel="roles"
+            className="rounded-2xl border border-zinc-800"
+          />
           </div>
           )}
         </div>

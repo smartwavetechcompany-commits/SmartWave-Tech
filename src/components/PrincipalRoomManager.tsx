@@ -27,6 +27,7 @@ import { format, parseISO } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
 import { ReceiptGenerator } from './ReceiptGenerator';
+import { Pagination } from './Pagination';
 import { toast } from 'sonner';
 
 interface PrincipalRoomManagerProps {
@@ -51,6 +52,8 @@ export function PrincipalRoomManager({
   const [showMoveModal, setShowMoveModal] = useState<{ isOpen: boolean; childReservation?: Reservation }>({ isOpen: false });
   const [showConsolidatedReceipt, setShowConsolidatedReceipt] = useState(false);
   const [selectedInvoiceRoom, setSelectedInvoiceRoom] = useState<Reservation | null>(null);
+  const [chargesPage, setChargesPage] = useState(1);
+  const [chargesPageSize, setChargesPageSize] = useState(10);
 
   // Group Payment state
   const [paymentSplits, setPaymentSplits] = useState<Array<{ amount: number; method: 'cash' | 'card' | 'transfer'; referenceCode?: string }>>([
@@ -544,7 +547,7 @@ export function PrincipalRoomManager({
                         </td>
                       </tr>
                     ) : (
-                      groupFinancials.allGroupEntries.map((entry) => (
+                      groupFinancials.allGroupEntries.slice((chargesPage - 1) * chargesPageSize, chargesPage * chargesPageSize).map((entry) => (
                         <tr key={entry.id} className="hover:bg-zinc-800/30">
                           <td className="py-2.5 px-4 font-bold text-zinc-100">
                             <span className={cn(
@@ -579,6 +582,18 @@ export function PrincipalRoomManager({
                     )}
                   </tbody>
                 </table>
+                <Pagination
+                  compact
+                  currentPage={chargesPage}
+                  totalItems={groupFinancials.allGroupEntries.length}
+                  pageSize={chargesPageSize}
+                  onPageChange={setChargesPage}
+                  onPageSizeChange={(size) => {
+                    setChargesPageSize(size);
+                    setChargesPage(1);
+                  }}
+                  itemLabel="charges"
+                />
               </div>
             </div>
           )}

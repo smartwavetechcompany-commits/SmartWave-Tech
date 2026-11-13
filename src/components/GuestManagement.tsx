@@ -211,16 +211,37 @@ export function GuestManagement() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
+    const personalReservations = allReservations.filter(r => !r.corporateId);
+
     guests.forEach(guest => {
-      const position = calculateGuestFinancialPosition(guest, allReservations, hotel, allLedgerEntries);
-      balanceMap[guest.id] = position.outstandingBalance;
+      const hasAnyStay = allReservations.some(r =>
+        r.status !== 'cancelled' &&
+        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      );
+      const guestPersonalRes = personalReservations.filter(r =>
+        r.status !== 'cancelled' &&
+        (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      );
+
+      if (guestPersonalRes.length > 0) {
+        const position = calculateGuestFinancialPosition(guest, guestPersonalRes, hotel, allLedgerEntries);
+        balanceMap[guest.id] = position.outstandingBalance;
+      } else if (hasAnyStay) {
+        balanceMap[guest.id] = 0;
+      } else {
+        balanceMap[guest.id] = Number((guest.ledgerBalance ?? 0).toFixed(2));
+      }
     });
 
     return balanceMap;
   }, [guests, allReservations, hotel, allLedgerEntries]);
 
   const getGuestLiveBalance = useCallback((guest: Guest) => {
-    return guestLiveBalances[guest.id] ?? calculateGuestFinancialPosition(guest, allReservations, hotel, allLedgerEntries).outstandingBalance;
+    if (guestLiveBalances[guest.id] !== undefined) {
+      return guestLiveBalances[guest.id];
+    }
+    const personalRes = allReservations.filter(r => !r.corporateId && r.status !== 'cancelled');
+    return calculateGuestFinancialPosition(guest, personalRes, hotel, allLedgerEntries).outstandingBalance;
   }, [guestLiveBalances, allReservations, hotel, allLedgerEntries]);
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
@@ -273,7 +294,11 @@ export function GuestManagement() {
       const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
       const visitsCount = completedCount + activeCount;
 
+      const individualGuestRes = guestRes.filter(r => !r.corporateId);
       const position = calculateGuestFinancialPosition(g, guestRes, hotel, allLedgerEntries);
+      const personalPosition = individualGuestRes.length > 0
+        ? calculateGuestFinancialPosition(g, individualGuestRes, hotel, allLedgerEntries)
+        : null;
       const calculatedNights = position.totalNights;
       const bookingNights = position.bookingNights !== undefined ? position.bookingNights : calculatedNights;
       const overstayNights = position.overstayNights || 0;
@@ -285,7 +310,7 @@ export function GuestManagement() {
       // Revenue Generated = All posted charges (Room charges + Service charges + Taxes + Overstay)
       const totalRevenueVal = position.totalCharges;
       const totalDiscountsVal = position.totalDiscounts || 0;
-      const outstandingDebtVal = position.netAmountDue;
+      const outstandingDebtVal = personalPosition ? personalPosition.netAmountDue : (guestRes.length > 0 ? 0 : Math.max(0, g.ledgerBalance || 0));
 
       statsMap[g.id] = {
         visitsCount,
@@ -562,7 +587,7 @@ export function GuestManagement() {
           );
 
           for (const res of matchingRes) {
-            const resBalance = getReservationLiveBalance(res, hotel);
+            const resBalance = getReservationLiveBalance(res, hotel, allLedgerEntries);
             if (resBalance > 0.01) {
               // Transfer the existing balance to corporate account
               await transferToCityLedger(hotel.id, editingGuest.id, res.id, resBalance, profile.uid, newCorpId);

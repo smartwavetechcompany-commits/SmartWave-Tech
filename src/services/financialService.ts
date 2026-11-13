@@ -1,6 +1,6 @@
 import { db } from '../firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { LedgerEntry, Guest, Reservation, Hotel } from '../types';
+import { LedgerEntry, Guest, Reservation, Hotel, FinanceRecord } from '../types';
 import { calculateStayDuration } from '../utils/dateUtils';
 import { calculateReservationAccount } from '../utils/financialUtils';
 
@@ -429,4 +429,112 @@ export async function fetchGuestLedgerEntries(hotelId: string, guestId: string):
     console.error('Failed to fetch guest ledger entries:', err);
     return [];
   }
+}
+
+const SPECIAL_RESERVATION_IDS = new Set([
+  'CORPORATE_SETTLEMENT',
+  'CORPORATE_CHARGE',
+  'BULK_SETTLEMENT',
+  'MANUAL_ADJUSTMENT',
+  'CORP_TRANSFER'
+]);
+
+export function isSpecialNonReservationId(resId?: string | null): boolean {
+  if (!resId) return false;
+  return SPECIAL_RESERVATION_IDS.has(resId) || resId.startsWith('CORP_') || resId.startsWith('CORPORATE_');
+}
+
+/**
+ * Filters out invalid/corrupted ledger entries and orphaned entries whose parent reservation was deleted.
+ */
+export function reconcileLedgerEntries(
+  ledgerEntries: LedgerEntry[],
+  reservations: Reservation[],
+  reservationsLoaded = false
+): LedgerEntry[] {
+  const resIdSet = new Set(reservations.map(r => r.id).filter(Boolean));
+  return ledgerEntries.filter(e => {
+    if (!validateLedgerTransaction(e).isValid) return false;
+    if (
+      reservationsLoaded &&
+      e.reservationId &&
+      !isSpecialNonReservationId(e.reservationId) &&
+      !resIdSet.has(e.reservationId)
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Filters out orphaned ledger-originated finance records whose linked ledger entry or reservation was deleted/purged,
+ * while preserving legitimate manual entries, PO payments, supplier payments, F&B revenue, and corporate settlements.
+ */
+export function reconcileFinanceRecords(
+  records: FinanceRecord[],
+  ledgerEntries: LedgerEntry[],
+  reservations: Reservation[],
+  options: { ledgerLoaded?: boolean; reservationsLoaded?: boolean } = {}
+): FinanceRecord[] {
+  const { ledgerLoaded = false, reservationsLoaded = false } = options;
+  const resIdSet = new Set(reservations.map(r => r.id).filter(Boolean));
+  const ledgerById = new Map<string, LedgerEntry>();
+  ledgerEntries.forEach(le => {
+    if (le.id) ledgerById.set(le.id, le);
+  });
+
+  return records.filter(r => {
+    const recResId = (r as any).reservationId as string | undefined | null;
+    if (
+      reservationsLoaded &&
+      recResId &&
+      !isSpecialNonReservationId(recResId) &&
+      !resIdSet.has(recResId)
+    ) {
+      return false;
+    }
+
+    const isLedgerOriginated = Boolean(
+      r.referenceId &&
+      ('guestId' in r || 'reservationId' in r) &&
+      (r.category === 'Room Revenue' || r.category === 'Other') &&
+      !(r.description || '').startsWith('PO Payment:')
+    );
+
+    if (isLedgerOriginated && r.referenceId) {
+      const linkedLedger = ledgerById.get(r.referenceId);
+      if (ledgerLoaded && !linkedLedger) {
+        return false;
+      }
+      if (linkedLedger) {
+        if (!validateLedgerTransaction(linkedLedger).isValid) {
+          return false;
+        }
+        if (
+          reservationsLoaded &&
+          linkedLedger.reservationId &&
+          !isSpecialNonReservationId(linkedLedger.reservationId) &&
+          !resIdSet.has(linkedLedger.reservationId)
+        ) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  });
+}
+
+/**
+ * Returns true if a ledger entry represents an actual money payment collected
+ * (individual folio payment, corporate settlement, or non-transfer city ledger payment).
+ */
+export function isActualPaymentLedgerEntry(e: LedgerEntry): boolean {
+  if (e.type !== 'credit') return false;
+  const cat = (e.category || '').toLowerCase();
+  const desc = (e.description || '').toLowerCase();
+  if (cat === 'payment' || cat === 'corporate_payment') return true;
+  if (cat === 'city_ledger' && !desc.includes('transfer')) return true;
+  return false;
 }

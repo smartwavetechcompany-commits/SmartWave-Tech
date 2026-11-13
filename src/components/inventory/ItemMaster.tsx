@@ -14,6 +14,7 @@ import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface ItemMasterProps {
   items: InventoryItem[];
@@ -31,6 +32,12 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
   const [showCategoryModal, setShowCategoryModal] = useState(defaultShowCategoryModal || false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery, categoryFilter]);
 
   // Sync modal state with prop
   React.useEffect(() => {
@@ -195,7 +202,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredItems.map((item) => (
+              {filteredItems.slice((page - 1) * pageSize, page * pageSize).map((item) => (
                 <tr key={item.id} className="hover:bg-zinc-800/30 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-4">
@@ -319,6 +326,17 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={page}
+          totalItems={filteredItems.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+          itemLabel="items"
+        />
       </div>
 
       {/* Add/Edit Modal */}
@@ -627,6 +645,8 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
   const [newCategory, setNewCategory] = useState({ name: '', description: '', isFB: false });
   const [editingCategory, setEditingCategory] = useState<InventoryCategory | null>(null);
   const [loading, setLoading] = useState(false);
+  const [catPage, setCatPage] = useState(1);
+  const catPageSize = 6;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -754,7 +774,7 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
           <div className="space-y-2">
             <h3 className="text-xs font-bold text-zinc-500 uppercase ml-1">Existing Categories</h3>
             <div className="grid grid-cols-1 gap-2">
-              {categories.map(cat => (
+              {categories.slice((catPage - 1) * catPageSize, catPage * catPageSize).map(cat => (
                 <div key={cat.id} className="flex items-center justify-between bg-zinc-950/50 p-3 rounded-xl border border-zinc-800 group hover:border-zinc-700 transition-all">
                   <div>
                     <div className="text-sm font-bold text-white flex items-center gap-2">
@@ -785,6 +805,15 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
                 </div>
               ))}
             </div>
+            <Pagination
+              compact
+              currentPage={catPage}
+              totalItems={categories.length}
+              pageSize={catPageSize}
+              onPageChange={setCatPage}
+              itemLabel="categories"
+              className="mt-2 rounded-xl border border-zinc-800/80"
+            />
           </div>
         </div>
       </motion.div>

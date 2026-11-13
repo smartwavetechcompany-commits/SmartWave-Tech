@@ -37,6 +37,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { Pagination } from './Pagination';
 
 export interface DSSGuestRecord {
   id: string;
@@ -65,6 +66,12 @@ export function DSSGuestReport() {
   });
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [period, customRange.start, customRange.end, searchTerm]);
 
   // Live listener for reservations
   useEffect(() => {
@@ -148,6 +155,9 @@ export function DSSGuestReport() {
         // Exclude cancelled/no_show
         if (res.status === 'cancelled' || res.status === 'no_show') return false;
 
+        // Checked-out guests move out of the active Daily Report into Weekly/Monthly/Custom history
+        if (period === 'daily' && res.status === 'checked_out') return false;
+
         const checkInDate = startOfDay(parseISO(res.checkIn));
         let checkOutDate = endOfDay(parseISO(res.checkOut));
 
@@ -200,7 +210,7 @@ export function DSSGuestReport() {
         };
       })
       .sort((a, b) => new Date(a.arrivalDate).getTime() - new Date(b.arrivalDate).getTime());
-  }, [reservations, guestMap, activeInterval]);
+  }, [reservations, guestMap, activeInterval, period]);
 
   // Filtered search
   const filteredRecords = useMemo(() => {
@@ -532,7 +542,7 @@ export function DSSGuestReport() {
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((record) => (
+                filteredRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((record) => (
                   <tr key={record.id} className="hover:bg-zinc-800/30 transition-colors">
                     {/* Guest Name */}
                     <td className="py-3 px-4 font-bold text-zinc-100">
@@ -576,6 +586,15 @@ export function DSSGuestReport() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={filteredRecords.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[10, 15, 25, 50]}
+          itemLabel="guest records"
+        />
 
         {/* Footer */}
         <div className="p-4 bg-zinc-950/60 border-t border-zinc-800 text-xs text-zinc-500 flex items-center justify-between">

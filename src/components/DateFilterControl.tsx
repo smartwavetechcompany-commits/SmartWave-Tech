@@ -165,7 +165,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           type="button"
           onClick={() => handleModeChange('all')}
           className={cn(
-            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none",
+            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none cursor-pointer",
             value.mode === 'all'
               ? "bg-zinc-800 text-zinc-100 shadow-sm"
               : "text-zinc-500 hover:text-zinc-300"
@@ -177,7 +177,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           type="button"
           onClick={() => handleModeChange('day')}
           className={cn(
-            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1",
+            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1 cursor-pointer",
             value.mode === 'day'
               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
               : "text-zinc-500 hover:text-zinc-300"
@@ -190,7 +190,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           type="button"
           onClick={() => handleModeChange('month')}
           className={cn(
-            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1",
+            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1 cursor-pointer",
             value.mode === 'month'
               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
               : "text-zinc-500 hover:text-zinc-300"
@@ -203,7 +203,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           type="button"
           onClick={() => handleModeChange('year')}
           className={cn(
-            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1",
+            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1 cursor-pointer",
             value.mode === 'year'
               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
               : "text-zinc-500 hover:text-zinc-300"
@@ -216,7 +216,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           type="button"
           onClick={() => handleModeChange('range')}
           className={cn(
-            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1",
+            "px-2.5 py-1 rounded-lg text-xs font-semibold transition-all select-none flex items-center gap-1 cursor-pointer",
             value.mode === 'range'
               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
               : "text-zinc-500 hover:text-zinc-300"
@@ -240,14 +240,14 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           <button
             type="button"
             onClick={setToday}
-            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors"
+            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
           >
             Today
           </button>
           <button
             type="button"
             onClick={setYesterday}
-            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors"
+            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
           >
             Yesterday
           </button>
@@ -282,7 +282,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           <button
             type="button"
             onClick={setThisMonth}
-            className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors"
+            className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
           >
             Current
           </button>
@@ -305,7 +305,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           <button
             type="button"
             onClick={setThisYear}
-            className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors"
+            className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
           >
             Current Year
           </button>
@@ -337,7 +337,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
           type="button"
           onClick={() => handleModeChange('all')}
           title="Reset date filter"
-          className="p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          className="p-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
         >
           <X size={14} />
         </button>

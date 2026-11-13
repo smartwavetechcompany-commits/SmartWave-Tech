@@ -43,6 +43,7 @@ import { StaffManagement } from './StaffManagement';
 import { SuperAdminReceipt } from './SuperAdminReceipt';
 
 import { toast } from 'sonner';
+import { Pagination } from './Pagination';
 
 export function SuperAdmin() {
   const navigate = useNavigate();
@@ -84,6 +85,24 @@ export function SuperAdmin() {
   const [activeTab, setActiveTab] = useState<'hotels' | 'requests' | 'codes' | 'audit' | 'settings'>('hotels');
   const [loading, setLoading] = useState(false);
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [hotelsPage, setHotelsPage] = useState<number>(1);
+  const [hotelsPageSize, setHotelsPageSize] = useState<number>(10);
+  const [requestsPage, setRequestsPage] = useState<number>(1);
+  const [requestsPageSize, setRequestsPageSize] = useState<number>(10);
+  const [codesPage, setCodesPage] = useState<number>(1);
+  const [codesPageSize, setCodesPageSize] = useState<number>(10);
+
+  useEffect(() => {
+    setHotelsPage(1);
+  }, [searchTerm, statusFilter]);
+
+  useEffect(() => {
+    setRequestsPage(1);
+  }, [filterStatus]);
+
+  useEffect(() => {
+    setCodesPage(1);
+  }, [codeSearchTerm]);
 
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
@@ -1610,7 +1629,7 @@ export function SuperAdmin() {
                       </td>
                     </tr>
                   ) : (
-                    filteredHotels.map(hotel => {
+                    filteredHotels.slice((hotelsPage - 1) * hotelsPageSize, hotelsPage * hotelsPageSize).map(hotel => {
                       const expiryTime = new Date(hotel.subscriptionExpiry).getTime();
                       const isExpired = !isNaN(expiryTime) && expiryTime <= Date.now();
                       const remainingDays = !isNaN(expiryTime) ? (expiryTime - Date.now()) / (24 * 60 * 60 * 1000) : 0;
@@ -1734,6 +1753,15 @@ export function SuperAdmin() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={hotelsPage}
+              totalItems={filteredHotels.length}
+              pageSize={hotelsPageSize}
+              onPageChange={setHotelsPage}
+              onPageSizeChange={setHotelsPageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemLabel="hotels"
+            />
           </div>
         )}
 
@@ -1769,7 +1797,7 @@ export function SuperAdmin() {
               {requests.filter(r => r.status === filterStatus).length === 0 ? (
                 <div className="p-8 text-center text-zinc-500 text-sm">No {filterStatus} requests</div>
               ) : (
-                requests.filter(r => r.status === filterStatus).map(request => {
+                requests.filter(r => r.status === filterStatus).slice((requestsPage - 1) * requestsPageSize, requestsPage * requestsPageSize).map(request => {
                   const currentHotel = hotels.find(h => h.adminUIDs?.includes(request.id) || h.branding?.email?.toLowerCase() === request.email.toLowerCase());
                   const displayName = currentHotel?.name || request.hotelName;
                   
@@ -1844,6 +1872,15 @@ export function SuperAdmin() {
               })
             )}
             </div>
+            <Pagination
+              currentPage={requestsPage}
+              totalItems={requests.filter(r => r.status === filterStatus).length}
+              pageSize={requestsPageSize}
+              onPageChange={setRequestsPage}
+              onPageSizeChange={setRequestsPageSize}
+              pageSizeOptions={[10, 25, 50]}
+              itemLabel="requests"
+            />
           </div>
         )}
 
@@ -1875,11 +1912,11 @@ export function SuperAdmin() {
                 </div>
               </div>
             </div>
-            <div className="divide-y divide-zinc-800 max-h-[600px] overflow-y-auto">
+            <div className="divide-y divide-zinc-800">
               {filteredCodes.length === 0 ? (
                 <div className="p-8 text-center text-zinc-500 text-xs">No codes found</div>
               ) : (
-                filteredCodes.map(code => {
+                filteredCodes.slice((codesPage - 1) * codesPageSize, codesPage * codesPageSize).map(code => {
                   const linkedHotel = hotels.find(h => 
                     (h.trackingCode?.trim().toUpperCase() === code.code?.trim().toUpperCase()) ||
                     (code.usedByHotel && h.id === code.usedByHotel)
@@ -1979,6 +2016,15 @@ export function SuperAdmin() {
                 })
               )}
             </div>
+            <Pagination
+              currentPage={codesPage}
+              totalItems={filteredCodes.length}
+              pageSize={codesPageSize}
+              onPageChange={setCodesPage}
+              onPageSizeChange={setCodesPageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemLabel="codes"
+            />
           </div>
         )}
 

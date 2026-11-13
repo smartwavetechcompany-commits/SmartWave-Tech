@@ -31,6 +31,7 @@ import { cn, exportToCSV } from '../../utils';
 import { format, parseISO } from 'date-fns';
 import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 const DEFAULT_LINEN_ITEMS: Omit<HousekeepingLinenItem, 'id' | 'lastUpdated'>[] = [
   { name: 'Bed Sheets (King/Queen)', cleanStock: 75, issued: 45, used: 45, inLaundry: 30, damagedMissing: 2, totalPar: 150 },
@@ -48,6 +49,10 @@ export function HousekeepingLinen() {
   const [linens, setLinens] = useState<HousekeepingLinenItem[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [linenPage, setLinenPage] = useState(1);
+  const [linenPageSize, setLinenPageSize] = useState(10);
+  const [movementPage, setMovementPage] = useState(1);
+  const [movementPageSize, setMovementPageSize] = useState(10);
 
   // Modals
   const [selectedLinen, setSelectedLinen] = useState<HousekeepingLinenItem | null>(null);
@@ -307,7 +312,7 @@ export function HousekeepingLinen() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {linens.map(item => {
+              {linens.slice((linenPage - 1) * linenPageSize, linenPage * linenPageSize).map(item => {
                 return (
                   <tr key={item.id} className="hover:bg-zinc-800/40 transition-colors">
                     <td className="py-3 px-4 font-bold text-white">
@@ -388,6 +393,15 @@ export function HousekeepingLinen() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={linenPage}
+          totalItems={linens.length}
+          pageSize={linenPageSize}
+          onPageChange={setLinenPage}
+          onPageSizeChange={setLinenPageSize}
+          pageSizeOptions={[10, 25, 50]}
+          itemLabel="linens"
+        />
       </div>
 
       {/* Movement History Log */}
@@ -409,7 +423,7 @@ export function HousekeepingLinen() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {movements.slice(0, 10).map((m: any, i) => (
+                {movements.slice((movementPage - 1) * movementPageSize, movementPage * movementPageSize).map((m: any, i) => (
                   <tr key={m.id || i} className="hover:bg-zinc-800/40">
                     <td className="py-2.5 px-3 text-zinc-400 font-mono">
                       {safeFormatDate(m.timestamp, 'MMM d, HH:mm', '')}
@@ -423,6 +437,15 @@ export function HousekeepingLinen() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={movementPage}
+            totalItems={movements.length}
+            pageSize={movementPageSize}
+            onPageChange={setMovementPage}
+            onPageSizeChange={setMovementPageSize}
+            pageSizeOptions={[10, 25, 50]}
+            itemLabel="movements"
+          />
         </div>
       )}
 

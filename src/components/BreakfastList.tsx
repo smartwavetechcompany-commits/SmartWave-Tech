@@ -44,6 +44,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { Pagination } from './Pagination';
 
 interface BreakfastEntry {
   id: string;
@@ -118,6 +119,24 @@ export function BreakfastList() {
   const [selectedRoomType, setSelectedRoomType] = useState('all');
   const [selectedPackage, setSelectedPackage] = useState('all');
   const [servedStatusFilter, setServedStatusFilter] = useState<'all' | 'served' | 'pending'>('all');
+
+  // Pagination states
+  const [dailyPage, setDailyPage] = useState(1);
+  const [dailyPageSize, setDailyPageSize] = useState(15);
+  const [summaryPage, setSummaryPage] = useState(1);
+  const [summaryPageSize, setSummaryPageSize] = useState(10);
+  const [histLogPage, setHistLogPage] = useState(1);
+  const [histLogPageSize, setHistLogPageSize] = useState(15);
+
+  useEffect(() => {
+    setDailyPage(1);
+    setHistLogPage(1);
+  }, [selectedDate, searchTerm, selectedRoomType, selectedPackage, servedStatusFilter, viewMode]);
+
+  useEffect(() => {
+    setSummaryPage(1);
+    setHistLogPage(1);
+  }, [rangeStart, rangeEnd, historicalPreset]);
 
   // Real-time listener for reservations
   useEffect(() => {
@@ -214,7 +233,7 @@ export function BreakfastList() {
   };
 
   // Helper to compute entries for any single target date string
-  const getEntriesForDate = (targetDateStr: string): BreakfastEntry[] => {
+  const getEntriesForDate = (targetDateStr: string, forHistory: boolean = false): BreakfastEntry[] => {
     const targetDate = startOfDay(parseISO(targetDateStr));
     const today = startOfDay(new Date());
 
@@ -222,6 +241,10 @@ export function BreakfastList() {
       .filter(res => {
         if (res.status === 'cancelled' || res.status === 'no_show') return false;
 
+        // Checked-out guests move out of the live Daily Roster into Historical Archive
+        if (!forHistory && res.status === 'checked_out') return false;
+
+        const isServedOnDate = ((res as any).breakfastServedDates || []).includes(targetDateStr);
         const checkInDate = startOfDay(parseISO(res.checkIn));
         let checkOutDate = startOfDay(parseISO(res.checkOut));
 
@@ -238,10 +261,25 @@ export function BreakfastList() {
           }
         }
 
-        const isInHouse = targetDate >= checkInDate && targetDate <= checkOutDate;
-        if (!isInHouse) return false;
+        // In historical view, checked-out guests should not appear on today/future post-checkout days unless breakfast was served
+        if (forHistory && res.status === 'checked_out') {
+          const rawCheckedOutAt = (res as any).checkedOutAt;
+          if (rawCheckedOutAt) {
+            const parsedOut = parseISO(String(rawCheckedOutAt));
+            if (!isNaN(parsedOut.getTime())) {
+              const actualOutDay = startOfDay(parsedOut);
+              if (actualOutDay < checkOutDate) {
+                checkOutDate = actualOutDay;
+              }
+            }
+          }
+          if (targetDate >= today && !isServedOnDate) return false;
+        }
 
-        if (res.status === 'checked_out' && targetDate > checkOutDate) return false;
+        const isInHouse = targetDate >= checkInDate && targetDate <= checkOutDate;
+        if (!isInHouse && !isServedOnDate) return false;
+
+        if (res.status === 'checked_out' && targetDate > checkOutDate && !isServedOnDate) return false;
         return true;
       })
       .map(res => {
@@ -277,7 +315,7 @@ export function BreakfastList() {
 
   // Compute live breakfast entries for selected single date
   const breakfastEntries = useMemo<BreakfastEntry[]>(() => {
-    return getEntriesForDate(selectedDate);
+    return getEntriesForDate(selectedDate, false);
   }, [reservations, selectedDate, roomTypeMap]);
 
   // Filtered single-date entries
@@ -398,7 +436,7 @@ export function BreakfastList() {
 
       days.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
-        const dayEntries = getEntriesForDate(dateStr);
+        const dayEntries = getEntriesForDate(dateStr, true);
         const eligible = dayEntries.filter(e => !e.breakfastEntitlement.toLowerCase().includes('room only'));
         const entitledPax = eligible.reduce((acc, c) => acc + c.numberOfGuests, 0);
         const servedPax = eligible.filter(e => e.isServed).reduce((acc, c) => acc + c.numberOfGuests, 0);
@@ -1165,7 +1203,7 @@ export function BreakfastList() {
                       </td>
                     </tr>
                   ) : (
-                    filteredEntries.map((entry) => {
+                    filteredEntries.slice((dailyPage - 1) * dailyPageSize, dailyPage * dailyPageSize).map((entry) => {
                       const isRoomOnly = entry.breakfastEntitlement.toLowerCase().includes('room only');
 
                       return (
@@ -1274,6 +1312,15 @@ export function BreakfastList() {
               </table>
             </div>
 
+            <Pagination
+              currentPage={dailyPage}
+              totalItems={filteredEntries.length}
+              pageSize={dailyPageSize}
+              onPageChange={setDailyPage}
+              onPageSizeChange={setDailyPageSize}
+              pageSizeOptions={[10, 15, 25, 50]}
+              itemLabel="breakfast entries"
+            />
             <div className="p-4 bg-zinc-950/60 border-t border-zinc-800 text-xs text-zinc-500 flex flex-col sm:flex-row items-center justify-between gap-2">
               <span>
                 Showing {filteredEntries.length} of {breakfastEntries.length} in-house reservations for {format(parseISO(selectedDate), 'MMM dd, yyyy')}
@@ -1319,7 +1366,7 @@ export function BreakfastList() {
                         </td>
                       </tr>
                     ) : (
-                      historicalData.dailySummaries.map(s => (
+                      historicalData.dailySummaries.slice((summaryPage - 1) * summaryPageSize, summaryPage * summaryPageSize).map(s => (
                         <tr key={s.date} className="hover:bg-zinc-800/30 transition-colors">
                           <td className="py-2.5 px-4 font-bold text-zinc-100 font-mono">
                             {s.dayName}
@@ -1345,6 +1392,15 @@ export function BreakfastList() {
                   </tbody>
                 </table>
               </div>
+              <Pagination
+                currentPage={summaryPage}
+                totalItems={historicalData.dailySummaries.length}
+                pageSize={summaryPageSize}
+                onPageChange={setSummaryPage}
+                onPageSizeChange={setSummaryPageSize}
+                pageSizeOptions={[10, 20, 31]}
+                itemLabel="days"
+              />
             </div>
 
             {/* Detailed Historical Guest Ledger */}
@@ -1381,7 +1437,7 @@ export function BreakfastList() {
                         </td>
                       </tr>
                     ) : (
-                      filteredHistoricalLogs.slice(0, 100).map((log, idx) => (
+                      filteredHistoricalLogs.slice((histLogPage - 1) * histLogPageSize, histLogPage * histLogPageSize).map((log, idx) => (
                         <tr key={idx} className="hover:bg-zinc-800/30 transition-colors">
                           <td className="py-2.5 px-4 font-mono text-zinc-400 text-[11px]">{log.date}</td>
                           <td className="py-2.5 px-4 font-bold text-zinc-100 font-mono">{log.roomNumber}</td>
@@ -1423,11 +1479,15 @@ export function BreakfastList() {
                 </table>
               </div>
 
-              {filteredHistoricalLogs.length > 100 && (
-                <div className="p-3 bg-zinc-950/60 border-t border-zinc-800 text-center text-xs text-zinc-500">
-                  Showing first 100 of {filteredHistoricalLogs.length} historical logs. Use Excel/PDF export to view all {filteredHistoricalLogs.length} records.
-                </div>
-              )}
+              <Pagination
+                currentPage={histLogPage}
+                totalItems={filteredHistoricalLogs.length}
+                pageSize={histLogPageSize}
+                onPageChange={setHistLogPage}
+                onPageSizeChange={setHistLogPageSize}
+                pageSizeOptions={[15, 25, 50, 100]}
+                itemLabel="historical records"
+              />
             </div>
           </div>
         )}

@@ -30,6 +30,7 @@ import {
 import { cn, exportToCSV } from '../../utils';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface HousekeepingLostAndFoundProps {
   rooms: Room[];
@@ -45,6 +46,12 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
   // Filter & Search
   const [statusFilter, setStatusFilter] = useState<'all' | 'stored' | 'claimed' | 'returned' | 'unclaimed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, searchQuery]);
 
   // Modals
   const [showLogModal, setShowLogModal] = useState(false);
@@ -330,7 +337,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
 
       {/* Item Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredItems.map(item => {
+        {filteredItems.slice((page - 1) * pageSize, page * pageSize).map(item => {
           return (
             <div key={item.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3.5 flex flex-col justify-between">
               <div className="space-y-2.5">
@@ -427,6 +434,17 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
           </div>
         )}
       </div>
+
+      <Pagination
+        currentPage={page}
+        totalItems={filteredItems.length}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={[6, 9, 18, 36]}
+        itemLabel="items"
+        className="rounded-2xl border border-zinc-800"
+      />
 
       {/* --- MODAL 1: LOG FOUND ITEM --- */}
       {showLogModal && (

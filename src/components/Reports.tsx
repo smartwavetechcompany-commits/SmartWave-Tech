@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
@@ -30,7 +30,12 @@ import { cn, formatCurrency, safeStringify } from '../utils';
 import { printDocument } from '../utils/printUtils';
 import { isModuleEnabled } from '../utils/plans';
 import { hasPermission, hasFinancialVisibility } from '../utils/permissions';
-import { calculateGuestFinancialPosition } from '../services/financialService';
+import {
+  calculateGuestFinancialPosition,
+  reconcileFinanceRecords,
+  reconcileLedgerEntries,
+  isActualPaymentLedgerEntry
+} from '../services/financialService';
 import { ConfirmModal } from './ConfirmModal';
 import { deleteDoc, doc, addDoc } from 'firebase/firestore';
 import { handleFirestoreError } from '../firebase';
@@ -61,6 +66,7 @@ import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFor
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { PostStaySurveys } from './PostStaySurveys';
 import { Sparkles } from 'lucide-react';
+import { Pagination } from './Pagination';
 
 export function Reports() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -94,9 +100,24 @@ export function Reports() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [rawLedgerEntries, setRawLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [resLoaded, setResLoaded] = useState(false);
+  const [ledgerLoaded, setLedgerLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<{ id: string; collection: string; label: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [reportPage, setReportPage] = useState(1);
+  const [reportPageSize, setReportPageSize] = useState(15);
+
+  const validLedgerEntries = useMemo(() => {
+    return reconcileLedgerEntries(rawLedgerEntries, reservations, resLoaded);
+  }, [rawLedgerEntries, reservations, resLoaded]);
+
+  const validFinanceRecords = useMemo(() => {
+    return reconcileFinanceRecords(financeRecords, rawLedgerEntries, reservations, {
+      ledgerLoaded,
+      reservationsLoaded: resLoaded
+    });
+  }, [financeRecords, rawLedgerEntries, reservations, ledgerLoaded, resLoaded]);
 
   // 1. Real-time Firestore subscriptions for Reports
   useEffect(() => {
@@ -118,8 +139,10 @@ export function Reports() {
     // Reservations (live stay details, occupancy, checkins/checkouts)
     const unsubRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
       setReservations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
+      setResLoaded(true);
     }, (err) => {
       console.warn("Reports reservations listener notice:", err);
+      setResLoaded(true);
     });
     unsubs.push(unsubRes);
 
@@ -151,8 +174,10 @@ export function Reports() {
     if (canViewFinances) {
       const unsubLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
         setRawLedgerEntries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry)));
+        setLedgerLoaded(true);
       }, (err) => {
         console.warn("Reports ledger listener notice:", err);
+        setLedgerLoaded(true);
       });
       unsubs.push(unsubLedger);
 
@@ -185,6 +210,7 @@ export function Reports() {
       unsubs.push(unsubSuppliers);
     } else {
       setRawLedgerEntries([]);
+      setLedgerLoaded(true);
       setCorporateAccounts([]);
       setFinanceRecords([]);
       setAccounts([]);
@@ -201,13 +227,16 @@ export function Reports() {
     const startDate = startOfDay(new Date(dateRange.start));
     const endDate = endOfDay(new Date(dateRange.end));
 
-    // Current occupancy from live rooms
+    // Current occupancy from live rooms & actively checked-in reservations
+    const activeCheckedInRoomIds = new Set(
+      reservations.filter(r => r.status === 'checked_in' && r.roomId).map(r => r.roomId)
+    );
     const totalRooms = rooms.length;
-    const occupiedRooms = rooms.filter(d => d.status === 'occupied').length;
+    const occupiedRooms = rooms.filter(d => d.status === 'occupied' || activeCheckedInRoomIds.has(d.id)).length;
     const currentOccupancy = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
-    // Filter live ledger entries by current date interval
-    const filteredEntries = rawLedgerEntries.filter(entry => {
+    // Filter live reconciled ledger entries by current date interval
+    const filteredEntries = validLedgerEntries.filter(entry => {
       if (!entry.timestamp) return false;
       const entryDate = new Date(entry.timestamp);
       return isWithinInterval(entryDate, { start: startDate, end: endDate });
@@ -215,13 +244,15 @@ export function Reports() {
 
     setLedgerEntries(filteredEntries);
 
-    // Revenue calculations
+    const isChargeDebit = (e: LedgerEntry) => e.type === 'debit' && (e.category || '').toLowerCase() !== 'refund';
+
+    // Revenue calculations (gross charges excluding refund debits)
     const totalRevenue = filteredEntries
-      .filter(e => e.type === 'debit')
+      .filter(isChargeDebit)
       .reduce((acc, curr) => acc + curr.amount, 0);
 
     const corpRev = filteredEntries
-      .filter(e => e.type === 'debit' && e.corporateId)
+      .filter(e => isChargeDebit(e) && e.corporateId)
       .reduce((acc, curr) => acc + curr.amount, 0);
     
     const indivRev = totalRevenue - corpRev;
@@ -229,7 +260,7 @@ export function Reports() {
     // Group revenue by category for chart
     const categoryRevenue: { [key: string]: number } = {};
     filteredEntries.forEach(entry => {
-      if (entry.type === 'debit') {
+      if (isChargeDebit(entry)) {
         const cat = entry.category || 'Other';
         categoryRevenue[cat] = (categoryRevenue[cat] || 0) + entry.amount;
       }
@@ -241,7 +272,7 @@ export function Reports() {
     // Group revenue by day for chart
     const dailyRevenue: { [key: string]: number } = {};
     filteredEntries.forEach(entry => {
-      if (entry.type === 'debit') {
+      if (isChargeDebit(entry)) {
         const day = safeFormatDate(entry.timestamp, 'MMM d');
         dailyRevenue[day] = (dailyRevenue[day] || 0) + entry.amount;
       }
@@ -292,7 +323,7 @@ export function Reports() {
       curr.setDate(curr.getDate() + 1);
     }
     setOccupancyData(trend);
-  }, [rawLedgerEntries, rooms, reservations, dateRange]);
+  }, [validLedgerEntries, rooms, reservations, dateRange]);
 
   const getReportHeaders = (type: string): string[] => {
     const headers = (() => {
@@ -307,7 +338,7 @@ export function Reports() {
         case 'staff_payments': return ['Staff Name', 'User Role', 'Date', 'Guest', 'Room', 'Amount', 'Method', 'Settlement Source', 'Transaction ID'];
         case 'balance': return ['Guest Name', 'Room', 'Status', 'Phone', 'Total Charges', 'Total Paid', 'Balance'];
         case 'rooms': return ['Room #', 'Type', 'Status', 'Expected Revenue', 'Paid Revenue', 'Outstanding Balance', 'Occupancy Count'];
-        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Visits', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent'];
+        case 'guests': return ['Guest Name', 'Email', 'Phone', 'Total Visits', 'Completed Stays', 'Active Stays', 'Cancelled Stays', 'No-Show Stays', 'Total Spent (Paid)', 'Revenue Generated', 'Outstanding Debt'];
         case 'services': return ['Date', 'Service', 'Guest', 'Room', 'Amount'];
         case 'laundry': return ['Date', 'Guest', 'Room', 'Description', 'Amount'];
         case 'staff_sales': return ['Staff Name', 'Module', 'Settlement Source', 'Total Sales', 'Count'];
@@ -373,7 +404,7 @@ export function Reports() {
           .filter(res => res.status === 'checked_in')
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
-            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
+            const bal = getReservationLiveBalance(res, hotel, validLedgerEntries);
             return {
               Room: res.roomNumber,
               'Guest Name': res.guestName,
@@ -400,8 +431,8 @@ export function Reports() {
           })
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
-            const billingState = calculateBilling(res, hotel, rawLedgerEntries);
-            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
+            const billingState = calculateBilling(res, hotel, validLedgerEntries);
+            const bal = getReservationLiveBalance(res, hotel, validLedgerEntries);
             return {
               'Res #': (res.id || '').slice(-6).toUpperCase(),
               'Guest Name': res.guestName,
@@ -435,7 +466,7 @@ export function Reports() {
             return !['room', 'restaurant', 'f & b', 'food', 'bar', 'beverage', 'tax', 'payment', 'refund'].includes(cat) && e.type === 'debit';
           }).reduce((acc, e) => acc + e.amount, 0);
 
-          const paidCredits = dayEntries.filter(e => e.category === 'payment' && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+          const paidCredits = dayEntries.filter(e => isActualPaymentLedgerEntry(e)).reduce((acc, e) => acc + e.amount, 0);
           const refundDebits = dayEntries.filter(e => (e.category === 'refund' || e.category === 'payment') && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
           const paidCollected = Math.max(0, paidCredits - refundDebits);
 
@@ -458,7 +489,7 @@ export function Reports() {
       case 'monthly_sales': {
         const months: Record<string, { roomRev: number; fbRev: number; otherRev: number; taxRev: number; paidCollected: number }> = {};
         
-        rawLedgerEntries.forEach(e => {
+        validLedgerEntries.forEach(e => {
           const mDate = new Date(e.timestamp);
           const monthStr = format(mDate, 'yyyy-MM');
           if (!months[monthStr]) {
@@ -476,7 +507,7 @@ export function Reports() {
             } else if (cat !== 'refund') {
               months[monthStr].otherRev += e.amount;
             }
-          } else if (e.type === 'credit' && cat === 'payment') {
+          } else if (isActualPaymentLedgerEntry(e)) {
             months[monthStr].paidCollected += e.amount;
           }
         });
@@ -499,7 +530,7 @@ export function Reports() {
       }
       case 'payments': {
         return ledgerEntries
-          .filter(e => (e.category === 'payment' || e.category === 'city_ledger') && e.type === 'credit')
+          .filter(e => isActualPaymentLedgerEntry(e))
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
@@ -524,7 +555,7 @@ export function Reports() {
       }
       case 'staff_payments': {
         return ledgerEntries
-          .filter(e => (e.category === 'payment' || e.category === 'city_ledger') && e.type === 'credit')
+          .filter(e => isActualPaymentLedgerEntry(e))
           .map(e => {
             const res = reservations.find(r => r.id === e.reservationId);
             const staffMember = staff.find(s => s.id === e.postedBy || s.uid === e.postedBy);
@@ -546,13 +577,13 @@ export function Reports() {
       case 'balance': {
         return reservations
           .filter(res => {
-            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
+            const bal = getReservationLiveBalance(res, hotel, validLedgerEntries);
             return res.status === 'checked_in' || (res.status === 'checked_out' && Math.abs(bal) > 0.01);
           })
           .map(res => {
             const guest = guests.find(g => g.id === res.guestId);
-            const billingState = calculateBilling(res, hotel, rawLedgerEntries);
-            const bal = getReservationLiveBalance(res, hotel, rawLedgerEntries);
+            const billingState = calculateBilling(res, hotel, validLedgerEntries);
+            const bal = getReservationLiveBalance(res, hotel, validLedgerEntries);
             return {
               'Guest Name': res.guestName,
               Room: res.roomNumber,
@@ -573,8 +604,8 @@ export function Reports() {
           const roomResIds = new Set(roomRes.map(r => r.id));
           const roomEntries = ledgerEntries.filter(e => e.reservationId && roomResIds.has(e.reservationId));
           
-          const expectedRevenue = roomEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-          const paidRevenue = roomEntries.filter(e => e.category === 'payment' && e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
+          const expectedRevenue = roomEntries.filter(e => e.type === 'debit' && (e.category || '').toLowerCase() !== 'refund').reduce((acc, e) => acc + e.amount, 0);
+          const paidRevenue = roomEntries.filter(e => isActualPaymentLedgerEntry(e)).reduce((acc, e) => acc + e.amount, 0);
           const outstanding = Math.max(0, expectedRevenue - paidRevenue);
           
           return {
@@ -584,23 +615,26 @@ export function Reports() {
             'Expected Revenue': expectedRevenue,
             'Paid Revenue': paidRevenue,
             'Outstanding Balance': outstanding,
-            'Occupancy Count': roomRes.length
+            'Occupancy Count': roomRes.filter(r => r.status !== 'cancelled').length
           };
         });
       }
       case 'guests': {
         return guests.map(guest => {
-          const guestRes = reservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail === guest.email));
+          const guestRes = reservations.filter(r => r.guestId === guest.id || (guest.email && r.guestEmail && r.guestEmail.toLowerCase().trim() === guest.email.toLowerCase().trim()));
           const completedStays = guestRes.filter(r => r.status === 'checked_out').length;
           const activeStays = guestRes.filter(r => r.status === 'checked_in').length;
           const cancelledStays = guestRes.filter(r => r.status === 'cancelled').length;
           const noshowStays = guestRes.filter(r => r.status === 'no_show').length;
           const totalVisits = completedStays + activeStays;
           
-          const pos = calculateGuestFinancialPosition(guest, guestRes, hotel, rawLedgerEntries);
+          const pos = calculateGuestFinancialPosition(guest, guestRes, hotel, validLedgerEntries);
           const totalSpent = Math.max(0, pos.totalPayments - pos.totalRefunds);
           const revenueGenerated = pos.totalCharges;
-          const outstandingDebt = pos.netAmountDue;
+          const individualGuestRes = guestRes.filter(r => !r.corporateId && r.status !== 'cancelled');
+          const outstandingDebt = individualGuestRes.length > 0
+            ? individualGuestRes.reduce((sum, r) => sum + Math.max(0, getReservationLiveBalance(r, hotel, validLedgerEntries)), 0)
+            : (guestRes.length > 0 ? 0 : pos.netAmountDue);
 
           return {
             'Guest Name': guest.name,
@@ -667,8 +701,12 @@ export function Reports() {
         }));
       }
       case 'profit_loss': {
-        const income = financeRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
-        const expense = financeRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+        const periodFinance = validFinanceRecords.filter(r => {
+          if (!r.timestamp) return false;
+          return isWithinInterval(new Date(r.timestamp), { start: startDate, end: endDate });
+        });
+        const income = periodFinance.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+        const expense = periodFinance.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
         return [
           { Description: 'Total Operating Income', Income: income, Expense: 0, Net: income },
           { Description: 'Total Operating Expense', Income: 0, Expense: expense, Net: -expense },
@@ -676,8 +714,11 @@ export function Reports() {
         ];
       }
       case 'expenses_detail': {
-        return financeRecords
-          .filter(r => r.type === 'expense')
+        return validFinanceRecords
+          .filter(r => {
+            if (r.type !== 'expense' || !r.timestamp) return false;
+            return isWithinInterval(new Date(r.timestamp), { start: startDate, end: endDate });
+          })
           .map(r => ({
             Date: safeFormatDate(r.timestamp, 'yyyy-MM-dd'),
             Category: r.category,
@@ -721,8 +762,12 @@ export function Reports() {
         }));
       }
       case 'net_income': {
-        const income = financeRecords.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
-        const expense = financeRecords.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+        const periodFinance = validFinanceRecords.filter(r => {
+          if (!r.timestamp) return false;
+          return isWithinInterval(new Date(r.timestamp), { start: startDate, end: endDate });
+        });
+        const income = periodFinance.filter(r => r.type === 'income').reduce((acc, r) => acc + r.amount, 0);
+        const expense = periodFinance.filter(r => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
         return [{
           Period: `${dateRange.start} to ${dateRange.end}`,
           'Total Income': income,
@@ -748,11 +793,14 @@ export function Reports() {
           });
       }
       case 'occupancy_ratio': {
+        const activeCheckedInRoomIds = new Set(
+          reservations.filter(r => r.status === 'checked_in' && r.roomId).map(r => r.roomId)
+        );
         const distinctRoomTypes = Array.from(new Set(rooms.map(r => r.type).filter(Boolean)));
         return distinctRoomTypes.map(typeName => {
           const typeRooms = rooms.filter(r => r.type === typeName);
           const typeTotal = typeRooms.length;
-          const occupiedCount = typeRooms.filter(r => r.status === 'occupied').length;
+          const occupiedCount = typeRooms.filter(r => r.status === 'occupied' || activeCheckedInRoomIds.has(r.id)).length;
           const ratio = typeTotal > 0 ? `${Math.round((occupiedCount / typeTotal) * 100)}%` : '0%';
           
           const typeResIds = new Set(reservations.filter(r => typeRooms.some(tr => tr.id === r.roomId)).map(r => r.id));
@@ -772,13 +820,23 @@ export function Reports() {
       }
       case 'source': {
         const sourceMap: Record<string, { count: number; nights: number; revenue: number }> = {};
-        reservations.forEach(r => {
-          const src = r.bookingSource || r.source || (r.corporateId ? 'Corporate Account' : 'Front Desk / Walk-In');
-          if (!sourceMap[src]) sourceMap[src] = { count: 0, nights: 0, revenue: 0 };
-          sourceMap[src].count += 1;
-          sourceMap[src].nights += (r.nights || 1);
-          sourceMap[src].revenue += (r.totalAmount || 0);
-        });
+        reservations
+          .filter(r => {
+            if (r.status === 'cancelled' || r.status === 'no_show') return false;
+            const checkInDate = new Date(r.checkIn);
+            const createdDate = r.createdAt ? new Date(r.createdAt) : null;
+            return isWithinInterval(checkInDate, { start: startDate, end: endDate }) ||
+              (createdDate && isWithinInterval(createdDate, { start: startDate, end: endDate }));
+          })
+          .forEach(r => {
+            const src = r.bookingSource || r.source || (r.corporateId ? 'Corporate Account' : 'Front Desk / Walk-In');
+            if (!sourceMap[src]) sourceMap[src] = { count: 0, nights: 0, revenue: 0 };
+            const dur = calculateStayDuration(r.checkIn, r.checkOut, r.overstayNights, r.status, { res: r, hotel });
+            const billingState = calculateBilling(r, hotel, validLedgerEntries);
+            sourceMap[src].count += 1;
+            sourceMap[src].nights += dur.chargeableNights;
+            sourceMap[src].revenue += billingState.totalCharges;
+          });
         return Object.entries(sourceMap).map(([src, d]) => ({
           'Booking Source': src,
           'Total Bookings': d.count,
@@ -793,7 +851,7 @@ export function Reports() {
           const c = g.nationality || (g as any).country || 'Domestic / Local';
           if (!countryMap[c]) countryMap[c] = { count: 0, completed: 0, active: 0, spent: 0 };
           countryMap[c].count += 1;
-          const pos = calculateGuestFinancialPosition(g, reservations, hotel, rawLedgerEntries);
+          const pos = calculateGuestFinancialPosition(g, reservations, hotel, validLedgerEntries);
           countryMap[c].spent += Math.max(0, pos.totalPayments - pos.totalRefunds);
         });
         reservations.forEach(r => {
@@ -848,7 +906,7 @@ export function Reports() {
 
     const tableData = data.map(row => headers.map(header => {
       const val = row[header];
-      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays', 'Pax'].some(k => header.includes(k))) {
+      if (typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays', 'Pax', 'Visits', 'Bookings', 'Guests'].some(k => header.includes(k))) {
         return formatForExport(val);
       }
       return val !== null && val !== undefined ? String(val) : '';
@@ -896,6 +954,7 @@ export function Reports() {
       if (colName === 'reservations') {
         setReservations(prev => prev.filter(r => r.id !== id));
       } else if (colName === 'ledger') {
+        setRawLedgerEntries(prev => prev.filter(e => e.id !== id));
         setLedgerEntries(prev => prev.filter(e => e.id !== id));
       } else if (colName === 'finance') {
         setFinanceRecords(prev => prev.filter(f => f.id !== id));
@@ -947,6 +1006,10 @@ export function Reports() {
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
   const [activeReport, setActiveReport] = useState('overview');
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [activeReport, dateRange.start, dateRange.end]);
   
   const reportTypes = [
     { id: 'overview', label: 'Overview', icon: PieChart },
@@ -1285,49 +1348,67 @@ export function Reports() {
           )}
         </div>
               
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-zinc-950 border-b border-zinc-800">
-                    <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">
-                      {getReportHeaders(activeReport).map(header => (
-                        <th key={header} className="px-6 py-4">{header}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {getReportData(activeReport).length === 0 ? (
-                      <tr>
-                        <td colSpan={getReportHeaders(activeReport).length} className="px-6 py-12 text-center text-zinc-500 italic">
-                          No data found for this period
-                        </td>
-                      </tr>
-                    ) : (
-                      getReportData(activeReport).map((row, i) => (
-                        <tr key={i} className="hover:bg-zinc-800/50 transition-colors">
-                          {Object.entries(row).filter(([key]) => !key.startsWith('_')).map(([key, val]: [string, any], j) => (
-                            <td key={j} className="px-6 py-4 text-sm text-zinc-400">
-                              {typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays'].some(k => key.includes(k))
-                                ? formatCurrency(val, currency, exchangeRate)
-                                : val}
-                            </td>
-                          ))}
-                          {row._id && row._collection && (
-                            <td className="px-6 py-4 text-right">
-                              <button
-                                onClick={() => setRecordToDelete({ id: row._id, collection: row._collection, label: row._label || 'Record' })}
-                                className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                title="Delete Record"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </td>
+              {(() => {
+                const reportRows = getReportData(activeReport);
+                const pagedRows = reportRows.slice((reportPage - 1) * reportPageSize, reportPage * reportPageSize);
+                const headers = getReportHeaders(activeReport);
+                return (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="bg-zinc-950 border-b border-zinc-800">
+                          <tr className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">
+                            {headers.map(header => (
+                              <th key={header} className="px-6 py-4">{header}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-800">
+                          {reportRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={headers.length} className="px-6 py-12 text-center text-zinc-500 italic">
+                                No data found for this period
+                              </td>
+                            </tr>
+                          ) : (
+                            pagedRows.map((row, i) => (
+                              <tr key={i} className="hover:bg-zinc-800/50 transition-colors">
+                                {Object.entries(row).filter(([key]) => !key.startsWith('_')).map(([key, val]: [string, any], j) => (
+                                  <td key={j} className="px-6 py-4 text-sm text-zinc-400">
+                                    {typeof val === 'number' && !['Quantity', 'Nights', 'Count', 'Rooms', 'Occupied', 'Stays', 'Pax', 'Visits', 'Bookings', 'Guests'].some(k => key.includes(k))
+                                      ? formatCurrency(val, currency, exchangeRate)
+                                      : val}
+                                  </td>
+                                ))}
+                                {row._id && row._collection && (
+                                  <td className="px-6 py-4 text-right">
+                                    <button
+                                      onClick={() => setRecordToDelete({ id: row._id, collection: row._collection, label: row._label || 'Record' })}
+                                      className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                      title="Delete Record"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))
                           )}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination
+                      currentPage={reportPage}
+                      totalItems={reportRows.length}
+                      pageSize={reportPageSize}
+                      onPageChange={setReportPage}
+                      onPageSizeChange={setReportPageSize}
+                      pageSizeOptions={[10, 15, 25, 50]}
+                      itemLabel="records"
+                    />
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

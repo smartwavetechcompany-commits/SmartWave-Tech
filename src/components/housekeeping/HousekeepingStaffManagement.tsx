@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../utils';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface HousekeepingStaffManagementProps {
   staff: UserProfile[];
@@ -43,6 +44,12 @@ export function HousekeepingStaffManagement({
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [areaInput, setAreaInput] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
 
   // Housekeeper staff filter
   const housekeepingTeam = staff.filter(s => {
@@ -144,7 +151,7 @@ export function HousekeepingStaffManagement({
 
       {/* Staff Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredTeam.map(member => {
+        {filteredTeam.slice((page - 1) * pageSize, page * pageSize).map(member => {
           const assignedRooms = rooms.filter(r => r.assignedTo === member.uid);
           const dirtyAssigned = assignedRooms.filter(r => r.status === 'dirty').length;
           const cleanAssigned = assignedRooms.filter(r => r.status === 'clean' || r.housekeepingStatus === 'ready').length;
@@ -277,6 +284,17 @@ export function HousekeepingStaffManagement({
           );
         })}
       </div>
+
+      <Pagination
+        currentPage={page}
+        totalItems={filteredTeam.length}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={[6, 9, 18, 36]}
+        itemLabel="team members"
+        className="rounded-2xl border border-zinc-800"
+      />
 
       {/* --- MODAL: ASSIGN ROOMS TO STAFF --- */}
       {showAssignModal && selectedStaff && (

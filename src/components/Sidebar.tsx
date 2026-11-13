@@ -183,6 +183,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             <Link
               key={item.path}
               to={isDisabled ? item.path : item.path}
+              aria-disabled={isDisabled || undefined}
               onClick={(e) => {
                 if (isDisabled) {
                   e.preventDefault();
@@ -194,7 +195,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 min-h-[42px] rounded-lg transition-all duration-200 active:scale-[0.98]",
                 isActive ? "bg-emerald-500/10 text-emerald-500" : "hover:bg-zinc-900 hover:text-zinc-50",
-                isDisabled && "opacity-50 cursor-not-allowed active:scale-100"
+                isDisabled ? "opacity-50 cursor-not-allowed active:scale-100" : "cursor-pointer"
               )}
             >
               <item.icon size={18} className="shrink-0" />
@@ -212,7 +213,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               toast.success('Exited management mode');
               navigate('/super-admin');
             }}
-            className="flex items-center gap-3 px-3 py-2.5 min-h-[42px] w-full text-left rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-all duration-200 active:scale-[0.98]"
+            className="flex items-center gap-3 px-3 py-2.5 min-h-[42px] w-full text-left rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-all duration-200 active:scale-[0.98] cursor-pointer"
           >
             <XCircle size={18} className="shrink-0" />
             <span className="text-sm font-medium">Stop Managing Hotel</span>
@@ -221,7 +222,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         {systemSettings?.supportEmail && (
           <a 
             href={`mailto:${systemSettings.supportEmail}`}
-            className="flex items-center gap-3 px-3 py-2.5 min-h-[42px] w-full text-left rounded-lg hover:bg-emerald-500/10 hover:text-emerald-500 transition-all duration-200 active:scale-[0.98]"
+            className="flex items-center gap-3 px-3 py-2.5 min-h-[42px] w-full text-left rounded-lg hover:bg-emerald-500/10 hover:text-emerald-500 transition-all duration-200 active:scale-[0.98] cursor-pointer"
           >
             <Mail size={18} className="shrink-0" />
             <span className="text-sm font-medium">Support</span>

@@ -16,6 +16,7 @@ import { db, handleFirestoreError } from '../../firebase';
 import { database } from '../../utils/database';
 import { collection, doc, increment } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface StockMovementsProps {
   items: InventoryItem[];
@@ -28,6 +29,12 @@ export function StockMovements({ items, transactions, locations }: StockMovement
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
 
   const [moveForm, setMoveForm] = useState({
     type: 'consumption' as InventoryTransaction['type'],
@@ -173,7 +180,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {filteredTransactions.map((tx) => {
+              {filteredTransactions.slice((page - 1) * pageSize, page * pageSize).map((tx) => {
                 const item = items.find(i => i.id === tx.itemId);
                 return (
                   <tr key={tx.id} className="hover:bg-zinc-800/30 transition-colors">
@@ -220,6 +227,17 @@ export function StockMovements({ items, transactions, locations }: StockMovement
             </tbody>
           </table>
         </div>
+        <Pagination
+          currentPage={page}
+          totalItems={filteredTransactions.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+          itemLabel="movements"
+        />
       </div>
 
       {/* Movement Modal */}

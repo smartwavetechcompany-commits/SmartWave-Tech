@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   Calendar, 
@@ -22,6 +22,7 @@ import { Room, Reservation, RoomBlocking, Hotel, RoomType } from '../types';
 import { isRoomAvailable, doDateRangesOverlap, getRoomDisplayStatus } from '../utils/roomUtils';
 import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, startOfDay, endOfDay, isBefore, isAfter } from 'date-fns';
+import { Pagination } from './Pagination';
 
 interface AvailableRoomsModalProps {
   isOpen: boolean;
@@ -61,6 +62,15 @@ export function AvailableRoomsModal({
   const [selectedType, setSelectedType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'available' | 'schedule'>('available');
+  const [availPage, setAvailPage] = useState(1);
+  const [availPageSize, setAvailPageSize] = useState(12);
+  const [schedulePage, setSchedulePage] = useState(1);
+  const [schedulePageSize, setSchedulePageSize] = useState(10);
+
+  useEffect(() => {
+    setAvailPage(1);
+    setSchedulePage(1);
+  }, [searchQuery, selectedType, checkIn, checkOut, activeTab]);
 
   // Keep dates valid: checkOut must be strictly after checkIn
   const handleCheckInChange = (newCheckIn: string) => {
@@ -484,8 +494,9 @@ export function AvailableRoomsModal({
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {availableRoomsList.map(({ room, roomRate, totalCost, nextAvailableText }) => (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {availableRoomsList.slice((availPage - 1) * availPageSize, availPage * availPageSize).map(({ room, roomRate, totalCost, nextAvailableText }) => (
                   <div
                     key={room.id}
                     className="bg-zinc-950/80 border border-zinc-800/90 hover:border-emerald-500/40 rounded-2xl p-4 transition-all flex flex-col justify-between group shadow-sm"
@@ -582,6 +593,17 @@ export function AvailableRoomsModal({
                     </div>
                   </div>
                 ))}
+                </div>
+                <Pagination
+                  currentPage={availPage}
+                  totalItems={availableRoomsList.length}
+                  pageSize={availPageSize}
+                  onPageChange={setAvailPage}
+                  onPageSizeChange={(size) => { setAvailPageSize(size); setAvailPage(1); }}
+                  pageSizeOptions={[6, 12, 24, 48]}
+                  itemLabel="available rooms"
+                  compact
+                />
               </div>
             )
           ) : (
@@ -598,7 +620,7 @@ export function AvailableRoomsModal({
               </div>
 
               <div className="grid grid-cols-1 gap-3">
-                {allRoomsList.map(({ room, isAvailable, displayStatus, activeCheckIn, conflicts, nextAvailableText, upcomingReservations, roomRate }) => (
+                {allRoomsList.slice((schedulePage - 1) * schedulePageSize, schedulePage * schedulePageSize).map(({ room, isAvailable, displayStatus, activeCheckIn, conflicts, nextAvailableText, upcomingReservations, roomRate }) => (
                   <div
                     key={room.id}
                     className={cn(
@@ -701,6 +723,16 @@ export function AvailableRoomsModal({
                   </div>
                 ))}
               </div>
+              <Pagination
+                currentPage={schedulePage}
+                totalItems={allRoomsList.length}
+                pageSize={schedulePageSize}
+                onPageChange={setSchedulePage}
+                onPageSizeChange={(size) => { setSchedulePageSize(size); setSchedulePage(1); }}
+                pageSizeOptions={[5, 10, 20, 40]}
+                itemLabel="rooms"
+                compact
+              />
             </div>
           )}
         </div>

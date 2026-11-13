@@ -49,6 +49,7 @@ import { toast } from 'sonner';
 import { format, startOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { hasPermission } from '../utils/permissions';
 import { Pagination } from './Pagination';
+import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 
 export function FandB() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -87,6 +88,42 @@ export function FandB() {
 
   const [activeTab, setActiveTab] = useState<'orders' | 'tables' | 'reconciliation'>('orders');
   const [reconciliationSubTab, setReconciliationSubTab] = useState<'outlets' | 'payments' | 'cashiers' | 'room_charges' | 'daily'>('outlets');
+
+  // Role & Scope: Managers/Admins/Finance/Report viewers see all hotel F&B orders; outlet staff see only their own daily transactions
+  const isFandBManager = Boolean(
+    profile?.role === 'hotelAdmin' ||
+    profile?.role === 'superAdmin' ||
+    profile?.staffRole === 'manager' ||
+    profile?.staffRole === 'admin' ||
+    profile?.staffRole === 'accountant' ||
+    (Array.isArray(profile?.roles) && (profile.roles.includes('manager') || profile.roles.includes('admin') || profile.roles.includes('accountant'))) ||
+    hasPermission(profile, 'view_financial_records', customRoles) ||
+    hasPermission(profile, 'view_reports', customRoles) ||
+    hasPermission(profile, 'export_financial_data', customRoles)
+  );
+
+  // Additional UI pagination & user-outlet breakdown filters
+  const [tablesPage, setTablesPage] = useState<number>(1);
+  const [tablesPageSize, setTablesPageSize] = useState<number>(12);
+  const [userOutletFilter, setUserOutletFilter] = useState<string>('all');
+  const [userOutletSearch, setUserOutletSearch] = useState<string>('');
+  const [userOutletTodayOnly, setUserOutletTodayOnly] = useState<boolean>(false);
+  const [userOutletPage, setUserOutletPage] = useState<number>(1);
+  const [userOutletPageSize, setUserOutletPageSize] = useState<number>(10);
+  const [cashiersPage, setCashiersPage] = useState<number>(1);
+  const [cashiersPageSize, setCashiersPageSize] = useState<number>(10);
+  const [roomChargesPage, setRoomChargesPage] = useState<number>(1);
+  const [roomChargesPageSize, setRoomChargesPageSize] = useState<number>(10);
+  const [dailyReconPage, setDailyReconPage] = useState<number>(1);
+  const [dailyReconPageSize, setDailyReconPageSize] = useState<number>(10);
+  const [myTxPage, setMyTxPage] = useState<number>(1);
+  const [myTxPageSize, setMyTxPageSize] = useState<number>(10);
+  const [myTxSearch, setMyTxSearch] = useState<string>('');
+  const [myTxOutletFilter, setMyTxOutletFilter] = useState<string>('all');
+  const [myDateFilter, setMyDateFilter] = useState<DateFilterValue>(() => ({
+    ...getDefaultDateFilter(),
+    mode: 'day',
+  }));
 
   const [newOrder, setNewOrder] = useState({
     roomNumber: '',
@@ -1342,11 +1379,266 @@ export function FandB() {
     }
   };
 
-  const filteredOrders = orders.filter(o => {
+  const todayStr = format(now, 'yyyy-MM-dd');
+
+  const isMyDateToday = myDateFilter.mode === 'day' && myDateFilter.day === todayStr;
+
+  const myDateRangeLabel = React.useMemo(() => {
+    switch (myDateFilter.mode) {
+      case 'day':
+        return myDateFilter.day || todayStr;
+      case 'month':
+        return format(new Date(myDateFilter.year, myDateFilter.month, 1), 'MMM yyyy');
+      case 'year':
+        return String(myDateFilter.year);
+      case 'range':
+        return `${myDateFilter.startDate || '-'} to ${myDateFilter.endDate || '-'}`;
+      case 'all':
+      default:
+        return 'All Time';
+    }
+  }, [myDateFilter, todayStr]);
+
+  const isFrontDeskPayment = React.useCallback((p: any): boolean => {
+    if (!p) return false;
+    return (
+      p.settlementSource === 'Front Desk' ||
+      (typeof p.reference === 'string' && (p.reference.includes('Front Desk') || p.reference.includes('Corporate')))
+    );
+  }, []);
+
+  const getOrderPaymentBreakdown = React.useCallback((o: KitchenOrder) => {
+    const orderTotal = o.totalAmount || o.price || 0;
+    const paymentsList = Array.isArray(o.payments) ? o.payments : [];
+
+    const outletPayments = paymentsList.filter(
+      p => p.method !== 'room' && !isFrontDeskPayment(p) && (p.amount || 0) > 0
+    );
+    const frontDeskPayments = paymentsList.filter(
+      p => p.method !== 'room' && isFrontDeskPayment(p) && (p.amount || 0) > 0
+    );
+
+    const outletCash = outletPayments.filter(p => p.method === 'cash').reduce((s, p) => s + (p.amount || 0), 0);
+    const outletCard = outletPayments.filter(p => p.method === 'card').reduce((s, p) => s + (p.amount || 0), 0);
+    const outletTransfer = outletPayments.filter(p => p.method === 'transfer').reduce((s, p) => s + (p.amount || 0), 0);
+    const outletOther = outletPayments
+      .filter(p => p.method !== 'cash' && p.method !== 'card' && p.method !== 'transfer')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const outletSum = outletCash + outletCard + outletTransfer + outletOther;
+
+    const roomFromArray = paymentsList
+      .filter(p => p.method === 'room')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const frontDeskSettled = frontDeskPayments.reduce((s, p) => s + (p.amount || 0), 0);
+
+    const rawRoomCharged = o.roomChargedAmount !== undefined ? o.roomChargedAmount : roomFromArray;
+    const roomCharged = Math.max(rawRoomCharged, frontDeskSettled);
+
+    let directPaid = 0;
+    let cash = outletCash;
+    let card = outletCard;
+    let transfer = outletTransfer;
+
+    if (paymentsList.length > 0) {
+      // payments array is authoritative: never fall back to o.directPaidAmount if payments only contain room / Front Desk entries
+      directPaid = outletSum;
+    } else if (o.directPaidAmount !== undefined) {
+      directPaid = o.directPaidAmount;
+      if (directPaid > 0) {
+        const m = o.paymentMethod || 'cash';
+        if (m === 'cash') cash = directPaid;
+        else if (m === 'card') card = directPaid;
+        else if (m === 'transfer') transfer = directPaid;
+      }
+    } else if (o.paidAmount !== undefined && o.paidAmount > 0 && o.paymentMethod !== 'room' && frontDeskSettled === 0) {
+      directPaid = o.paidAmount;
+      const m = o.paymentMethod || 'cash';
+      if (m === 'cash') cash = directPaid;
+      else if (m === 'card') card = directPaid;
+      else if (m === 'transfer') transfer = directPaid;
+    } else if (roomCharged === 0 && frontDeskSettled === 0 && o.status === 'paid') {
+      directPaid = orderTotal;
+      const m = o.paymentMethod || 'cash';
+      if (m === 'cash') cash = directPaid;
+      else if (m === 'card') card = directPaid;
+      else if (m === 'transfer') transfer = directPaid;
+    }
+
+    return {
+      orderTotal,
+      cash,
+      card,
+      transfer,
+      directPaid,
+      roomCharged,
+      frontDeskSettled
+    };
+  }, [isFrontDeskPayment]);
+
+  const isOrderHandledByUser = React.useCallback((o: KitchenOrder) => {
+    if (!profile?.uid) return false;
+    if (o.cashierUid && o.cashierUid === profile.uid) return true;
+    // Attribute direct F&B outlet payments handled by the user, NEVER Front Desk room folio settlements
+    if (
+      Array.isArray(o.payments) &&
+      o.payments.some(p => p.processedBy?.uid === profile.uid && !isFrontDeskPayment(p) && p.method !== 'room')
+    ) {
+      return true;
+    }
+    if (!o.cashierUid && o.cashierName) {
+      const candidates = [profile.displayName, (profile as any)?.name, profile.email]
+        .filter(Boolean)
+        .map(s => String(s).trim().toLowerCase());
+      return candidates.includes(o.cashierName.trim().toLowerCase());
+    }
+    return false;
+  }, [profile, isFrontDeskPayment]);
+
+  // Scoped orders: Managers see all orders; non-manager outlet staff see ONLY their own transactions for the selected date range
+  const scopedOrders = React.useMemo(() => {
+    if (isFandBManager) return orders;
+    return orders.filter(o => {
+      if (!isOrderHandledByUser(o)) return false;
+      if (matchesDateFilter(o.timestamp, myDateFilter)) return true;
+      return (
+        Array.isArray(o.payments) &&
+        o.payments.some(
+          p =>
+            p.processedBy?.uid === profile?.uid &&
+            !isFrontDeskPayment(p) &&
+            p.method !== 'room' &&
+            matchesDateFilter(p.date, myDateFilter)
+        )
+      );
+    });
+  }, [orders, isFandBManager, isOrderHandledByUser, isFrontDeskPayment, profile?.uid, myDateFilter]);
+
+  // Logged-in user's personal sales summary across outlets for the selected date range
+  const myDailyStats = React.useMemo(() => {
+    const myTodayOrders = orders.filter(o =>
+      o.status !== 'cancelled' &&
+      isOrderHandledByUser(o) &&
+      (matchesDateFilter(o.timestamp, myDateFilter) ||
+        (Array.isArray(o.payments) &&
+          o.payments.some(
+            p =>
+              p.processedBy?.uid === profile?.uid &&
+              !isFrontDeskPayment(p) &&
+              p.method !== 'room' &&
+              matchesDateFilter(p.date, myDateFilter)
+          )))
+    );
+
+    let totalGenerated = 0;
+    let totalDirectPaid = 0;
+    let totalCash = 0;
+    let totalCard = 0;
+    let totalTransfer = 0;
+    let totalRoomCharged = 0;
+    const byOutlet: Record<string, { outletId: string; outletName: string; count: number; total: number; direct: number; room: number }> = {};
+
+    for (const o of myTodayOrders) {
+      const { orderTotal, cash, card, transfer, directPaid, roomCharged } = getOrderPaymentBreakdown(o);
+
+      totalGenerated += orderTotal;
+      totalDirectPaid += directPaid;
+      totalCash += cash;
+      totalCard += card;
+      totalTransfer += transfer;
+      totalRoomCharged += roomCharged;
+
+      const oId = o.outletId || 'restaurant';
+      const oName = o.outletName || configuredOutlets.find(x => x.id === oId)?.name || 'Main Restaurant';
+      if (!byOutlet[oId]) {
+        byOutlet[oId] = { outletId: oId, outletName: oName, count: 0, total: 0, direct: 0, room: 0 };
+      }
+      byOutlet[oId].count += 1;
+      byOutlet[oId].total += orderTotal;
+      byOutlet[oId].direct += directPaid;
+      byOutlet[oId].room += roomCharged;
+    }
+
+    return {
+      orders: myTodayOrders,
+      count: myTodayOrders.length,
+      totalGenerated,
+      totalDirectPaid,
+      totalCash,
+      totalCard,
+      totalTransfer,
+      totalRoomCharged,
+      byOutlet: Object.values(byOutlet).sort((a, b) => b.total - a.total)
+    };
+  }, [orders, isOrderHandledByUser, isFrontDeskPayment, getOrderPaymentBreakdown, profile?.uid, myDateFilter, configuredOutlets]);
+
+  // All-outlet sales summary for Managers/Admins matching the selected date filter
+  const allOutletStats = React.useMemo(() => {
+    const matchingOrders = orders.filter(o =>
+      o.status !== 'cancelled' &&
+      (matchesDateFilter(o.timestamp, myDateFilter) ||
+        (Array.isArray(o.payments) &&
+          o.payments.some(
+            p => !isFrontDeskPayment(p) && p.method !== 'room' && matchesDateFilter(p.date, myDateFilter)
+          )))
+    );
+
+    let totalGenerated = 0;
+    let totalDirectPaid = 0;
+    let totalCash = 0;
+    let totalCard = 0;
+    let totalTransfer = 0;
+    let totalRoomCharged = 0;
+    const byOutlet: Record<string, { outletId: string; outletName: string; count: number; total: number; direct: number; room: number }> = {};
+
+    for (const o of matchingOrders) {
+      const { orderTotal, cash, card, transfer, directPaid, roomCharged } = getOrderPaymentBreakdown(o);
+
+      totalGenerated += orderTotal;
+      totalDirectPaid += directPaid;
+      totalCash += cash;
+      totalCard += card;
+      totalTransfer += transfer;
+      totalRoomCharged += roomCharged;
+
+      const oId = o.outletId || 'restaurant';
+      const oName = o.outletName || configuredOutlets.find(x => x.id === oId)?.name || 'Main Restaurant';
+      if (!byOutlet[oId]) {
+        byOutlet[oId] = { outletId: oId, outletName: oName, count: 0, total: 0, direct: 0, room: 0 };
+      }
+      byOutlet[oId].count += 1;
+      byOutlet[oId].total += orderTotal;
+      byOutlet[oId].direct += directPaid;
+      byOutlet[oId].room += roomCharged;
+    }
+
+    return {
+      orders: matchingOrders,
+      count: matchingOrders.length,
+      totalGenerated,
+      totalDirectPaid,
+      totalCash,
+      totalCard,
+      totalTransfer,
+      totalRoomCharged,
+      byOutlet: Object.values(byOutlet).sort((a, b) => b.total - a.total)
+    };
+  }, [orders, isFrontDeskPayment, getOrderPaymentBreakdown, myDateFilter, configuredOutlets]);
+
+  const bannerStats = isFandBManager ? allOutletStats : myDailyStats;
+
+  const filteredOrders = scopedOrders.filter(o => {
     const matchesFilter = filter === 'all' || o.status === filter;
     const matchesCategory = categoryFilter === 'all' || o.category === categoryFilter;
-    const matchesSearch = (o.roomNumber || '').includes(searchQuery) || (o.items?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesCategory && matchesSearch;
+    const matchesOutlet = outletFilter === 'all' || (o.outletId || 'restaurant') === outletFilter;
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q ||
+      (o.roomNumber || '').toLowerCase().includes(q) ||
+      (o.items?.toLowerCase() || '').includes(q) ||
+      (o.guestName?.toLowerCase() || '').includes(q) ||
+      (o.billNumber?.toLowerCase() || '').includes(q) ||
+      (o.cashierName?.toLowerCase() || '').includes(q) ||
+      (o.outletName?.toLowerCase() || '').includes(q);
+    return matchesFilter && matchesCategory && matchesOutlet && matchesSearch;
   });
 
   // F&B Orders Pagination
@@ -1355,19 +1647,35 @@ export function FandB() {
 
   useEffect(() => {
     setOrdersPage(1);
-  }, [filter, categoryFilter, searchQuery]);
+  }, [filter, categoryFilter, outletFilter, searchQuery, isFandBManager, myDateFilter]);
+
+  useEffect(() => {
+    setUserOutletPage(1);
+    setCashiersPage(1);
+    setRoomChargesPage(1);
+    setDailyReconPage(1);
+  }, [reportFilter.startDate, reportFilter.endDate, reconciliationSubTab, userOutletFilter, userOutletSearch, userOutletTodayOnly]);
+
+  useEffect(() => {
+    setMyTxPage(1);
+  }, [myTxSearch, myTxOutletFilter, myDateFilter]);
 
   const paginatedOrders = React.useMemo(() => {
     const startIndex = (ordersPage - 1) * ordersPageSize;
     return filteredOrders.slice(startIndex, startIndex + ordersPageSize);
   }, [filteredOrders, ordersPage, ordersPageSize]);
 
-  const activeOrdersCount = orders.filter(o => o.status !== 'delivered').length;
+  const paginatedTables = React.useMemo(() => {
+    const startIndex = (tablesPage - 1) * tablesPageSize;
+    return tables.slice(startIndex, startIndex + tablesPageSize);
+  }, [tables, tablesPage, tablesPageSize]);
+
+  const activeOrdersCount = scopedOrders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled').length;
 
   const stats = [
-    { label: 'Active Orders', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
-    { label: 'Preparing', count: orders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
-    { label: 'Ready for Pickup', count: orders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
+    { label: isFandBManager ? 'Active Orders' : 'My Active Orders Today', count: activeOrdersCount, icon: Utensils, color: 'text-blue-500' },
+    { label: isFandBManager ? 'Preparing' : 'My Preparing Today', count: scopedOrders.filter(o => o.status === 'preparing').length, icon: ChefHat, color: 'text-amber-500' },
+    { label: isFandBManager ? 'Ready for Pickup' : 'My Ready Today', count: scopedOrders.filter(o => o.status === 'ready').length, icon: Bell, color: 'text-emerald-500' },
   ];
 
   const getWaitTime = (timestamp: string) => {
@@ -1471,9 +1779,8 @@ export function FandB() {
         return matchesDate && matchesType;
       })
       .map(order => {
-        const directPaid = (order.payments || [])
-          .filter(p => p.method !== 'room')
-          .reduce((sum, p) => sum + (p.amount || 0), 0) || (order.paidAmount || 0);
+        const { orderTotal, directPaid, roomCharged, frontDeskSettled } = getOrderPaymentBreakdown(order);
+        const totalSettled = Math.min(orderTotal, directPaid + frontDeskSettled);
         const sources = Array.from(new Set((order.payments || []).map(p => p.settlementSource).filter(Boolean)));
         const settlementSourceStr = sources.length > 0 ? sources.join(', ') : (order.settlementSource || 'F&B Outlet');
 
@@ -1484,8 +1791,11 @@ export function FandB() {
           Category: order.category,
           Status: order.status,
           Price: order.price,
-          'Total Amount': order.totalAmount || order.price,
-          'Amount Paid': directPaid,
+          'Total Amount': orderTotal,
+          'Direct Paid (Outlet)': directPaid,
+          'Charged to Room': roomCharged,
+          'Settled via Front Desk': frontDeskSettled,
+          'Amount Paid': totalSettled,
           Payment: order.paymentMethod,
           'Settlement Source': settlementSourceStr,
           Notes: order.notes || ''
@@ -1509,41 +1819,43 @@ export function FandB() {
           <p className="text-zinc-400">Manage room service orders and F & B workflow</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
-            <select
-              value={reportFilter.type}
-              onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
-              className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
-            >
-              <option value="all">All Types</option>
-              <option value="food">Food Only</option>
-              <option value="drink">Drink Only</option>
-              <option value="other">Other Only</option>
-            </select>
-            <div className="w-px h-4 bg-zinc-800" />
-            <div className="relative flex items-center gap-1">
-              <Calendar size={12} className="text-emerald-500 ml-1" />
-              <input
-                type="date"
-                value={reportFilter.startDate}
-                onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
-                className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
-                style={{ colorScheme: 'dark' }}
-              />
+          {isFandBManager && (
+            <div className="hidden md:flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
+              <select
+                value={reportFilter.type}
+                onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
+                className="bg-transparent text-xs text-zinc-400 font-bold px-2 py-1 focus:outline-none"
+              >
+                <option value="all">All Types</option>
+                <option value="food">Food Only</option>
+                <option value="drink">Drink Only</option>
+                <option value="other">Other Only</option>
+              </select>
+              <div className="w-px h-4 bg-zinc-800" />
+              <div className="relative flex items-center gap-1">
+                <Calendar size={12} className="text-emerald-500 ml-1" />
+                <input
+                  type="date"
+                  value={reportFilter.startDate}
+                  onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+                  className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+              <span className="text-zinc-600 text-xs">-</span>
+              <div className="relative flex items-center gap-1">
+                <Calendar size={12} className="text-emerald-500 ml-1" />
+                <input
+                  type="date"
+                  value={reportFilter.endDate}
+                  onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+                  className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
             </div>
-            <span className="text-zinc-600 text-xs">-</span>
-            <div className="relative flex items-center gap-1">
-              <Calendar size={12} className="text-emerald-500 ml-1" />
-              <input
-                type="date"
-                value={reportFilter.endDate}
-                onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
-                className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
-                style={{ colorScheme: 'dark' }}
-              />
-            </div>
-          </div>
-          {(hasPermission(profile, 'export_reports', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+          )}
+          {isFandBManager && (hasPermission(profile, 'export_reports', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <button 
               onClick={handleExport}
               className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
@@ -1566,35 +1878,37 @@ export function FandB() {
       </div>
       
       {/* Mobile Report Filters */}
-      <div className="md:hidden flex flex-col gap-2 bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
-        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Report Filters</p>
-        <div className="grid grid-cols-1 gap-3">
-          <select
-            value={reportFilter.type}
-            onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
-          >
-            <option value="all">All Types</option>
-            <option value="food">Food Only</option>
-            <option value="drink">Drink Only</option>
-            <option value="other">Other Only</option>
-          </select>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              value={reportFilter.startDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+      {isFandBManager && (
+        <div className="md:hidden flex flex-col gap-2 bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
+          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Report Filters</p>
+          <div className="grid grid-cols-1 gap-3">
+            <select
+              value={reportFilter.type}
+              onChange={(e) => setReportFilter({ ...reportFilter, type: e.target.value as any })}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
-            />
-            <input
-              type="date"
-              value={reportFilter.endDate}
-              onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
-            />
+            >
+              <option value="all">All Types</option>
+              <option value="food">Food Only</option>
+              <option value="drink">Drink Only</option>
+              <option value="other">Other Only</option>
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={reportFilter.startDate}
+                onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
+              />
+              <input
+                type="date"
+                value={reportFilter.endDate}
+                onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50"
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="flex items-center gap-4 border-b border-zinc-800 mb-6">
         <button
@@ -1604,7 +1918,7 @@ export function FandB() {
             activeTab === 'orders' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
           )}
         >
-          Orders
+          {isFandBManager ? 'Orders' : 'My Daily Orders'}
           {activeTab === 'orders' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
         </button>
         <button
@@ -1624,14 +1938,14 @@ export function FandB() {
             activeTab === 'reconciliation' ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
           )}
         >
-          Financial Reconciliation & Audit
+          {isFandBManager ? 'Financial Reconciliation & Audit' : 'My Daily Sales & Transactions'}
           {activeTab === 'reconciliation' && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
         </button>
       </div>
 
       {activeTab === 'orders' ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
             {stats.map((stat) => (
               <div key={stat.label} className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl">
                 <div className="flex items-center justify-between mb-2">
@@ -1643,17 +1957,120 @@ export function FandB() {
             ))}
           </div>
 
+          {/* Sales & Outlet Earnings Banner (Full F&B Summary for Managers; Personal Scope for Staff) */}
+          <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-5 mb-6 space-y-4">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                    {isFandBManager
+                      ? (isMyDateToday ? `F&B Daily Sales (${myDateRangeLabel})` : `F&B Sales Summary (${myDateRangeLabel})`)
+                      : (isMyDateToday ? `My Daily Sales (${myDateRangeLabel})` : `My Sales (${myDateRangeLabel})`)}
+                  </span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 font-medium">
+                    {profile?.displayName || (profile as any)?.name || profile?.email || 'Staff'}
+                  </span>
+                  {isFandBManager ? (
+                    <>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+                        All Outlets
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 font-medium">
+                        My Orders: {myDailyStats.count} ({formatCurrency(myDailyStats.totalGenerated, currency, exchangeRate)})
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
+                      Personal Scope
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {isFandBManager
+                    ? (isMyDateToday
+                        ? 'All orders and total revenue generated today across all F&B outlets'
+                        : `All orders and total revenue generated for ${myDateRangeLabel} across all F&B outlets`)
+                    : (isMyDateToday
+                        ? 'Your orders and total revenue generated today across F&B outlets'
+                        : `Your orders and total revenue generated for ${myDateRangeLabel} across F&B outlets`)}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3.5 py-2">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">
+                    {isMyDateToday ? 'Orders Today' : 'Orders'}
+                  </div>
+                  <div className="text-base font-black text-zinc-100">{bannerStats.count}</div>
+                </div>
+                <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3.5 py-2">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">
+                    {isMyDateToday ? 'Total Made Today' : 'Total Made'}
+                  </div>
+                  <div className="text-base font-black text-emerald-400">
+                    {formatCurrency(bannerStats.totalGenerated, currency, exchangeRate)}
+                  </div>
+                </div>
+                <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3.5 py-2">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Direct Collected</div>
+                  <div className="text-base font-black text-zinc-100">
+                    {formatCurrency(bannerStats.totalDirectPaid, currency, exchangeRate)}
+                  </div>
+                </div>
+                <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3.5 py-2">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Charged to Room</div>
+                  <div className="text-base font-black text-amber-400">
+                    {formatCurrency(bannerStats.totalRoomCharged, currency, exchangeRate)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-3">
+              <DateFilterControl
+                value={myDateFilter}
+                onChange={setMyDateFilter}
+                compact
+              />
+              {bannerStats.byOutlet.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mr-1">
+                    {isFandBManager
+                      ? (isMyDateToday ? 'Outlets Today:' : 'Outlets:')
+                      : (isMyDateToday ? 'My Outlets Today:' : 'My Outlets:')}
+                  </span>
+                  {bannerStats.byOutlet.map(ob => (
+                    <div key={ob.outletId} className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-xs">
+                      <span className="font-bold text-zinc-200">{ob.outletName}</span>
+                      <span className="text-zinc-500">({ob.count})</span>
+                      <span className="font-mono font-bold text-emerald-400">{formatCurrency(ob.total, currency, exchangeRate)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
             <div className="relative flex-1 w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
               <input
                 type="text"
-                placeholder="Search by room or items..."
+                placeholder="Search by room, guest, bill #, staff, outlet or items..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
               />
             </div>
+            <select
+              value={outletFilter}
+              onChange={(e) => setOutletFilter(e.target.value)}
+              className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-200 focus:outline-none focus:border-emerald-500/50 w-full md:w-auto"
+            >
+              <option value="all">All Outlets</option>
+              {configuredOutlets.map(outlet => (
+                <option key={outlet.id} value={outlet.id}>{outlet.name}</option>
+              ))}
+            </select>
             <div className="flex flex-wrap items-center gap-2 bg-zinc-900 border border-zinc-800 p-1 rounded-xl w-full md:w-auto">
               {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((f) => (
                 <button
@@ -1709,18 +2126,19 @@ export function FandB() {
 
                   // 1. Direct payments collected at F&B outlet (cash, transfer, card, POS)
                   const outletDirectPaid = paymentsList
-                    .filter(p => p.method !== 'room' && p.settlementSource !== 'Front Desk' && !p.reference?.includes('Front Desk'))
+                    .filter(p => p.method !== 'room' && !isFrontDeskPayment(p))
                     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-                  // 2. Portion charged to room folio
-                  const roomCharged = order.roomChargedAmount !== undefined
+                  // 2. Portion settled via Front Desk room folio payment
+                  const frontDeskSettled = paymentsList
+                    .filter(p => isFrontDeskPayment(p))
+                    .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+                  // 3. Portion charged to room folio (preserve Front Desk settled portion even if roomChargedAmount was cleared)
+                  const rawRoomCharged = order.roomChargedAmount !== undefined
                     ? order.roomChargedAmount
                     : paymentsList.filter(p => p.method === 'room').reduce((sum, p) => sum + (p.amount || 0), 0);
-
-                  // 3. Portion settled via Front Desk room folio payment
-                  const frontDeskSettled = paymentsList
-                    .filter(p => p.settlementSource === 'Front Desk' || p.reference?.includes('Front Desk'))
-                    .reduce((sum, p) => sum + (p.amount || 0), 0);
+                  const roomCharged = Math.max(rawRoomCharged, frontDeskSettled);
 
                   // Total payments received for this order (capped at orderTotal)
                   const totalPaidByGuest = Math.min(orderTotal, outletDirectPaid + frontDeskSettled);
@@ -1766,9 +2184,16 @@ export function FandB() {
                                 </span>
                               )}
                             </div>
-                            <div className="text-[10px] text-zinc-500 flex items-center gap-1">
-                              <Clock size={10} />
-                              {getWaitTime(order.timestamp)}
+                            <div className="text-[10px] text-zinc-500 flex items-center gap-1.5 flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <Clock size={10} />
+                                {getWaitTime(order.timestamp)}
+                              </span>
+                              {order.cashierName && (
+                                <span className="text-[9px] text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded">
+                                  By {order.cashierName}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -2065,7 +2490,7 @@ export function FandB() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {tables.map((table) => (
+            {paginatedTables.map((table) => (
               <div
                 key={table.id}
                 className={cn(
@@ -2134,9 +2559,213 @@ export function FandB() {
               </div>
             ))}
           </div>
+          <Pagination
+            currentPage={tablesPage}
+            totalItems={tables.length}
+            pageSize={tablesPageSize}
+            onPageChange={setTablesPage}
+            onPageSizeChange={setTablesPageSize}
+            pageSizeOptions={[8, 12, 24, 48]}
+            itemLabel="tables"
+          />
+        </div>
+      ) : !isFandBManager ? (
+        /* Scoped Personal Daily Sales & Transactions View for Outlet Staff */
+        <div className="space-y-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
+                <DollarSign className="text-emerald-400" size={22} />
+                My Sales & Transactions ({myDateRangeLabel})
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Showing only your personal transactions and outlet earnings for {isMyDateToday ? 'today' : myDateRangeLabel}
+              </p>
+            </div>
+            <DateFilterControl value={myDateFilter} onChange={setMyDateFilter} compact />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                <span>{isMyDateToday ? 'My Total Revenue Today' : 'My Total Revenue'}</span>
+                <UtensilsCrossed size={16} className="text-emerald-400" />
+              </div>
+              <div className="text-2xl font-black text-zinc-50">{formatCurrency(myDailyStats.totalGenerated, currency, exchangeRate)}</div>
+              <div className="text-[10px] text-zinc-500 mt-1">{myDailyStats.count} orders handled</div>
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                <span>My Direct Collections</span>
+                <DollarSign size={16} className="text-emerald-400" />
+              </div>
+              <div className="text-2xl font-black text-emerald-400">{formatCurrency(myDailyStats.totalDirectPaid, currency, exchangeRate)}</div>
+              <div className="text-[10px] text-zinc-500 mt-1">
+                Cash: {formatCurrency(myDailyStats.totalCash, currency, exchangeRate)} · Card: {formatCurrency(myDailyStats.totalCard, currency, exchangeRate)} · Transfer: {formatCurrency(myDailyStats.totalTransfer, currency, exchangeRate)}
+              </div>
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                <span>Charged to Room Folios</span>
+                <Building2 size={16} className="text-amber-400" />
+              </div>
+              <div className="text-2xl font-black text-amber-400">{formatCurrency(myDailyStats.totalRoomCharged, currency, exchangeRate)}</div>
+              <div className="text-[10px] text-zinc-500 mt-1">Room charges posted by you</div>
+            </div>
+
+            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                <span>Active Outlets Used</span>
+                <Utensils size={16} className="text-blue-400" />
+              </div>
+              <div className="text-2xl font-black text-zinc-100">{myDailyStats.byOutlet.length}</div>
+              <div className="text-[10px] text-zinc-500 mt-1">Outlets with your sales</div>
+            </div>
+          </div>
+
+          {/* My Revenue by Outlet */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-zinc-200">My Earnings by Outlet ({myDateRangeLabel})</h3>
+              <span className="text-xs text-zinc-500">{myDailyStats.byOutlet.length} outlets</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                  <tr>
+                    <th className="p-4">Outlet</th>
+                    <th className="p-4 text-center">Orders</th>
+                    <th className="p-4 text-right">Direct POS Collected</th>
+                    <th className="p-4 text-right">Charged to Room</th>
+                    <th className="p-4 text-right">Total Made</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                  {myDailyStats.byOutlet.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-zinc-500">No sales recorded for you in this period.</td>
+                    </tr>
+                  ) : myDailyStats.byOutlet.map(ob => (
+                    <tr key={ob.outletId} className="hover:bg-zinc-800/40 transition-colors">
+                      <td className="p-4 font-bold text-zinc-100">{ob.outletName}</td>
+                      <td className="p-4 text-center font-bold">{ob.count}</td>
+                      <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(ob.direct, currency, exchangeRate)}</td>
+                      <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(ob.room, currency, exchangeRate)}</td>
+                      <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(ob.total, currency, exchangeRate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* My Transactions Table (Paginated) */}
+          {(() => {
+            const myFilteredTx = myDailyStats.orders.filter(o => {
+              const matchesOutlet = myTxOutletFilter === 'all' || (o.outletId || 'restaurant') === myTxOutletFilter;
+              const q = myTxSearch.toLowerCase();
+              const matchesSearch = !q ||
+                (o.billNumber || '').toLowerCase().includes(q) ||
+                (o.guestName || '').toLowerCase().includes(q) ||
+                (o.roomNumber || '').toLowerCase().includes(q) ||
+                (o.items || '').toLowerCase().includes(q);
+              return matchesOutlet && matchesSearch;
+            });
+            const pagedMyTx = myFilteredTx.slice((myTxPage - 1) * myTxPageSize, myTxPage * myTxPageSize);
+
+            return (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-200">My Transactions ({myDateRangeLabel})</h3>
+                    <p className="text-[11px] text-zinc-500">Only your transactions processed in this period</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Search bill, guest, items..."
+                      value={myTxSearch}
+                      onChange={(e) => setMyTxSearch(e.target.value)}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                    />
+                    <select
+                      value={myTxOutletFilter}
+                      onChange={(e) => setMyTxOutletFilter(e.target.value)}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                    >
+                      <option value="all">All Outlets</option>
+                      {configuredOutlets.map(out => (
+                        <option key={out.id} value={out.id}>{out.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-4">Time</th>
+                        <th className="p-4">Bill #</th>
+                        <th className="p-4">Outlet</th>
+                        <th className="p-4">Guest / Room</th>
+                        <th className="p-4">Items</th>
+                        <th className="p-4 text-right">Direct Paid</th>
+                        <th className="p-4 text-right">Room Charge</th>
+                        <th className="p-4 text-right">Total</th>
+                        <th className="p-4 text-center">Docket</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                      {pagedMyTx.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="p-8 text-center text-zinc-500">No transactions found for today.</td>
+                        </tr>
+                      ) : pagedMyTx.map(order => {
+                        const { orderTotal, directPaid, roomCharged } = getOrderPaymentBreakdown(order);
+                        return (
+                          <tr key={order.id} className="hover:bg-zinc-800/40 transition-colors">
+                            <td className="p-4 text-zinc-400 whitespace-nowrap">{format(new Date(order.timestamp), 'HH:mm')}</td>
+                            <td className="p-4 font-mono font-bold text-zinc-200">{order.billNumber || '#' + order.id.slice(-6)}</td>
+                            <td className="p-4 text-emerald-400 font-semibold">{order.outletName || 'Main Restaurant'}</td>
+                            <td className="p-4">
+                              <div className="font-bold text-zinc-100">{order.guestName || 'Walk-in'}</div>
+                              <div className="text-[10px] text-zinc-500">{order.roomNumber === 'Walk-in' ? 'Walk-in' : `Room ${order.roomNumber}`}</div>
+                            </td>
+                            <td className="p-4 text-zinc-400 max-w-xs truncate">{order.items}</td>
+                            <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(directPaid, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(roomCharged, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(orderTotal, currency, exchangeRate)}</td>
+                            <td className="p-4 text-center">
+                              <button
+                                onClick={() => setPrintingOrder(order)}
+                                className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold"
+                              >
+                                Print
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination
+                  currentPage={myTxPage}
+                  totalItems={myFilteredTx.length}
+                  pageSize={myTxPageSize}
+                  onPageChange={setMyTxPage}
+                  onPageSizeChange={setMyTxPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="transactions"
+                />
+              </div>
+            );
+          })()}
         </div>
       ) : (
-        /* Financial Reconciliation & Audit View */
+        /* Financial Reconciliation & Audit View (Admin/Manager/Finance Scope) */
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
@@ -2145,7 +2774,7 @@ export function FandB() {
                 Financial Reconciliation & Audit
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Multi-outlet revenue tracking, direct POS collections, room charge folios, and cashier balancing
+                Multi-outlet revenue tracking, per-user outlet generation, direct POS collections, room charge folios, and cashier balancing
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -2168,7 +2797,7 @@ export function FandB() {
           {/* Sub-tab Navigation */}
           <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/80 pb-3">
             {[
-              { id: 'outlets', label: 'Sales by Outlet', icon: Utensils },
+              { id: 'outlets', label: 'Sales by Outlet & User', icon: Utensils },
               { id: 'payments', label: 'Payment Methods', icon: CreditCard },
               { id: 'cashiers', label: 'Cashier Accountability', icon: DollarSign },
               { id: 'room_charges', label: 'Room Charge Audit Log', icon: FileText },
@@ -2201,14 +2830,8 @@ export function FandB() {
             const validOrders = rangeOrders.filter(o => o.status !== 'cancelled');
 
             const totalSales = validOrders.reduce((acc, o) => acc + (o.totalAmount || o.price || 0), 0);
-            const totalDirectPaid = validOrders.reduce((acc, o) => {
-              const p = (o.payments || []).filter(pay => pay.method !== 'room').reduce((s, pay) => s + (pay.amount || 0), 0);
-              return acc + (p || o.directPaidAmount || (o.roomChargedAmount === 0 && o.status === 'paid' ? (o.totalAmount || o.price || 0) : 0));
-            }, 0);
-            const totalRoomCharged = validOrders.reduce((acc, o) => {
-              const r = (o.payments || []).filter(pay => pay.method === 'room').reduce((s, pay) => s + (pay.amount || 0), 0);
-              return acc + (r || o.roomChargedAmount || 0);
-            }, 0);
+            const totalDirectPaid = validOrders.reduce((acc, o) => acc + getOrderPaymentBreakdown(o).directPaid, 0);
+            const totalRoomCharged = validOrders.reduce((acc, o) => acc + getOrderPaymentBreakdown(o).roomCharged, 0);
             const totalVoided = rangeOrders.filter(o => o.status === 'cancelled').reduce((acc, o) => acc + (o.totalAmount || o.price || 0), 0);
 
             return (
@@ -2252,67 +2875,242 @@ export function FandB() {
             );
           })()}
 
-          {/* Sub-tab 1: Outlets */}
+          {/* Sub-tab 1: Outlets + User × Outlet Revenue Breakdown */}
           {reconciliationSubTab === 'outlets' && (() => {
-            const start = new Date(reportFilter.startDate + 'T00:00:00');
-            const end = new Date(reportFilter.endDate + 'T23:59:59');
+            const start = userOutletTodayOnly ? startOfDay(now) : new Date(reportFilter.startDate + 'T00:00:00');
+            const end = userOutletTodayOnly ? endOfDay(now) : new Date(reportFilter.endDate + 'T23:59:59');
             const validOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
               return d >= start && d <= end && o.status !== 'cancelled';
             });
 
-            return (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-zinc-200">Revenue Breakdown by Outlet</h3>
-                  <span className="text-xs text-zinc-500">{configuredOutlets.length} active outlets</span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
-                      <tr>
-                        <th className="p-4">Outlet Name</th>
-                        <th className="p-4">Type</th>
-                        <th className="p-4 text-center">Orders</th>
-                        <th className="p-4 text-right">Gross Sales</th>
-                        <th className="p-4 text-right">Direct Paid (POS)</th>
-                        <th className="p-4 text-right">Charged to Room</th>
-                        <th className="p-4 text-center">Room Charge Policy</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800 text-zinc-300">
-                      {configuredOutlets.map(outlet => {
-                        const outletOrders = validOrders.filter(o => o.outletId === outlet.id || (outlet.id === 'restaurant' && !o.outletId));
-                        const grossSales = outletOrders.reduce((sum, o) => sum + (o.totalAmount || o.price || 0), 0);
-                        const directPaid = outletOrders.reduce((sum, o) => sum + (o.directPaidAmount || (o.roomChargedAmount === 0 && o.status === 'paid' ? (o.totalAmount || o.price || 0) : 0)), 0);
-                        const roomCharged = outletOrders.reduce((sum, o) => sum + (o.roomChargedAmount || 0), 0);
+            // Build User × Outlet map
+            const userOutletMap: Record<string, {
+              key: string;
+              userUid: string;
+              userName: string;
+              outletId: string;
+              outletName: string;
+              count: number;
+              cash: number;
+              card: number;
+              transfer: number;
+              direct: number;
+              room: number;
+              total: number;
+            }> = {};
 
-                        return (
-                          <tr key={outlet.id} className="hover:bg-zinc-800/40 transition-colors">
-                            <td className="p-4 font-bold text-zinc-100 flex items-center gap-2">
-                              <Utensils size={14} className="text-emerald-400" />
-                              {outlet.name}
-                            </td>
-                            <td className="p-4 uppercase text-[10px] font-semibold text-zinc-400">{outlet.type}</td>
-                            <td className="p-4 text-center font-bold">{outletOrders.length}</td>
-                            <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(grossSales, currency, exchangeRate)}</td>
-                            <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(directPaid, currency, exchangeRate)}</td>
-                            <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(roomCharged, currency, exchangeRate)}</td>
-                            <td className="p-4 text-center">
-                              <span className={cn(
-                                "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
-                                outlet.allowRoomCharge !== false
-                                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                  : "bg-zinc-800 text-zinc-400"
-                              )}>
-                                {outlet.allowRoomCharge !== false ? 'Enabled' : 'Direct Only'}
+            for (const order of validOrders) {
+              const uUid = order.cashierUid || order.cashierName || 'staff';
+              const uName = order.cashierName || 'Staff';
+              const oId = order.outletId || 'restaurant';
+              const oName = order.outletName || configuredOutlets.find(x => x.id === oId)?.name || 'Main Restaurant';
+              const key = `${uUid}::${oId}`;
+
+              if (!userOutletMap[key]) {
+                userOutletMap[key] = {
+                  key,
+                  userUid: uUid,
+                  userName: uName,
+                  outletId: oId,
+                  outletName: oName,
+                  count: 0,
+                  cash: 0,
+                  card: 0,
+                  transfer: 0,
+                  direct: 0,
+                  room: 0,
+                  total: 0
+                };
+              }
+
+              const { orderTotal, cash, card, transfer, directPaid, roomCharged } = getOrderPaymentBreakdown(order);
+
+              userOutletMap[key].count += 1;
+              userOutletMap[key].cash += cash;
+              userOutletMap[key].card += card;
+              userOutletMap[key].transfer += transfer;
+              userOutletMap[key].direct += directPaid;
+              userOutletMap[key].room += roomCharged;
+              userOutletMap[key].total += orderTotal;
+            }
+
+            const userOutletRows = Object.values(userOutletMap)
+              .filter(r => {
+                const matchesOut = userOutletFilter === 'all' || r.outletId === userOutletFilter;
+                const q = userOutletSearch.toLowerCase();
+                const matchesSearch = !q || r.userName.toLowerCase().includes(q) || r.outletName.toLowerCase().includes(q);
+                return matchesOut && matchesSearch;
+              })
+              .sort((a, b) => b.total - a.total);
+
+            const pagedUserOutletRows = userOutletRows.slice((userOutletPage - 1) * userOutletPageSize, userOutletPage * userOutletPageSize);
+
+            return (
+              <div className="space-y-6">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-zinc-200">Revenue Breakdown by Outlet</h3>
+                    <span className="text-xs text-zinc-500">{configuredOutlets.length} active outlets</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                        <tr>
+                          <th className="p-4">Outlet Name</th>
+                          <th className="p-4">Type</th>
+                          <th className="p-4 text-center">Orders</th>
+                          <th className="p-4 text-right">Gross Sales</th>
+                          <th className="p-4 text-right">Direct Paid (POS)</th>
+                          <th className="p-4 text-right">Charged to Room</th>
+                          <th className="p-4 text-center">Room Charge Policy</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                        {configuredOutlets.map(outlet => {
+                          const outletOrders = validOrders.filter(o => o.outletId === outlet.id || (outlet.id === 'restaurant' && !o.outletId));
+                          const grossSales = outletOrders.reduce((sum, o) => sum + (o.totalAmount || o.price || 0), 0);
+                          const directPaid = outletOrders.reduce((sum, o) => sum + getOrderPaymentBreakdown(o).directPaid, 0);
+                          const roomCharged = outletOrders.reduce((sum, o) => sum + getOrderPaymentBreakdown(o).roomCharged, 0);
+
+                          return (
+                            <tr key={outlet.id} className="hover:bg-zinc-800/40 transition-colors">
+                              <td className="p-4 font-bold text-zinc-100 flex items-center gap-2">
+                                <Utensils size={14} className="text-emerald-400" />
+                                {outlet.name}
+                              </td>
+                              <td className="p-4 uppercase text-[10px] font-semibold text-zinc-400">{outlet.type}</td>
+                              <td className="p-4 text-center font-bold">{outletOrders.length}</td>
+                              <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(grossSales, currency, exchangeRate)}</td>
+                              <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(directPaid, currency, exchangeRate)}</td>
+                              <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(roomCharged, currency, exchangeRate)}</td>
+                              <td className="p-4 text-center">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                                  outlet.allowRoomCharge !== false
+                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                    : "bg-zinc-800 text-zinc-400"
+                                )}>
+                                  {outlet.allowRoomCharge !== false ? 'Enabled' : 'Direct Only'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* User × Outlet Revenue Breakdown */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b border-zinc-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-200">Revenue Generated by Each User & Outlet</h3>
+                      <p className="text-[11px] text-zinc-500">Shows exactly how much each staff member generates per outlet</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setUserOutletTodayOnly(v => !v)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-xl text-xs font-bold border transition-all",
+                          userOutletTodayOnly
+                            ? "bg-emerald-500 text-black border-emerald-400"
+                            : "bg-zinc-950 text-zinc-300 border-zinc-800 hover:bg-zinc-800"
+                        )}
+                      >
+                        {userOutletTodayOnly ? 'Showing Today Only' : 'Today Only'}
+                      </button>
+                      <input
+                        type="text"
+                        placeholder="Search user or outlet..."
+                        value={userOutletSearch}
+                        onChange={(e) => setUserOutletSearch(e.target.value)}
+                        className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                      />
+                      <select
+                        value={userOutletFilter}
+                        onChange={(e) => setUserOutletFilter(e.target.value)}
+                        className="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                      >
+                        <option value="all">All Outlets</option>
+                        {configuredOutlets.map(outlet => (
+                          <option key={outlet.id} value={outlet.id}>{outlet.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (userOutletRows.length === 0) return toast.info('No user outlet records to export');
+                          exportToCSV(userOutletRows.map(r => ({
+                            User: r.userName,
+                            Outlet: r.outletName,
+                            Orders: r.count,
+                            Cash: r.cash,
+                            Card: r.card,
+                            Transfer: r.transfer,
+                            'Direct POS Total': r.direct,
+                            'Room Charges': r.room,
+                            'Total Generated': r.total
+                          })), `FB_User_Outlet_Revenue_${userOutletTodayOnly ? todayStr : `${reportFilter.startDate}_to_${reportFilter.endDate}`}`);
+                        }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold border border-zinc-700"
+                      >
+                        <Download size={13} />
+                        CSV
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
+                        <tr>
+                          <th className="p-4">Staff / User</th>
+                          <th className="p-4">Outlet</th>
+                          <th className="p-4 text-center">Orders</th>
+                          <th className="p-4 text-right">Cash</th>
+                          <th className="p-4 text-right">Card</th>
+                          <th className="p-4 text-right">Transfer</th>
+                          <th className="p-4 text-right">Direct POS</th>
+                          <th className="p-4 text-right">Room Charge</th>
+                          <th className="p-4 text-right">Total Generated</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800 text-zinc-300">
+                        {pagedUserOutletRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="p-8 text-center text-zinc-500">No user outlet sales found for this period.</td>
+                          </tr>
+                        ) : pagedUserOutletRows.map(row => (
+                          <tr key={row.key} className="hover:bg-zinc-800/40 transition-colors">
+                            <td className="p-4 font-bold text-zinc-100">{row.userName}</td>
+                            <td className="p-4">
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[11px] font-semibold">
+                                {row.outletName}
                               </span>
                             </td>
+                            <td className="p-4 text-center font-bold">{row.count}</td>
+                            <td className="p-4 text-right text-zinc-300">{formatCurrency(row.cash, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right text-zinc-300">{formatCurrency(row.card, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right text-zinc-300">{formatCurrency(row.transfer, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-bold text-emerald-400">{formatCurrency(row.direct, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(row.room, currency, exchangeRate)}</td>
+                            <td className="p-4 text-right font-black text-zinc-100">{formatCurrency(row.total, currency, exchangeRate)}</td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination
+                    currentPage={userOutletPage}
+                    totalItems={userOutletRows.length}
+                    pageSize={userOutletPageSize}
+                    onPageChange={setUserOutletPage}
+                    onPageSizeChange={setUserOutletPageSize}
+                    pageSizeOptions={[10, 25, 50]}
+                    itemLabel="user-outlet rows"
+                  />
                 </div>
               </div>
             );
@@ -2335,21 +3133,22 @@ export function FandB() {
             };
 
             for (const order of validOrders) {
-              if (Array.isArray(order.payments) && order.payments.length > 0) {
-                for (const p of order.payments) {
-                  const m = p.method || 'cash';
-                  if (!methodTotals[m]) methodTotals[m] = { count: 0, amount: 0 };
-                  if (p.amount > 0) {
-                    methodTotals[m].count += 1;
-                    methodTotals[m].amount += p.amount;
-                  }
-                }
-              } else {
-                const isRoom = order.roomNumber && order.roomNumber !== 'Walk-in' && (order.roomChargedAmount ?? 0) > 0;
-                const m = isRoom ? 'room' : (order.paymentMethod || 'cash');
-                if (!methodTotals[m]) methodTotals[m] = { count: 0, amount: 0 };
-                methodTotals[m].count += 1;
-                methodTotals[m].amount += (order.totalAmount || order.price || 0);
+              const { cash, card, transfer, roomCharged } = getOrderPaymentBreakdown(order);
+              if (cash > 0) {
+                methodTotals.cash.count += 1;
+                methodTotals.cash.amount += cash;
+              }
+              if (card > 0) {
+                methodTotals.card.count += 1;
+                methodTotals.card.amount += card;
+              }
+              if (transfer > 0) {
+                methodTotals.transfer.count += 1;
+                methodTotals.transfer.amount += transfer;
+              }
+              if (roomCharged > 0) {
+                methodTotals.room.count += 1;
+                methodTotals.room.amount += roomCharged;
               }
             }
 
@@ -2404,7 +3203,7 @@ export function FandB() {
             );
           })()}
 
-          {/* Sub-tab 3: Cashiers */}
+          {/* Sub-tab 3: Cashiers (Paginated + Outlet breakdown) */}
           {reconciliationSubTab === 'cashiers' && (() => {
             const start = new Date(reportFilter.startDate + 'T00:00:00');
             const end = new Date(reportFilter.endDate + 'T23:59:59');
@@ -2413,32 +3212,37 @@ export function FandB() {
               return d >= start && d <= end && o.status !== 'cancelled';
             });
 
-            const cashierMap: Record<string, { count: number; direct: number; room: number; total: number }> = {};
+            const cashierMap: Record<string, { name: string; outlets: Set<string>; count: number; direct: number; room: number; total: number }> = {};
             for (const order of validOrders) {
-              const cashier = order.cashierName || 'Staff';
-              if (!cashierMap[cashier]) {
-                cashierMap[cashier] = { count: 0, direct: 0, room: 0, total: 0 };
+              const cashierKey = order.cashierUid || order.cashierName || 'Staff';
+              const cashierName = order.cashierName || 'Staff';
+              if (!cashierMap[cashierKey]) {
+                cashierMap[cashierKey] = { name: cashierName, outlets: new Set(), count: 0, direct: 0, room: 0, total: 0 };
               }
-              const orderTotal = order.totalAmount || order.price || 0;
-              const directPaid = order.directPaidAmount || (order.roomChargedAmount === 0 && order.status === 'paid' ? orderTotal : 0);
-              const roomCharged = order.roomChargedAmount || 0;
+              const { orderTotal, directPaid, roomCharged } = getOrderPaymentBreakdown(order);
 
-              cashierMap[cashier].count += 1;
-              cashierMap[cashier].direct += directPaid;
-              cashierMap[cashier].room += roomCharged;
-              cashierMap[cashier].total += orderTotal;
+              cashierMap[cashierKey].outlets.add(order.outletName || 'Main Restaurant');
+              cashierMap[cashierKey].count += 1;
+              cashierMap[cashierKey].direct += directPaid;
+              cashierMap[cashierKey].room += roomCharged;
+              cashierMap[cashierKey].total += orderTotal;
             }
+
+            const cashierEntries = Object.entries(cashierMap).sort(([, a], [, b]) => b.total - a.total);
+            const pagedCashiers = cashierEntries.slice((cashiersPage - 1) * cashiersPageSize, cashiersPage * cashiersPageSize);
 
             return (
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-zinc-800">
+                <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-zinc-200">Cashier Performance & Shift Balancing</h3>
+                  <span className="text-xs text-zinc-500">{cashierEntries.length} cashiers</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] border-b border-zinc-800">
                       <tr>
                         <th className="p-4">Cashier Name</th>
+                        <th className="p-4">Outlets</th>
                         <th className="p-4 text-center">Orders Handled</th>
                         <th className="p-4 text-right">Direct POS Collected</th>
                         <th className="p-4 text-right">Room Charges Posted</th>
@@ -2446,9 +3250,18 @@ export function FandB() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800 text-zinc-300">
-                      {Object.entries(cashierMap).map(([cashier, data]) => (
-                        <tr key={cashier} className="hover:bg-zinc-800/40 transition-colors">
-                          <td className="p-4 font-bold text-zinc-100">{cashier}</td>
+                      {pagedCashiers.map(([key, data]) => (
+                        <tr key={key} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="p-4 font-bold text-zinc-100">{data.name}</td>
+                          <td className="p-4">
+                            <div className="flex flex-wrap gap-1">
+                              {Array.from(data.outlets).map(out => (
+                                <span key={out} className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] font-medium">
+                                  {out}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
                           <td className="p-4 text-center font-bold">{data.count}</td>
                           <td className="p-4 text-right font-black text-emerald-400">{formatCurrency(data.direct, currency, exchangeRate)}</td>
                           <td className="p-4 text-right font-bold text-amber-400">{formatCurrency(data.room, currency, exchangeRate)}</td>
@@ -2458,19 +3271,30 @@ export function FandB() {
                     </tbody>
                   </table>
                 </div>
+                <Pagination
+                  currentPage={cashiersPage}
+                  totalItems={cashierEntries.length}
+                  pageSize={cashiersPageSize}
+                  onPageChange={setCashiersPage}
+                  onPageSizeChange={setCashiersPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="cashiers"
+                />
               </div>
             );
           })()}
 
-          {/* Sub-tab 4: Room Charges Audit Log */}
+          {/* Sub-tab 4: Room Charges Audit Log (Paginated) */}
           {reconciliationSubTab === 'room_charges' && (() => {
             const start = new Date(reportFilter.startDate + 'T00:00:00');
             const end = new Date(reportFilter.endDate + 'T23:59:59');
             const roomOrders = orders.filter(o => {
               const d = new Date(o.timestamp);
-              const isRoom = (o.roomChargedAmount && o.roomChargedAmount > 0) || (o.payments || []).some(p => p.method === 'room');
+              const { roomCharged } = getOrderPaymentBreakdown(o);
+              const isRoom = roomCharged > 0 || (o.payments || []).some(p => p.method === 'room' || isFrontDeskPayment(p));
               return d >= start && d <= end && isRoom;
             });
+            const pagedRoomOrders = roomOrders.slice((roomChargesPage - 1) * roomChargesPageSize, roomChargesPage * roomChargesPageSize);
 
             return (
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -2493,7 +3317,7 @@ export function FandB() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800 text-zinc-300">
-                      {roomOrders.map(order => (
+                      {pagedRoomOrders.map(order => (
                         <tr key={order.id} className="hover:bg-zinc-800/40 transition-colors">
                           <td className="p-4 text-zinc-400">{new Date(order.timestamp).toLocaleString()}</td>
                           <td className="p-4 font-mono font-bold text-zinc-200">{order.billNumber || '#' + order.id.slice(-6)}</td>
@@ -2504,7 +3328,7 @@ export function FandB() {
                           <td className="p-4 text-zinc-300 font-medium">{order.outletName || 'Restaurant'}</td>
                           <td className="p-4 text-zinc-400 max-w-xs truncate">{order.items}</td>
                           <td className="p-4 text-right font-black text-amber-400">
-                            {formatCurrency(order.roomChargedAmount || order.totalAmount || order.price, currency, exchangeRate)}
+                            {formatCurrency(getOrderPaymentBreakdown(order).roomCharged || order.totalAmount || order.price, currency, exchangeRate)}
                           </td>
                           <td className="p-4 font-mono text-[10px] text-zinc-400">
                             {order.ledgerEntryId ? `LED-${order.ledgerEntryId.slice(-6).toUpperCase()}` : `REF-${order.id.slice(-6).toUpperCase()}`}
@@ -2524,11 +3348,20 @@ export function FandB() {
                     </tbody>
                   </table>
                 </div>
+                <Pagination
+                  currentPage={roomChargesPage}
+                  totalItems={roomOrders.length}
+                  pageSize={roomChargesPageSize}
+                  onPageChange={setRoomChargesPage}
+                  onPageSizeChange={setRoomChargesPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="room charge logs"
+                />
               </div>
             );
           })()}
 
-          {/* Sub-tab 5: Daily Summary & Export */}
+          {/* Sub-tab 5: Daily Summary & Export (Paginated) */}
           {reconciliationSubTab === 'daily' && (() => {
             const start = new Date(reportFilter.startDate + 'T00:00:00');
             const end = new Date(reportFilter.endDate + 'T23:59:59');
@@ -2549,16 +3382,20 @@ export function FandB() {
               if (order.status === 'cancelled') {
                 dailyMap[day].voided += total;
               } else {
+                const { directPaid, roomCharged } = getOrderPaymentBreakdown(order);
                 dailyMap[day].count += 1;
                 dailyMap[day].gross += total;
                 dailyMap[day].taxes += tax;
-                dailyMap[day].direct += (order.directPaidAmount || (order.roomChargedAmount === 0 && order.status === 'paid' ? total : 0));
-                dailyMap[day].room += (order.roomChargedAmount || 0);
+                dailyMap[day].direct += directPaid;
+                dailyMap[day].room += roomCharged;
               }
             }
 
+            const dailyEntries = Object.entries(dailyMap).sort(([a], [b]) => b.localeCompare(a));
+            const pagedDailyEntries = dailyEntries.slice((dailyReconPage - 1) * dailyReconPageSize, dailyReconPage * dailyReconPageSize);
+
             const exportDailyReconciliationCSV = () => {
-              const rows = Object.entries(dailyMap).sort(([a], [b]) => b.localeCompare(a)).map(([day, d]) => ({
+              const rows = dailyEntries.map(([day, d]) => ({
                 Date: day,
                 'Order Count': d.count,
                 'Gross Revenue': d.gross,
@@ -2599,7 +3436,7 @@ export function FandB() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800 text-zinc-300">
-                      {Object.entries(dailyMap).sort(([a], [b]) => b.localeCompare(a)).map(([day, d]) => (
+                      {pagedDailyEntries.map(([day, d]) => (
                         <tr key={day} className="hover:bg-zinc-800/40 transition-colors">
                           <td className="p-4 font-bold text-zinc-100">{day}</td>
                           <td className="p-4 text-center font-bold">{d.count}</td>
@@ -2613,6 +3450,15 @@ export function FandB() {
                     </tbody>
                   </table>
                 </div>
+                <Pagination
+                  currentPage={dailyReconPage}
+                  totalItems={dailyEntries.length}
+                  pageSize={dailyReconPageSize}
+                  onPageChange={setDailyReconPage}
+                  onPageSizeChange={setDailyReconPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="days"
+                />
               </div>
             );
           })()}

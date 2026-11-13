@@ -38,6 +38,7 @@ import { cn, exportToCSV } from '../../utils';
 import { format, parseISO } from 'date-fns';
 import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 // Standard Blueprint Items to initialize if collection is empty
 const DEFAULT_BLUEPRINT_ITEMS: Omit<HousekeepingInventoryItem, 'id' | 'lastUpdated'>[] = [
@@ -78,6 +79,18 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [filterLowStockOnly, setFilterLowStockOnly] = useState(false);
   const [viewMode, setViewMode] = useState<'inventory' | 'history'>('inventory');
+  const [itemPage, setItemPage] = useState(1);
+  const [itemPageSize, setItemPageSize] = useState(12);
+  const [txPage, setTxPage] = useState(1);
+  const [txPageSize, setTxPageSize] = useState(10);
+
+  useEffect(() => {
+    setItemPage(1);
+  }, [searchQuery, selectedCategory, filterLowStockOnly, viewMode]);
+
+  useEffect(() => {
+    setTxPage(1);
+  }, [viewMode]);
 
   // Modals
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -535,7 +548,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {filteredItems.map(item => {
+                {filteredItems.slice((itemPage - 1) * itemPageSize, itemPage * itemPageSize).map(item => {
                   const isLow = (item.balance || 0) <= (item.minStockLevel || 5);
                   return (
                     <tr key={item.id} className="hover:bg-zinc-800/40 transition-colors">
@@ -606,6 +619,15 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={itemPage}
+            totalItems={filteredItems.length}
+            pageSize={itemPageSize}
+            onPageChange={setItemPage}
+            onPageSizeChange={setItemPageSize}
+            pageSizeOptions={[12, 24, 50, 100]}
+            itemLabel="items"
+          />
         </div>
       )}
 
@@ -634,7 +656,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {transactions.map((tx: any, idx) => {
+                {transactions.slice((txPage - 1) * txPageSize, txPage * txPageSize).map((tx: any, idx) => {
                   const isIssue = tx.type === 'issue';
                   return (
                     <tr key={tx.id || idx} className="hover:bg-zinc-800/40 transition-colors">
@@ -675,6 +697,15 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={txPage}
+            totalItems={transactions.length}
+            pageSize={txPageSize}
+            onPageChange={setTxPage}
+            onPageSizeChange={setTxPageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            itemLabel="transactions"
+          />
         </div>
       )}
 

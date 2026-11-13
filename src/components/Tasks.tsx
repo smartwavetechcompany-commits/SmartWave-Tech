@@ -32,6 +32,7 @@ import { format, isAfter, startOfDay, parseISO, isSameDay } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
+import { Pagination } from './Pagination';
 
 export function Tasks() {
   const { hotel, profile } = useAuth();
@@ -44,6 +45,12 @@ export function Tasks() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string }>({ isOpen: false, taskId: '' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, priorityFilter, categoryFilter, searchQuery]);
   
   const [newTask, setNewTask] = useState({
     title: '',
@@ -269,7 +276,7 @@ export function Tasks() {
               <p className="text-sm">Create a new task to get started</p>
             </div>
           ) : (
-            filteredTasks.map(task => {
+            filteredTasks.slice((currentPage - 1) * pageSize, currentPage * pageSize).map(task => {
               const priorityColor = 
                 task.priority === 'urgent' ? 'text-red-500 bg-red-500/10 border-red-500/20' :
                 task.priority === 'high' ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' :
@@ -387,6 +394,15 @@ export function Tasks() {
           )}
         </AnimatePresence>
       </div>
+      <Pagination
+        currentPage={currentPage}
+        totalItems={filteredTasks.length}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={[10, 20, 50]}
+        itemLabel="tasks"
+      />
 
       {/* Modals */}
       <ConfirmModal 

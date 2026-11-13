@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Package, AlertTriangle, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Box, ShoppingCart, History } from 'lucide-react';
 import { InventoryItem, InventoryTransaction } from '../../types';
 import { formatCurrency } from '../../utils';
@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { cn } from '../../utils';
 import { format, subDays, isAfter } from 'date-fns';
 import { safeFormatDate } from '../../utils/dateUtils';
+import { Pagination } from '../Pagination';
 
 interface InventoryDashboardProps {
   items: InventoryItem[];
@@ -15,9 +16,12 @@ interface InventoryDashboardProps {
 
 export function InventoryDashboard({ items, transactions }: InventoryDashboardProps) {
   const { currency, exchangeRate } = useAuth();
+  const [alertsPage, setAlertsPage] = useState(1);
+  const alertsPageSize = 6;
 
   const totalValue = items.reduce((acc, item) => acc + (item.quantity * item.price), 0);
-  const lowStockCount = items.filter(i => i.quantity <= i.minThreshold).length;
+  const lowStockItems = items.filter(i => i.quantity <= i.minThreshold);
+  const lowStockCount = lowStockItems.length;
   const outOfStockCount = items.filter(i => i.quantity <= 0).length;
   
   const recentTransactions = [...transactions]
@@ -91,7 +95,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
             </span>
           </div>
           <div className="divide-y divide-zinc-800">
-            {items.filter(i => i.quantity <= i.minThreshold).slice(0, 6).map((item) => (
+            {lowStockItems.slice((alertsPage - 1) * alertsPageSize, alertsPage * alertsPageSize).map((item) => (
               <div key={item.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400">
@@ -122,6 +126,14 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
               </div>
             )}
           </div>
+          <Pagination
+            compact
+            currentPage={alertsPage}
+            totalItems={lowStockCount}
+            pageSize={alertsPageSize}
+            onPageChange={setAlertsPage}
+            itemLabel="alerts"
+          />
         </div>
 
         {/* Recent Activity */}

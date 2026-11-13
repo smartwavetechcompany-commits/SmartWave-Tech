@@ -28,6 +28,7 @@ import { cn, exportToCSV } from '../utils';
 import { format, isWithinInterval, startOfDay, endOfDay, startOfMonth, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
+import { Pagination } from './Pagination';
 
 export function Maintenance() {
   const { hotel, profile } = useAuth();
@@ -48,6 +49,12 @@ export function Maintenance() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [isLoading, setIsLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; requestId: string }>({ isOpen: false, requestId: '' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, priorityFilter, searchQuery, sortBy, sortOrder]);
   const [newRequest, setNewRequest] = useState({
     roomNumber: '',
     issue: '',
@@ -452,7 +459,7 @@ export function Maintenance() {
               <p>No maintenance requests found</p>
             </div>
           ) : (
-            sortedRequests.map((request) => (
+            sortedRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((request) => (
               <motion.div
                 key={request.id}
                 layout
@@ -585,6 +592,16 @@ export function Maintenance() {
           )}
         </AnimatePresence>
       </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalItems={sortedRequests.length}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={[6, 12, 24, 48]}
+        itemLabel="maintenance requests"
+      />
 
       {/* Add Request Modal */}
       {showAddModal && (

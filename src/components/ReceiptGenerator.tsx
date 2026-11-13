@@ -376,8 +376,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
           {/* Additional Custom Information Fields */}
           {branding.customInfo && branding.customInfo.filter(c => c.isEnabled && c.label && c.value).length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-1 text-zinc-600 text-[9px]">
-              {branding.customInfo.filter(c => c.isEnabled && c.label && c.value).map((info) => (
-                <span key={info.id} className="bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200/80">
+              {branding.customInfo.filter(c => c.isEnabled && c.label && c.value).map((info, idx) => (
+                <span key={`${info.id || 'custom-info'}-${idx}`} className="bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200/80">
                   <span className="font-bold text-zinc-800">{info.label}:</span> {info.value}
                 </span>
               ))}
@@ -452,8 +452,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         
         {type === 'restaurant' ? (
           <div className="space-y-3">
-            {ledgerEntries.filter(e => getSafeStr(e.category) === 'restaurant' && e.type === 'debit').map(e => (
-              <div key={e.id} className="flex justify-between items-start">
+            {ledgerEntries.filter(e => getSafeStr(e.category) === 'restaurant' && e.type === 'debit').map((e, idx) => (
+              <div key={`${e.id || 'restaurant'}-${idx}`} className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="text-sm font-bold">{getSafeStr(e.description)}</p>
                   <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
@@ -477,7 +477,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                   // Render already posted room charges from the ledger
                   roomDebits.forEach((e, index) => {
                     renderedNights.push(
-                      <div key={e.id || `posted-room-${index}`} className="flex justify-between items-start py-0.5">
+                      <div key={`${e.id || 'posted-room'}-${index}`} className="flex justify-between items-start py-0.5">
                         <div className="flex-1">
                           <p className="text-sm font-bold">{e.description}</p>
                           <p className="text-[10px] text-zinc-500 font-medium">Posted Charge • Room {reservation?.roomNumber || 'N/A'}</p>
@@ -517,7 +517,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         }
 
                         renderedNights.push(
-                          <div key={`projected-room-${nightIndex}`} className="flex justify-between items-start py-0.5 text-zinc-600">
+                          <div key={`projected-room-${nightIndex}-${i}`} className="flex justify-between items-start py-0.5 text-zinc-600">
                             <div className="flex-1">
                               <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                                 {title}
@@ -572,7 +572,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         }
 
                         return (
-                          <div key={e.id || `incidental-${index}`} className="flex justify-between items-start py-1">
+                          <div key={`${e.id || 'incidental'}-${index}`} className="flex justify-between items-start py-1">
                             <div className="flex-1">
                               <p className="text-sm font-bold flex items-center gap-2 flex-wrap">
                                 {getSafeStr(e.description)}
@@ -608,7 +608,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                   
                   taxBreakdown.filter(t => t.showOnReceipt).forEach((tax, index) => {
                     items.push(
-                      <div key={tax.id || `tax-${index}`} className="flex justify-between items-start py-1.5">
+                      <div key={`${tax.id || tax.name || 'tax'}-${index}`} className="flex justify-between items-start py-1.5">
                         <div className="flex-1">
                           <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                             {tax.name} ({tax.percentage}%)
@@ -676,7 +676,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                 <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(reservation.paidAmount, currency, exchangeRate)}</span>
               </div>
             )}
-            {credits.map(e => {
+            {credits.map((e, index) => {
               const cat = getSafeStr(e.category).toLowerCase();
               const desc = getSafeStr(e.description).toLowerCase();
               const isReversal = cat === 'reversal' || desc.startsWith('reversal') || desc.includes('reversal:');
@@ -697,7 +697,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               }
 
               return (
-                <div key={e.id} className="flex justify-between items-start">
+                <div key={`${e.id || 'credit'}-${index}`} className="flex justify-between items-start">
                   <div className="flex-1">
                     <p className={cn("text-sm font-bold", textCol)}>{cleanLedgerDescription(getSafeStr(e.description))}</p>
                     <p className="text-[10px] text-zinc-400">
@@ -722,8 +722,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
           <span className="font-bold text-sm">{formatCurrency(subtotal, currency, exchangeRate)}</span>
         </div>
 
-        {taxBreakdown.filter(t => t.showOnReceipt).map(tax => (
-          <div key={tax.id} className="flex justify-between items-center text-[10px]">
+        {taxBreakdown.filter(t => t.showOnReceipt).map((tax, index) => (
+          <div key={`${tax.id || tax.name || 'tax-summary'}-${index}`} className="flex justify-between items-center text-[10px]">
             <span className="text-zinc-500 uppercase tracking-widest font-bold">
               {tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}
             </span>
@@ -829,7 +829,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               activeBanks.length > 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
             )}>
               {activeBanks.map((bank, index) => (
-                <div key={bank.id || index} className="p-2.5 rounded-lg bg-white border border-zinc-200/80 shadow-xs space-y-1">
+                <div key={`${bank.id || 'bank'}-${index}`} className="p-2.5 rounded-lg bg-white border border-zinc-200/80 shadow-xs space-y-1">
                   <div className="flex justify-between items-center text-[10px]">
                     <span className="text-zinc-500 font-medium">Bank:</span>
                     <span className="font-bold text-zinc-900">{bank.bankName || 'N/A'}</span>

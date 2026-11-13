@@ -136,10 +136,16 @@ export function CorporateManagement() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [accountsPage, setAccountsPage] = useState<number>(1);
   const [accountsPageSize, setAccountsPageSize] = useState<number>(10);
+  const [ratesPage, setRatesPage] = useState<number>(1);
+  const [ratesPageSize, setRatesPageSize] = useState<number>(6);
 
   useEffect(() => {
     setAccountsPage(1);
   }, [searchQuery, sortBy, sortOrder]);
+
+  useEffect(() => {
+    setRatesPage(1);
+  }, [showRatesModal?.id]);
   const [editingRate, setEditingRate] = useState<CorporateRate | null>(null);
   const [newAccount, setNewAccount] = useState({
     name: '',
@@ -1872,7 +1878,7 @@ export function CorporateManagement() {
                       <p>No negotiated rates found for this account.</p>
                     </div>
                   ) : (
-                    rates.map(rate => {
+                    rates.slice((ratesPage - 1) * ratesPageSize, ratesPage * ratesPageSize).map(rate => {
                       const isActive = new Date() >= new Date(rate.startDate) && new Date() <= new Date(rate.endDate);
                       return (
                         <div key={rate.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between group">
@@ -1958,6 +1964,19 @@ export function CorporateManagement() {
                     })
                   )}
                 </div>
+                {rates.length > ratesPageSize && (
+                  <Pagination
+                    compact
+                    currentPage={ratesPage}
+                    totalItems={rates.length}
+                    pageSize={ratesPageSize}
+                    onPageChange={setRatesPage}
+                    onPageSizeChange={setRatesPageSize}
+                    pageSizeOptions={[6, 12, 24]}
+                    itemLabel="rates"
+                    className="mt-4 rounded-xl border border-zinc-800"
+                  />
+                )}
               </div>
             </div>
           </motion.div>

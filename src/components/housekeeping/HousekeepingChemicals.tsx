@@ -29,6 +29,7 @@ import {
 import { cn, exportToCSV } from '../../utils';
 import { format, parseISO, isPast, isBefore, addDays } from 'date-fns';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 const DEFAULT_CHEMICALS: Omit<HousekeepingChemicalItem, 'id' | 'timestamp'>[] = [
   {
@@ -105,6 +106,12 @@ export function HousekeepingChemicals() {
   const [chemicals, setChemicals] = useState<HousekeepingChemicalItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -335,7 +342,7 @@ export function HousekeepingChemicals() {
 
       {/* Chemicals Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredChemicals.map(c => {
+        {filteredChemicals.slice((page - 1) * pageSize, page * pageSize).map(c => {
           const isLow = (c.quantity || 0) <= (c.minimumLevel || 3);
           const isExpired = c.expiryDate && isPast(parseISO(c.expiryDate));
 
@@ -420,6 +427,17 @@ export function HousekeepingChemicals() {
           </div>
         )}
       </div>
+
+      <Pagination
+        currentPage={page}
+        totalItems={filteredChemicals.length}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={[6, 9, 18, 36]}
+        itemLabel="chemicals"
+        className="rounded-2xl border border-zinc-800"
+      />
 
       {/* --- MODAL 1: ADD CHEMICAL --- */}
       {showAddModal && (

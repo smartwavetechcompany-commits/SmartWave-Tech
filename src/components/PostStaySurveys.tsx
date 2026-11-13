@@ -24,6 +24,7 @@ import {
 import { format, differenceInDays, parseISO, addHours } from 'date-fns';
 import { formatCurrency } from '../utils';
 import { toast } from 'sonner';
+import { Pagination } from './Pagination';
 
 export interface SurveyFeedback {
   id?: string;
@@ -59,6 +60,8 @@ export function PostStaySurveys({ hotelId, currency, exchangeRate }: PostStaySur
   const [simulationSurvey, setSimulationSurvey] = useState<SurveyFeedback | null>(null);
   const [managerResponseText, setManagerResponseText] = useState('');
   const [submittingResponse, setSubmittingResponse] = useState(false);
+  const [surveyPage, setSurveyPage] = useState(1);
+  const [surveyPageSize, setSurveyPageSize] = useState(10);
 
   // Load existing surveys
   useEffect(() => {
@@ -365,7 +368,7 @@ export function PostStaySurveys({ hotelId, currency, exchangeRate }: PostStaySur
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-900">
-                  {surveys.map((survey) => (
+                  {surveys.slice((surveyPage - 1) * surveyPageSize, surveyPage * surveyPageSize).map((survey) => (
                     <tr 
                       key={survey.id} 
                       className={`hover:bg-zinc-900/40 transition-colors cursor-pointer ${selectedSurvey?.id === survey.id ? 'bg-zinc-900/60 font-medium' : ''}`}
@@ -435,6 +438,19 @@ export function PostStaySurveys({ hotelId, currency, exchangeRate }: PostStaySur
               </table>
             )}
           </div>
+          {surveys.length > 0 && (
+            <div className="p-3 border-t border-zinc-850">
+              <Pagination
+                currentPage={surveyPage}
+                totalItems={surveys.length}
+                pageSize={surveyPageSize}
+                onPageChange={setSurveyPage}
+                onPageSizeChange={(size) => { setSurveyPageSize(size); setSurveyPage(1); }}
+                itemLabel="surveys"
+                compact
+              />
+            </div>
+          )}
         </div>
 
         {/* Guest Review Panel / Response Pane */}

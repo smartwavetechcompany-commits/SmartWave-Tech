@@ -40,6 +40,7 @@ import {
 import { cn, formatCurrency } from '../utils';
 import { format, parseISO, isValid } from 'date-fns';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
+import { Pagination } from './Pagination';
 
 interface GuestActivityTimelineProps {
   reservation: Reservation;
@@ -57,6 +58,12 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'stay' | 'financial' | 'service'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+
+  useEffect(() => {
+    setPage(1);
+  }, [categoryFilter, searchQuery, sortOrder, reservation?.id]);
 
   // Real-time listener on hotel's activityLogs (same audit records used by AuditLog)
   useEffect(() => {
@@ -560,7 +567,7 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
           </div>
         ) : (
           <div className="relative pl-6 sm:pl-8 before:absolute before:left-3 sm:before:left-4 before:top-3 before:bottom-3 before:w-0.5 before:bg-zinc-800 space-y-6">
-            {filteredLogs.map((log) => {
+            {filteredLogs.slice((page - 1) * pageSize, page * pageSize).map((log) => {
               const visuals = getActionVisuals(log.action);
               const Icon = visuals.icon;
               const { dateStr, timeStr } = formatEventDate(log.timestamp);
@@ -701,6 +708,18 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
             })}
           </div>
         )}
+        <Pagination
+          currentPage={page}
+          totalItems={filteredLogs.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+          itemLabel="events"
+          className="mt-6 print:hidden"
+        />
       </div>
     </div>
   );

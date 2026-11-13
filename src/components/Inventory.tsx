@@ -31,6 +31,7 @@ import { Procurement } from './inventory/Procurement';
 import { StockMovements } from './inventory/StockMovements';
 import { InventoryAuditing } from './inventory/InventoryAuditing';
 import { InventoryReports } from './inventory/InventoryReports';
+import { Pagination } from './Pagination';
 
 type InventoryTab = 'dashboard' | 'items' | 'procurement' | 'movements' | 'auditing' | 'reports';
 
@@ -52,6 +53,12 @@ export function Inventory() {
   const [filterCategory, setFilterCategory] = useState('All');
   const [shouldOpenAddModal, setShouldOpenAddModal] = useState(false);
   const [shouldOpenCategoryModal, setShouldOpenCategoryModal] = useState(false);
+  const [itemsPage, setItemsPage] = useState(1);
+  const [itemsPageSize, setItemsPageSize] = useState(10);
+
+  useEffect(() => {
+    setItemsPage(1);
+  }, [searchQuery, filterCategory]);
 
   const canManage = hasPermission(profile, 'manage_inventory', customRoles) || 
                     hasPermission(profile, 'edit_inventory', customRoles) || 
@@ -294,7 +301,7 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
-            {filteredItems.map(item => (
+            {filteredItems.slice((itemsPage - 1) * itemsPageSize, itemsPage * itemsPageSize).map(item => (
               <tr key={item.id} className="hover:bg-zinc-800/30 transition-colors">
                 <td className="px-6 py-4 font-bold text-white text-sm">{item.name}</td>
                 <td className="px-6 py-4 text-zinc-400 text-sm">{item.category}</td>
@@ -329,6 +336,17 @@ export function Inventory() {
             )}
           </tbody>
         </table>
+        <Pagination
+          currentPage={itemsPage}
+          totalItems={filteredItems.length}
+          pageSize={itemsPageSize}
+          onPageChange={setItemsPage}
+          onPageSizeChange={(size) => {
+            setItemsPageSize(size);
+            setItemsPage(1);
+          }}
+          itemLabel="items"
+        />
       </div>
 
       {/* Keep the tabbed view for advanced features if needed, but default to this dashboard */}

@@ -5,6 +5,7 @@ import {
   startOfMonth, 
   endOfMonth, 
   eachDayOfInterval, 
+  addDays,
   addMonths, 
   subMonths, 
   isSameMonth, 
@@ -13,7 +14,7 @@ import {
   getDay,
   parseISO
 } from 'date-fns';
-import { FinanceRecord, Reservation, Hotel } from '../types';
+import { FinanceRecord, Reservation, Hotel, LedgerEntry } from '../types';
 import { calculateBilling } from '../utils/billingEngine';
 import { formatCurrency, cn, exportToCSV } from '../utils';
 import { toast } from 'sonner';
@@ -38,6 +39,7 @@ interface RevenueHeatmapProps {
   hotel: Hotel | null;
   currency: 'NGN' | 'USD';
   exchangeRate: number;
+  ledgerEntries?: LedgerEntry[];
 }
 
 interface DayData {
@@ -57,7 +59,8 @@ export function RevenueHeatmap({
   reservations,
   hotel,
   currency,
-  exchangeRate
+  exchangeRate,
+  ledgerEntries = []
 }: RevenueHeatmapProps) {
   const [currentMonth, setCurrentMonth] = useState<Date>(() => startOfMonth(new Date()));
   const [filterMode, setFilterMode] = useState<'all' | 'peaks' | 'weekends'>('all');
@@ -130,17 +133,25 @@ export function RevenueHeatmap({
         .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
       // 2. Room revenue and occupancy from active reservations covering this date
+      const todayExclusiveStr = format(addDays(new Date(), 1), 'yyyy-MM-dd');
       const activeBookings = reservations.filter(res => {
         if (['cancelled', 'no_show'].includes(res.status)) return false;
         if (!res.checkIn || !res.checkOut) return false;
 
         const cinStr = format(new Date(res.checkIn), 'yyyy-MM-dd');
-        const coutStr = format(new Date(res.checkOut), 'yyyy-MM-dd');
+        let coutStr = format(new Date(res.checkOut), 'yyyy-MM-dd');
+        if (res.overstayNights && res.overstayNights > 0) {
+          const extendedStr = format(addDays(new Date(res.checkOut), res.overstayNights), 'yyyy-MM-dd');
+          if (extendedStr > coutStr) coutStr = extendedStr;
+        }
+        if (res.status === 'checked_in' && todayExclusiveStr > coutStr) {
+          coutStr = todayExclusiveStr;
+        }
         return cinStr <= dateStr && dateStr < coutStr;
       });
 
       const bookingDailyRev = activeBookings.reduce((sum, res) => {
-        const billing = calculateBilling(res, hotel);
+        const billing = calculateBilling(res, hotel, ledgerEntries);
         const nights = Math.max(1, billing.nightsCount || differenceInDays(new Date(res.checkOut), new Date(res.checkIn)) || 1);
         const dailyRate = billing.nightlyRate > 0 ? billing.nightlyRate : ((res.totalAmount || 0) / nights);
         return sum + dailyRate;
@@ -174,7 +185,7 @@ export function RevenueHeatmap({
       ...d,
       isPeak: d.revenue > 0 && d.revenue >= peakCutoff
     }));
-  }, [currentMonth, records, reservations, hotel]);
+  }, [currentMonth, records, reservations, hotel, ledgerEntries]);
 
   // Overall Month Statistics
   const monthStats = useMemo(() => {

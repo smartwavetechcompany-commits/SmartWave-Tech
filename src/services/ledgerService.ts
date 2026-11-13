@@ -402,6 +402,7 @@ export const postToLedger = async (
       paymentMethod,
       settlementSource: p.settlementSource || (p.description?.includes('[F&B Outlet]') ? 'F&B Outlet' : (p.description?.includes('[Front Desk]') ? 'Front Desk' : undefined)),
       guestId,
+      reservationId: reservationId || null,
       corporateId: p.corporateId || null,
       referenceId: postedIds[entries.indexOf(p)],
       createdAt: serverTimestamp(),
@@ -625,6 +626,19 @@ export const purgeCorruptedLedgerEntries = async (
         action: 'PURGE_CORRUPTED_ENTRY',
         details: `Purged corrupted or virtual projection ledger entry ${entryId}`
       });
+
+      try {
+        const finQ = query(
+          collection(db, 'hotels', hotelId, 'finance'),
+          where('referenceId', '==', entryId)
+        );
+        const finSnap = await getDocs(finQ);
+        for (const finDoc of finSnap.docs) {
+          await deleteDoc(finDoc.ref);
+        }
+      } catch (finErr) {
+        console.warn(`Notice cleaning up finance record for purged ledger ${entryId}:`, finErr);
+      }
     } catch (err) {
       console.error(`Failed to purge ledger entry ${entryId}:`, err);
     }
@@ -1584,6 +1598,51 @@ export const deleteReservationWithFinancialReversal = async (
     } catch (delErr) {
       console.warn(`[deleteReservationWithFinancialReversal] Could not delete ledger doc ${docId}:`, delErr);
     }
+  }
+
+  // 3b. Purge associated finance records and outstanding debt ledger entry to prevent orphaned transactions
+  try {
+    const finDocsToDelete = new Set<string>();
+    const finByResSnap = await getDocs(
+      query(collection(db, 'hotels', hotelId, 'finance'), where('reservationId', '==', reservationId))
+    );
+    finByResSnap.docs.forEach(d => finDocsToDelete.add(d.id));
+
+    const finByRefResSnap = await getDocs(
+      query(collection(db, 'hotels', hotelId, 'finance'), where('referenceId', '==', reservationId))
+    );
+    finByRefResSnap.docs.forEach(d => finDocsToDelete.add(d.id));
+
+    if (targetDocIds.size > 0) {
+      const idArray = Array.from(targetDocIds);
+      for (let i = 0; i < idArray.length; i += 10) {
+        const chunk = idArray.slice(i, i + 10);
+        const finByLedgerSnap = await getDocs(
+          query(collection(db, 'hotels', hotelId, 'finance'), where('referenceId', 'in', chunk))
+        );
+        finByLedgerSnap.docs.forEach(d => finDocsToDelete.add(d.id));
+      }
+    }
+
+    for (const finId of finDocsToDelete) {
+      try {
+        await deleteDoc(doc(db, 'hotels', hotelId, 'finance', finId));
+      } catch (finDelErr) {
+        console.warn(`[deleteReservationWithFinancialReversal] Could not delete finance doc ${finId}:`, finDelErr);
+      }
+    }
+
+    try {
+      const debtRef = doc(db, 'hotels', hotelId, 'outstanding_debt_ledger', reservationId);
+      const debtSnap = await getDoc(debtRef);
+      if (debtSnap.exists()) {
+        await deleteDoc(debtRef);
+      }
+    } catch (debtErr) {
+      console.warn('[deleteReservationWithFinancialReversal] Debt doc cleanup skipped:', debtErr);
+    }
+  } catch (orphanCleanupErr) {
+    console.warn('[deleteReservationWithFinancialReversal] Finance cleanup notice:', orphanCleanupErr);
   }
 
   // 4. If checked in and assigned to a room, mark the room as clean/available safely

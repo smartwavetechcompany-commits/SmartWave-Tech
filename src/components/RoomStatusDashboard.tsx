@@ -32,6 +32,7 @@ import { GuestFolio } from './GuestFolio';
 import { SafeModalBoundary } from './SafeModalBoundary';
 import { toast } from 'sonner';
 import { createAuditLog } from '../utils/database';
+import { Pagination } from './Pagination';
 
 export type OperationalRoomStatus = 
   | 'occupied' 
@@ -65,6 +66,12 @@ export function RoomStatusDashboard() {
   const [selectedFloor, setSelectedFloor] = useState('all');
   const [selectedRoomType, setSelectedRoomType] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | OperationalRoomStatus>('all');
+  const [roomPage, setRoomPage] = useState(1);
+  const [roomPageSize, setRoomPageSize] = useState(20);
+
+  useEffect(() => {
+    setRoomPage(1);
+  }, [searchTerm, selectedFloor, selectedRoomType, selectedStatus]);
 
   // Selected Room for Quick Action Modal
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
@@ -715,8 +722,9 @@ export function RoomStatusDashboard() {
           No rooms match the selected filters.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {filteredRooms.map((room) => {
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {filteredRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map((room) => {
             const status = getOperationalStatus(room);
             const detailedResInfo = getRoomDetailedReservationInfo(room, reservations);
             const isReservedState = status === 'reserved' || detailedResInfo.isReserved;
@@ -836,6 +844,16 @@ export function RoomStatusDashboard() {
               </div>
             );
           })}
+          </div>
+          <Pagination
+            currentPage={roomPage}
+            totalItems={filteredRooms.length}
+            pageSize={roomPageSize}
+            onPageChange={setRoomPage}
+            onPageSizeChange={(size) => { setRoomPageSize(size); setRoomPage(1); }}
+            pageSizeOptions={[10, 20, 40, 80]}
+            itemLabel="rooms"
+          />
         </div>
       )}
 

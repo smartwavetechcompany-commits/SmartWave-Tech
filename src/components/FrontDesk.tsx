@@ -2897,7 +2897,8 @@ export function FrontDesk() {
   };
 
   const getCheckoutPreviewData = (res: Reservation) => {
-    const billing = calculateBilling(res, hotel);
+    const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+    const billing = calculateBilling(res, hotel, resLedger);
     const { checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
     const nightlyRate = res.nightlyRate || (originalNights > 0 ? (res.totalAmount / originalNights) : 0) || 0;
     
@@ -3121,7 +3122,7 @@ export function FrontDesk() {
 
         {reservations.filter(r => {
           if (r.status !== 'checked_in') return false;
-          const bal = getReservationLiveBalance(r, hotel);
+          const bal = getReservationLiveBalance(r, hotel, ledgerEntries.filter(e => e.reservationId === r.id));
           return bal > 0.01;
         }).length > 0 && (
           <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-4">
@@ -3133,7 +3134,7 @@ export function FrontDesk() {
               <div className="text-lg font-bold text-zinc-50">
                 {reservations.filter(r => {
                   if (r.status !== 'checked_in') return false;
-                  const bal = getReservationLiveBalance(r, hotel);
+                  const bal = getReservationLiveBalance(r, hotel, ledgerEntries.filter(e => e.reservationId === r.id));
                   return bal > 0.01;
                 }).length} Guests Owing
               </div>
@@ -6040,7 +6041,7 @@ export function FrontDesk() {
 
       {checkoutPreviewRes && (() => {
         const preview = getCheckoutPreviewData(checkoutPreviewRes);
-        const bal = getReservationLiveBalance(checkoutPreviewRes, hotel);
+        const bal = getReservationLiveBalance(checkoutPreviewRes, hotel, ledgerEntries.filter(e => e.reservationId === checkoutPreviewRes.id));
         
         return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">

@@ -36,6 +36,7 @@ import { cn, exportToCSV } from '../../utils';
 import { format, parseISO, isToday } from 'date-fns';
 import { safeFormatDate } from '../../utils/dateUtils';
 import { toast } from 'sonner';
+import { Pagination } from '../Pagination';
 
 interface HousekeepingDailyLogProps {
   rooms: Room[];
@@ -55,6 +56,8 @@ export function HousekeepingDailyLogView({
   const [logs, setLogs] = useState<HousekeepingDailyLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showLogModal, setShowLogModal] = useState(false);
+  const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(6);
 
   // Computations for today's live summary
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
@@ -291,7 +294,7 @@ export function HousekeepingDailyLogView({
         </h3>
 
         <div className="space-y-3">
-          {logs.map((log) => (
+          {logs.slice((logPage - 1) * logPageSize, logPage * logPageSize).map((log) => (
             <div key={log.id} className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
                 <div className="flex items-center gap-3">
@@ -345,6 +348,16 @@ export function HousekeepingDailyLogView({
             </div>
           )}
         </div>
+        <Pagination
+          currentPage={logPage}
+          totalItems={logs.length}
+          pageSize={logPageSize}
+          onPageChange={setLogPage}
+          onPageSizeChange={setLogPageSize}
+          pageSizeOptions={[6, 12, 24]}
+          itemLabel="logs"
+          className="rounded-xl border border-zinc-800"
+        />
       </div>
 
       {/* --- MODAL: SEAL TODAY'S LOG --- */}
