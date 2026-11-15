@@ -641,10 +641,16 @@ export function FrontDesk() {
         return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
       }
 
-      // Automatically hide fully paid (ledgerBalance = 0) checkout reservations from other active tabs ONLY when statusFilter is 'all'
+      // Automatically hide settled or overpaid/credit (balance <= 0) checkout reservations from 'All' tab ONLY when statusFilter is 'all'
+      // Checked-out reservations with actual unpaid debt (> 0.01) remain visible.
       if (activeTab === 'all' && statusFilter === 'all') {
-        const isCompleted = res.status === 'checked_out' && Math.abs(res.ledgerBalance || 0) < 0.01;
-        if (isCompleted) return false;
+        if (res.status === 'checked_out') {
+          const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+          const liveBal = resLedger.length > 0
+            ? getReservationLiveBalance(res, hotel, resLedger)
+            : (res.ledgerBalance ?? 0);
+          if (liveBal <= 0.01) return false;
+        }
       }
 
       return true;
@@ -2620,13 +2626,20 @@ export function FrontDesk() {
         }
 
         // 3. Update reservation status to checked_out - preserving exact debt (RULE 7)
+        const checkoutDateStr = format(now, 'yyyy-MM-dd');
+        const checkoutTimeStr = format(now, 'HH:mm');
+        const isEarlyCheckout = Boolean(res.checkOut && checkoutDateStr < res.checkOut);
+        const earlyCheckoutNights = isEarlyCheckout
+          ? Math.max(1, differenceInDays(startOfDay(now), startOfDay(parseTimestampToDate(res.checkIn))))
+          : undefined;
         const checkoutStaffName = profile.displayName || profile.name || profile.email || 'Front Desk Staff';
         await database.safeUpdate(resRef, { 
           status: 'checked_out',
-          checkOut: format(now, 'yyyy-MM-dd'),
-          checkOutTime: format(now, 'HH:mm'),
+          checkOut: checkoutDateStr,
+          checkOutTime: checkoutTimeStr,
           checkOutDateTime: now.toISOString(),
           actualCheckOut: now.toISOString(),
+          ...(isEarlyCheckout && earlyCheckoutNights !== undefined ? { nights: earlyCheckoutNights, overstayNights: 0 } : {}),
           checkedOutBy: profile.email || 'System',
           checkedOutByName: checkoutStaffName,
           paymentStatus: freshResData.paymentStatus || (outstandingBalance <= 0.01 ? 'paid' : (freshResData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'),
@@ -2669,7 +2682,18 @@ export function FrontDesk() {
         // 5. Update Guest Profile Statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const duration = calculateStayDuration(res.checkIn, format(now, 'yyyy-MM-dd'), res.overstayNights || 0, 'checked_out', { res, hotel });
+          const duration = calculateStayDuration(
+            res.checkIn,
+            checkoutDateStr,
+            isEarlyCheckout ? 0 : (res.overstayNights || 0),
+            'checked_out',
+            {
+              res: isEarlyCheckout && earlyCheckoutNights !== undefined
+                ? { ...res, checkOut: checkoutDateStr, nights: earlyCheckoutNights, overstayNights: 0 }
+                : res,
+              hotel
+            }
+          );
           const nights = duration.actualStayedNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
@@ -2757,11 +2781,12 @@ export function FrontDesk() {
             guestPhone: res.guestPhone || '',
             roomNumber: res.roomNumber,
             roomId: res.roomId,
-            nights: res.nights || 1,
+            nights: (isEarlyCheckout && earlyCheckoutNights !== undefined) ? earlyCheckoutNights : (freshData.nights || res.nights || 1),
+            overstayNights: isEarlyCheckout ? 0 : (freshData.overstayNights ?? res.overstayNights ?? 0),
             nightlyRate: res.nightlyRate || 0,
             checkIn: res.checkIn,
-            checkOut: format(now, 'yyyy-MM-dd'),
-            checkOutTime: format(now, 'HH:mm'),
+            checkOut: checkoutDateStr,
+            checkOutTime: checkoutTimeStr,
             checkOutDateTime: now.toISOString(),
             actualCheckOut: now.toISOString(),
             checkOutTimestamp: now.toISOString(),

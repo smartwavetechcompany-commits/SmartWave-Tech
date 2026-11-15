@@ -408,15 +408,41 @@ export function PrincipalRoomManager({
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Consolidated Net Balance</span>
                   <div className={cn(
                     "text-2xl font-black mt-1",
-                    groupFinancials.groupNetBalance > 0 ? "text-amber-400" : "text-emerald-400"
+                    groupFinancials.groupNetBalance > 0.01
+                      ? "text-amber-400"
+                      : groupFinancials.groupNetBalance < -0.01
+                      ? "text-blue-400"
+                      : "text-emerald-400"
                   )}>
-                    {formatCurrency(groupFinancials.groupNetBalance, currency, exchangeRate)}
+                    {groupFinancials.groupNetBalance < -0.01
+                      ? `Credit: ${formatCurrency(Math.abs(groupFinancials.groupNetBalance), currency, exchangeRate)}`
+                      : formatCurrency(groupFinancials.groupNetBalance, currency, exchangeRate)}
                   </div>
                   <span className="text-[11px] text-zinc-400">
-                    {groupFinancials.groupNetBalance > 0 ? 'Due for Settlement' : 'Fully Settled'}
+                    {groupFinancials.groupNetBalance > 0.01
+                      ? 'Due for Settlement'
+                      : groupFinancials.groupNetBalance < -0.01
+                      ? 'Overpayment Credit (All Rooms Settled)'
+                      : 'Fully Settled'}
                   </span>
                 </div>
               </div>
+
+              {groupFinancials.masterBalance < -0.01 && linkedReservations.some(r => (groupFinancials.chargesByRoom[r.roomNumber]?.balance || 0) > 0.01) && (
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <span className="text-xs text-amber-300">
+                    Master Room {masterReservation.roomNumber} has <strong>{formatCurrency(Math.abs(groupFinancials.masterBalance), currency, exchangeRate)}</strong> credit available while linked room(s) still owe debt.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleApplyMasterCredit}
+                    disabled={isProcessingPayment}
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-lg text-xs whitespace-nowrap transition-all disabled:opacity-50"
+                  >
+                    {isProcessingPayment ? 'Applying...' : 'Apply Master Credit to Linked Rooms'}
+                  </button>
+                </div>
+              )}
 
               {/* Master & Linked Rooms Breakdown List */}
               <div className="space-y-3">

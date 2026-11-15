@@ -340,7 +340,9 @@ export function calculateStayDuration(
     }
   } else {
     if (options.res?.nights && typeof options.res.nights === 'number' && options.res.nights > 0) {
-      bookingNights = options.res.nights;
+      bookingNights = status === 'checked_out'
+        ? Math.min(options.res.nights, calendarNights)
+        : options.res.nights;
     } else {
       bookingNights = calendarNights;
     }

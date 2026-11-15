@@ -501,6 +501,36 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     );
   }, [isMasterWithLinks, currentReservation, linkedGroupReservations, groupLedgerEntries, ledgerEntries, hotel]);
 
+  const handleApplyMasterCreditToLinked = async () => {
+    if (!hotel?.id || !profile || !isMasterWithLinks || linkedGroupReservations.length === 0) return;
+    await executeRequest(
+      `apply-master-credit-${currentReservation.id}`,
+      async () => {
+        setIsSaving(true);
+        const sourceLedger = groupLedgerEntries.length > 0 ? groupLedgerEntries : ledgerEntries;
+        const result = await principalRoomService.reallocateMasterCreditToLinkedRooms(
+          hotel.id,
+          currentReservation,
+          linkedGroupReservations,
+          {
+            uid: profile.uid,
+            name: profile.displayName || (profile as any)?.name || profile.email || 'Staff',
+            role: profile.role || 'staff'
+          },
+          { ledgerEntries: sourceLedger, hotel }
+        );
+        if (result.appliedAmount > 0) {
+          toast.success(`Applied ${formatCurrency(result.appliedAmount, currency, exchangeRate)} Master credit to Room(s) ${result.settledRooms.join(', ')}`);
+        } else {
+          toast.info('No excess Master credit available to apply to linked rooms.');
+        }
+      },
+      { loadingMessage: 'Applying Master credit to linked rooms...', showOverlay: true }
+    ).finally(() => {
+      setIsSaving(false);
+    });
+  };
+
   const executeSettlePayment = async () => {
     if (!hotel?.id || !profile) return;
     await executeRequest(
@@ -1970,6 +2000,28 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         </span>
                       </div>
                     )}
+                    {folioBreakdown.tier3.totalRefunds > 0.01 && (() => {
+                      const hasLinkedCreditTransfer = processedDisplayedEntries.some(
+                        e => e.type === 'debit' && String(e.category).toLowerCase() === 'refund' && String(e.description || '').toLowerCase().includes('linked room')
+                      );
+                      const netCreditsRetained = Math.max(0, totalCredits - folioBreakdown.tier3.totalRefunds);
+                      return (
+                        <>
+                          <div className="flex justify-between text-amber-400">
+                            <span>{hasLinkedCreditTransfer ? 'Less: Credit Applied to Linked Room(s) / Refunds' : 'Less: Refunds Issued'}</span>
+                            <span className="font-bold font-mono">
+                              +{formatCurrency(folioBreakdown.tier3.totalRefunds, currency, exchangeRate)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-emerald-400/90 text-[11px] pl-2 pt-1 border-t border-zinc-800/50">
+                            <span>Net Credits Retained on Folio</span>
+                            <span className="font-bold font-mono">
+                              -{formatCurrency(netCreditsRetained, currency, exchangeRate)}
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div className="pt-2 border-t border-zinc-800 flex justify-between items-center">
@@ -2039,9 +2091,49 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </div>
                   </div>
                 ) : (
-                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center gap-2 text-emerald-400">
-                    <CheckCircle2 size={18} />
-                    <span className="text-xs font-black uppercase tracking-widest">✅ Account Settled</span>
+                  <div className="space-y-2.5">
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center gap-2 text-emerald-400">
+                      <CheckCircle2 size={18} />
+                      <span className="text-xs font-black uppercase tracking-widest">✅ Account Settled</span>
+                    </div>
+
+                    {balance < -0.01 && (() => {
+                      const owingLinked = (isMasterWithLinks && groupFinancialSummary)
+                        ? linkedGroupReservations.filter(r => (groupFinancialSummary.chargesByRoom[r.roomNumber]?.balance || 0) > 0.01)
+                        : [];
+                      const owingLinkedTotal = owingLinked.reduce(
+                        (sum, r) => sum + (groupFinancialSummary?.chargesByRoom[r.roomNumber]?.balance || 0),
+                        0
+                      );
+
+                      if (owingLinked.length > 0) {
+                        return (
+                          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+                            <p className="text-[11px] text-amber-300 leading-relaxed">
+                              Master Room {currentReservation.roomNumber} has <strong className="font-mono">{formatCurrency(Math.abs(balance), currency, exchangeRate)}</strong> credit available while linked room(s) ({owingLinked.map(r => `Room ${r.roomNumber}`).join(', ')}) owe <strong className="font-mono">{formatCurrency(owingLinkedTotal, currency, exchangeRate)}</strong>.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={handleApplyMasterCreditToLinked}
+                              disabled={isSaving}
+                              className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-lg text-[11px] uppercase tracking-wider transition-all disabled:opacity-50"
+                            >
+                              {isSaving ? 'Applying Credit...' : 'Apply Master Credit to Linked Room(s)'}
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      if (isMasterWithLinks) {
+                        return (
+                          <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300 leading-relaxed">
+                            <strong>Overpayment Credit ({formatCurrency(Math.abs(balance), currency, exchangeRate)}):</strong> Master Room {currentReservation.roomNumber} and all linked room(s) ({linkedGroupReservations.map(r => `Room ${r.roomNumber}`).join(', ')}) are already fully settled (₦0 owed). This excess remains from unused prepaid nights / over-remittance.
+                          </div>
+                        );
+                      }
+
+                      return null;
+                    })()}
                   </div>
                 )}
               </div>
@@ -2562,16 +2654,24 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <Banknote size={20} />
                         </div>
                         <div className="flex-1">
-                          <p className="text-xs font-bold text-zinc-500 uppercase truncate">
-                            {isMasterWithLinks && groupFinancialSummary ? 'Consolidated Group Balance Due' : 'Remaining Stay Total'}
-                          </p>
-                          <p className="text-lg font-bold text-red-500">
-                            {formatCurrency(
-                              isMasterWithLinks && groupFinancialSummary ? groupFinancialSummary.groupNetBalance : balance,
-                              currency,
-                              exchangeRate
-                            )}
-                          </p>
+                          {(() => {
+                            const modalTargetBal = isMasterWithLinks && groupFinancialSummary ? groupFinancialSummary.groupNetBalance : balance;
+                            return (
+                              <>
+                                <p className="text-xs font-bold text-zinc-500 uppercase truncate">
+                                  {modalTargetBal < -0.01
+                                    ? (isMasterWithLinks ? 'Consolidated Group Credit Balance' : 'Credit Balance (Overpaid)')
+                                    : (isMasterWithLinks && groupFinancialSummary ? 'Consolidated Group Balance Due' : 'Remaining Stay Total')}
+                                </p>
+                                <p className={cn(
+                                  "text-lg font-bold",
+                                  modalTargetBal > 0.01 ? "text-red-500" : modalTargetBal < -0.01 ? "text-blue-400" : "text-emerald-400"
+                                )}>
+                                  {formatCurrency(modalTargetBal < -0.01 ? Math.abs(modalTargetBal) : modalTargetBal, currency, exchangeRate)}
+                                </p>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                       

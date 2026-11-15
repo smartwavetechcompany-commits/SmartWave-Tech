@@ -45,7 +45,7 @@ import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
 import { ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
-import { calculateStayDuration, safeFormatDate } from '../utils/dateUtils';
+import { calculateStayDuration, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -746,12 +746,19 @@ export function Rooms() {
         }
 
         // 3. Update reservation - preserving exact debt in ledger and reservation (RULE 7)
+        const checkoutDateStr = format(now, 'yyyy-MM-dd');
+        const checkoutTimeStr = format(now, 'HH:mm');
+        const isEarlyCheckout = Boolean(res.checkOut && checkoutDateStr < res.checkOut);
+        const earlyCheckoutNights = isEarlyCheckout
+          ? Math.max(1, differenceInDays(startOfDay(now), startOfDay(parseTimestampToDate(res.checkIn))))
+          : undefined;
         await database.safeUpdate(resRef, { 
           status: 'checked_out',
-          checkOut: format(now, 'yyyy-MM-dd'),
-          checkOutTime: format(now, 'HH:mm'),
+          checkOut: checkoutDateStr,
+          checkOutTime: checkoutTimeStr,
           checkOutDateTime: now.toISOString(),
           actualCheckOut: now.toISOString(),
+          ...(isEarlyCheckout && earlyCheckoutNights !== undefined ? { nights: earlyCheckoutNights, overstayNights: 0 } : {}),
           checkedOutBy: profile.email || 'System',
           paymentStatus: freshResData.paymentStatus || (outstandingBalance <= 0.01 ? 'paid' : (freshResData.paidAmount || 0) > 0 ? 'partial' : 'unpaid'),
           financialStatus: outstandingBalance > 0.01 ? ((freshResData.paidAmount || 0) > 0 ? 'PARTIALLY_PAID' : 'OUTSTANDING') : 'SETTLED',
@@ -781,7 +788,18 @@ export function Rooms() {
         // Update guest statistics
         if (res.guestId) {
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', res.guestId);
-          const duration = calculateStayDuration(res.checkIn, format(now, 'yyyy-MM-dd'), res.overstayNights, 'checked_out', { res, hotel });
+          const duration = calculateStayDuration(
+            res.checkIn,
+            checkoutDateStr,
+            isEarlyCheckout ? 0 : res.overstayNights,
+            'checked_out',
+            {
+              res: isEarlyCheckout && earlyCheckoutNights !== undefined
+                ? { ...res, checkOut: checkoutDateStr, nights: earlyCheckoutNights, overstayNights: 0 }
+                : res,
+              hotel
+            }
+          );
           const nights = duration.actualStayedNights;
           await database.safeUpdate(guestRef, {
             totalNights: increment(nights),
@@ -815,11 +833,12 @@ export function Rooms() {
             guestPhone: res.guestPhone || '',
             roomNumber: res.roomNumber,
             roomId: res.roomId,
-            nights: res.nights || 1,
+            nights: (isEarlyCheckout && earlyCheckoutNights !== undefined) ? earlyCheckoutNights : (freshResData.nights || res.nights || 1),
+            overstayNights: isEarlyCheckout ? 0 : (freshResData.overstayNights ?? res.overstayNights ?? 0),
             nightlyRate: res.nightlyRate || 0,
             checkIn: res.checkIn,
-            checkOut: format(now, 'yyyy-MM-dd'),
-            checkOutTime: format(now, 'HH:mm'),
+            checkOut: checkoutDateStr,
+            checkOutTime: checkoutTimeStr,
             checkOutDateTime: now.toISOString(),
             actualCheckOut: now.toISOString(),
             checkOutTimestamp: now.toISOString(),

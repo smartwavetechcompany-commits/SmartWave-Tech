@@ -11,9 +11,11 @@ import {
 import { db } from '../firebase';
 import { Reservation, LedgerEntry, Room, Hotel } from '../types';
 import { createAuditLog } from '../utils/database';
-import { postToLedger, settleLedger, syncKitchenOrdersForReservation } from './ledgerService';
+import { postToLedger, settleLedger, syncKitchenOrdersForReservation, reconcileAndRepairReservationFinancials } from './ledgerService';
 import { validateLedgerTransaction } from './financialService';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { parseTimestampToDate } from '../utils/dateUtils';
+import { format, differenceInDays, startOfDay } from 'date-fns';
 import { toast } from 'sonner';
 
 export interface GroupChargeBreakdown {
@@ -805,46 +807,84 @@ export const principalRoomService = {
     const batch = writeBatch(db);
     const checkedOutRooms: string[] = [];
 
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const checkoutDateStr = format(now, 'yyyy-MM-dd');
+    const checkoutTimeStr = format(now, 'HH:mm');
+    const checkoutStaffEmail = userContext?.email || 'System';
+    const checkoutStaffName = userContext?.displayName || userContext?.email || 'Front Desk Staff';
+
+    const applyCheckoutWrites = (res: Reservation) => {
+      const isEarlyCheckout = Boolean(res.checkOut && checkoutDateStr < res.checkOut);
+      const earlyCheckoutNights = isEarlyCheckout
+        ? Math.max(1, differenceInDays(startOfDay(now), startOfDay(parseTimestampToDate(res.checkIn))))
+        : undefined;
+
+      const resRef = doc(db, 'hotels', hotelId, 'reservations', res.id);
+      batch.update(resRef, {
+        status: 'checked_out',
+        operationalStatus: 'checked_out',
+        checkOut: checkoutDateStr,
+        checkOutTime: checkoutTimeStr,
+        checkOutDateTime: nowIso,
+        actualCheckOut: nowIso,
+        checkedOutBy: checkoutStaffEmail,
+        checkedOutByName: checkoutStaffName,
+        ...(isEarlyCheckout && earlyCheckoutNights !== undefined ? { nights: earlyCheckoutNights, overstayNights: 0 } : {}),
+        updatedAt: nowIso
+      });
+
+      if (res.roomId) {
+        const roomRef = doc(db, 'hotels', hotelId, 'rooms', res.roomId);
+        batch.update(roomRef, {
+          status: 'dirty',
+          housekeepingStatus: 'dirty',
+          currentGuestId: null,
+          currentReservationId: null,
+          lastFlaggedAt: nowIso
+        });
+      }
+
+      const checkoutHistoryRef = doc(db, 'hotels', hotelId, 'checkout_history', res.id);
+      batch.set(checkoutHistoryRef, {
+        ...res,
+        id: res.id,
+        reservationId: res.id,
+        guestId: res.guestId || 'unknown_guest',
+        guestName: res.guestName,
+        guestEmail: res.guestEmail || '',
+        guestPhone: res.guestPhone || '',
+        roomNumber: res.roomNumber,
+        roomId: res.roomId,
+        nights: (isEarlyCheckout && earlyCheckoutNights !== undefined) ? earlyCheckoutNights : (res.nights || 1),
+        overstayNights: isEarlyCheckout ? 0 : (res.overstayNights ?? 0),
+        nightlyRate: res.nightlyRate || 0,
+        checkIn: res.checkIn,
+        checkOut: checkoutDateStr,
+        checkOutTime: checkoutTimeStr,
+        checkOutDateTime: nowIso,
+        actualCheckOut: nowIso,
+        checkOutTimestamp: nowIso,
+        checkedOutBy: checkoutStaffEmail,
+        checkedOutByName: checkoutStaffName,
+        status: 'checked_out'
+      }, { merge: true });
+
+      checkedOutRooms.push(res.roomNumber);
+    };
+
+    const checkedOutReservationIds: string[] = [];
 
     if (mode === 'entire_group') {
       // Checkout master and all linked rooms
       for (const res of allReservationsInGroup) {
-        const resRef = doc(db, 'hotels', hotelId, 'reservations', res.id);
-        batch.update(resRef, {
-          status: 'checked_out',
-          operationalStatus: 'checked_out',
-          checkOutDateTime: nowIso,
-          updatedAt: nowIso
-        });
-
-        if (res.roomId) {
-          const roomRef = doc(db, 'hotels', hotelId, 'rooms', res.roomId);
-          batch.update(roomRef, {
-            status: 'dirty',
-            lastFlaggedAt: nowIso
-          });
-        }
-        checkedOutRooms.push(res.roomNumber);
+        applyCheckoutWrites(res);
+        checkedOutReservationIds.push(res.id);
       }
     } else if (mode === 'master_only') {
-      // Checkout master reservation only, but keep linked rooms active (or promote first linked to master)
-      const resRef = doc(db, 'hotels', hotelId, 'reservations', masterReservation.id);
-      batch.update(resRef, {
-        status: 'checked_out',
-        operationalStatus: 'checked_out',
-        checkOutDateTime: nowIso,
-        updatedAt: nowIso
-      });
-
-      if (masterReservation.roomId) {
-        const roomRef = doc(db, 'hotels', hotelId, 'rooms', masterReservation.roomId);
-        batch.update(roomRef, {
-          status: 'dirty',
-          lastFlaggedAt: nowIso
-        });
-      }
-      checkedOutRooms.push(masterReservation.roomNumber);
+      // Checkout master reservation only, but keep linked rooms active
+      applyCheckoutWrites(masterReservation);
+      checkedOutReservationIds.push(masterReservation.id);
     } else if (mode === 'linked_only' && targetChildId) {
       // Checkout a single linked room
       const targetRes = allReservationsInGroup.find(r => r.id === targetChildId);
@@ -852,22 +892,8 @@ export const principalRoomService = {
         throw new Error('Target linked room not found in group');
       }
 
-      const resRef = doc(db, 'hotels', hotelId, 'reservations', targetRes.id);
-      batch.update(resRef, {
-        status: 'checked_out',
-        operationalStatus: 'checked_out',
-        checkOutDateTime: nowIso,
-        updatedAt: nowIso
-      });
-
-      if (targetRes.roomId) {
-        const roomRef = doc(db, 'hotels', hotelId, 'rooms', targetRes.roomId);
-        batch.update(roomRef, {
-          status: 'dirty',
-          lastFlaggedAt: nowIso
-        });
-      }
-      checkedOutRooms.push(targetRes.roomNumber);
+      applyCheckoutWrites(targetRes);
+      checkedOutReservationIds.push(targetRes.id);
 
       // Remove from master linked list
       const updatedLinkedIds = (masterReservation.linkedReservationIds || []).filter(id => id !== targetRes.id);
@@ -882,6 +908,13 @@ export const principalRoomService = {
     }
 
     await batch.commit();
+
+    // Authoritatively reconcile financials so ledgerBalance, totalAmount, and nights match post-checkout
+    await Promise.all(
+      checkedOutReservationIds.map(resId =>
+        reconcileAndRepairReservationFinancials(hotelId, resId).catch(() => {})
+      )
+    );
 
     await createAuditLog(
       hotelId,

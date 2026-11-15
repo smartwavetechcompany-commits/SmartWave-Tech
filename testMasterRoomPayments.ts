@@ -1,7 +1,8 @@
 import { planGroupPaymentAllocation, principalRoomService } from './src/services/principalRoomService';
 import { calculateReservationAccount } from './src/utils/financialUtils';
 import { calculateGuestFinancialPosition } from './src/services/financialService';
-import { getReservationLiveBalance } from './src/utils/billingEngine';
+import { getReservationLiveBalance, calculateBilling, BillingEngine } from './src/utils/billingEngine';
+import { calculateStayDuration } from './src/utils/dateUtils';
 import { Hotel, LedgerEntry, Reservation, Guest } from './src/types';
 
 function assert(condition: boolean, message: string) {
@@ -392,6 +393,182 @@ function runSuite() {
   assertClose(francisPos.outstandingBalance, 0, 'Individual guest financial position (Francis Royce) owes 0');
   const mAccount = calculateReservationAccount(master101, hotel, ledger4AfterRealloc);
   assertClose(mAccount.outstandingBalance, 0, 'calculateReservationAccount matches Master 101 = 0');
+
+  // TEST 5: Exact early-checkout Master Room 101 (Nov 13 - Nov 15, stale nights: 3, inclusive 7.5% Tax + 13.5% SC, 280k payments, 10k refund reallocation)
+  console.log('\nCondition 5: Early-checkout Master Room 101 (2 nights stayed, stale nights=3, inclusive taxes, 10k refund reallocation)');
+  const inclusiveHotel: Hotel = {
+    ...hotel,
+    taxes: [
+      { id: 't_vat', name: 'Tax', percentage: 7.5, isInclusive: true, status: 'active', category: 'all', showOnFolio: true, showOnReceipt: true },
+      { id: 't_sc', name: 'SC', percentage: 13.5, isInclusive: true, status: 'active', category: 'all', showOnFolio: true, showOnReceipt: true }
+    ]
+  };
+  const checkedOutEarly101: Reservation = {
+    ...master101,
+    status: 'checked_out',
+    checkIn: '2026-11-13',
+    checkOut: '2026-11-15',
+    nights: 3, // stale nights pre-checkout
+    overstayNights: 0,
+    ledgerBalance: -90000
+  };
+  const inclusiveLedger101: LedgerEntry[] = [
+    {
+      id: 'night_1_base',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'room',
+      chargeType: 'room_rate',
+      amount: 73016,
+      description: 'Room Charge: Room 101 (Night of Nov 13, 2026)',
+      timestamp: '2026-11-13T13:10:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'night_1_vat',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'tax',
+      amount: 6279,
+      description: 'Tax (7.5%) [Inclusive] for Room Charge: Room 101 (Night of Nov 13, 2026)',
+      timestamp: '2026-11-13T13:10:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'night_1_sc',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'tax',
+      amount: 10705,
+      description: 'SC (13.5%) [Inclusive] for Room Charge: Room 101 (Night of Nov 13, 2026)',
+      timestamp: '2026-11-13T13:10:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'night_2_base',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'room',
+      chargeType: 'room_rate',
+      amount: 73016,
+      description: 'Nightly Room Charge: 101 (Night of Nov 14, 2026) (Night 2 of 3)',
+      timestamp: '2026-11-14T00:05:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'night_2_vat',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'tax',
+      amount: 6279,
+      description: 'Tax (7.5%) [Inclusive] for Nightly Room Charge: 101 (Night of Nov 14, 2026) (Night 2 of 3)',
+      timestamp: '2026-11-14T00:05:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'night_2_sc',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'tax',
+      amount: 10705,
+      description: 'SC (13.5%) [Inclusive] for Nightly Room Charge: 101 (Night of Nov 14, 2026) (Night 2 of 3)',
+      timestamp: '2026-11-14T00:05:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'pay_transfer_10k',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'credit',
+      category: 'payment',
+      amount: 10000,
+      description: 'Payment via TRANSFER',
+      timestamp: '2026-11-13T13:16:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'pay_cash_260k',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'credit',
+      category: 'payment',
+      amount: 260000,
+      description: 'Payment via CASH',
+      timestamp: '2026-11-13T14:41:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'pay_card_10k',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'credit',
+      category: 'payment',
+      amount: 10000,
+      description: 'Payment via CARD',
+      timestamp: '2026-11-13T14:43:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'refund_master_realloc_10k',
+      hotelId: hotel.id,
+      guestId: master101.guestId!,
+      reservationId: master101.id,
+      type: 'debit',
+      category: 'refund',
+      amount: 10000,
+      description: 'Master Credit Applied to Linked Room 102',
+      timestamp: '2026-11-15T09:10:00.000Z',
+      postedBy: 'staff'
+    }
+  ];
+
+  const earlyDuration = calculateStayDuration(
+    checkedOutEarly101.checkIn,
+    checkedOutEarly101.checkOut,
+    checkedOutEarly101.overstayNights,
+    checkedOutEarly101.status,
+    { hotel: inclusiveHotel, res: checkedOutEarly101 }
+  );
+  assert(earlyDuration.bookingNights === 2 && earlyDuration.chargeableNights === 2, 'Early checkout duration clamps to 2 stayed nights despite stale res.nights=3');
+
+  const earlyAcc = calculateReservationAccount(checkedOutEarly101, inclusiveHotel, inclusiveLedger101);
+  assertClose(earlyAcc.totalCharges, 180000, 'ReservationAccount totalCharges = 180,000 (not 270k)');
+  assertClose(earlyAcc.outstandingBalance, -90000, 'ReservationAccount outstandingBalance = -90,000 credit');
+  assertClose(earlyAcc.creditBalance, 90000, 'ReservationAccount creditBalance = 90,000');
+  assertClose(earlyAcc.netAmountDue, 0, 'ReservationAccount netAmountDue = 0');
+
+  const earlyBilling = calculateBilling(checkedOutEarly101, inclusiveHotel, inclusiveLedger101);
+  assertClose(earlyBilling.totalCharges, 180000, 'calculateBilling totalCharges = 180,000');
+  assertClose(earlyBilling.outstandingBalance, -90000, 'calculateBilling outstandingBalance = -90,000');
+
+  const earlyFolio = BillingEngine.calculateFolioBreakdown(checkedOutEarly101, inclusiveHotel, inclusiveLedger101);
+  assertClose(earlyFolio.tier3.totalCharges, 180000, 'Folio tier3 totalCharges = 180,000');
+  assertClose(earlyFolio.tier3.creditBalance, 90000, 'Folio tier3 creditBalance = 90,000');
+
+  // Verify inclusive tax reconstruction prevents double-counting 33,968 even when checked_in with 3 booked nights
+  const reconstructedRoomSum = BillingEngine.reconstructInclusiveTaxes(inclusiveLedger101)
+    .filter(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'))
+    .reduce((s, e) => s + e.amount, 0);
+  assertClose(reconstructedRoomSum, 180000, 'Reconstructed posted room charges equal tax-inclusive 180,000 (no 33,968 tax double-count)');
+
+  // Verify FrontDesk Active 'All' tab hides settled/overpaid checkouts (liveBal <= 0.01)
+  const liveBal5 = getReservationLiveBalance(checkedOutEarly101, inclusiveHotel, inclusiveLedger101);
+  assert(liveBal5 <= 0.01, `FrontDesk live balance (${liveBal5}) <= 0.01 moves checked-out Master Room to Check-Out History`);
 
   console.log('\nALL MASTER ROOM PAYMENT ALLOCATION TESTS PASSED!');
 }

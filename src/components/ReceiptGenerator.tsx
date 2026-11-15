@@ -4,7 +4,7 @@ import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
-import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
+import { BillingEngine, calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { calculateBookedRoomTotal, getNightlyRateForStayIndex } from '../utils/rateSnapshot';
@@ -148,9 +148,11 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const processedEntries = processLedgerTaxes(filteredEntries, hotel.taxes || [], 'showOnReceipt');
   
   const debits = processedEntries.filter(e => e.type === 'debit');
+  const chargeDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() !== 'refund');
   const credits = processedEntries.filter(e => e.type === 'credit');
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
+  const totalChargeDebits = chargeDebits.reduce((acc, e) => acc + e.amount, 0);
   const totalCredits = credits.reduce((acc, e) => acc + e.amount, 0);
   
   const totalDiscounts = credits.filter(e => {
@@ -198,9 +200,17 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
     const totalNights = resAccount.totalNights || reservation.nights || 1;
     const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;
-    const postedRoomAmount = roomDebits.reduce((sum, e) => sum + (e.amount || 0), 0);
+    // Reconstruct gross room charges (with any inclusive taxes merged back onto room entries)
+    // so comparing against tax-inclusive expectedTotalRoom never double-counts posted inclusive taxes.
+    const reconstructedEntries = BillingEngine.reconstructInclusiveTaxes(filteredEntries);
+    const reconstructedRoomDebits = reconstructedEntries.filter(
+      e => e.type === 'debit' && (getSafeStr(e.category).toLowerCase() === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
+    );
+    const postedRoomAmount = reconstructedRoomDebits.length > 0
+      ? reconstructedRoomDebits.reduce((sum, e) => sum + (e.amount || 0), 0)
+      : roomDebits.reduce((sum, e) => sum + (e.amount || 0), 0);
 
-    if (totalNights > postedNightsCount) {
+    if (reservation.status !== 'checked_out' && totalNights > postedNightsCount) {
       const expectedTotalRoom = calculateBookedRoomTotal(reservation, bookedNightsCount, hotel, filteredEntries) + (resAccount.totalOverstayCharges || 0);
       unpostedRoomBase = Math.max(0, Number((expectedTotalRoom - postedRoomAmount).toFixed(2)));
     } else if (postedNightsCount === 0 && (reservation.totalAmount || 0) > 0) {
@@ -209,14 +219,14 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     }
   }
 
-  // Subtotal represents the gross charges of all stay/service items.
+  // Subtotal represents the gross charges of all stay/service items (excluding refund outflow debits).
   // We keep inclusive taxes as part of the subtotal (since they are built into the prices).
-  // Therefore, we only subtract exclusive tax debits from the ledger's total debits.
+  // Therefore, we only subtract exclusive tax debits from the ledger's total charge debits.
   const totalExclusiveTaxDebits = processedEntries
     .filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit' && !getSafeStr(e.description).toLowerCase().includes('inclusive'))
     .reduce((acc, e) => acc + e.amount, 0);
 
-  const subtotal = Math.max(0, (totalDebits - totalExclusiveTaxDebits) + unpostedRoomBase);
+  const subtotal = Math.max(0, (totalChargeDebits - totalExclusiveTaxDebits) + unpostedRoomBase);
   
   // Calculate Taxes
   const activeTaxes = (hotel.taxes || []).filter(t => {
@@ -293,15 +303,16 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
   const hasPaymentInLedger = activeLedger.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
-  let balance = grandTotal - totalPaid;
+  const netPaid = Math.max(0, totalPaid - totalRefunds);
+  let balance = grandTotal - netPaid;
 
   // Authoritative fallback cross-check with getReservationLiveBalance
   if (reservation && type !== 'corporate' && type !== 'restaurant') {
     const liveBal = getReservationLiveBalance(reservation, hotel, activeLedger);
     if (balance <= 0.005 && liveBal > 0.005) {
       balance = liveBal;
-      if (grandTotal < totalPaid + liveBal) {
-        grandTotal = totalPaid + liveBal;
+      if (grandTotal < netPaid + liveBal) {
+        grandTotal = netPaid + liveBal;
       }
     }
   }
@@ -490,8 +501,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                     );
                   });
 
-                  // Generate unposted/projected room charges chronologically (including overstays)
-                  if (reservation) {
+                  // Generate unposted/projected room charges chronologically (including overstays) for active/pre-checkout stays
+                  if (reservation && (reservation.status !== 'checked_out' || roomDebits.length === 0)) {
                     const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
                     const postedNightsCount = roomDebits.length;
                     const totalNights = resAccount.totalNights;
