@@ -479,32 +479,42 @@ export function GuestManagement() {
   useEffect(() => {
     if (!viewingHistory || !hotel?.id) return;
     
-    // Fetch reservations
-    const qRes = query(
-      collection(db, 'hotels', hotel.id, 'reservations'),
-      where('guestEmail', '==', viewingHistory.email)
-    );
-    const unsubRes = onSnapshot(qRes, (snap) => {
-      setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
-    });
-
-    // Fetch full ledger history for guest
-    const qLedger = query(
-      collection(db, 'hotels', hotel.id, 'ledger'),
-      where('guestId', '==', viewingHistory.id)
-    );
-    const unsubLedger = onSnapshot(qLedger, (snap) => {
-      const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
-      
-      // Client-side sorting to avoid composite index
-      const sortedEntries = [...entries].sort((a, b) => {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeB - timeA; // desc
+    // Fetch reservations only when a guestEmail value is present to avoid undefined Firestore filter crashes
+    let unsubRes = () => {};
+    if (viewingHistory.email) {
+      const qRes = query(
+        collection(db, 'hotels', hotel.id, 'reservations'),
+        where('guestEmail', '==', viewingHistory.email)
+      );
+      unsubRes = onSnapshot(qRes, (snap) => {
+        setGuestHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation)));
       });
+    } else {
+      setGuestHistory([]);
+    }
 
-      setGuestLedger(sortedEntries);
-    });
+    // Fetch full ledger history for guest when guestId is present
+    let unsubLedger = () => {};
+    if (viewingHistory.id) {
+      const qLedger = query(
+        collection(db, 'hotels', hotel.id, 'ledger'),
+        where('guestId', '==', viewingHistory.id)
+      );
+      unsubLedger = onSnapshot(qLedger, (snap) => {
+        const entries = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+        
+        // Client-side sorting to avoid composite index
+        const sortedEntries = [...entries].sort((a, b) => {
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          return timeB - timeA; // desc
+        });
+
+        setGuestLedger(sortedEntries);
+      });
+    } else {
+      setGuestLedger([]);
+    }
     
     return () => {
       unsubRes();

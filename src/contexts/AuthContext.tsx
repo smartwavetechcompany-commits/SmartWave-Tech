@@ -219,7 +219,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (auth.currentUser?.uid !== currentUid) return;
 
       if (snap.exists()) {
-        const data = snap.data() as UserProfile;
+        const rawData = snap.data() as UserProfile;
+        const data: UserProfile = {
+          ...rawData,
+          uid: rawData.uid || currentUid
+        };
         
         // Check for Force Logout trigger
         if (data.forceLogout) {

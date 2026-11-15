@@ -694,7 +694,7 @@ export function FandB() {
                 ledgerEntry = { id: lSnap.id, firestoreId: lSnap.id, ...lSnap.data() };
               }
             }
-            if (!ledgerEntry) {
+            if (!ledgerEntry && orderId) {
               const q = query(
                 collection(db, 'hotels', hotel.id, 'ledger'),
                 where('referenceId', '==', orderId)
@@ -780,7 +780,7 @@ export function FandB() {
             ledgerEntry = { id: lSnap.id, firestoreId: lSnap.id, ...lSnap.data() };
           }
         }
-        if (!ledgerEntry) {
+        if (!ledgerEntry && order?.id) {
           const q = query(
             collection(db, 'hotels', hotel.id, 'ledger'),
             where('referenceId', '==', order.id)

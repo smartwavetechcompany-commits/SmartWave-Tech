@@ -125,6 +125,7 @@ export const roomService = {
 
   // Inventory Integration
   async triggerInventoryConsumption(hotelId: string, roomTypeId: string, trigger: InventoryConsumptionRule['trigger'], userId: string) {
+    if (!hotelId || !trigger) return;
     const rulesRef = collection(db, 'hotels', hotelId, 'inventory_consumption_rules');
     const q = query(rulesRef, where('trigger', '==', trigger));
     const snap = await getDocs(q);
@@ -168,6 +169,7 @@ export const roomService = {
 
   // Rate Management
   async calculateCurrentRate(hotelId: string, roomTypeId: string, date: Date): Promise<number> {
+    if (!hotelId || !roomTypeId) return 0;
     const configRef = collection(db, 'hotels', hotelId, 'rate_configurations');
     const q = query(configRef, where('roomTypeId', '==', roomTypeId));
     const snap = await getDocs(q);

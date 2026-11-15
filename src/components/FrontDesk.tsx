@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { principalRoomService } from '../services/principalRoomService';
 import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -51,7 +52,9 @@ import {
   Users,
   Sparkles,
   History,
-  UserCheck
+  UserCheck,
+  ChevronDown,
+  Check
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
@@ -87,6 +90,50 @@ export function FrontDesk() {
   const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
   const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
   const [isBooking, setIsBooking] = useState(false);
+  const [isRoomDropdownOpen, setIsRoomDropdownOpen] = useState(false);
+  const [openAdditionalRoomDropdownIndex, setOpenAdditionalRoomDropdownIndex] = useState<number | null>(null);
+  const roomDropdownRef = useRef<HTMLDivElement>(null);
+  const roomDropdownMenuRef = useRef<HTMLDivElement>(null);
+  const additionalRoomDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    if (!isBooking) {
+      setIsRoomDropdownOpen(false);
+      setOpenAdditionalRoomDropdownIndex(null);
+      return;
+    }
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (roomDropdownRef.current && !roomDropdownRef.current.contains(target)) {
+        setIsRoomDropdownOpen(false);
+      }
+      if (openAdditionalRoomDropdownIndex !== null) {
+        const activeRef = additionalRoomDropdownRefs.current[openAdditionalRoomDropdownIndex];
+        if (!activeRef || !activeRef.contains(target)) {
+          setOpenAdditionalRoomDropdownIndex(null);
+        }
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsRoomDropdownOpen(false);
+        setOpenAdditionalRoomDropdownIndex(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isBooking, openAdditionalRoomDropdownIndex]);
+
+  useEffect(() => {
+    if (isRoomDropdownOpen && roomDropdownMenuRef.current) {
+      roomDropdownMenuRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [isRoomDropdownOpen]);
+
   const [checkoutPreviewRes, setCheckoutPreviewRes] = useState<Reservation | null>(null);
   const [returningGuestDebtModalData, setReturningGuestDebtModalData] = useState<{
     debts: any[];
@@ -1417,9 +1464,11 @@ export function FrontDesk() {
       }
       
       // Post discounts and initial payments to ledger if any
+      const stayTargets: Array<{ stay: (typeof createdStays)[number]; remainingOwed: number }> = [];
       for (const stay of createdStays) {
+        let finalDiscount = 0;
         if (stay.discountAmount && stay.discountAmount > 0) {
-          let finalDiscount = stay.discountAmount;
+          finalDiscount = stay.discountAmount;
           if (stay.discountType === 'percentage') {
             finalDiscount = (stay.totalAmount * stay.discountAmount) / 100;
           }
@@ -1434,11 +1483,85 @@ export function FrontDesk() {
           }, profile.uid, stay.corporateId);
         }
 
-        const totalPayment = newBooking.payments.reduce((acc: number, p: any) => acc + (p.amount || 0), 0);
-        if (createdStays.indexOf(stay) === 0 && totalPayment > 0) {
+        stayTargets.push({
+          stay,
+          remainingOwed: Math.max(0, Number(((stay.totalAmount || 0) - finalDiscount).toFixed(2)))
+        });
+      }
+
+      const totalPayment = newBooking.payments.reduce((acc: number, p: any) => acc + (p.amount || 0), 0);
+      if (totalPayment > 0 && stayTargets.length > 0) {
+        if (stayTargets.length === 1) {
+          const singleStay = stayTargets[0].stay;
           for (const pay of newBooking.payments) {
             if (pay.amount > 0) {
-              await settleLedger(hotel.id, stay.guestId, stay.resId, pay.amount, pay.method, profile.uid, stay.corporateId);
+              await settleLedger(hotel.id, singleStay.guestId, singleStay.resId, pay.amount, pay.method, profile.uid, singleStay.corporateId);
+            }
+          }
+        } else {
+          const masterStay = stayTargets[0].stay;
+          for (const pay of newBooking.payments) {
+            let remainingPay = Number((Number(pay.amount) || 0).toFixed(2));
+            if (remainingPay <= 0) continue;
+
+            for (const target of stayTargets) {
+              if (remainingPay <= 0.01) break;
+              if (target.remainingOwed <= 0.01) continue;
+
+              const allocAmt = Number(Math.min(remainingPay, target.remainingOwed).toFixed(2));
+              if (allocAmt <= 0.01) continue;
+
+              const isLinkedChild = target.stay.resId !== masterStay.resId;
+              await settleLedger(
+                hotel.id,
+                target.stay.guestId,
+                target.stay.resId,
+                allocAmt,
+                pay.method,
+                profile.uid,
+                target.stay.corporateId,
+                undefined,
+                undefined,
+                undefined,
+                'Front Desk',
+                isLinkedChild
+                  ? {
+                      description: `Payment via ${String(pay.method).toUpperCase()} (Allocated from Master Room ${masterStay.roomNumber})`,
+                      masterReservationId: masterStay.resId,
+                      sourceRoomNumber: target.stay.roomNumber,
+                      sourceReservationId: target.stay.resId
+                    }
+                  : {
+                      masterReservationId: masterStay.resId,
+                      sourceRoomNumber: masterStay.roomNumber,
+                      sourceReservationId: masterStay.resId
+                    }
+              );
+
+              target.remainingOwed = Number((target.remainingOwed - allocAmt).toFixed(2));
+              remainingPay = Number((remainingPay - allocAmt).toFixed(2));
+            }
+
+            if (remainingPay > 0.01) {
+              await settleLedger(
+                hotel.id,
+                masterStay.guestId,
+                masterStay.resId,
+                remainingPay,
+                pay.method,
+                profile.uid,
+                masterStay.corporateId,
+                undefined,
+                undefined,
+                undefined,
+                'Front Desk',
+                {
+                  description: `Group Overpayment / Credit via ${String(pay.method).toUpperCase()} (Master Room ${masterStay.roomNumber})`,
+                  masterReservationId: masterStay.resId,
+                  sourceRoomNumber: masterStay.roomNumber,
+                  sourceReservationId: masterStay.resId
+                }
+              );
             }
           }
         }
@@ -2032,7 +2155,7 @@ export function FrontDesk() {
           ))).docs.map(doc => ({ id: doc.id, ...doc.data() } as Reservation));
       
       for (const res of checkedInReservations) {
-        if (!res.guestId || !res.autoNightDeduction) continue;
+        if (!res?.id || !res.guestId || !res.autoNightDeduction) continue;
 
         try {
           const result = await processAutomatedBillingForReservation(hotel, res, profile.uid, new Date());
@@ -2094,7 +2217,7 @@ export function FrontDesk() {
     try {
       overstayRunningRef.current = true;
       const activeCheckedInRes = reservations.filter(res => {
-        return res.status === 'checked_in' && res.autoNightDeduction && res.guestId;
+        return Boolean(res?.id && res.status === 'checked_in' && res.autoNightDeduction && res.guestId);
       });
 
       if (activeCheckedInRes.length === 0) return;
@@ -2334,14 +2457,17 @@ export function FrontDesk() {
           const endStr = End.toISOString();
 
           // Query to see if any room charge already exists for this reservation to avoid duplicates
-          const ledgerQ = query(
-            collection(db, 'hotels', hotel.id, 'ledger'),
-            where('reservationId', '==', res.id),
-            where('category', '==', 'room'),
-            where('type', '==', 'debit')
-          );
-          const ledgerSnap = await getDocs(ledgerQ);
-          const alreadyHasRoomCharge = !ledgerSnap.empty;
+          let alreadyHasRoomCharge = false;
+          if (res?.id) {
+            const ledgerQ = query(
+              collection(db, 'hotels', hotel.id, 'ledger'),
+              where('reservationId', '==', res.id),
+              where('category', '==', 'room'),
+              where('type', '==', 'debit')
+            );
+            const ledgerSnap = await getDocs(ledgerQ);
+            alreadyHasRoomCharge = !ledgerSnap.empty;
+          }
 
           if (!alreadyHasRoomCharge) {
             await postToLedger(hotel.id, res.guestId, res.id, {
@@ -2379,7 +2505,7 @@ export function FrontDesk() {
 
         // 2. Read true authoritative reconciled balance directly from database
         const freshResSnap = await getDoc(resRef);
-        const freshResData = freshResSnap.data() as Reservation;
+        const freshResData = { ...(freshResSnap.data() || res), id: freshResSnap.id } as Reservation;
         
         // Calculate current ledger balance
         const outstandingBalance = freshResData.ledgerBalance || 0;
@@ -2605,9 +2731,39 @@ export function FrontDesk() {
     
     try {
       setLoading(true);
-      // Use settleLedger to record payment and update guest balance
-      // settleLedger also updates reservation.paidAmount and paymentStatus automatically
-      if (res.guestId) {
+      const linkedIdSet = new Set(res.linkedReservationIds || []);
+      const linkedForMaster = reservations.filter(
+        r =>
+          r.id !== res.id &&
+          r.status !== 'cancelled' &&
+          r.status !== 'no_show' &&
+          (linkedIdSet.has(r.id) || r.principalReservationId === res.id)
+      );
+      const isMasterWithLinks = Boolean(
+        (res.isPrincipalRoom || linkedForMaster.length > 0) &&
+        (linkedForMaster.length > 0 || (res.linkedReservationIds?.length || 0) > 0)
+      );
+
+      if (isMasterWithLinks) {
+        await principalRoomService.postGroupPayment(
+          hotel.id,
+          res,
+          [{ amount, method: 'cash' }],
+          {
+            uid: profile.uid,
+            name: profile.displayName || (profile as any).name || profile.email || 'Staff',
+            role: profile.role
+          },
+          {
+            isConsolidated: true,
+            linkedReservations: linkedForMaster.length > 0 ? linkedForMaster : undefined,
+            ledgerEntries,
+            hotel
+          }
+        );
+      } else if (res.guestId) {
+        // Use settleLedger to record payment and update guest balance
+        // settleLedger also updates reservation.paidAmount and paymentStatus automatically
         await settleLedger(
           hotel.id, 
           res.guestId, 
@@ -3525,22 +3681,16 @@ export function FrontDesk() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
-                  <select 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                    value={newBooking.roomId}
-                    onChange={(e) => {
-                      setNewBooking({ ...newBooking, roomId: e.target.value });
-                    }}
-                  >
-                    <option value="">Select a room</option>
-                    {rooms.filter(r => 
+                  {(() => {
+                    const availableRoomsList = rooms.filter(r =>
                       isRoomAvailable(r.id, newBooking.checkIn, newBooking.checkOut, reservations, roomBlockings, hotel) || r.id === newBooking.roomId
-                    ).map(room => {
+                    );
+                    const getRoomPricingLabel = (room: Room) => {
                       let displayPrice = room.price;
                       let isNegotiated = false;
 
                       if (newBooking.corporateId) {
-                        const activeRate = activeCorporateRates.find(r => 
+                        const activeRate = activeCorporateRates.find(r =>
                           (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
                           new Date(newBooking.checkIn) >= new Date(r.startDate) &&
                           new Date(newBooking.checkIn) <= new Date(r.endDate)
@@ -3551,13 +3701,83 @@ export function FrontDesk() {
                         }
                       }
 
-                      return (
-                        <option key={room.id} value={room.id}>
-                          Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
-                        </option>
-                      );
-                    })}
-                  </select>
+                      return `Room ${room.roomNumber} (${room.type} - ${formatCurrency(displayPrice, currency, exchangeRate)}${isNegotiated ? ' [Negotiated]' : ''})`;
+                    };
+                    const selectedRoomObj = rooms.find(r => r.id === newBooking.roomId);
+
+                    return (
+                      <div className="relative" ref={roomDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setIsRoomDropdownOpen(prev => !prev)}
+                          aria-expanded={isRoomDropdownOpen}
+                          aria-haspopup="listbox"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none flex items-center justify-between gap-2 text-left cursor-pointer"
+                        >
+                          <span className="truncate">
+                            {selectedRoomObj ? getRoomPricingLabel(selectedRoomObj) : 'Select a room'}
+                          </span>
+                          <ChevronDown
+                            size={16}
+                            className={cn(
+                              "shrink-0 text-zinc-400 transition-transform duration-150",
+                              isRoomDropdownOpen && "rotate-180 text-emerald-400"
+                            )}
+                          />
+                        </button>
+                        {isRoomDropdownOpen && (
+                          <div
+                            ref={roomDropdownMenuRef}
+                            role="listbox"
+                            className="absolute left-0 right-0 top-full mt-1 z-50 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl max-h-60 overflow-y-auto py-1"
+                          >
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={!newBooking.roomId}
+                              onClick={() => {
+                                setNewBooking({ ...newBooking, roomId: '' });
+                                setIsRoomDropdownOpen(false);
+                              }}
+                              className={cn(
+                                "w-full px-4 py-2 text-left text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer",
+                                !newBooking.roomId
+                                  ? "bg-emerald-500/15 text-emerald-400 font-medium"
+                                  : "text-zinc-300 hover:bg-zinc-900"
+                              )}
+                            >
+                              <span className="truncate">Select a room</span>
+                              {!newBooking.roomId && <Check size={14} className="shrink-0" />}
+                            </button>
+                            {availableRoomsList.map(room => {
+                              const isSelected = newBooking.roomId === room.id;
+                              return (
+                                <button
+                                  key={room.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isSelected}
+                                  onClick={() => {
+                                    setNewBooking({ ...newBooking, roomId: room.id });
+                                    setIsRoomDropdownOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full px-4 py-2 text-left text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer",
+                                    isSelected
+                                      ? "bg-emerald-500/15 text-emerald-400 font-medium"
+                                      : "text-zinc-100 hover:bg-zinc-900"
+                                  )}
+                                >
+                                  <span className="truncate">{getRoomPricingLabel(room)}</span>
+                                  {isSelected && <Check size={14} className="shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex flex-col justify-end">
                   {newBooking.roomId && (() => {
@@ -4320,24 +4540,16 @@ export function FrontDesk() {
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
-                        <select 
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                          value={stay.roomId}
-                          onChange={(e) => {
-                            const updated = [...newBooking.additionalStays];
-                            updated[index].roomId = e.target.value;
-                            setNewBooking({ ...newBooking, additionalStays: updated });
-                          }}
-                        >
-                          <option value="">Select Room</option>
-                          {rooms.filter(r => 
+                        {(() => {
+                          const availableStayRooms = rooms.filter(r =>
                             isRoomAvailable(r.id, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel) || r.id === stay.roomId
-                          ).map(room => {
+                          );
+                          const getStayRoomPricingLabel = (room: Room) => {
                             let displayPrice = room.price;
                             let isNegotiated = false;
 
                             if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-                              const rate = activeCorporateRates.find(r => 
+                              const rate = activeCorporateRates.find(r =>
                                 (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
                                 new Date(stay.checkIn) >= new Date(r.startDate) &&
                                 new Date(stay.checkIn) <= new Date(r.endDate)
@@ -4348,13 +4560,92 @@ export function FrontDesk() {
                               }
                             }
 
-                            return (
-                              <option key={room.id} value={room.id}>
-                                Room {room.roomNumber} ({room.type} - {formatCurrency(displayPrice, currency, exchangeRate)}{isNegotiated ? ' [Negotiated]' : ''})
-                              </option>
-                            );
-                          })}
-                        </select>
+                            return `Room ${room.roomNumber} (${room.type} - ${formatCurrency(displayPrice, currency, exchangeRate)}${isNegotiated ? ' [Negotiated]' : ''})`;
+                          };
+                          const selectedStayRoom = rooms.find(r => r.id === stay.roomId);
+                          const isStayDropdownOpen = openAdditionalRoomDropdownIndex === index;
+
+                          return (
+                            <div
+                              className="relative"
+                              ref={(el) => {
+                                additionalRoomDropdownRefs.current[index] = el;
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setOpenAdditionalRoomDropdownIndex(isStayDropdownOpen ? null : index)}
+                                aria-expanded={isStayDropdownOpen}
+                                aria-haspopup="listbox"
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none flex items-center justify-between gap-2 text-left cursor-pointer"
+                              >
+                                <span className="truncate">
+                                  {selectedStayRoom ? getStayRoomPricingLabel(selectedStayRoom) : 'Select Room'}
+                                </span>
+                                <ChevronDown
+                                  size={16}
+                                  className={cn(
+                                    "shrink-0 text-zinc-400 transition-transform duration-150",
+                                    isStayDropdownOpen && "rotate-180 text-emerald-400"
+                                  )}
+                                />
+                              </button>
+                              {isStayDropdownOpen && (
+                                <div
+                                  role="listbox"
+                                  className="absolute left-0 right-0 top-full mt-1 z-50 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl max-h-60 overflow-y-auto py-1"
+                                >
+                                  <button
+                                    type="button"
+                                    role="option"
+                                    aria-selected={!stay.roomId}
+                                    onClick={() => {
+                                      const updated = [...newBooking.additionalStays];
+                                      updated[index].roomId = '';
+                                      setNewBooking({ ...newBooking, additionalStays: updated });
+                                      setOpenAdditionalRoomDropdownIndex(null);
+                                    }}
+                                    className={cn(
+                                      "w-full px-4 py-2 text-left text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer",
+                                      !stay.roomId
+                                        ? "bg-emerald-500/15 text-emerald-400 font-medium"
+                                        : "text-zinc-300 hover:bg-zinc-900"
+                                    )}
+                                  >
+                                    <span className="truncate">Select Room</span>
+                                    {!stay.roomId && <Check size={14} className="shrink-0" />}
+                                  </button>
+                                  {availableStayRooms.map(room => {
+                                    const isSelected = stay.roomId === room.id;
+                                    return (
+                                      <button
+                                        key={room.id}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={isSelected}
+                                        onClick={() => {
+                                          const updated = [...newBooking.additionalStays];
+                                          updated[index].roomId = room.id;
+                                          setNewBooking({ ...newBooking, additionalStays: updated });
+                                          setOpenAdditionalRoomDropdownIndex(null);
+                                        }}
+                                        className={cn(
+                                          "w-full px-4 py-2 text-left text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer",
+                                          isSelected
+                                            ? "bg-emerald-500/15 text-emerald-400 font-medium"
+                                            : "text-zinc-100 hover:bg-zinc-900"
+                                        )}
+                                      >
+                                        <span className="truncate">{getStayRoomPricingLabel(room)}</span>
+                                        {isSelected && <Check size={14} className="shrink-0" />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>

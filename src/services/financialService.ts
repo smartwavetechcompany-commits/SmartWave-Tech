@@ -420,6 +420,7 @@ export function validateGuestAccount(
  * Async helper to fetch guest ledger entries directly from Firestore if not in state
  */
 export async function fetchGuestLedgerEntries(hotelId: string, guestId: string): Promise<LedgerEntry[]> {
+  if (!hotelId || !guestId) return [];
   try {
     const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
     const q = query(ledgerRef, where('guestId', '==', guestId));

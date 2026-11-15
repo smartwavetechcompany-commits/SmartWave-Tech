@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount, Promotion } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { logActivity } from '../utils/activityLogger';
 import { validateLedgerTransaction } from '../services/financialService';
@@ -103,6 +104,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   }, [showGuestHistory, guestHistory.length]);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showPrincipalManager, setShowPrincipalManager] = useState(false);
+  const [linkedGroupReservations, setLinkedGroupReservations] = useState<Reservation[]>([]);
+  const [groupLedgerEntries, setGroupLedgerEntries] = useState<LedgerEntry[]>([]);
   const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<LedgerEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -482,14 +485,48 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     }
   };
 
+  const isMasterWithLinks = Boolean(
+    currentReservation.isPrincipalRoom &&
+    (linkedGroupReservations.length > 0 || (currentReservation.linkedReservationIds?.length || 0) > 0)
+  );
+
+  const groupFinancialSummary: GroupFinancialSummary | null = useMemo(() => {
+    if (!isMasterWithLinks) return null;
+    const sourceLedger = groupLedgerEntries.length > 0 ? groupLedgerEntries : ledgerEntries;
+    return principalRoomService.calculateGroupFinancials(
+      currentReservation,
+      linkedGroupReservations,
+      sourceLedger,
+      hotel
+    );
+  }, [isMasterWithLinks, currentReservation, linkedGroupReservations, groupLedgerEntries, ledgerEntries, hotel]);
+
   const executeSettlePayment = async () => {
     if (!hotel?.id || !profile) return;
     await executeRequest(
       `settle-payment-${currentReservation.id}`,
       async () => {
         setIsSaving(true);
-        for (const split of settleData.splits) {
-          if (split.amount > 0) {
+        const validSplits = settleData.splits.filter(s => s.amount > 0);
+        if (isMasterWithLinks) {
+          await principalRoomService.postGroupPayment(
+            hotel.id,
+            currentReservation,
+            validSplits,
+            {
+              uid: profile.uid,
+              name: profile.displayName || (profile as any)?.name || profile.email || 'Staff',
+              role: profile.role || 'staff'
+            },
+            {
+              notes: settleData.notes,
+              isConsolidated: true,
+              linkedReservations: linkedGroupReservations.length > 0 ? linkedGroupReservations : undefined,
+              hotel
+            }
+          );
+        } else {
+          for (const split of validSplits) {
             await settleLedger(
               hotel.id, 
               currentReservation.guestId || 'unknown', 
@@ -510,7 +547,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           }
         }
 
-        toast.success('Payment recorded successfully');
+        toast.success(isMasterWithLinks ? 'Group payment allocated across Master & Linked room folios' : 'Payment recorded successfully');
         if (hotel.settings?.payments?.autoSendReceipts) {
           toast.success(`E-Receipt automatically generated & emailed to ${currentReservation.guestEmail || 'guest on file'}`);
         }
@@ -578,8 +615,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       }
     }
 
-    // Validation hook: Detect when a payment amount exceeds the calculated net total (balance)
-    if (totalAmount > balance + 0.01) {
+    // Validation hook: Detect when a payment amount exceeds the calculated net total (balance or consolidated group balance)
+    const settlementTargetBalance = (isMasterWithLinks && groupFinancialSummary)
+      ? groupFinancialSummary.groupNetBalance
+      : balance;
+    if (totalAmount > settlementTargetBalance + 0.01) {
       setShowOverpaymentWarning(true);
       return;
     }
@@ -942,6 +982,44 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       try { unsubGuest(); } catch (e) { /* ignore cleanup error */ }
     };
   }, [hotel?.id, reservation.id, reservation.guestId]);
+
+  const linkedResIdsKey = (currentReservation.linkedReservationIds || []).join(',');
+  useEffect(() => {
+    if (!hotel?.id || (!currentReservation.isPrincipalRoom && (currentReservation.linkedReservationIds?.length || 0) === 0)) {
+      setLinkedGroupReservations([]);
+      setGroupLedgerEntries([]);
+      return;
+    }
+
+    const linkedIdSet = new Set(currentReservation.linkedReservationIds || []);
+    const unsubGroupRes = onSnapshot(collection(db, 'hotels', hotel.id, 'reservations'), (snap) => {
+      const linked = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Reservation))
+        .filter(r =>
+          r.id !== currentReservation.id &&
+          r.status !== 'cancelled' &&
+          r.status !== 'no_show' &&
+          (linkedIdSet.has(r.id) || r.principalReservationId === currentReservation.id)
+        );
+      setLinkedGroupReservations(linked);
+    }, (err) => {
+      console.warn('Linked group reservations listener warning:', err);
+    });
+
+    const unsubGroupLedger = onSnapshot(collection(db, 'hotels', hotel.id, 'ledger'), (snap) => {
+      const entries = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as LedgerEntry))
+        .filter(e => validateLedgerTransaction(e).isValid);
+      setGroupLedgerEntries(entries);
+    }, (err) => {
+      console.warn('Group ledger listener warning:', err);
+    });
+
+    return () => {
+      try { unsubGroupRes(); } catch (e) {}
+      try { unsubGroupLedger(); } catch (e) {}
+    };
+  }, [hotel?.id, currentReservation.id, currentReservation.isPrincipalRoom, linkedResIdsKey]);
 
   const [activeFolio, setActiveFolio] = useState<'all' | 'guest' | 'company'>(reservation.corporateId ? 'all' : 'guest');
   
@@ -2482,25 +2560,61 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           <Banknote size={20} />
                         </div>
                         <div className="flex-1">
-                          <p className="text-xs font-bold text-zinc-500 uppercase truncate">Remaining Stay Total</p>
-                          <p className="text-lg font-bold text-red-500">{formatCurrency(balance, currency, exchangeRate)}</p>
+                          <p className="text-xs font-bold text-zinc-500 uppercase truncate">
+                            {isMasterWithLinks && groupFinancialSummary ? 'Consolidated Group Balance Due' : 'Remaining Stay Total'}
+                          </p>
+                          <p className="text-lg font-bold text-red-500">
+                            {formatCurrency(
+                              isMasterWithLinks && groupFinancialSummary ? groupFinancialSummary.groupNetBalance : balance,
+                              currency,
+                              exchangeRate
+                            )}
+                          </p>
                         </div>
                       </div>
                       
                       {/* Detailed Balance Breakdown */}
                       <div className="pt-3 border-t border-zinc-800 space-y-1">
-                        <div className="flex justify-between text-[10px]">
-                          <span className="text-zinc-500 uppercase">Principal Charges</span>
-                          <span className="text-zinc-300">{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
-                        </div>
-                        <div className="flex justify-between text-[10px]">
-                          <span className="text-zinc-500 uppercase">Taxes & Fees</span>
-                          <span className="text-zinc-300">{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
-                        </div>
-                        <div className="flex justify-between text-[10px]">
-                          <span className="text-zinc-500 uppercase">Total Payments</span>
-                          <span className="text-emerald-500">-{formatCurrency(totalCredits, currency, exchangeRate)}</span>
-                        </div>
+                        {isMasterWithLinks && groupFinancialSummary ? (
+                          <>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-zinc-500 uppercase">Master Room {currentReservation.roomNumber} Balance</span>
+                              <span className="text-zinc-300">{formatCurrency(groupFinancialSummary.masterBalance, currency, exchangeRate)}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-zinc-500 uppercase">Linked Rooms ({linkedGroupReservations.length}) Balance</span>
+                              <span className="text-zinc-300">
+                                {formatCurrency(
+                                  Number((groupFinancialSummary.groupNetBalance - groupFinancialSummary.masterBalance).toFixed(2)),
+                                  currency,
+                                  exchangeRate
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-zinc-500 uppercase">Group Total Payments</span>
+                              <span className="text-emerald-500">-{formatCurrency(groupFinancialSummary.groupTotalPayments, currency, exchangeRate)}</span>
+                            </div>
+                            <p className="text-[10px] text-amber-400/90 pt-1">
+                              Payments automatically settle Master Room {currentReservation.roomNumber} and all linked rooms' debts first.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-zinc-500 uppercase">Principal Charges</span>
+                              <span className="text-zinc-300">{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'debit' && e.category !== 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-zinc-500 uppercase">Taxes & Fees</span>
+                              <span className="text-zinc-300">{formatCurrency(processedDisplayedEntries.filter(e => e.type === 'debit' && e.category === 'tax').reduce((acc, e) => acc + e.amount, 0), currency, exchangeRate)}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-zinc-500 uppercase">Total Payments</span>
+                              <span className="text-emerald-500">-{formatCurrency(totalCredits, currency, exchangeRate)}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -2668,7 +2782,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <h3 className="text-lg font-bold">Overpayment Detected</h3>
                 </div>
                 <p className="text-sm text-zinc-300 mb-6 leading-relaxed">
-                  The payment amount of <span className="font-bold text-zinc-100">{formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}</span> exceeds the calculated net remaining total of <span className="font-bold text-zinc-100">{formatCurrency(balance, currency, exchangeRate)}</span> (calculated inclusive of stays, taxes & service fees).
+                  The payment amount of <span className="font-bold text-zinc-100">{formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}</span> exceeds the calculated net remaining total of <span className="font-bold text-zinc-100">{formatCurrency(isMasterWithLinks && groupFinancialSummary ? groupFinancialSummary.groupNetBalance : balance, currency, exchangeRate)}</span> ({isMasterWithLinks && groupFinancialSummary ? 'consolidated across Master + Linked rooms' : 'calculated inclusive of stays, taxes & service fees'}).
                   <br /><br />
                   Proceeding may create unnecessary ledger overpayment credits. Are you sure you want to proceed and record this payment?
                 </p>

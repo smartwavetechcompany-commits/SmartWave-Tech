@@ -719,6 +719,9 @@ export const repairErroneousFolioCredit = async (
   reservationId: string,
   profile: any
 ): Promise<{ repaired: boolean; restoredAmount: number }> => {
+  if (!hotelId || !reservationId) {
+    return { repaired: false, restoredAmount: 0 };
+  }
   const ledgerQ = query(
     collection(db, 'hotels', hotelId, 'ledger'),
     where('reservationId', '==', reservationId),
@@ -734,7 +737,7 @@ export const repairErroneousFolioCredit = async (
   const resSnap = await getDoc(resRef);
   if (!resSnap.exists()) return { repaired: false, restoredAmount: 0 };
 
-  const res = resSnap.data() as Reservation;
+  const res = { ...resSnap.data(), id: resSnap.id } as Reservation;
   let totalBogusCredit = 0;
 
   for (const entryDoc of snap.docs) {
@@ -755,7 +758,7 @@ export const repairErroneousFolioCredit = async (
 
   if (totalBogusCredit > 0) {
     const freshResSnap = await getDoc(resRef);
-    const freshRes = freshResSnap.data() as Reservation;
+    const freshRes = { ...(freshResSnap.data() || res), id: freshResSnap.id } as Reservation;
     const balance = freshRes.ledgerBalance || totalBogusCredit;
     
     await recordOutstandingDebt(

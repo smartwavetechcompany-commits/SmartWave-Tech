@@ -152,7 +152,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
 
   const handleSettlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id || !profile || !currentAccount) return;
+    if (!hotel?.id || !profile || !currentAccount?.id) return;
 
     try {
       setIsSaving(true);

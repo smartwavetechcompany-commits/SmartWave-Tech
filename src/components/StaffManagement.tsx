@@ -475,7 +475,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       });
 
       // Revoke all active sessions immediately when suspending
-      if (willSuspend) {
+      if (willSuspend && member.email) {
         try {
           const sessionsQuery = query(
             collection(db, 'hotels', hotelId, 'sessions'),

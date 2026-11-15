@@ -186,7 +186,11 @@ export function SuperAdmin() {
 
     setLoading(true);
     try {
-      const email = request.email.toLowerCase();
+      const email = (request.email || '').trim().toLowerCase();
+      if (!email) {
+        toast.error('Target email is required');
+        return;
+      }
       
       // Check if there's already an active code for this email
       const q = query(

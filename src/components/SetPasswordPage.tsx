@@ -208,15 +208,17 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
       // Look up staff user doc to retrieve UID and temporary password
       let targetDocId: string | null = null;
       let userDocData: any = null;
-      try {
-        const qEmail = query(collection(db, 'users'), where('email', '==', cleanEmail));
-        const userSnap = await getDocs(qEmail);
-        if (!userSnap.empty) {
-          targetDocId = userSnap.docs[0].id;
-          userDocData = userSnap.docs[0].data();
+      if (cleanEmail) {
+        try {
+          const qEmail = query(collection(db, 'users'), where('email', '==', cleanEmail));
+          const userSnap = await getDocs(qEmail);
+          if (!userSnap.empty) {
+            targetDocId = userSnap.docs[0].id;
+            userDocData = userSnap.docs[0].data();
+          }
+        } catch (lookupErr) {
+          console.warn("User lookup notice:", lookupErr);
         }
-      } catch (lookupErr) {
-        console.warn("User lookup notice:", lookupErr);
       }
 
       const effectiveTempPass = tempPass || fallbackTokenData?.tempPass || userDocData?.initialTempPass || userDocData?.temporaryPassword;

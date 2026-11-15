@@ -53,11 +53,14 @@ export const postToLedger = async (
   }
 
   // 0. Prevent duplicate room / overstay charges with robust multi-field idempotency
-  const q = query(
-    collection(db, 'hotels', hotelId, 'ledger'),
-    where('reservationId', '==', reservationId)
-  );
-  const querySnap = await getDocs(q);
+  const querySnap = reservationId
+    ? await getDocs(
+        query(
+          collection(db, 'hotels', hotelId, 'ledger'),
+          where('reservationId', '==', reservationId)
+        )
+      )
+    : ({ docs: [] } as any);
 
   if (entry.type === 'debit' && (entry.category === 'room' || entry.chargeType === 'room_rate' || entry.chargeType === 'overstay')) {
     const targetStartDay = entry.chargePeriodStart ? format(new Date(entry.chargePeriodStart), 'yyyy-MM-dd') : null;
@@ -130,15 +133,19 @@ export const postToLedger = async (
     }
   }
 
+  if (!hotelId) {
+    throw new Error('hotelId is required to post to ledger.');
+  }
+
   // Resolve finalCorporateId if not specified for a payment, and fetch hotel tax setup in parallel
   let finalCorporateId = corporateId;
-  const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
+  const resRef = reservationId ? doc(db, 'hotels', hotelId, 'reservations', reservationId) : null;
   const hotelRef = doc(db, 'hotels', hotelId);
 
   const shouldFetchHotel = entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment' && !entry.skipAutomaticTax;
   
   const [resSnap, hotelSnap] = await Promise.all([
-    getDoc(resRef),
+    resRef ? getDoc(resRef) : Promise.resolve(null),
     shouldFetchHotel ? getDoc(hotelRef) : Promise.resolve(null)
   ]);
 
@@ -146,7 +153,7 @@ export const postToLedger = async (
     const resData = resSnap.data() as Reservation;
     if (resData.corporateId) {
       finalCorporateId = resData.corporateId;
-    } else if (entry.category === 'payment' && entry.type === 'credit') {
+    } else if (reservationId && entry.category === 'payment' && entry.type === 'credit') {
       // Query to see if there is any city ledger debit transfer entry
       const q = query(
         collection(db, 'hotels', hotelId, 'ledger'),
@@ -533,11 +540,13 @@ export const recalculateReservationAccountFromLedger = async (
 
     let totalDebits = 0;
     let totalCredits = 0;
+    let totalRefunds = 0;
     let totalPaid = 0;
 
     validEntries.forEach(e => {
       if (e.type === 'debit') {
         if (e.category === 'refund') {
+          totalRefunds += e.amount;
           totalPaid -= e.amount;
         } else {
           totalDebits += e.amount;
@@ -555,9 +564,11 @@ export const recalculateReservationAccountFromLedger = async (
 
     totalDebits = Number(totalDebits.toFixed(2));
     totalCredits = Number(totalCredits.toFixed(2));
+    totalRefunds = Number(totalRefunds.toFixed(2));
     totalPaid = Math.max(0, Number(totalPaid.toFixed(2)));
 
-    const ledgerBalance = Number((totalDebits - totalCredits).toFixed(2));
+    const netCredits = Math.max(0, Number((totalCredits - totalRefunds).toFixed(2)));
+    const ledgerBalance = Number((totalDebits - netCredits).toFixed(2));
 
     const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
     const resSnap = await getDoc(resRef);
@@ -632,6 +643,7 @@ export const purgeCorruptedLedgerEntries = async (
   const reservationIdsToSync = new Set<string>();
 
   for (const entryId of entryIds) {
+    if (!entryId) continue;
     try {
       const docRef = doc(db, 'hotels', hotelId, 'ledger', entryId);
       const snap = await getDoc(docRef);
@@ -706,6 +718,7 @@ export const syncKitchenOrdersForReservation = async (
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
   sourcePrefix: string = 'Front Desk Folio Settlement'
 ) => {
+  if (!hotelId || !reservationId) return;
   try {
     const resRef = doc(db, 'hotels', hotelId, 'reservations', reservationId);
     const resSnap = await getDoc(resRef);
@@ -816,18 +829,27 @@ export const settleLedger = async (
   referenceCode?: string,
   proofUrl?: string,
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
-  settlementSource?: 'Front Desk' | 'F&B Outlet'
+  settlementSource?: 'Front Desk' | 'F&B Outlet',
+  extraFields?: {
+    description?: string;
+    masterReservationId?: string;
+    sourceRoomNumber?: string;
+    sourceReservationId?: string;
+  }
 ) => {
   const result = await postToLedger(hotelId, guestId, reservationId, {
     amount,
     type: 'credit',
     category: 'payment',
-    description: `Payment via ${paymentMethod.toUpperCase()}${referenceCode ? ` (Ref: ${referenceCode})` : ''}`,
+    description: extraFields?.description || `Payment via ${paymentMethod.toUpperCase()}${referenceCode ? ` (Ref: ${referenceCode})` : ''}`,
     referenceId: reservationId,
     postedBy,
     referenceCode,
     proofUrl,
-    settlementSource: settlementSource || 'Front Desk'
+    settlementSource: settlementSource || 'Front Desk',
+    ...(extraFields?.masterReservationId ? { masterReservationId: extraFields.masterReservationId } : {}),
+    ...(extraFields?.sourceRoomNumber ? { sourceRoomNumber: extraFields.sourceRoomNumber } : {}),
+    ...(extraFields?.sourceReservationId ? { sourceReservationId: extraFields.sourceReservationId } : {})
   } as any, postedBy, corporateId, paymentMethod, userContext);
 
   // Synchronize any F&B kitchen orders charged to this room that are settled via Front Desk or Corporate Folio
@@ -1081,8 +1103,8 @@ export const reconcileAndRepairReservationFinancials = async (
   if (!resSnap.exists()) {
     throw new Error(`Reservation ${reservationId} not found`);
   }
-  const res = resSnap.data() as Reservation;
-  const hotel = hotelSnap.exists() ? (hotelSnap.data() as Hotel) : null;
+  const res = { ...resSnap.data(), id: resSnap.id } as Reservation;
+  const hotel = hotelSnap.exists() ? ({ ...hotelSnap.data(), id: hotelSnap.id } as Hotel) : null;
 
   let ledgerEntries = existingEntries;
   if (!ledgerEntries) {
@@ -1209,11 +1231,13 @@ export const reconcileAndRepairReservationFinancials = async (
   let totalCharges = 0;
   let totalPayments = 0;
   let totalCredits = 0;
+  let totalRefunds = 0;
   let totalPaid = 0;
 
   cleanEntries.forEach(e => {
     if (e.type === 'debit') {
       if (e.category === 'refund') {
+        totalRefunds += e.amount;
         totalPaid -= e.amount;
       } else {
         totalCharges += e.amount;
@@ -1231,8 +1255,10 @@ export const reconcileAndRepairReservationFinancials = async (
 
   totalCharges = Number(totalCharges.toFixed(2));
   totalCredits = Number(totalCredits.toFixed(2));
+  totalRefunds = Number(totalRefunds.toFixed(2));
   totalPayments = Math.max(0, Number(totalPaid.toFixed(2)));
-  const expectedBalance = Number((totalCharges - totalCredits).toFixed(2));
+  const netCredits = Math.max(0, Number((totalCredits - totalRefunds).toFixed(2)));
+  const expectedBalance = Number((totalCharges - netCredits).toFixed(2));
   const previousStoredBalance = res.ledgerBalance || 0;
   const discrepancy = Number((previousStoredBalance - expectedBalance).toFixed(2));
 
@@ -1346,7 +1372,7 @@ export const processAutomatedBillingForReservation = async (
   currentTime: Date = new Date(),
   skipReconcile = false
 ) => {
-  if (!res.guestId || res.autoNightDeduction === false || res.status !== 'checked_in') {
+  if (!hotel?.id || !res?.id || !res.guestId || res.autoNightDeduction === false || res.status !== 'checked_in') {
     return { chargedCount: 0, totalAmount: 0 };
   }
 

@@ -714,7 +714,7 @@ export function Rooms() {
 
         // 2. Fetch authoritative reconciled balance from reservation document
         const freshResSnap = await getDoc(resRef);
-        const freshResData = freshResSnap.data() as Reservation;
+        const freshResData = { ...(freshResSnap.data() || res), id: freshResSnap.id } as Reservation;
         const outstandingBalance = freshResData.ledgerBalance || 0;
         const totalDebits = freshResData.totalAmount || 0;
 

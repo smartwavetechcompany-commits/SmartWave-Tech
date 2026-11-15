@@ -195,10 +195,11 @@ export async function resendAccountActivationEmail(
   emailSent: boolean;
 }> {
   // Revoke any previous active tokens for this user
-  try {
-    const colRef = collection(db, 'hotels', hotelId, 'passwordResetTokens');
-    const q = query(colRef, where('targetEmail', '==', targetUser.email.toLowerCase()), where('status', '==', 'active'));
-    const snap = await getDocs(q);
+  if (hotelId && targetUser?.email) {
+    try {
+      const colRef = collection(db, 'hotels', hotelId, 'passwordResetTokens');
+      const q = query(colRef, where('targetEmail', '==', targetUser.email.toLowerCase()), where('status', '==', 'active'));
+      const snap = await getDocs(q);
     const now = new Date().toISOString();
     snap.forEach(async (d) => {
       try {
@@ -206,8 +207,9 @@ export async function resendAccountActivationEmail(
         await updateDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', d.id), { status: 'revoked', revokedAt: now, revokedBy: adminProfile.email });
       } catch (e) {}
     });
-  } catch (revErr) {
-    console.warn('Could not revoke old tokens before resend:', revErr);
+    } catch (revErr) {
+      console.warn('Could not revoke old tokens before resend:', revErr);
+    }
   }
 
   // Generate new token and dispatch email
@@ -573,7 +575,7 @@ export async function completePasswordResetWithToken(
   let existingData: any = {};
   if (userSnap.exists()) {
     existingData = userSnap.data();
-  } else {
+  } else if (tokenData.targetEmail) {
     // Query by email if targetUid document is not found
     const q = query(collection(db, 'users'), where('email', '==', tokenData.targetEmail.toLowerCase()));
     const qSnap = await getDocs(q);
@@ -719,7 +721,7 @@ export function subscribeToUserResetTokens(
   targetEmail: string,
   callback: (tokens: PasswordResetToken[]) => void
 ) {
-  if (!hotelId) return () => {};
+  if (!hotelId || !targetEmail) return () => {};
 
   const colRef = collection(db, 'hotels', hotelId, 'passwordResetTokens');
   const q = query(

@@ -26,6 +26,7 @@ import { cn, formatCurrency } from '../utils';
 import { format, parseISO } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
+import { validateLedgerTransaction } from '../services/financialService';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { Pagination } from './Pagination';
 import { toast } from 'sonner';
@@ -66,14 +67,15 @@ export function PrincipalRoomManager({
   const [selectedChildResId, setSelectedChildResId] = useState('');
   const [isLinking, setIsLinking] = useState(false);
 
-  // Listen to active in-house reservations
+  // Listen to hotel reservations (excluding cancelled/no_show so linked pending or checked-out rooms with debt remain included)
   useEffect(() => {
     if (!hotel?.id) return;
     const resRef = collection(db, 'hotels', hotel.id, 'reservations');
-    const q = query(resRef, where('status', 'in', ['checked_in', 'confirmed']));
 
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Reservation));
+    const unsub = onSnapshot(resRef, (snap) => {
+      const data = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Reservation))
+        .filter(r => r.status !== 'cancelled' && r.status !== 'no_show');
       setAllReservations(data);
       setLoading(false);
     });
@@ -87,7 +89,9 @@ export function PrincipalRoomManager({
     const ledgerRef = collection(db, 'hotels', hotel.id, 'ledger');
 
     const unsub = onSnapshot(ledgerRef, (snap) => {
-      const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
+      const entries = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as LedgerEntry))
+        .filter(e => validateLedgerTransaction(e).isValid);
       setLedgerEntries(entries);
     });
 
@@ -96,18 +100,21 @@ export function PrincipalRoomManager({
 
   // Determine Master and Linked reservations
   const { masterReservation, linkedReservations, isChildLinked } = useMemo(() => {
-    const isChild = !!currentReservation.principalReservationId;
-    let master: Reservation = currentReservation;
+    const liveCurrent = allReservations.find(r => r.id === currentReservation.id) || currentReservation;
+    const isChild = !!liveCurrent.principalReservationId;
+    let master: Reservation = liveCurrent;
 
     if (isChild) {
-      const foundMaster = allReservations.find(r => r.id === currentReservation.principalReservationId);
+      const foundMaster = allReservations.find(r => r.id === liveCurrent.principalReservationId);
       if (foundMaster) {
         master = foundMaster;
       }
     }
 
     const linkedIds = new Set(master.linkedReservationIds || []);
-    const linked = allReservations.filter(r => linkedIds.has(r.id) && r.id !== master.id);
+    const linked = allReservations.filter(
+      r => r.id !== master.id && (linkedIds.has(r.id) || r.principalReservationId === master.id)
+    );
 
     return {
       masterReservation: master,
@@ -121,9 +128,10 @@ export function PrincipalRoomManager({
     return principalRoomService.calculateGroupFinancials(
       masterReservation,
       linkedReservations,
-      ledgerEntries
+      ledgerEntries,
+      hotel
     );
-  }, [masterReservation, linkedReservations, ledgerEntries]);
+  }, [masterReservation, linkedReservations, ledgerEntries, hotel]);
 
   // Available rooms to link (checked-in or confirmed, not already master with links, not already linked)
   const availableToLink = useMemo(() => {
@@ -133,6 +141,7 @@ export function PrincipalRoomManager({
     ]);
 
     return allReservations.filter(r => {
+      if (r.status !== 'checked_in' && r.status !== 'confirmed') return false;
       if (existingGroupIds.has(r.id)) return false;
       if (r.principalReservationId) return false;
       if (r.isPrincipalRoom && r.linkedReservationIds && r.linkedReservationIds.length > 0) return false;
@@ -207,6 +216,31 @@ export function PrincipalRoomManager({
     }
   };
 
+  // Apply existing Master Room credit toward linked room debt
+  const handleApplyMasterCredit = async () => {
+    if (!hotel?.id || linkedReservations.length === 0) return;
+    setIsProcessingPayment(true);
+    try {
+      const res = await principalRoomService.reallocateMasterCreditToLinkedRooms(
+        hotel.id,
+        masterReservation,
+        linkedReservations,
+        { uid: profile?.uid || 'staff', name: profile?.displayName || profile?.email || 'Staff', role: profile?.role },
+        { ledgerEntries, hotel }
+      );
+      if (res.appliedAmount > 0) {
+        toast.success(`Applied ${formatCurrency(res.appliedAmount, currency, exchangeRate)} Master credit to Room(s) ${res.settledRooms.join(', ')}`);
+      } else {
+        toast.info('No excess Master credit available to apply.');
+      }
+      onRefresh?.();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply Master credit');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
   // Process Group Payment
   const handleGroupPayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,14 +258,21 @@ export function PrincipalRoomManager({
         hotel.id,
         masterReservation,
         paymentSplits,
-        { uid: profile?.uid || 'staff', name: profile?.displayName || profile?.email || 'Staff' },
-        { notes: paymentNotes, isConsolidated: true }
+        { uid: profile?.uid || 'staff', name: profile?.displayName || profile?.email || 'Staff', role: profile?.role },
+        {
+          notes: paymentNotes,
+          isConsolidated: true,
+          linkedReservations,
+          ledgerEntries,
+          hotel
+        }
       );
 
-      toast.success(`Group payment of ${formatCurrency(totalToPay, currency, exchangeRate)} recorded to Master Folio`);
+      toast.success(`Group payment of ${formatCurrency(totalToPay, currency, exchangeRate)} allocated across group folios`);
       setPaymentSplits([{ amount: 0, method: 'cash', referenceCode: '' }]);
       setPaymentNotes('');
       setActiveTab('overview');
+      onRefresh?.();
     } catch (err: any) {
       toast.error('Failed to post group payment');
     } finally {
@@ -414,12 +455,28 @@ export function PrincipalRoomManager({
                     </div>
 
                     <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <div className="text-xs text-zinc-400">Room Balance</div>
-                        <div className="text-sm font-bold text-zinc-100">
-                          {formatCurrency(groupFinancials.chargesByRoom[masterReservation.roomNumber]?.balance || 0, currency, exchangeRate)}
-                        </div>
-                      </div>
+                      {(() => {
+                        const masterSummary = groupFinancials.chargesByRoom[masterReservation.roomNumber];
+                        const masterBal = masterSummary?.balance || 0;
+                        return (
+                          <div className="text-right">
+                            <div className="text-xs text-zinc-400">Room Balance</div>
+                            <div className={cn(
+                              "text-sm font-bold",
+                              masterBal > 0.01 ? "text-red-400" : masterBal < -0.01 ? "text-blue-400" : "text-emerald-400"
+                            )}>
+                              {masterBal > 0.01
+                                ? `Owed: ${formatCurrency(masterBal, currency, exchangeRate)}`
+                                : masterBal < -0.01
+                                ? `Credit: ${formatCurrency(Math.abs(masterBal), currency, exchangeRate)}`
+                                : 'Settled'}
+                            </div>
+                            <div className="text-[10px] text-zinc-500">
+                              Charges: {formatCurrency(masterSummary?.totalCharges || 0, currency, exchangeRate)}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       <button
                         onClick={() => setSelectedInvoiceRoom(masterReservation)}
@@ -461,9 +518,19 @@ export function PrincipalRoomManager({
 
                           <div className="flex items-center gap-3">
                             <div className="text-right">
-                              <div className="text-xs text-zinc-400">Total Charges</div>
-                              <div className="text-sm font-bold text-zinc-100">
-                                {formatCurrency(childSummary?.totalCharges || 0, currency, exchangeRate)}
+                              <div className="text-xs text-zinc-400">Room Balance</div>
+                              <div className={cn(
+                                "text-sm font-bold",
+                                (childSummary?.balance || 0) > 0.01 ? "text-red-400" : (childSummary?.balance || 0) < -0.01 ? "text-blue-400" : "text-emerald-400"
+                              )}>
+                                {(childSummary?.balance || 0) > 0.01
+                                  ? `Owed: ${formatCurrency(childSummary?.balance || 0, currency, exchangeRate)}`
+                                  : (childSummary?.balance || 0) < -0.01
+                                  ? `Credit: ${formatCurrency(Math.abs(childSummary?.balance || 0), currency, exchangeRate)}`
+                                  : 'Settled'}
+                              </div>
+                              <div className="text-[10px] text-zinc-500">
+                                Charges: {formatCurrency(childSummary?.totalCharges || 0, currency, exchangeRate)}
                               </div>
                             </div>
 
@@ -611,6 +678,21 @@ export function PrincipalRoomManager({
                 <p className="text-[11px] text-zinc-500">
                   Payments are posted directly to the Master Folio and automatically settle the unified balance across Room {masterReservation.roomNumber} and all linked rooms.
                 </p>
+                {groupFinancials.masterBalance < -0.01 && linkedReservations.some(r => (groupFinancials.chargesByRoom[r.roomNumber]?.balance || 0) > 0.01) && (
+                  <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span className="text-[11px] text-amber-300">
+                      Master Room {masterReservation.roomNumber} has {formatCurrency(Math.abs(groupFinancials.masterBalance), currency, exchangeRate)} unallocated credit while linked room(s) still have debt.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleApplyMasterCredit}
+                      disabled={isProcessingPayment}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-lg text-[11px] whitespace-nowrap transition-all"
+                    >
+                      Apply Master Credit to Linked Rooms
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Payment Splits */}

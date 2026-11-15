@@ -42,7 +42,7 @@ export function Notifications() {
   const notifPageSize = 6;
 
   useEffect(() => {
-    if (!hotel?.id || !profile) return;
+    if (!hotel?.id || !profile?.uid) return;
 
     const q = query(
       collection(db, 'hotels', hotel.id, 'notifications'),
