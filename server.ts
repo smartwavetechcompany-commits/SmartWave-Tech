@@ -4,6 +4,23 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import {
+  escapeHtml,
+  sanitizeEmailHeaderValue,
+  isValidEmailAddress,
+  isSafeIdentifier,
+  isAllowedOrigin,
+  resolveSafeAppOrigin,
+  isSafeActionUrl,
+  sanitizeErrorForClient,
+  redactSensitiveUserFields,
+  BoundedRateLimiter,
+  VerifiedCaller,
+  isSuperAdminCaller,
+  isAccountSuspendedOrPending,
+  callerHasStaffManagement,
+  callerIsHotelStaff,
+} from "./src/utils/serverSecurity.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,18 +28,40 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  app.disable("x-powered-by");
 
   // Security Headers Middleware (iFrame compatible for AI Studio preview)
   app.use((req, res, next) => {
     res.header("X-Content-Type-Options", "nosniff");
     res.header("X-XSS-Protection", "1; mode=block");
     res.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    res.header("X-DNS-Prefetch-Control", "off");
+    res.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "").toLowerCase();
+    if (proto === "https") {
+      res.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
     next();
   });
 
-  // CORS and Preflight Handling for all environments (prevents 405 Method Not Allowed)
+  // Strict Origin-Validated CORS and Preflight Handling
   app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+    const reqHost = typeof req.headers.host === "string" ? req.headers.host : undefined;
+    const originPermitted = isAllowedOrigin(origin, reqHost, process.env.APP_URL, process.env.ALLOWED_ORIGINS);
+
+    if (origin && !originPermitted) {
+      if (req.path.startsWith("/api/") || req.method === "OPTIONS") {
+        return res.status(403).json({ error: "Cross-origin request blocked by security policy." });
+      }
+    }
+
+    if (origin && originPermitted) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+      res.header("Access-Control-Allow-Credentials", "true");
+    }
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
     if (req.method === "OPTIONS") {
@@ -33,32 +72,36 @@ async function startServer() {
 
   app.use(express.json({ limit: "2mb" }));
 
-  // In-memory rate limiting map for API routes
-  const apiRateLimitMap = new Map<string, { count: number; firstSeen: number }>();
+  // Bounded in-memory rate limiting for API routes (prevents brute force and memory exhaustion)
+  const apiRateLimiter = new BoundedRateLimiter(5000);
+  const STRICT_AUTH_PATHS = new Set([
+    "/auth/validate-token",
+    "/auth/validate-reset-token",
+    "/auth/activate-staff-user",
+    "/auth/complete-password-reset",
+  ]);
   app.use("/api/", (req, res, next) => {
     // Exempt health check
     if (req.path === "/health") return next();
 
-    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown_ip";
-    const ipKey = `${String(clientIp)}:${req.path}`;
-    const now = Date.now();
+    const forwarded = req.headers["x-forwarded-for"];
+    const firstForwarded = Array.isArray(forwarded)
+      ? forwarded[0]
+      : typeof forwarded === "string"
+        ? forwarded.split(",")[0].trim()
+        : "";
+    const clientIp = firstForwarded || req.socket.remoteAddress || "unknown_ip";
+    const ipKey = `${clientIp}:${req.path}`;
     const windowMs = 60000; // 1 minute window
-    const maxRequests = 120; // 120 requests per minute per endpoint
+    const maxRequests = STRICT_AUTH_PATHS.has(req.path) ? 20 : 120;
 
-    const record = apiRateLimitMap.get(ipKey);
-    if (!record || now - record.firstSeen > windowMs) {
-      apiRateLimitMap.set(ipKey, { count: 1, firstSeen: now });
-      return next();
-    }
-
-    if (record.count >= maxRequests) {
+    const result = apiRateLimiter.check(ipKey, maxRequests, windowMs);
+    if (!result.allowed) {
       return res.status(429).json({
         error: "Too many requests. Please slow down.",
-        retryAfterMs: windowMs - (now - record.firstSeen)
+        retryAfterMs: result.retryAfterMs,
       });
     }
-
-    record.count++;
     next();
   });
 
@@ -115,24 +158,175 @@ async function startServer() {
     console.error("Failed to initialize server-side Firebase app:", err);
   }
 
+  // Helper: Decode Firestore REST document fields
+  function decodeFirestoreValue(val: any): any {
+    if (!val || typeof val !== "object") return undefined;
+    if ("stringValue" in val) return val.stringValue;
+    if ("booleanValue" in val) return val.booleanValue;
+    if ("integerValue" in val) return Number(val.integerValue);
+    if ("doubleValue" in val) return Number(val.doubleValue);
+    if ("nullValue" in val) return null;
+    if ("timestampValue" in val) return val.timestampValue;
+    if ("arrayValue" in val) {
+      const vals = val.arrayValue?.values;
+      return Array.isArray(vals) ? vals.map(decodeFirestoreValue) : [];
+    }
+    if ("mapValue" in val) {
+      const out: Record<string, any> = {};
+      const fields = val.mapValue?.fields || {};
+      for (const [k, v] of Object.entries(fields)) {
+        out[k] = decodeFirestoreValue(v);
+      }
+      return out;
+    }
+    return undefined;
+  }
+
+  // Helper: Extract & verify Firebase ID token and fetch caller's Firestore profile
+  async function verifyFirebaseTokenAndCaller(
+    req: express.Request,
+    allowBodyIdToken = false
+  ): Promise<(VerifiedCaller & { idToken: string }) | null> {
+    const authHeader = req.headers.authorization;
+    let token: string | null = null;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+      token = authHeader.slice(7).trim();
+    } else if (allowBodyIdToken && typeof req.body?.idToken === "string" && req.body.idToken.trim()) {
+      token = req.body.idToken.trim();
+    }
+
+    if (!token) return null;
+
+    let uid: string | null = null;
+    let email: string | null = null;
+
+    if (adminAuth) {
+      try {
+        const decoded = await adminAuth.verifyIdToken(token);
+        uid = decoded.uid;
+        email = decoded.email || null;
+      } catch (adminErr: any) {
+        console.warn("[AUTH VERIFY] Admin SDK verifyIdToken notice:", adminErr?.message);
+      }
+    }
+
+    if (!uid && firebaseConfig?.apiKey) {
+      try {
+        const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken: token }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data?.users?.[0]) {
+          uid = data.users[0].localId;
+          email = data.users[0].email || null;
+        }
+      } catch (restErr) {
+        console.warn("[AUTH VERIFY] Identity Toolkit lookup notice:", restErr);
+      }
+    }
+
+    if (!uid) return null;
+
+    let profile: Record<string, any> | null = null;
+
+    // 1. Try Firestore REST API with caller's Bearer token (works even when rules tighten)
+    if (firebaseConfig?.projectId) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+        const restUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/users/${encodeURIComponent(uid)}`;
+        const fsResp = await fetch(restUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (fsResp.ok) {
+          const fsDoc = await fsResp.json();
+          if (fsDoc?.fields) {
+            profile = {};
+            for (const [k, v] of Object.entries(fsDoc.fields)) {
+              profile[k] = decodeFirestoreValue(v);
+            }
+          }
+        }
+      } catch {
+        // Fall through to SDK lookup
+      }
+    }
+
+    // 2. Fallback to Firestore SDK
+    if (!profile && db) {
+      try {
+        const { doc, getDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+        const snap = await getDoc(doc(db, "users", uid));
+        if (snap.exists()) {
+          profile = snap.data();
+        } else if (email) {
+          const q = query(collection(db, "users"), where("email", "==", email.toLowerCase()));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            profile = qSnap.docs[0].data();
+          }
+        }
+      } catch (dbErr) {
+        console.warn("[AUTH VERIFY] Profile lookup notice:", dbErr);
+      }
+    }
+
+    return { uid, email, profile, idToken: token };
+  }
+
+  // Helper: Require authenticated, active caller on protected endpoints
+  async function requireAuth(
+    req: express.Request,
+    res: express.Response
+  ): Promise<(VerifiedCaller & { idToken: string }) | null> {
+    const caller = await verifyFirebaseTokenAndCaller(req, false);
+    if (!caller) {
+      res.status(401).json({ error: "Authentication required. Valid Bearer token missing or expired." });
+      return null;
+    }
+    if (caller.profile && isAccountSuspendedOrPending(caller.profile)) {
+      res.status(403).json({ error: "Your account is suspended, locked, or pending activation." });
+      return null;
+    }
+    return caller;
+  }
+
   // API Route: Server-side transaction validation logic to ensure total charges, payments & tax calculations are idempotent & immutable
   app.post("/api/ledger/validate-and-post", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const { hotelId, guestId, reservationId, items, postedBy, corporateId, idempotencyKey } = req.body;
 
     if (!hotelId || !guestId || !reservationId || !items || !Array.isArray(items) || items.length === 0 || !idempotencyKey) {
       return res.status(400).json({ error: "Missing required parameters or empty items list." });
     }
 
+    if (!isSafeIdentifier(hotelId) || !isSafeIdentifier(guestId) || !isSafeIdentifier(reservationId)) {
+      return res.status(400).json({ error: "Invalid identifier format." });
+    }
+
+    if (items.length > 200) {
+      return res.status(400).json({ error: "Batch exceeds maximum allowed items (200)." });
+    }
+
+    if (!callerIsHotelStaff(caller, hotelId)) {
+      return res.status(403).json({ error: "Forbidden: You are not authorized to post ledger entries for this hotel." });
+    }
+
     if (!db) {
       return res.status(500).json({ error: "Server-side database is currently unavailable." });
     }
+
+    const effectivePostedBy = postedBy || caller.email || caller.uid;
 
     try {
       const { collection, doc, query, where, getDocs, getDoc, writeBatch, serverTimestamp, increment } = await import('firebase/firestore');
       
       // 1. Idempotency Check
       const ledgerRef = collection(db, 'hotels', hotelId, 'ledger');
-      const dupQuery = query(ledgerRef, where('idempotencyKey', '==', idempotencyKey));
+      const dupQuery = query(ledgerRef, where('idempotencyKey', '==', String(idempotencyKey)));
       const dupSnap = await getDocs(dupQuery);
       
       if (!dupSnap.empty) {
@@ -167,14 +361,27 @@ async function startServer() {
       for (const item of items) {
         const { price = 0, quantity = 1, type = 'debit', category = 'other', description = '', discount = 0, discountType = 'fixed' } = item;
 
-        if (price < 0 || quantity < 1) {
-          return res.status(400).json({ error: "Price must be positive and quantity at least 1." });
+        const numPrice = Number(price);
+        const numQty = Number(quantity);
+        const numDiscount = Number(discount);
+
+        if (!Number.isFinite(numPrice) || !Number.isFinite(numQty) || !Number.isFinite(numDiscount)) {
+          return res.status(400).json({ error: "Numeric price, quantity, and discount values are required." });
+        }
+        if (numPrice < 0 || numPrice > 1e9 || numQty < 1 || numQty > 10000) {
+          return res.status(400).json({ error: "Price must be non-negative and quantity between 1 and 10,000." });
+        }
+        if (numDiscount < 0 || (discountType === 'percentage' && numDiscount > 100)) {
+          return res.status(400).json({ error: "Invalid discount value." });
+        }
+        if (type !== 'debit' && type !== 'credit') {
+          return res.status(400).json({ error: "Invalid ledger entry type." });
         }
 
-        const baseAmount = price * quantity;
+        const baseAmount = numPrice * numQty;
         const amountAfterDiscount = discountType === 'fixed'
-          ? Math.max(0, baseAmount - discount)
-          : Math.max(0, baseAmount * (1 - discount / 100));
+          ? Math.max(0, baseAmount - numDiscount)
+          : Math.max(0, baseAmount * (1 - numDiscount / 100));
 
         const mainEntry = {
           amount: amountAfterDiscount,
@@ -182,10 +389,10 @@ async function startServer() {
           category,
           description: description || `${type === 'debit' ? 'Charge' : 'Adjustment'}: ${category}`,
           referenceId: reservationId,
-          postedBy,
-          quantity,
-          price,
-          discount,
+          postedBy: effectivePostedBy,
+          quantity: numQty,
+          price: numPrice,
+          discount: numDiscount,
           discountType,
           timestamp,
           hotelId,
@@ -235,7 +442,7 @@ async function startServer() {
               amount: taxAmount,
               description: `${tax.name} (${tax.percentage}%) ${tax.isInclusive ? '[Inclusive]' : ''} for ${mainEntry.description}`,
               category: 'tax',
-              postedBy,
+              postedBy: effectivePostedBy,
               idempotencyKey,
               isImmutable: true
             };
@@ -375,7 +582,7 @@ async function startServer() {
 
     } catch (err: any) {
       console.error("Transact validation post error:", err);
-      return res.status(500).json({ error: err.message || "Failed validating database entries." });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed validating database entries.") });
     }
   });
 
@@ -394,6 +601,8 @@ async function startServer() {
     html: string;
     fromName: string;
   }): Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }> {
+    const safeFromName = sanitizeEmailHeaderValue(fromName, "PMS Administration");
+    const safeSubject = sanitizeEmailHeaderValue(subject, "PMS Notification");
     let emailDispatched = false;
     let method = 'simulated';
     let previewUrl: string | false = false;
@@ -414,9 +623,9 @@ async function startServer() {
           });
 
           const info = await transporter.sendMail({
-            from: `"${fromName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+            from: `"${safeFromName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
             to,
-            subject,
+            subject: safeSubject,
             html,
           });
 
@@ -450,9 +659,9 @@ async function startServer() {
         });
 
         const info = await testTransporter.sendMail({
-          from: `"${fromName}" <no-reply@smartwave-pms.internal>`,
+          from: `"${safeFromName}" <no-reply@smartwave-pms.internal>`,
           to,
-          subject,
+          subject: safeSubject,
           html,
         });
 
@@ -502,6 +711,14 @@ async function startServer() {
     formattedExpiry?: string;
     note?: string;
   }) {
+    const safeHotelName = escapeHtml(hotelName);
+    const safeTargetName = escapeHtml(targetName || targetEmail);
+    const safeAdminName = escapeHtml(adminName);
+    const safeAdminEmail = escapeHtml(adminEmail);
+    const safeActivationUrl = escapeHtml(activationUrl);
+    const safeDurationHours = escapeHtml(durationHours);
+    const safeFormattedExpiry = formattedExpiry ? escapeHtml(formattedExpiry) : '';
+    const safeNote = note ? escapeHtml(note) : '';
     return `
       <!DOCTYPE html>
       <html>
@@ -525,7 +742,7 @@ async function startServer() {
                             Account Activation
                           </div>
                           <h1 style="margin: 16px 0 4px; font-size: 22px; font-weight: 700; color: #ffffff;">
-                            Welcome to ${hotelName}
+                            Welcome to ${safeHotelName}
                           </h1>
                           <p style="margin: 0; font-size: 14px; color: #a1a1aa;">
                             Property Management System (PMS) Staff Onboarding
@@ -540,10 +757,10 @@ async function startServer() {
                 <tr>
                   <td style="padding: 32px;">
                     <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #e4e4e7;">
-                      Hello <strong>${targetName || targetEmail}</strong>,
+                      Hello <strong>${safeTargetName}</strong>,
                     </p>
                     <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
-                      Your Hotel Administrator <strong>${adminName}</strong> (${adminEmail}) has created your staff account for <strong>${hotelName}</strong>.
+                      Your Hotel Administrator <strong>${safeAdminName}</strong> (${safeAdminEmail}) has created your staff account for <strong>${safeHotelName}</strong>.
                     </p>
 
                     <div style="background-color: #27272a; border-left: 3px solid #10b981; padding: 14px 18px; border-radius: 6px; margin-bottom: 24px;">
@@ -553,10 +770,10 @@ async function startServer() {
                       </p>
                     </div>
 
-                    ${note ? `
+                    ${safeNote ? `
                       <div style="background-color: #27272a; border-left: 3px solid #3b82f6; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px;">
                         <span style="font-size: 12px; font-weight: 600; color: #60a5fa; text-transform: uppercase;">Admin Note:</span>
-                        <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${note}"</p>
+                        <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${safeNote}"</p>
                       </div>
                     ` : ''}
 
@@ -564,7 +781,7 @@ async function startServer() {
                     <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
                       <tr>
                         <td align="center">
-                          <a href="${activationUrl}" style="display: inline-block; padding: 14px 36px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                          <a href="${safeActivationUrl}" style="display: inline-block; padding: 14px 36px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
                             Activate Account & Set Password
                           </a>
                         </td>
@@ -581,7 +798,7 @@ async function startServer() {
                               Activation Link Expiration
                             </p>
                             <p style="margin: 4px 0 0; font-size: 12px; color: #fde68a; line-height: 1.5;">
-                              This activation link is valid for <strong>${durationHours}</strong>${formattedExpiry ? ` (until <strong>${formattedExpiry}</strong>)` : ''} and will automatically deactivate once used.
+                              This activation link is valid for <strong>${safeDurationHours}</strong>${safeFormattedExpiry ? ` (until <strong>${safeFormattedExpiry}</strong>)` : ''} and will automatically deactivate once used.
                             </p>
                           </td>
                         </tr>
@@ -592,13 +809,13 @@ async function startServer() {
                       If the button above does not open, copy and paste this link into your browser:
                     </p>
                     <p style="margin: 0 0 24px; font-size: 12px; color: #10b981; word-break: break-all; background-color: #18181b; border: 1px solid #27272a; padding: 10px; border-radius: 6px;">
-                      ${activationUrl}
+                      ${safeActivationUrl}
                     </p>
                     
                     <hr style="border: none; border-top: 1px solid #27272a; margin: 24px 0;">
                     
                     <p style="margin: 0; font-size: 12px; color: #71717a; line-height: 1.5;">
-                      <strong>Security Notice:</strong> If you did not expect this invitation, please contact your hotel management team (${adminEmail}).
+                      <strong>Security Notice:</strong> If you did not expect this invitation, please contact your hotel management team (${safeAdminEmail}).
                     </p>
                   </td>
                 </tr>
@@ -607,7 +824,7 @@ async function startServer() {
                 <tr>
                   <td style="padding: 20px 32px; background-color: #121215; border-top: 1px solid #27272a; text-align: center;">
                     <p style="margin: 0; font-size: 11px; color: #71717a;">
-                      © ${new Date().getFullYear()} ${hotelName} • Property Management System (PMS)
+                      © ${new Date().getFullYear()} ${safeHotelName} • Property Management System (PMS)
                     </p>
                   </td>
                 </tr>
@@ -620,7 +837,7 @@ async function startServer() {
     `;
   }
 
-  // In-memory activation token registry for instant, resilient staff onboarding & password setup
+  // Bounded in-memory activation token registry for instant, resilient staff onboarding & password setup
   interface ActivationTokenEntry {
     email: string;
     name?: string;
@@ -631,6 +848,24 @@ async function startServer() {
     expiresAt: number;
   }
   const activeActivationTokens = new Map<string, ActivationTokenEntry>();
+  const MAX_ACTIVE_ACTIVATION_TOKENS = 2000;
+
+  function setBoundedActivationToken(tokenId: string, entry: ActivationTokenEntry) {
+    const now = Date.now();
+    if (activeActivationTokens.size >= MAX_ACTIVE_ACTIVATION_TOKENS) {
+      for (const [k, v] of activeActivationTokens.entries()) {
+        if (now > v.expiresAt) {
+          activeActivationTokens.delete(k);
+        }
+      }
+      while (activeActivationTokens.size >= MAX_ACTIVE_ACTIVATION_TOKENS) {
+        const oldest = activeActivationTokens.keys().next().value;
+        if (!oldest) break;
+        activeActivationTokens.delete(oldest);
+      }
+    }
+    activeActivationTokens.set(tokenId, entry);
+  }
 
   // Helper: Look up user in Firebase Authentication by email
   async function lookupAuthUserByEmail(email: string): Promise<{ uid: string; email: string } | null> {
@@ -838,6 +1073,9 @@ async function startServer() {
 
   // API Route: Create Staff Account (Phase 1: Firebase Auth user + Staff Profile with firebase_uid + Activation link)
   app.post("/api/auth/create-staff", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const {
       hotelId,
       hotelName = "Hotel Property",
@@ -862,13 +1100,20 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required fields: hotelId, email, and fullName are mandatory." });
     }
 
-    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-    if (!emailRegex.test(String(email).trim())) {
+    if (!isValidEmailAddress(email)) {
       return res.status(400).json({ error: "Invalid email address format." });
     }
 
-    if (!/^[a-zA-Z0-9_\-\.]+$/.test(String(hotelId).trim())) {
+    if (!isSafeIdentifier(hotelId)) {
       return res.status(400).json({ error: "Invalid hotelId identifier." });
+    }
+
+    if (!callerHasStaffManagement(caller, hotelId)) {
+      return res.status(403).json({ error: "Forbidden: Staff management permission required for this hotel." });
+    }
+
+    if (req.body.assignedUserRole === 'superAdmin' && !isSuperAdminCaller(caller)) {
+      return res.status(403).json({ error: "Forbidden: Only Super Administrators can assign the superAdmin role." });
     }
 
     if (!db) {
@@ -876,7 +1121,17 @@ async function startServer() {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const clientOrigin = baseUrl || req.headers.origin || process.env.APP_URL || `http://localhost:${PORT}`;
+    const effectiveAdminEmail = caller.email || adminEmail;
+    const effectiveAdminUid = caller.uid || adminUid;
+    const effectiveAdminName = caller.profile?.displayName || adminName || effectiveAdminEmail;
+    const clientOrigin = resolveSafeAppOrigin(
+      baseUrl,
+      typeof req.headers.host === 'string' ? req.headers.host : undefined,
+      typeof req.headers.origin === 'string' ? req.headers.origin : undefined,
+      process.env.APP_URL,
+      PORT,
+      process.env.ALLOWED_ORIGINS
+    );
 
     try {
       const { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
@@ -919,7 +1174,7 @@ async function startServer() {
       const now = new Date().toISOString();
 
       // Store in memory for instant, seamless staff password setup
-      activeActivationTokens.set(tokenId, {
+      setBoundedActivationToken(tokenId, {
         email: normalizedEmail,
         name: fullName.trim(),
         tempPass: authUser.tempPass,
@@ -982,6 +1237,10 @@ async function startServer() {
             ? Object.keys(moduleMap).filter(modId => moduleMap[modId].some(p => permissions.includes(p)))
             : (isHotelAdminRole ? Object.keys(moduleMap) : []));
 
+      const sanitizedPermissions = Array.isArray(permissions)
+        ? (isSuperAdminCaller(caller) ? permissions : permissions.filter((p: any) => p !== 'access_super_admin'))
+        : [];
+
       // 4. Save Staff Profile to application database explicitly linking firebase_uid
       const staffProfile = {
         uid: firebase_uid,
@@ -1000,12 +1259,12 @@ async function startServer() {
         initialTempPass: authUser.tempPass || null,
         systemAuthSecret: authUser.tempPass || null,
         roles: isHotelAdminRole ? ['admin', 'hotelAdmin'] : (roleType === 'base' ? [baseRole] : [roleLabel]),
-        permissions: permissions && permissions.length > 0 ? permissions : (isHotelAdminRole ? ['all'] : []),
+        permissions: sanitizedPermissions.length > 0 ? sanitizedPermissions : (isHotelAdminRole ? ['all'] : []),
         assignedModules: resolvedAssignedModules,
         activationLink: activationUrl,
         activationToken: tokenId,
         activationEmailSentAt: now,
-        activationEmailSentBy: adminEmail,
+        activationEmailSentBy: effectiveAdminEmail,
         createdAt: now,
         updatedAt: now
       };
@@ -1029,8 +1288,8 @@ async function startServer() {
         hotelName,
         targetName: fullName.trim(),
         targetEmail: normalizedEmail,
-        adminName,
-        adminEmail,
+        adminName: effectiveAdminName,
+        adminEmail: effectiveAdminEmail,
         activationUrl,
         durationHours: '24 hours'
       });
@@ -1052,8 +1311,8 @@ async function startServer() {
           targetId: firebase_uid,
           targetEmail: normalizedEmail,
           targetName: fullName.trim(),
-          performedBy: adminEmail,
-          performedByUid: adminUid,
+          performedBy: effectiveAdminEmail,
+          performedByUid: effectiveAdminUid,
           details: `Created ${isHotelAdminRole ? 'administrator' : 'staff'} account for ${normalizedEmail} with role '${roleLabel}' in Firebase Auth (UID: ${firebase_uid}). Status set to Pending Activation.`,
           timestamp: serverTimestamp(),
           createdAt: now
@@ -1065,7 +1324,7 @@ async function startServer() {
       return res.status(201).json({
         success: true,
         firebase_uid,
-        user: staffProfile,
+        user: redactSensitiveUserFields(staffProfile),
         activationLink: activationUrl,
         emailSent: emailResult.emailDispatched,
         previewUrl: emailResult.previewUrl || null,
@@ -1074,13 +1333,16 @@ async function startServer() {
     } catch (err: any) {
       console.error("[CREATE STAFF ERROR]:", err);
       res.setHeader('Content-Type', 'application/json');
-      return res.status(500).json({ error: err.message || "Failed to create staff account" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to create staff account.") });
     }
   });
 
   // API Route: Extend Grace Period for checked-in guest (Time-Sensitive Ad-Hoc Extension)
   app.post("/api/reservations/extend-grace-period", async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const {
       hotelId,
       reservationId,
@@ -1093,6 +1355,17 @@ async function startServer() {
     if (!hotelId || !reservationId) {
       return res.status(400).json({ error: "Missing required parameters: hotelId and reservationId are mandatory." });
     }
+
+    if (!isSafeIdentifier(hotelId) || !isSafeIdentifier(reservationId)) {
+      return res.status(400).json({ error: "Invalid identifier format." });
+    }
+
+    if (!callerIsHotelStaff(caller, hotelId)) {
+      return res.status(403).json({ error: "Forbidden: You are not authorized to modify reservations for this hotel." });
+    }
+
+    const effectiveStaffUid = caller.uid || staffUid;
+    const effectiveStaffName = caller.profile?.displayName || caller.email || staffName;
 
     try {
       const { doc, getDoc, updateDoc, arrayUnion, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
@@ -1110,7 +1383,7 @@ async function startServer() {
       const hotelData = hotelSnap.exists() ? hotelSnap.data() : {};
 
       const currentCustomMinutes = Number(resData.customGracePeriodMinutes || 0);
-      const minutesToAdd = Math.max(15, Number(extensionMinutes) || 60);
+      const minutesToAdd = Math.min(1440, Math.max(15, Number(extensionMinutes) || 60));
       const newTotalCustomMinutes = currentCustomMinutes + minutesToAdd;
 
       const baseCheckoutTime = resData.approvedLateCheckoutTime || resData.checkOutTime || hotelData.defaultCheckOutTime || hotelData.settings?.checkout?.defaultTime || '12:00';
@@ -1138,8 +1411,8 @@ async function startServer() {
       const extensionRecord = {
         minutes: minutesToAdd,
         totalCustomMinutes: newTotalCustomMinutes,
-        approvedBy: staffName,
-        approvedByUid: staffUid,
+        approvedBy: effectiveStaffName,
+        approvedByUid: effectiveStaffUid,
         timestamp: nowIso,
         reason: String(reason).trim() || 'Front Desk courtesy extension',
         previousCheckoutDeadline: new Date(previousDeadlineMs).toISOString(),
@@ -1151,8 +1424,8 @@ async function startServer() {
         approvedLateCheckoutTime: newEffectiveTimeStr,
         effectiveCheckoutTime: prospectiveDeadline.toISOString(),
         gracePeriodApprovedBy: {
-          uid: staffUid,
-          name: staffName,
+          uid: effectiveStaffUid,
+          name: effectiveStaffName,
           timestamp: nowIso,
           reason: String(reason).trim() || 'Front Desk courtesy extension'
         },
@@ -1166,8 +1439,8 @@ async function startServer() {
           module: 'Reservations',
           reservationId,
           targetId: reservationId,
-          performedBy: staffName,
-          performedByUid: staffUid,
+          performedBy: effectiveStaffName,
+          performedByUid: effectiveStaffUid,
           details: `Extended grace period by +${minutesToAdd}m (Total custom: ${newTotalCustomMinutes}m) for Room ${resData.roomNumber || resData.roomId} (${resData.guestName}). New checkout deadline: ${newEffectiveTimeStr}. Reason: ${reason}`,
           timestamp: serverTimestamp(),
           createdAt: nowIso
@@ -1188,12 +1461,15 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("[EXTEND GRACE PERIOD ERROR]:", err);
-      return res.status(500).json({ error: err.message || "Failed to extend grace period." });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to extend grace period.") });
     }
   });
 
   // API Route: Resend Activation Link (Regenerate Firebase activation link and redispatch email)
   app.post("/api/auth/resend-activation-link", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const {
       hotelId,
       hotelName = "Hotel Property",
@@ -1210,8 +1486,26 @@ async function startServer() {
       return res.status(400).json({ error: "Missing hotelId or targetEmail." });
     }
 
+    if (!isSafeIdentifier(hotelId) || (targetUid && !isSafeIdentifier(targetUid)) || !isValidEmailAddress(targetEmail)) {
+      return res.status(400).json({ error: "Invalid identifier or email format." });
+    }
+
+    if (!callerHasStaffManagement(caller, hotelId)) {
+      return res.status(403).json({ error: "Forbidden: Staff management permission required." });
+    }
+
     const normalizedEmail = targetEmail.trim().toLowerCase();
-    const clientOrigin = baseUrl || req.headers.origin || process.env.APP_URL || `http://localhost:${PORT}`;
+    const effectiveAdminEmail = caller.email || adminEmail;
+    const effectiveAdminUid = caller.uid || adminUid;
+    const effectiveAdminName = caller.profile?.displayName || adminName || effectiveAdminEmail;
+    const clientOrigin = resolveSafeAppOrigin(
+      baseUrl,
+      typeof req.headers.host === 'string' ? req.headers.host : undefined,
+      typeof req.headers.origin === 'string' ? req.headers.origin : undefined,
+      process.env.APP_URL,
+      PORT,
+      process.env.ALLOWED_ORIGINS
+    );
 
     try {
       let targetDocId = targetUid || null;
@@ -1256,7 +1550,7 @@ async function startServer() {
       const now = new Date().toISOString();
 
       // Register in memory registry
-      activeActivationTokens.set(tokenId, {
+      setBoundedActivationToken(tokenId, {
         email: normalizedEmail,
         name: userDisplayName || normalizedEmail,
         uid: targetDocId,
@@ -1273,7 +1567,7 @@ async function startServer() {
             activationLink: activationUrl,
             activationToken: tokenId,
             activationEmailSentAt: now,
-            activationEmailSentBy: adminEmail,
+            activationEmailSentBy: effectiveAdminEmail,
             updatedAt: now
           });
         } catch (uErr) {
@@ -1286,8 +1580,8 @@ async function startServer() {
         hotelName,
         targetName: userDisplayName || normalizedEmail,
         targetEmail: normalizedEmail,
-        adminName,
-        adminEmail,
+        adminName: effectiveAdminName,
+        adminEmail: effectiveAdminEmail,
         activationUrl,
         durationHours: '24 hours'
       });
@@ -1308,8 +1602,8 @@ async function startServer() {
             module: 'Staff Management',
             targetId: targetDocId,
             targetEmail: normalizedEmail,
-            performedBy: adminEmail,
-            performedByUid: adminUid,
+            performedBy: effectiveAdminEmail,
+            performedByUid: effectiveAdminUid,
             details: `Regenerated Firebase activation link and dispatched email to ${normalizedEmail}.`,
             timestamp: serverTimestamp(),
             createdAt: now
@@ -1326,7 +1620,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("[RESEND ACTIVATION ERROR]:", err);
-      return res.status(500).json({ error: err.message || "Failed to resend activation link" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to resend activation link.") });
     }
   });
 
@@ -1335,14 +1629,18 @@ async function startServer() {
     const tokenId = (req.query.tokenId as string) || (req.body?.tokenId as string) || (req.query.token as string) || (req.body?.token as string);
     const email = (req.query.email as string) || (req.body?.email as string);
 
-    if (!tokenId) {
-      return res.status(400).json({ valid: false, error: "Token ID is required" });
+    if (!tokenId || !isSafeIdentifier(tokenId)) {
+      return res.status(400).json({ valid: false, error: "Valid token ID is required." });
     }
 
     try {
-      // 1. Check in-memory token registry
+      // 1. Check in-memory token registry (strict expiry enforcement)
       if (activeActivationTokens.has(tokenId)) {
         const mem = activeActivationTokens.get(tokenId)!;
+        if (Date.now() > mem.expiresAt) {
+          activeActivationTokens.delete(tokenId);
+          return res.status(200).json({ valid: false, error: "This activation link has expired. Please request a new link." });
+        }
         return res.status(200).json({
           valid: true,
           tokenData: {
@@ -1352,7 +1650,7 @@ async function startServer() {
             hotelId: mem.hotelId,
             status: 'active',
             type: 'activation',
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            expiresAt: new Date(mem.expiresAt).toISOString()
           }
         });
       }
@@ -1396,13 +1694,13 @@ async function startServer() {
           });
         }
 
-        // If not found in tokens, check if user exists with matching activationToken or pending status
-        if (email) {
+        // Fallback: match exact stored activationToken on user document (never accept arbitrary unverified tokens)
+        if (email && isValidEmailAddress(email)) {
           const q = query(collection(db, 'users'), where('email', '==', email.trim().toLowerCase()));
           const userSnap = await getDocs(q);
           if (!userSnap.empty) {
             const userData = userSnap.docs[0].data();
-            if (userData.status === 'pending_activation' || userData.activationToken === tokenId) {
+            if (userData.activationToken === tokenId || userData.activationTokenId === tokenId) {
               return res.status(200).json({
                 valid: true,
                 tokenData: {
@@ -1412,7 +1710,7 @@ async function startServer() {
                   hotelId: userData.hotelId,
                   status: 'active',
                   type: 'activation',
-                  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+                  expiresAt: userData.activationLinkExpiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
                 }
               });
             }
@@ -1420,50 +1718,10 @@ async function startServer() {
         }
       }
 
-      // If token looks valid format, permit it so user can set password
-      if (tokenId && (tokenId.startsWith('act_') || tokenId.startsWith('prt_') || tokenId.length >= 6)) {
-        let foundEmail = email ? email.trim().toLowerCase() : '';
-        let foundTempPass: string | null = null;
-
-        if (!foundEmail && db) {
-          try {
-            const { collection, query, where, getDocs } = await import('firebase/firestore');
-            const uSnap = await getDocs(query(collection(db, 'users'), where('activationToken', '==', tokenId)));
-            if (!uSnap.empty) {
-              const uData = uSnap.docs[0].data();
-              foundEmail = uData.email || '';
-              foundTempPass = uData.initialTempPass || uData.temporaryPassword || null;
-            }
-          } catch (e) {}
-        }
-
-        return res.status(200).json({
-          valid: true,
-          tokenData: {
-            tokenId,
-            targetEmail: foundEmail,
-            tempPass: foundTempPass,
-            status: 'active',
-            type: 'activation',
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-          }
-        });
-      }
-
       return res.status(200).json({ valid: false, error: "Activation token not found or invalid." });
     } catch (e: any) {
-      console.warn("[VALIDATE TOKEN] Check notice:", e);
-      // Fail-open for valid looking tokens rather than locking user out
-      return res.status(200).json({
-        valid: true,
-        tokenData: {
-          tokenId,
-          targetEmail: email ? email.trim().toLowerCase() : '',
-          status: 'active',
-          type: 'activation',
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-        }
-      });
+      console.warn("[VALIDATE TOKEN] Check error:", e);
+      return res.status(500).json({ valid: false, error: "Unable to validate activation token." });
     }
   });
 
@@ -1474,10 +1732,21 @@ async function startServer() {
     if (!email && !firebase_uid) {
       return res.status(400).json({ error: "Missing email or firebase_uid for activation." });
     }
+    if (firebase_uid && !isSafeIdentifier(firebase_uid)) {
+      return res.status(400).json({ error: "Invalid firebase_uid format." });
+    }
+    if (tokenId && !isSafeIdentifier(tokenId)) {
+      return res.status(400).json({ error: "Invalid tokenId format." });
+    }
+    if (email && !isValidEmailAddress(email)) {
+      return res.status(400).json({ error: "Invalid email format." });
+    }
 
     if (!db) {
       return res.status(500).json({ error: "Database service is currently unavailable." });
     }
+
+    const caller = await verifyFirebaseTokenAndCaller(req, false);
 
     try {
       const { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc, serverTimestamp } = await import('firebase/firestore');
@@ -1513,12 +1782,25 @@ async function startServer() {
         targetDocId = firebase_uid;
       }
 
-      // 1. Resolve tempPass and UID from in-memory token registry or passwordResetTokens
+      // 1. Resolve tempPass, UID, and verify authorization/proof
       let resolvedTempPass: string | null = null;
-      let effectiveEmail = email ? email.trim().toLowerCase() : null;
+      let effectiveEmail = email ? email.trim().toLowerCase() : (userDocData?.email?.toLowerCase() || null);
+      let hasValidProof = false;
+
+      // Proof 1: Caller already verified Firebase ID token for target account
+      if (caller && ((targetDocId && caller.uid === targetDocId) || (effectiveEmail && caller.email?.toLowerCase() === effectiveEmail))) {
+        hasValidProof = true;
+      }
 
       if (tokenId && activeActivationTokens.has(tokenId)) {
         const memToken = activeActivationTokens.get(tokenId)!;
+        if (Date.now() <= memToken.expiresAt) {
+          const emailMatches = !effectiveEmail || memToken.email?.toLowerCase() === effectiveEmail;
+          const uidMatches = !targetDocId || memToken.uid === targetDocId;
+          if (emailMatches && uidMatches) {
+            hasValidProof = true;
+          }
+        }
         resolvedTempPass = memToken.tempPass || null;
         if (!targetDocId && memToken.uid) {
           targetDocId = memToken.uid;
@@ -1528,7 +1810,7 @@ async function startServer() {
         }
       }
 
-      if (!resolvedTempPass && tokenId && db) {
+      if (tokenId && db) {
         try {
           let tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
           if (!tokenSnap.exists()) {
@@ -1536,12 +1818,25 @@ async function startServer() {
           }
           if (tokenSnap.exists()) {
             const tokData = tokenSnap.data();
-            resolvedTempPass = tokData.tempPass || null;
-            if (!targetDocId && tokData.targetUid) {
-              targetDocId = tokData.targetUid;
+            const isRevoked = tokData.status === 'revoked';
+            const isUsed = Boolean(tokData.isUsed) || tokData.status === 'used';
+            const expiryMs = tokData.expiresAt ? new Date(tokData.expiresAt).getTime() : NaN;
+            const isExpired = !isNaN(expiryMs) && Date.now() > expiryMs;
+            const tokEmail = (tokData.targetEmail || tokData.email || '').toLowerCase();
+            const tokUid = tokData.targetUid || tokData.uid;
+            const matchesTarget = (!effectiveEmail || !tokEmail || tokEmail === effectiveEmail) && (!targetDocId || !tokUid || tokUid === targetDocId);
+
+            if (!isRevoked && !isUsed && !isExpired && matchesTarget) {
+              hasValidProof = true;
             }
-            if (!effectiveEmail && (tokData.targetEmail || tokData.email)) {
-              effectiveEmail = tokData.targetEmail || tokData.email;
+            if (!resolvedTempPass && tokData.tempPass) {
+              resolvedTempPass = tokData.tempPass;
+            }
+            if (!targetDocId && tokUid) {
+              targetDocId = tokUid;
+            }
+            if (!effectiveEmail && tokEmail) {
+              effectiveEmail = tokEmail;
             }
           }
         } catch (tokErr) {
@@ -1549,8 +1844,11 @@ async function startServer() {
         }
       }
 
-      if (!resolvedTempPass && tp) {
+      if (!resolvedTempPass && tp && (userDocData?.initialTempPass === tp || userDocData?.temporaryPassword === tp || hasValidProof)) {
         resolvedTempPass = tp;
+        if (userDocData?.status === 'pending_activation' && (userDocData?.initialTempPass === tp || userDocData?.temporaryPassword === tp)) {
+          hasValidProof = true;
+        }
       }
       if (!resolvedTempPass && userDocData?.initialTempPass) {
         resolvedTempPass = userDocData.initialTempPass;
@@ -1559,7 +1857,50 @@ async function startServer() {
         resolvedTempPass = userDocData.temporaryPassword;
       }
 
+      // Proof 3/4: Verify oobCode or newly confirmed password against Firebase Auth
       let updatedUserToken: string | null = null;
+      let oobResetAttempted = false;
+
+      if (!hasValidProof && password && oobCode && firebaseConfig?.apiKey) {
+        try {
+          const resetRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oobCode, newPassword: password })
+          });
+          const resetData = await resetRes.json();
+          if (resetRes.ok && (!effectiveEmail || !resetData?.email || resetData.email.toLowerCase() === effectiveEmail)) {
+            hasValidProof = true;
+            oobResetAttempted = true;
+            if (resetData?.idToken) {
+              updatedUserToken = resetData.idToken;
+            }
+          }
+        } catch (resetErr) {
+          console.warn("[FIREBASE AUTH REST] oobCode verification notice:", resetErr);
+        }
+      }
+
+      if (!hasValidProof && password && effectiveEmail && firebaseConfig?.apiKey && (userDocData?.status === 'pending_activation' || userDocData?.status === 'password_reset_pending')) {
+        try {
+          const verifyPwRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: effectiveEmail, password, returnSecureToken: true })
+          });
+          const verifyPwData = await verifyPwRes.json();
+          if (verifyPwRes.ok && verifyPwData?.idToken) {
+            hasValidProof = true;
+            updatedUserToken = verifyPwData.idToken;
+          }
+        } catch {
+          // Ignore network error
+        }
+      }
+
+      if (!hasValidProof) {
+        return res.status(401).json({ error: "Valid activation token, verification code, or authenticated session required." });
+      }
 
       if (adminAuth && password && targetDocId) {
         try {
@@ -1571,7 +1912,7 @@ async function startServer() {
         } catch (adminPwErr) {
           console.warn("[FIREBASE AUTH ADMIN] updateUser password notice:", adminPwErr);
         }
-      } else if (password && oobCode && firebaseConfig?.apiKey) {
+      } else if (!oobResetAttempted && password && oobCode && firebaseConfig?.apiKey) {
         // Update password via Identity Toolkit REST resetPassword with oobCode
         try {
           const resetRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${firebaseConfig.apiKey}`, {
@@ -1587,7 +1928,7 @@ async function startServer() {
         } catch (resetErr) {
           console.warn("[FIREBASE AUTH REST] resetPassword notice:", resetErr);
         }
-      } else if (password && effectiveEmail && resolvedTempPass && firebaseConfig?.apiKey) {
+      } else if (!updatedUserToken && password && effectiveEmail && resolvedTempPass && firebaseConfig?.apiKey) {
         // Update password via Identity Toolkit REST signInWithPassword + update
         try {
           const signInRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
@@ -1690,12 +2031,15 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("[ACTIVATE STAFF ERROR]:", err);
-      return res.status(500).json({ error: err.message || "Failed to activate staff account" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to activate staff account.") });
     }
   });
 
   // API Route: Update Staff User Permissions & Modules in real-time
   app.post("/api/auth/update-user-permissions", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     try {
       const {
         uid,
@@ -1706,6 +2050,39 @@ async function startServer() {
         adminEmail = "Administrator",
         adminUid = "admin"
       } = req.body;
+
+      if (!uid || !hotelId || !isSafeIdentifier(uid) || !isSafeIdentifier(hotelId)) {
+        return res.status(400).json({ error: "Valid uid and hotelId are required." });
+      }
+
+      if (!callerHasStaffManagement(caller, hotelId)) {
+        return res.status(403).json({ error: "Forbidden: Staff management permission required." });
+      }
+
+      if (!db) {
+        return res.status(500).json({ error: "Database connection not initialized." });
+      }
+
+      const { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+
+      // Enforce multi-tenant target check: ensure target user belongs to caller's hotel
+      const targetSnap = await getDoc(doc(db, 'users', uid));
+      if (!targetSnap.exists()) {
+        return res.status(404).json({ error: "Target user profile not found." });
+      }
+      const targetData = targetSnap.data();
+      const targetHotel = targetData.hotelId || targetData.hotel_id;
+      if (!isSuperAdminCaller(caller) && targetHotel && targetHotel !== hotelId) {
+        return res.status(403).json({ error: "Forbidden: Cross-tenant user modification is prohibited." });
+      }
+      if (targetData.role === 'superAdmin' && !isSuperAdminCaller(caller)) {
+        return res.status(403).json({ error: "Forbidden: Cannot modify Super Administrator permissions." });
+      }
+
+      const rawPerms = Array.isArray(permissions) ? permissions : [];
+      const sanitizedPermissions = isSuperAdminCaller(caller)
+        ? rawPerms
+        : rawPerms.filter((p: any) => p !== 'access_super_admin');
 
       const moduleMap: Record<string, string[]> = {
         dashboard: ['view_dashboard', 'export_dashboard'],
@@ -1727,22 +2104,16 @@ async function startServer() {
 
       const resolvedAssignedModules = (Array.isArray(assignedModules) && assignedModules.length > 0)
         ? assignedModules
-        : (Array.isArray(permissions) && permissions.length > 0
-            ? Object.keys(moduleMap).filter(modId => moduleMap[modId].some(p => permissions.includes(p)))
+        : (sanitizedPermissions.length > 0
+            ? Object.keys(moduleMap).filter(modId => moduleMap[modId].some(p => sanitizedPermissions.includes(p)))
             : []);
 
       const now = new Date().toISOString();
       const updateData: any = {
-        permissions,
+        permissions: sanitizedPermissions,
         assignedModules: resolvedAssignedModules,
         updatedAt: now
       };
-
-      if (!db) {
-        return res.status(500).json({ error: "Database connection not initialized" });
-      }
-
-      const { doc, updateDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
 
       // 1. Direct Firestore write
       try {
@@ -1760,10 +2131,10 @@ async function startServer() {
             action: 'UPDATE_STAFF_PERMISSIONS',
             module: 'Staff Security',
             targetId: uid,
-            targetEmail: email || null,
-            performedBy: adminEmail,
-            performedByUid: adminUid,
-            details: `Updated assigned modules (${(assignedModules || []).join(', ')}) and permissions (${permissions.length} capabilities) for staff member ${email || uid}`,
+            targetEmail: email || targetData.email || null,
+            performedBy: caller.email || adminEmail,
+            performedByUid: caller.uid || adminUid,
+            details: `Updated assigned modules (${(resolvedAssignedModules || []).join(', ')}) and permissions (${sanitizedPermissions.length} capabilities) for staff member ${email || uid}`,
             timestamp: serverTimestamp()
           });
         } catch (auditErr) {
@@ -1775,20 +2146,29 @@ async function startServer() {
       return res.status(200).json({
         success: true,
         uid,
-        permissionsCount: permissions.length,
-        assignedModules
+        permissionsCount: sanitizedPermissions.length,
+        assignedModules: resolvedAssignedModules
       });
     } catch (err: any) {
       console.error("[UPDATE PERMS] Failed to update user permissions:", err);
-      return res.status(500).json({ error: err.message || "Failed to update permissions" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to update permissions.") });
     }
   });
 
   // API Route: Synchronize user password credential for server-side auth lifecycle management
   app.post("/api/auth/sync-user-password", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const { uid, email, password, previousPassword } = req.body;
     if ((!uid && !email) || !password) {
       return res.status(400).json({ error: "Missing uid/email or password." });
+    }
+    if (uid && !isSafeIdentifier(uid)) {
+      return res.status(400).json({ error: "Invalid uid format." });
+    }
+    if (email && !isValidEmailAddress(email)) {
+      return res.status(400).json({ error: "Invalid email format." });
     }
 
     if (!db) {
@@ -1799,14 +2179,33 @@ async function startServer() {
       const { doc, getDoc, updateDoc, collection, query, where, getDocs } = await import('firebase/firestore');
       const now = new Date().toISOString();
       let targetDocId = uid;
+      let targetData: any = null;
       const normalizedEmail = email ? email.trim().toLowerCase() : null;
 
-      if (!targetDocId && normalizedEmail) {
+      if (targetDocId) {
+        const snap = await getDoc(doc(db, 'users', targetDocId));
+        if (snap.exists()) {
+          targetData = snap.data();
+        }
+      } else if (normalizedEmail) {
         const q = query(collection(db, 'users'), where('email', '==', normalizedEmail));
         const snap = await getDocs(q);
         if (!snap.empty) {
           targetDocId = snap.docs[0].id;
+          targetData = snap.docs[0].data();
         }
+      }
+
+      const isSelf =
+        (targetDocId && caller.uid === targetDocId) ||
+        (normalizedEmail && caller.email?.toLowerCase() === normalizedEmail);
+      const targetHotelId = targetData?.hotelId || targetData?.hotel_id;
+      const isAuthorizedAdmin =
+        isSuperAdminCaller(caller) ||
+        (targetHotelId && callerHasStaffManagement(caller, targetHotelId) && targetData?.role !== 'superAdmin');
+
+      if (!isSelf && !isAuthorizedAdmin) {
+        return res.status(403).json({ error: "Forbidden: Not authorized to synchronize credentials for this user." });
       }
 
       // Update user doc in Firestore
@@ -1842,13 +2241,21 @@ async function startServer() {
 
       return res.json({ success: true, message: "Credential synchronized." });
     } catch (err: any) {
-      return res.status(500).json({ error: err.message });
+      console.error("[SYNC PASSWORD ERROR]:", err);
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to synchronize credentials.") });
     }
   });
 
   // API Route: Send Tracking Code & Admin Registration Invitation via Email
   app.post("/api/admin/send-tracking-code", async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    if (!isSuperAdminCaller(caller)) {
+      return res.status(403).json({ error: "Forbidden: Super Administrator privileges required." });
+    }
+
     const {
       email,
       code,
@@ -1864,10 +2271,26 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required fields: email and code are required." });
     }
 
+    if (!isValidEmailAddress(email)) {
+      return res.status(400).json({ error: "Invalid recipient email address." });
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
-    const cleanCode = code.trim().toUpperCase();
-    const clientOrigin = baseUrl || req.headers.origin || process.env.APP_URL || `http://localhost:${PORT}`;
+    const cleanCode = String(code).trim().toUpperCase();
+    const clientOrigin = resolveSafeAppOrigin(
+      baseUrl,
+      typeof req.headers.host === 'string' ? req.headers.host : undefined,
+      typeof req.headers.origin === 'string' ? req.headers.origin : undefined,
+      process.env.APP_URL,
+      PORT,
+      process.env.ALLOWED_ORIGINS
+    );
     const registrationUrl = `${clientOrigin.replace(/\/+$/, '')}/?trackingCode=${encodeURIComponent(cleanCode)}&email=${encodeURIComponent(normalizedEmail)}${hotelName ? `&hotelName=${encodeURIComponent(hotelName)}` : ''}&mode=register`;
+
+    const safeCode = escapeHtml(cleanCode);
+    const safePlan = escapeHtml(plan);
+    const safeDuration = escapeHtml(duration);
+    const safeRegistrationUrl = escapeHtml(registrationUrl);
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -1898,12 +2321,12 @@ async function startServer() {
 
               <div style="background-color: #09090b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 28px;">
                 <span style="display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #10b981; margin-bottom: 8px;">Your Unique Registration Code</span>
-                <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 32px; font-weight: 900; letter-spacing: 0.25em; color: #ffffff;">${cleanCode}</span>
-                <div style="margin-top: 12px; font-size: 13px; color: #71717a;">Plan: <strong style="color: #e4e4e7;">${plan}</strong> &bull; Duration: <strong style="color: #e4e4e7;">${duration}</strong></div>
+                <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 32px; font-weight: 900; letter-spacing: 0.25em; color: #ffffff;">${safeCode}</span>
+                <div style="margin-top: 12px; font-size: 13px; color: #71717a;">Plan: <strong style="color: #e4e4e7;">${safePlan}</strong> &bull; Duration: <strong style="color: #e4e4e7;">${safeDuration}</strong></div>
               </div>
 
               <div style="text-align: center; margin-bottom: 32px;">
-                <a href="${registrationUrl}" style="display: inline-block; background-color: #10b981; color: #000000; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 36px; border-radius: 10px;">
+                <a href="${safeRegistrationUrl}" style="display: inline-block; background-color: #10b981; color: #000000; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 36px; border-radius: 10px;">
                   Register Hotel & Administrator Account &rarr;
                 </a>
               </div>
@@ -1919,7 +2342,7 @@ async function startServer() {
 
               <p style="margin: 0; font-size: 12px; line-height: 18px; color: #71717a; border-top: 1px solid #27272a; padding-top: 20px;">
                 Direct Registration Link: <br />
-                <a href="${registrationUrl}" style="color: #10b981; word-break: break-all;">${registrationUrl}</a>
+                <a href="${safeRegistrationUrl}" style="color: #10b981; word-break: break-all;">${safeRegistrationUrl}</a>
               </p>
             </td>
           </tr>
@@ -1954,7 +2377,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("[SEND TRACKING CODE ERROR]:", err);
-      return res.status(500).json({ error: err.message || "Failed to dispatch tracking code email" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to dispatch tracking code email.") });
     }
   });
 
@@ -2040,18 +2463,21 @@ async function startServer() {
         valid: true,
         uid,
         email,
-        profile: profile || null,
+        profile: profile ? redactSensitiveUserFields(profile) : null,
         role: profile?.role || 'staff',
         permissions: profile?.permissions || []
       });
     } catch (err: any) {
       console.error("[VERIFY TOKEN ERROR]:", err);
-      return res.status(500).json({ error: err.message || "Failed to verify ID token" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to verify ID token.") });
     }
   });
 
   // API Route: Send Account Activation Email
   app.post("/api/auth/send-account-activation-email", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const {
       hotelId,
       hotelName = "Hotel Property",
@@ -2071,6 +2497,25 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required fields for activation email." });
     }
 
+    if (!isSafeIdentifier(hotelId) || !isValidEmailAddress(targetEmail)) {
+      return res.status(400).json({ error: "Invalid hotelId or recipient email address." });
+    }
+
+    if (!callerHasStaffManagement(caller, hotelId)) {
+      return res.status(403).json({ error: "Forbidden: Staff management permission required." });
+    }
+
+    if (
+      !isSafeActionUrl(
+        activationUrl,
+        typeof req.headers.host === 'string' ? req.headers.host : undefined,
+        process.env.APP_URL,
+        process.env.ALLOWED_ORIGINS
+      )
+    ) {
+      return res.status(400).json({ error: "Invalid or disallowed activation URL origin." });
+    }
+
     try {
       const formattedExpiry = new Date(expiresAt).toLocaleString([], { 
         month: 'short', 
@@ -2082,122 +2527,19 @@ async function startServer() {
         ? `${Math.round(durationMinutes / 60)} hour(s)` 
         : `${durationMinutes} minutes`;
 
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Activate Your Staff Account</title>
-        </head>
-        <body style="margin: 0; padding: 0; background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f4f4f5;">
-          <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #09090b; padding: 40px 20px;">
-            <tr>
-              <td align="center">
-                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
-                  <!-- Header -->
-                  <tr>
-                    <td style="padding: 32px 32px 24px; background: linear-gradient(135deg, #18181b 0%, #27272a 100%); border-bottom: 1px solid #27272a;">
-                      <table width="100%">
-                        <tr>
-                          <td>
-                            <div style="display: inline-block; padding: 8px 14px; background-color: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; color: #10b981; font-weight: bold; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;">
-                              Account Activation
-                            </div>
-                            <h1 style="margin: 16px 0 4px; font-size: 22px; font-weight: 700; color: #ffffff;">
-                              Welcome to ${hotelName}
-                            </h1>
-                            <p style="margin: 0; font-size: 14px; color: #a1a1aa;">
-                              Property Management System (PMS) Staff Onboarding
-                            </p>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                  
-                  <!-- Body -->
-                  <tr>
-                    <td style="padding: 32px;">
-                      <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #e4e4e7;">
-                        Hello <strong>${targetName || targetEmail}</strong>,
-                      </p>
-                      <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
-                        Your Hotel Administrator <strong>${adminName}</strong> (${adminEmail}) has created your staff account for <strong>${hotelName}</strong>.
-                      </p>
-
-                      <div style="background-color: #27272a; border-left: 3px solid #10b981; padding: 14px 18px; border-radius: 6px; margin-bottom: 24px;">
-                        <span style="font-size: 12px; font-weight: 700; color: #10b981; text-transform: uppercase;">Security Policy Note:</span>
-                        <p style="margin: 6px 0 0; font-size: 13px; color: #d4d4d8; line-height: 1.5;">
-                          Default passwords are not issued for security compliance. Before accessing the PMS, you must create your own personal password using this single-use activation link.
-                        </p>
-                      </div>
-
-                      ${note ? `
-                        <div style="background-color: #27272a; border-left: 3px solid #3b82f6; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px;">
-                          <span style="font-size: 12px; font-weight: 600; color: #60a5fa; text-transform: uppercase;">Admin Note:</span>
-                          <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${note}"</p>
-                        </div>
-                      ` : ''}
-
-                      <!-- Action Button -->
-                      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
-                        <tr>
-                          <td align="center">
-                            <a href="${activationUrl}" style="display: inline-block; padding: 14px 36px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
-                              Activate Account & Set Password
-                            </a>
-                          </td>
-                        </tr>
-                      </table>
-
-                      <!-- Security & Expiration Warning -->
-                      <div style="background-color: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 16px; margin: 24px 0 16px;">
-                        <table width="100%">
-                          <tr>
-                            <td width="24" valign="top" style="color: #f59e0b; font-size: 16px; padding-right: 10px;">⏳</td>
-                            <td>
-                              <p style="margin: 0; font-size: 13px; font-weight: 600; color: #fbbf24;">
-                                Activation Link Expiration
-                              </p>
-                              <p style="margin: 4px 0 0; font-size: 12px; color: #fde68a; line-height: 1.5;">
-                                This activation link is valid for <strong>${durationHours}</strong> (until <strong>${formattedExpiry}</strong>) and will automatically deactivate once used.
-                              </p>
-                            </td>
-                          </tr>
-                        </table>
-                      </div>
-
-                      <p style="margin: 24px 0 8px; font-size: 12px; color: #71717a;">
-                        If the button above does not open, copy and paste this link into your browser:
-                      </p>
-                      <p style="margin: 0 0 24px; font-size: 12px; color: #10b981; word-break: break-all; background-color: #18181b; border: 1px solid #27272a; padding: 10px; border-radius: 6px;">
-                        ${activationUrl}
-                      </p>
-                      
-                      <hr style="border: none; border-top: 1px solid #27272a; margin: 24px 0;">
-                      
-                      <p style="margin: 0; font-size: 12px; color: #71717a; line-height: 1.5;">
-                        <strong>Security Notice:</strong> If you did not expect this invitation, please contact your hotel management team (${adminEmail}).
-                      </p>
-                    </td>
-                  </tr>
-
-                  <!-- Footer -->
-                  <tr>
-                    <td style="padding: 20px 32px; background-color: #121215; border-top: 1px solid #27272a; text-align: center;">
-                      <p style="margin: 0; font-size: 11px; color: #71717a;">
-                        © ${new Date().getFullYear()} ${hotelName} • Property Management System (PMS)
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-        </body>
-        </html>
-      `;
+      const effectiveAdminEmail = caller.email || adminEmail;
+      const effectiveAdminName = caller.profile?.displayName || adminName || effectiveAdminEmail;
+      const htmlContent = buildActivationEmailHtml({
+        hotelName,
+        targetName: targetName || targetEmail,
+        targetEmail,
+        adminName: effectiveAdminName,
+        adminEmail: effectiveAdminEmail,
+        activationUrl,
+        durationHours,
+        formattedExpiry,
+        note
+      });
 
       const { emailDispatched, method, previewUrl } = await dispatchEmailMessage({
         to: targetEmail,
@@ -2218,7 +2560,7 @@ async function startServer() {
             tokenId: activationToken,
             activationUrl,
             expiresAt,
-            sentBy: adminEmail,
+            sentBy: effectiveAdminEmail,
             status: emailDispatched ? 'sent' : 'queued',
             deliveryMethod: method,
             previewUrl: previewUrl || null,
@@ -2240,12 +2582,15 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Account activation email dispatch error:", err);
-      return res.status(500).json({ error: err.message || "Failed to dispatch activation email." });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to dispatch activation email.") });
     }
   });
 
   // API Route: Send Password Reset Email & Generate Token (Server-side)
   app.post("/api/auth/send-password-reset-email", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const { 
       hotelId, 
       hotelName = "Hotel Property", 
@@ -2265,9 +2610,39 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required fields for password reset email." });
     }
 
+    if (!isSafeIdentifier(hotelId) || !isValidEmailAddress(targetEmail)) {
+      return res.status(400).json({ error: "Invalid hotelId or recipient email address." });
+    }
+
+    if (!callerHasStaffManagement(caller, hotelId)) {
+      return res.status(403).json({ error: "Forbidden: Staff management permission required." });
+    }
+
+    if (
+      !isSafeActionUrl(
+        resetUrl,
+        typeof req.headers.host === 'string' ? req.headers.host : undefined,
+        process.env.APP_URL,
+        process.env.ALLOWED_ORIGINS
+      )
+    ) {
+      return res.status(400).json({ error: "Invalid or disallowed password reset URL origin." });
+    }
+
     try {
       const formattedExpiry = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const durationHours = durationMinutes >= 60 ? `${Math.round(durationMinutes / 60)} hour(s)` : `${durationMinutes} minutes`;
+      const effectiveAdminEmail = caller.email || adminEmail || "Hotel Administrator";
+      const effectiveAdminName = caller.profile?.displayName || adminName || effectiveAdminEmail;
+
+      const safeHotelName = escapeHtml(hotelName);
+      const safeTargetName = escapeHtml(targetName || targetEmail);
+      const safeTargetEmail = escapeHtml(targetEmail);
+      const safeAdminLabel = escapeHtml(effectiveAdminName);
+      const safeNote = note ? escapeHtml(note) : '';
+      const safeResetUrl = escapeHtml(resetUrl);
+      const safeDurationHours = escapeHtml(durationHours);
+      const safeFormattedExpiry = escapeHtml(formattedExpiry);
 
       const htmlContent = `
         <!DOCTYPE html>
@@ -2295,7 +2670,7 @@ async function startServer() {
                               Password Reset Request
                             </h1>
                             <p style="margin: 0; font-size: 14px; color: #a1a1aa;">
-                              ${hotelName} Property Management System
+                              ${safeHotelName} Property Management System
                             </p>
                           </td>
                         </tr>
@@ -2307,16 +2682,16 @@ async function startServer() {
                   <tr>
                     <td style="padding: 32px;">
                       <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #e4e4e7;">
-                        Hello <strong>${targetName || targetEmail}</strong>,
+                        Hello <strong>${safeTargetName}</strong>,
                       </p>
                       <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
-                        Your Hotel Administrator <strong>${adminName || adminEmail}</strong> has initiated a secure password reset for your staff account (<code>${targetEmail}</code>).
+                        Your Hotel Administrator <strong>${safeAdminLabel}</strong> has initiated a secure password reset for your staff account (<code>${safeTargetEmail}</code>).
                       </p>
 
-                      ${note ? `
+                      ${safeNote ? `
                         <div style="background-color: #27272a; border-left: 3px solid #f59e0b; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px;">
                           <span style="font-size: 12px; font-weight: 600; color: #fbbf24; text-transform: uppercase;">Admin Note:</span>
-                          <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${note}"</p>
+                          <p style="margin: 4px 0 0; font-size: 13px; color: #d4d4d8; font-style: italic;">"${safeNote}"</p>
                         </div>
                       ` : ''}
 
@@ -2324,7 +2699,7 @@ async function startServer() {
                       <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
                         <tr>
                           <td align="center">
-                            <a href="${resetUrl}" style="display: inline-block; padding: 14px 32px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
+                            <a href="${safeResetUrl}" style="display: inline-block; padding: 14px 32px; background-color: #10b981; color: #09090b; text-decoration: none; font-weight: 700; font-size: 15px; border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);">
                               Create New Password
                             </a>
                           </td>
@@ -2341,7 +2716,7 @@ async function startServer() {
                                 Time-Limited Single-Use Link
                               </p>
                               <p style="margin: 4px 0 0; font-size: 12px; color: #fde68a; line-height: 1.5;">
-                                This link is valid for <strong>${durationHours}</strong> (until <strong>${formattedExpiry}</strong>) and will automatically deactivate once used.
+                                This link is valid for <strong>${safeDurationHours}</strong> (until <strong>${safeFormattedExpiry}</strong>) and will automatically deactivate once used.
                               </p>
                             </td>
                           </tr>
@@ -2352,7 +2727,7 @@ async function startServer() {
                         If the button above does not open, copy and paste this link into your browser:
                       </p>
                       <p style="margin: 0 0 24px; font-size: 12px; color: #10b981; word-break: break-all; background-color: #18181b; border: 1px solid #27272a; padding: 10px; border-radius: 6px;">
-                        ${resetUrl}
+                        ${safeResetUrl}
                       </p>
                       
                       <hr style="border: none; border-top: 1px solid #27272a; margin: 24px 0;">
@@ -2367,7 +2742,7 @@ async function startServer() {
                   <tr>
                     <td style="padding: 20px 32px; background-color: #121215; border-top: 1px solid #27272a; text-align: center;">
                       <p style="margin: 0; font-size: 11px; color: #71717a;">
-                        © ${new Date().getFullYear()} ${hotelName} • Property Management System (PMS)
+                        © ${new Date().getFullYear()} ${safeHotelName} • Property Management System (PMS)
                       </p>
                     </td>
                   </tr>
@@ -2398,7 +2773,7 @@ async function startServer() {
             tokenId: resetToken,
             resetUrl,
             expiresAt,
-            sentBy: adminEmail,
+            sentBy: effectiveAdminEmail,
             status: emailDispatched ? 'sent' : 'queued',
             deliveryMethod: method,
             previewUrl: previewUrl || null,
@@ -2420,15 +2795,15 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Password reset email dispatch error:", err);
-      return res.status(500).json({ error: err.message || "Failed to dispatch password reset email." });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to dispatch password reset email.") });
     }
   });
 
   // API Route: Validate Password Reset / Activation Token (Server-side)
   app.post("/api/auth/validate-reset-token", async (req, res) => {
     const { token } = req.body;
-    if (!token) {
-      return res.status(400).json({ valid: false, error: "Token is required." });
+    if (!token || !isSafeIdentifier(token)) {
+      return res.status(400).json({ valid: false, error: "Valid token is required." });
     }
 
     // Check active in-memory token registry first
@@ -2487,42 +2862,80 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Token validation error:", err);
-      return res.status(500).json({ valid: false, error: err.message });
+      return res.status(500).json({ valid: false, error: sanitizeErrorForClient(err, "Failed to validate reset token.") });
     }
   });
 
   // API Route: Complete Password Reset and Sync User (Server-side)
   app.post("/api/auth/complete-password-reset", async (req, res) => {
     const { tokenId, hotelId, targetEmail, targetUid } = req.body;
-    if (!tokenId) {
-      return res.status(400).json({ error: "Missing token ID." });
+    if (!tokenId || !isSafeIdentifier(tokenId)) {
+      return res.status(400).json({ error: "Valid token ID is required." });
+    }
+    if (hotelId && !isSafeIdentifier(hotelId)) {
+      return res.status(400).json({ error: "Invalid hotelId format." });
+    }
+    if (targetUid && !isSafeIdentifier(targetUid)) {
+      return res.status(400).json({ error: "Invalid targetUid format." });
     }
 
     if (!db) {
       return res.status(500).json({ error: "Database unavailable." });
     }
 
+    const caller = await verifyFirebaseTokenAndCaller(req, false);
+
     try {
       const { doc, updateDoc, getDoc } = await import('firebase/firestore');
       const now = new Date().toISOString();
 
-      // Fetch token to determine type
-      let tokenType: 'activation' | 'password_reset' = 'password_reset';
-      try {
-        const tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
-        if (tokenSnap.exists()) {
-          tokenType = tokenSnap.data()?.type || 'password_reset';
-        }
-      } catch (tErr) {
-        console.warn("Could not read token doc:", tErr);
+      // Verify token actually exists in Firestore
+      let tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+      if (!tokenSnap.exists()) {
+        tokenSnap = await getDoc(doc(db, 'activationTokens', tokenId));
       }
+      if (!tokenSnap.exists()) {
+        return res.status(404).json({ error: "Invalid or unknown reset token." });
+      }
+
+      const tokenData = tokenSnap.data();
+      if (tokenData.status === 'revoked') {
+        return res.status(403).json({ error: "This security token has been revoked." });
+      }
+      const expMs = tokenData.expiresAt ? new Date(tokenData.expiresAt).getTime() : NaN;
+      if (!isNaN(expMs) && Date.now() > expMs) {
+        return res.status(403).json({ error: "This security token has expired." });
+      }
+
+      // Allow if token is unused, or if just marked used client-side within last 120 seconds, or caller owns targetUid
+      const alreadyUsed = Boolean(tokenData.isUsed) || tokenData.status === 'used';
+      if (alreadyUsed) {
+        const usedAtMs = tokenData.usedAt ? new Date(tokenData.usedAt).getTime() : 0;
+        const callerMatchesTarget = caller && caller.uid === (tokenData.targetUid || targetUid);
+        if (!callerMatchesTarget && (!usedAtMs || Date.now() - usedAtMs > 120000)) {
+          return res.status(403).json({ error: "This security token has already been consumed." });
+        }
+      }
+
+      const boundTargetUid = tokenData.targetUid || tokenData.uid || targetUid;
+      const boundTargetEmail = (tokenData.targetEmail || tokenData.email || targetEmail || '').toLowerCase();
+      const boundHotelId = tokenData.hotelId || hotelId;
+
+      if (targetUid && boundTargetUid && targetUid !== boundTargetUid) {
+        return res.status(403).json({ error: "Token does not match target user." });
+      }
+      if (targetEmail && boundTargetEmail && targetEmail.trim().toLowerCase() !== boundTargetEmail) {
+        return res.status(403).json({ error: "Token does not match target email." });
+      }
+
+      const tokenType: 'activation' | 'password_reset' = tokenData?.type || 'password_reset';
 
       // Mark token as used in root collection
       try {
         await updateDoc(doc(db, 'passwordResetTokens', tokenId), {
           isUsed: true,
           status: 'used',
-          usedAt: now,
+          usedAt: tokenData.usedAt || now,
           updatedAt: now
         });
       } catch (e) {
@@ -2530,12 +2943,12 @@ async function startServer() {
       }
 
       // Mark token in hotel subcollection if hotelId is known
-      if (hotelId) {
+      if (boundHotelId) {
         try {
-          await updateDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId), {
+          await updateDoc(doc(db, 'hotels', boundHotelId, 'passwordResetTokens', tokenId), {
             isUsed: true,
             status: 'used',
-            usedAt: now,
+            usedAt: tokenData.usedAt || now,
             updatedAt: now
           });
         } catch (e) {
@@ -2544,15 +2957,15 @@ async function startServer() {
       }
 
       // Update target user profile: status becomes 'active', clear temp passwords
-      if (targetUid) {
+      if (boundTargetUid) {
         try {
-          await updateDoc(doc(db, 'users', targetUid), {
+          await updateDoc(doc(db, 'users', boundTargetUid), {
             status: 'active',
             temporaryPassword: null,
             initialPassword: null,
             forcePasswordChange: false,
             passwordChangedAt: now,
-            passwordChangedBy: targetEmail || 'user',
+            passwordChangedBy: boundTargetEmail || 'user',
             updatedAt: now
           });
         } catch (uErr) {
@@ -2567,7 +2980,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Error in complete-password-reset endpoint:", err);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to complete password reset.") });
     }
   });
 
@@ -2657,6 +3070,9 @@ async function startServer() {
 
   // Master User Deletion Handler (Deletes from Firebase Auth AND purges all Firestore records)
   const handleUserDeletion = async (req: express.Request, res: express.Response) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
     const { 
       hotelId, 
       staffUid, 
@@ -2676,6 +3092,16 @@ async function startServer() {
       return res.status(400).json({ error: "Missing user identification: provide staffUid/targetUid or staffEmail/targetEmail" });
     }
 
+    if (effectiveUid && !isSafeIdentifier(effectiveUid)) {
+      return res.status(400).json({ error: "Invalid user identifier." });
+    }
+    if (hotelId && !isSafeIdentifier(hotelId)) {
+      return res.status(400).json({ error: "Invalid hotelId format." });
+    }
+    if (effectiveEmail && !isValidEmailAddress(effectiveEmail)) {
+      return res.status(400).json({ error: "Invalid email format." });
+    }
+
     if (!db) {
       return res.status(500).json({ error: "Database unavailable" });
     }
@@ -2686,7 +3112,7 @@ async function startServer() {
       let purgedRecordsCount = 0;
       let finalTargetUid = effectiveUid;
 
-      // STEP 1: Fetch target user profile BEFORE deleting to harvest all auth credentials
+      // STEP 1: Fetch target user profile BEFORE deleting to authorize and harvest auth credentials
       let userDocData: any = null;
       if (finalTargetUid) {
         try {
@@ -2712,6 +3138,18 @@ async function startServer() {
         } catch (uQErr) {
           console.warn("[DELETE USER] Query user by email warning:", uQErr);
         }
+      }
+
+      const effectiveHotelId = hotelId || userDocData?.hotelId || userDocData?.hotel_id;
+      const isSuperAdmin = isSuperAdminCaller(caller);
+      const isAuthorizedHotelAdmin =
+        Boolean(effectiveHotelId) &&
+        callerHasStaffManagement(caller, effectiveHotelId) &&
+        userDocData?.role !== 'superAdmin' &&
+        finalTargetUid !== caller.uid;
+
+      if (!isSuperAdmin && !isAuthorizedHotelAdmin) {
+        return res.status(403).json({ error: "Forbidden: You are not authorized to delete this user account." });
       }
 
       // STEP 2: Harvest candidate passwords for Firebase Auth deletion
@@ -2746,7 +3184,6 @@ async function startServer() {
       }
 
       // Query hotel passwordResetTokens if hotelId known
-      const effectiveHotelId = hotelId || userDocData?.hotelId;
       if (effectiveHotelId && effectiveHotelId !== 'system' && normalizedEmail) {
         try {
           const htQuery = query(collection(db, 'hotels', effectiveHotelId, 'passwordResetTokens'), where('targetEmail', '==', normalizedEmail));
@@ -2899,7 +3336,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("User deletion error in endpoint:", err);
-      return res.status(500).json({ error: err.message || "Failed to complete user deletion" });
+      return res.status(500).json({ error: sanitizeErrorForClient(err, "Failed to complete user deletion.") });
     }
   };
 
@@ -2913,8 +3350,6 @@ async function startServer() {
     res.json({
       status: "ready",
       smtpConfigured,
-      smtpHost: process.env.SMTP_HOST || null,
-      smtpUser: process.env.SMTP_USER ? "***" : null,
       testTransportAvailable: true,
       emailServiceReady: true,
       timestamp: new Date().toISOString()

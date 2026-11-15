@@ -13,7 +13,7 @@ import {
   Download,
   FileSpreadsheet
 } from 'lucide-react';
-import { formatCurrency } from '../utils';
+import { formatCurrency, escapeCsvCell } from '../utils';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 
@@ -494,14 +494,14 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
   const exportToCSV = () => {
     const headers = ['Date', 'Type', 'Description', 'Debit', 'Credit', 'Running Balance', 'User', 'ID'];
     const rows = auditedEntries.map(e => [
-      `"${e.dateDisplay}"`,
-      `"${e.transactionType}"`,
-      `"${e.description.replace(/"/g, '""')}"`,
+      escapeCsvCell(e.dateDisplay),
+      escapeCsvCell(e.transactionType),
+      escapeCsvCell(e.description),
       e.debit.toFixed(2),
       e.credit.toFixed(2),
       e.balance.toFixed(2),
-      `"${e.userId}"`,
-      `"${e.id}"`
+      escapeCsvCell(e.userId),
+      escapeCsvCell(e.id)
     ]);
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);

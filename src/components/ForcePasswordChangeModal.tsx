@@ -60,9 +60,13 @@ export function ForcePasswordChangeModal() {
       toast.success('Password updated successfully! Welcome to the PMS.');
 
       // Synchronize credential to server for authentication lifecycle
+      const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
       fetch('/api/auth/sync-user-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+        },
         body: JSON.stringify({
           uid: profile.uid,
           email: profile.email,

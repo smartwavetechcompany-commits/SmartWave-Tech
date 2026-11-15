@@ -253,9 +253,13 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
 
       // 3. Complete activation on server (sets password in Auth, marks user active in DB, marks token used)
       try {
+        const activeUserToken = await auth.currentUser?.getIdToken().catch(() => null);
         await fetch('/api/auth/activate-staff-user', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(activeUserToken ? { 'Authorization': `Bearer ${activeUserToken}` } : {})
+          },
           body: JSON.stringify({
             email: cleanEmail,
             firebase_uid: targetDocId || undefined,

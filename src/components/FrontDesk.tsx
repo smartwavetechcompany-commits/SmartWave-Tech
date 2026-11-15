@@ -71,6 +71,14 @@ import { useSearchParams } from 'react-router-dom';
 import { calculateBilling, getReservationLiveBalance, parseLocalDateTime, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, getGracePeriodInfo, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
+import {
+  resolveApplicableRoomRate,
+  buildInitialRateSnapshot,
+  ensureBaseRateSnapshot,
+  appendExtensionToRateSnapshot,
+  getNightlyRateForStayIndex,
+  calculateBookedRoomTotal
+} from '../utils/rateSnapshot';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { useBookingSources } from '../hooks/useSettings';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
@@ -178,6 +186,7 @@ export function FrontDesk() {
   const [showDigitalKeyModal, setShowDigitalKeyModal] = useState<Reservation | null>(null);
   const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' | 'delete' } | null>(null);
   const [showPostponeModal, setShowPostponeModal] = useState<Reservation | null>(null);
+  const [postponeCorporateRates, setPostponeCorporateRates] = useState<CorporateRate[]>([]);
   const [showDiscountModal, setShowDiscountModal] = useState<Reservation | null>(null);
   const [discountData, setDiscountData] = useState({ 
     amount: 0, 
@@ -875,53 +884,45 @@ export function FrontDesk() {
     };
   }, [hotel?.id, newBooking.corporateId]);
 
+  useEffect(() => {
+    if (!hotel?.id || !showPostponeModal?.corporateId) {
+      setPostponeCorporateRates([]);
+      return;
+    }
+
+    const ratesRef = collection(db, 'hotels', hotel.id, 'corporate_accounts', showPostponeModal.corporateId, 'rates');
+    const q = query(ratesRef, where('status', '==', 'active'));
+    const unsub = onSnapshot(q, (snap) => {
+      setPostponeCorporateRates(snap.docs.map(d => ({ id: d.id, ...d.data() } as CorporateRate)));
+    }, () => {
+      setPostponeCorporateRates([]);
+    });
+
+    return () => {
+      try { unsub(); } catch (_) {}
+    };
+  }, [hotel?.id, showPostponeModal?.corporateId]);
+
   // Recalculate price when room, dates or corporate account changes
   useEffect(() => {
     const calculatePrices = async () => {
       const selectedRoom = rooms.find(r => r.id === newBooking.roomId);
       if (!selectedRoom || !hotel?.id) return;
 
-      let pricePerNight = selectedRoom.price;
-      let negotiated = false;
+      const selectedRoomType = roomTypes.find(t => t.id === selectedRoom.roomTypeId || t.name === selectedRoom.type);
+      const primaryRateInfo = resolveApplicableRoomRate({
+        room: selectedRoom,
+        roomType: selectedRoomType,
+        rateConfigs,
+        corporateRates: activeCorporateRates,
+        corporateId: newBooking.guestType === 'corporate' ? newBooking.corporateId : undefined,
+        targetDate: newBooking.checkIn,
+        rateOption: selectedRateType as any,
+        customRate: customRateAmount
+      });
 
-      // 1. Check corporate negotiated rates
-      if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-        const activeRate = activeCorporateRates.find(r => 
-          (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-          new Date(newBooking.checkIn) >= new Date(r.startDate) &&
-          new Date(newBooking.checkIn) <= new Date(r.endDate)
-        );
-
-        if (activeRate) {
-          pricePerNight = activeRate.rate;
-          negotiated = true;
-        }
-      }
-
-      // 2. If not negotiated, check chosen rate option
-      if (!negotiated) {
-        const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
-        
-        if (selectedRateType === 'base') {
-          pricePerNight = matchingConfig?.baseRate || selectedRoom.price;
-        } else if (selectedRateType === 'weekend') {
-          pricePerNight = (matchingConfig?.weekendRate && matchingConfig.weekendRate > 0) ? matchingConfig.weekendRate : selectedRoom.price;
-        } else if (selectedRateType === 'weekday') {
-          pricePerNight = (matchingConfig?.weekdayRate && matchingConfig.weekdayRate > 0) ? matchingConfig.weekdayRate : selectedRoom.price;
-        } else if (selectedRateType === 'custom') {
-          pricePerNight = customRateAmount;
-        } else {
-          // 'auto' - check dynamic rate configuration
-          const dynamicRate = await roomService.calculateCurrentRate(
-            hotel.id, 
-            selectedRoom.roomTypeId || '', 
-            new Date(newBooking.checkIn)
-          );
-          if (dynamicRate > 0) {
-            pricePerNight = dynamicRate;
-          }
-        }
-      }
+      const pricePerNight = primaryRateInfo.rate;
+      const negotiated = primaryRateInfo.rateSource === 'corporate_contract';
 
       const checkInDateTime = parseLocalDateTime(newBooking.checkIn, newBooking.checkInTime || '14:00');
       const checkOutDateTime = parseLocalDateTime(newBooking.checkOut, newBooking.checkOutTime || '12:00');
@@ -962,30 +963,18 @@ export function FrontDesk() {
       const updatedAdditionalStays = await Promise.all(newBooking.additionalStays.map(async (stay) => {
         const room = rooms.find(r => r.id === stay.roomId);
         if (!room) return stay;
-        
-        let stayPrice = room.price;
-        let stayNegotiated = false;
 
-        if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-          const rate = activeCorporateRates.find(r => 
-            (r.roomTypeId === room.roomTypeId || r.roomType === room.type) &&
-            new Date(stay.checkIn) >= new Date(r.startDate) &&
-            new Date(stay.checkIn) <= new Date(r.endDate)
-          );
-          if (rate) {
-            stayPrice = rate.rate;
-            stayNegotiated = true;
-          }
-        }
-
-        if (!stayNegotiated) {
-          const dynamicRate = await roomService.calculateCurrentRate(
-            hotel.id, 
-            room.roomTypeId || '', 
-            new Date(stay.checkIn)
-          );
-          if (dynamicRate > 0) stayPrice = dynamicRate;
-        }
+        const stayRoomType = roomTypes.find(t => t.id === room.roomTypeId || t.name === room.type);
+        const stayRateInfo = resolveApplicableRoomRate({
+          room,
+          roomType: stayRoomType,
+          rateConfigs,
+          corporateRates: activeCorporateRates,
+          corporateId: newBooking.guestType === 'corporate' ? newBooking.corporateId : undefined,
+          targetDate: stay.checkIn,
+          rateOption: 'auto'
+        });
+        const stayPrice = stayRateInfo.rate;
         
         const sCheckInDateTime = parseLocalDateTime(stay.checkIn, newBooking.checkInTime || '14:00');
         const sCheckOutDateTime = parseLocalDateTime(stay.checkOut, newBooking.checkOutTime || '12:00');
@@ -1038,7 +1027,7 @@ export function FrontDesk() {
     };
 
     calculatePrices();
-  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, newBooking.additionalStays, hotel, currency, exchangeRate, selectedRateType, customRateAmount, rateConfigs]);
+  }, [newBooking.roomId, newBooking.checkIn, newBooking.checkOut, newBooking.corporateId, newBooking.guestType, activeCorporateRates, rooms, roomTypes, newBooking.additionalStays, hotel, currency, exchangeRate, selectedRateType, customRateAmount, rateConfigs]);
 
   useEffect(() => {
     setHasPermissionError(false);
@@ -1227,51 +1216,35 @@ export function FrontDesk() {
         const selectedRoom = rooms.find(r => r.id === stay.roomId);
         if (!selectedRoom) continue;
 
-        // Calculate individual stay price
-        let pricePerNight = selectedRoom.price;
-        let isOverridden = false;
-        let originalRate = selectedRoom.price;
+        // Calculate individual stay price using uniform applicable rate resolver
+        const stayRoomType = roomTypes.find(t => t.id === selectedRoom.roomTypeId || t.name === selectedRoom.type);
+        const autoRateInfo = resolveApplicableRoomRate({
+          room: selectedRoom,
+          roomType: stayRoomType,
+          rateConfigs,
+          corporateRates: activeCorporateRates,
+          corporateId: newBooking.guestType === 'corporate' ? newBooking.corporateId : undefined,
+          targetDate: stay.checkIn,
+          rateOption: 'auto'
+        });
+        const originalRate = autoRateInfo.rate;
 
-        // Check if there's a rate override selected for the primary stay
         const isPrimaryStay = createdStays.length === 0;
-        if (isPrimaryStay) {
-          if (selectedRateType === 'custom') {
-            pricePerNight = customRateAmount;
-            isOverridden = pricePerNight !== originalRate;
-          } else if (selectedRateType === 'base') {
-            const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
-            pricePerNight = matchingConfig?.baseRate || selectedRoom.price;
-            isOverridden = pricePerNight !== originalRate;
-          } else if (selectedRateType === 'weekend') {
-            const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
-            pricePerNight = (matchingConfig?.weekendRate && matchingConfig.weekendRate > 0) ? matchingConfig.weekendRate : selectedRoom.price;
-            isOverridden = pricePerNight !== originalRate;
-          } else if (selectedRateType === 'weekday') {
-            const matchingConfig = rateConfigs.find(rc => rc.roomTypeId === selectedRoom.roomTypeId);
-            pricePerNight = (matchingConfig?.weekdayRate && matchingConfig.weekdayRate > 0) ? matchingConfig.weekdayRate : selectedRoom.price;
-            isOverridden = pricePerNight !== originalRate;
-          } else {
-            // Check corporate negotiated rate
-            if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-              const activeRate = activeCorporateRates.find(r => 
-                (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-                new Date(stay.checkIn) >= new Date(r.startDate) &&
-                new Date(stay.checkIn) <= new Date(r.endDate)
-              );
-              if (activeRate) pricePerNight = activeRate.rate;
-            }
-          }
-        } else {
-          // Additional stays in batch booking
-          if (newBooking.guestType === 'corporate' && newBooking.corporateId) {
-            const activeRate = activeCorporateRates.find(r => 
-              (r.roomTypeId === selectedRoom.roomTypeId || r.roomType === selectedRoom.type) &&
-              new Date(stay.checkIn) >= new Date(r.startDate) &&
-              new Date(stay.checkIn) <= new Date(r.endDate)
-            );
-            if (activeRate) pricePerNight = activeRate.rate;
-          }
-        }
+        const resolvedRateInfo = isPrimaryStay
+          ? resolveApplicableRoomRate({
+              room: selectedRoom,
+              roomType: stayRoomType,
+              rateConfigs,
+              corporateRates: activeCorporateRates,
+              corporateId: newBooking.guestType === 'corporate' ? newBooking.corporateId : undefined,
+              targetDate: stay.checkIn,
+              rateOption: selectedRateType as any,
+              customRate: customRateAmount
+            })
+          : autoRateInfo;
+
+        const pricePerNight = resolvedRateInfo.rate;
+        const isOverridden = isPrimaryStay && selectedRateType !== 'auto' && pricePerNight !== originalRate;
 
         if (isOverridden) {
           // Log manual rate override to activityLogs immediately
@@ -1354,6 +1327,14 @@ export function FrontDesk() {
           guestId = guestRef.id;
         }
 
+        const initialRateSnapshot = buildInitialRateSnapshot({
+          checkIn: stay.checkIn,
+          nights,
+          nightlyRate: pricePerNight,
+          rateSource: resolvedRateInfo.rateSource,
+          effectiveDate: resolvedRateInfo.effectiveDate
+        });
+
         const resRef = doc(collection(db, 'hotels', hotel.id, 'reservations'));
         const resolvedSource = newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in';
         const resData: any = {
@@ -1383,6 +1364,8 @@ export function FrontDesk() {
           corporateReference: newBooking.corporateReference,
           ledgerBalance: totalAmount,
           nightlyRate: pricePerNight,
+          originalNightlyRate: pricePerNight,
+          rateSnapshot: initialRateSnapshot,
           autoNightDeduction: newBooking.autoNightDeduction,
           numberOfGuests: stay.numberOfGuests || newBooking.numberOfGuests || 1,
           mealPlan: stay.mealPlan || newBooking.mealPlan || 'Bed & Breakfast',
@@ -1858,8 +1841,52 @@ export function FrontDesk() {
         return;
       }
 
-      const nightlyRate = room?.price || 0;
-      const baseExtraAmount = extraNights * nightlyRate;
+      // Resolve the currently applicable room rate at extension confirmation time
+      const roomType = roomTypes.find(t => t.id === room?.roomTypeId || t.name === room?.type);
+      const corpRatesForExt = res.corporateId ? postponeCorporateRates : activeCorporateRates;
+      const extRateInfo = resolveApplicableRoomRate({
+        room: room || {
+          id: res.roomId,
+          roomNumber: res.roomNumber,
+          type: '',
+          price: 0,
+          status: 'occupied',
+          floor: '',
+          capacity: 2
+        },
+        roomType,
+        rateConfigs,
+        corporateRates: corpRatesForExt,
+        corporateId: res.corporateId,
+        targetDate: res.checkOut,
+        rateOption: 'auto'
+      });
+
+      const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+      const extensionNightlyRate = extRateInfo.rate > 0
+        ? extRateInfo.rate
+        : getNightlyRateForStayIndex(res, 1, hotel, resLedger).rate;
+      const baseExtraAmount = Number((extraNights * extensionNightlyRate).toFixed(2));
+
+      // Lock extension nights onto rateSnapshot while keeping original nights and original rate untouched
+      const updatedRateSnapshot = appendExtensionToRateSnapshot({
+        res,
+        previousCheckOut: res.checkOut,
+        newCheckOut: newCheckOutDate,
+        extraNights,
+        extensionRate: extensionNightlyRate,
+        extensionRateSource: extRateInfo.rate > 0 ? extRateInfo.rateSource : 'extension_rate',
+        confirmedBy: profile?.email || profile?.uid,
+        hotel,
+        ledgerEntries: resLedger
+      });
+
+      const prevNightsCount = Math.max(
+        1,
+        calculateStayDuration(res.checkIn, res.checkOut).bookedNights || res.nights || 1
+      );
+      const newBookedNights = prevNightsCount + extraNights;
+      const preservedOriginalRate = res.originalNightlyRate ?? res.nightlyRate ?? updatedRateSnapshot.originalNightlyRate;
 
       // Calculate exclusive taxes for the extension to update totalAmount correctly
       const activeTaxes = (hotel?.taxes || []).filter(t => {
@@ -1875,28 +1902,64 @@ export function FrontDesk() {
         }
       });
 
-      const newTotalAmount = res.totalAmount + baseExtraAmount + extraExclusiveTaxTotal;
+      const newTotalAmount = Number((res.totalAmount + baseExtraAmount + extraExclusiveTaxTotal).toFixed(2));
 
       await database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), { 
         checkOut: newCheckOutDate,
-        totalAmount: newTotalAmount
+        nights: newBookedNights,
+        totalAmount: newTotalAmount,
+        originalNightlyRate: preservedOriginalRate,
+        nightlyRate: res.nightlyRate ?? preservedOriginalRate,
+        rateSnapshot: updatedRateSnapshot
       }, {
         hotelId: hotel.id,
         module: 'Front Desk',
         action: 'RESERVATION_POSTPONED',
-        details: `Stay extension for Res #${(res.id || '').slice(-6)} until ${newCheckOutDate}`
+        details: `Stay extension for Res #${(res.id || '').slice(-6)} until ${newCheckOutDate} at ${extensionNightlyRate}/night`
       });
 
-      // Post the extra charge to the ledger if guest is checked in
+      // Post extension night charges cleanly using indexed night records so future auto-billing never double-charges
       if (res.status === 'checked_in') {
-        await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
-          amount: baseExtraAmount,
-          type: 'debit',
-          category: 'room',
-          description: `Stay Extension: ${extraNights} additional nights until ${newCheckOutDate}`,
-          referenceId: res.id,
-          postedBy: profile?.uid || 'system'
-        }, profile?.uid || 'system', res.corporateId);
+        const updatedResForBilling: Reservation = {
+          ...res,
+          checkOut: newCheckOutDate,
+          nights: newBookedNights,
+          totalAmount: newTotalAmount,
+          originalNightlyRate: preservedOriginalRate,
+          nightlyRate: res.nightlyRate ?? preservedOriginalRate,
+          rateSnapshot: updatedRateSnapshot
+        };
+
+        if (res.autoNightDeduction !== false) {
+          await processAutomatedBillingForReservation(hotel, updatedResForBilling, profile?.uid || 'system', new Date());
+        } else {
+          const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
+          const { checkInDateTime } = BillingService.calculateStayWindow(updatedResForBilling, hotel);
+          for (let offset = 0; offset < extraNights; offset++) {
+            const nightIndex = prevNightsCount + 1 + offset;
+            const nightStart = parseLocalDateTime(format(addDays(checkInDateTime, nightIndex - 1), 'yyyy-MM-dd'), checkOutTime);
+            const nightEnd = parseLocalDateTime(format(addDays(checkInDateTime, nightIndex), 'yyyy-MM-dd'), checkOutTime);
+            const nightRefId = `${res.id}_NIGHT_${nightIndex}`;
+            const alreadyPosted = resLedger.some(e => e.type === 'debit' && e.referenceId === nightRefId);
+            if (!alreadyPosted && extensionNightlyRate > 0) {
+              await postToLedger(hotel.id, res.guestId || 'unknown', res.id, {
+                amount: extensionNightlyRate,
+                type: 'debit',
+                category: 'room',
+                description: `Nightly Room Charge [Extension]: ${res.roomNumber} (Night of ${format(nightStart, 'MMM dd, yyyy')}) (Night ${nightIndex} of ${newBookedNights})`,
+                referenceId: nightRefId,
+                postedBy: profile?.uid || 'system',
+                chargePeriodStart: nightStart.toISOString(),
+                chargePeriodEnd: nightEnd.toISOString(),
+                chargeType: 'room_rate',
+                rateSegment: 'extension',
+                rateSource: extRateInfo.rateSource,
+                appliedNightlyRate: extensionNightlyRate,
+                effectiveDate: res.checkOut
+              } as any, profile?.uid || 'system', res.corporateId);
+            }
+          }
+        }
       }
 
       await logActivity(
@@ -1904,10 +1967,10 @@ export function FrontDesk() {
         profile,
         'STAY_EXTENDED',
         'Front Desk',
-        `Stay extended for ${res.guestName} by ${extraNights} night(s) to ${newCheckOutDate}${baseExtraAmount > 0 ? ` (Additional room charge: ${formatCurrency(baseExtraAmount, currency, exchangeRate)})` : ''}`,
+        `Stay extended for ${res.guestName} by ${extraNights} night(s) to ${newCheckOutDate} at ${formatCurrency(extensionNightlyRate, currency, exchangeRate)}/night${baseExtraAmount > 0 ? ` (Additional room charge: ${formatCurrency(baseExtraAmount, currency, exchangeRate)})` : ''}`,
         res.id,
         { checkOut: res.checkOut, totalAmount: res.totalAmount },
-        { checkOut: newCheckOutDate, totalAmount: newTotalAmount, extraNights, baseExtraAmount },
+        { checkOut: newCheckOutDate, totalAmount: newTotalAmount, extraNights, extensionNightlyRate, baseExtraAmount },
         { reservationId: res.id, guestId: res.guestId, roomNumber: res.roomNumber, guestName: res.guestName }
       );
 
@@ -2342,12 +2405,20 @@ export function FrontDesk() {
         const updateData: any = { status };
         const now = new Date();
         const staffName = profile.displayName || profile.name || profile.email || 'Front Desk Staff';
+        let frozenSnapshotForCheckIn: any = null;
         if (status === 'checked_in') {
           updateData.checkInDateTime = now.toISOString();
           updateData.actualCheckIn = now.toISOString();
           updateData.checkInTime = format(now, 'HH:mm');
           updateData.checkedInBy = profile.email || 'System';
           updateData.checkedInByName = staffName;
+          if (!res.rateSnapshot) {
+            const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+            frozenSnapshotForCheckIn = ensureBaseRateSnapshot(res, hotel, resLedger);
+            updateData.rateSnapshot = frozenSnapshotForCheckIn;
+            updateData.originalNightlyRate = res.originalNightlyRate ?? frozenSnapshotForCheckIn.originalNightlyRate;
+            updateData.nightlyRate = res.nightlyRate ?? frozenSnapshotForCheckIn.originalNightlyRate;
+          }
         }
 
         await database.safeUpdate(resRef, updateData, {
@@ -2448,7 +2519,11 @@ export function FrontDesk() {
           await roomService.triggerInventoryConsumption(hotel.id, roomType?.id || '', 'check_in', profile.uid);
 
           // Post ONLY the first night's charge at check-in, if not already posted
-          const rate = res.nightlyRate || (res.totalAmount / (res.nights || 1)) || 0;
+          const effectiveResForNight1: Reservation = res.rateSnapshot
+            ? res
+            : { ...res, rateSnapshot: ensureBaseRateSnapshot(res, hotel) };
+          const night1Info = getNightlyRateForStayIndex(effectiveResForNight1, 1, hotel);
+          const rate = night1Info.rate;
           const { checkInDateTime } = BillingService.calculateStayWindow(res, hotel);
           const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
           const Start = checkInDateTime;
@@ -2479,8 +2554,12 @@ export function FrontDesk() {
               postedBy: profile.uid,
               chargePeriodStart: startStr,
               chargePeriodEnd: endStr,
-              chargeType: 'room_rate'
-            }, profile.uid, res.corporateId);
+              chargeType: 'room_rate',
+              rateSegment: night1Info.segment,
+              rateSource: night1Info.rateSource,
+              appliedNightlyRate: rate,
+              effectiveDate: night1Info.effectiveDate
+            } as any, profile.uid, res.corporateId);
           } else {
             console.log(`[CheckIn] Skipped room charge for reservation ${res.id} because one already exists.`);
           }
@@ -5244,7 +5323,7 @@ export function FrontDesk() {
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span>Rate: {formatCurrency(billing.nightlyRate, currency, exchangeRate)} / night</span>
                           <span className="text-zinc-600">•</span>
-                          <span>Base ({billing.originalNights} {billing.originalNights === 1 ? 'night' : 'nights'}): {formatCurrency((billing.originalNights * billing.nightlyRate), currency, exchangeRate)}</span>
+                          <span>Base ({billing.originalNights} {billing.originalNights === 1 ? 'night' : 'nights'}): {formatCurrency(calculateBookedRoomTotal(res, billing.originalNights, hotel, resLedger), currency, exchangeRate)}</span>
                         </div>
                         {billing.extraNights > 0 && (
                           <div className="text-red-400 font-semibold flex items-center gap-1 flex-wrap">
@@ -6036,15 +6115,35 @@ export function FrontDesk() {
                   );
                 }
 
+                const extraNightsPreview = Math.max(0, Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24)));
+                const targetRoom = rooms.find(r => r.id === showPostponeModal.roomId);
+                const targetRoomType = roomTypes.find(t => t.id === targetRoom?.roomTypeId || t.name === targetRoom?.type);
+                const previewRateInfo = resolveApplicableRoomRate({
+                  room: targetRoom,
+                  roomType: targetRoomType,
+                  rateConfigs,
+                  corporateRates: showPostponeModal.corporateId ? postponeCorporateRates : activeCorporateRates,
+                  corporateId: showPostponeModal.corporateId,
+                  targetDate: showPostponeModal.checkOut,
+                  rateOption: 'auto'
+                });
+                const previewExtRate = previewRateInfo.rate > 0
+                  ? previewRateInfo.rate
+                  : getNightlyRateForStayIndex(showPostponeModal, 1, hotel).rate;
+
                 return (
-                  <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
-                    <div className="flex justify-between text-xs font-bold text-blue-500 uppercase mb-1">
+                  <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl space-y-1">
+                    <div className="flex justify-between text-xs font-bold text-blue-500 uppercase">
                       <span>Extra Nights</span>
-                      <span>{Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24))}</span>
+                      <span>{extraNightsPreview}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-400">
+                      <span>Applicable Extension Rate</span>
+                      <span>{formatCurrency(previewExtRate, currency, exchangeRate)} / night</span>
                     </div>
                     <div className="flex justify-between text-sm font-bold text-zinc-50">
                       <span>Estimated Extra Charge</span>
-                      <span>{formatCurrency(Math.ceil((new Date(newCheckOutDate).getTime() - new Date(showPostponeModal.checkOut).getTime()) / (1000 * 60 * 60 * 24)) * (rooms.find(r => r.id === showPostponeModal.roomId)?.price || 0), currency, exchangeRate)}</span>
+                      <span>{formatCurrency(extraNightsPreview * previewExtRate, currency, exchangeRate)}</span>
                     </div>
                   </div>
                 );
@@ -6392,9 +6491,9 @@ export function FrontDesk() {
                   <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-lg">
                     <div className="space-y-0.5">
                       <p className="text-xs font-bold text-zinc-50">Standard Room Rate</p>
-                      <p className="text-[10px] text-zinc-500">{preview.originalNights} night{preview.originalNights > 1 ? 's' : ''} at {formatCurrency(preview.nightlyRate, currency, exchangeRate)}/night</p>
+                      <p className="text-[10px] text-zinc-500">{preview.originalNights} night{preview.originalNights > 1 ? 's' : ''} at {formatCurrency(preview.nightlyRate, currency, exchangeRate)}/night{checkoutPreviewRes.rateSnapshot?.extensions?.length ? ' (incl. extension snapshot)' : ''}</p>
                     </div>
-                    <p className="text-sm font-bold text-zinc-50">{formatCurrency(preview.originalNights * preview.nightlyRate, currency, exchangeRate)}</p>
+                    <p className="text-sm font-bold text-zinc-50">{formatCurrency(calculateBookedRoomTotal(checkoutPreviewRes, preview.originalNights, hotel, ledgerEntries), currency, exchangeRate)}</p>
                   </div>
 
                   {/* F&B Room Charges */}

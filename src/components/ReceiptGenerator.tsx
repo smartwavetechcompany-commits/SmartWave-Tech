@@ -7,6 +7,7 @@ import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
+import { calculateBookedRoomTotal, getNightlyRateForStayIndex } from '../utils/rateSnapshot';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { printDocument } from '../utils/printUtils';
@@ -196,10 +197,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   if (reservation && type !== 'restaurant') {
     const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
     const totalNights = resAccount.totalNights || reservation.nights || 1;
-    const nightlyRate = reservation.nightlyRate || (reservation.nights && reservation.totalAmount ? (reservation.totalAmount / reservation.nights) : 0);
+    const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;
+    const postedRoomAmount = roomDebits.reduce((sum, e) => sum + (e.amount || 0), 0);
 
-    if (totalNights > postedNightsCount && nightlyRate > 0) {
-      unpostedRoomBase = (totalNights - postedNightsCount) * nightlyRate;
+    if (totalNights > postedNightsCount) {
+      const expectedTotalRoom = calculateBookedRoomTotal(reservation, bookedNightsCount, hotel, filteredEntries) + (resAccount.totalOverstayCharges || 0);
+      unpostedRoomBase = Math.max(0, Number((expectedTotalRoom - postedRoomAmount).toFixed(2)));
     } else if (postedNightsCount === 0 && (reservation.totalAmount || 0) > 0) {
       const stayTaxTotal = reservation.taxAmount || 0;
       unpostedRoomBase = Math.max(0, (reservation.totalAmount || 0) - stayTaxTotal);
@@ -492,9 +495,10 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                     const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
                     const postedNightsCount = roomDebits.length;
                     const totalNights = resAccount.totalNights;
-                    const nightlyRate = reservation.nightlyRate || (reservation.nights ? reservation.totalAmount / reservation.nights : 0);
+                    const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;
+                    const nightlyRate = reservation.originalNightlyRate || reservation.nightlyRate || (reservation.nights ? reservation.totalAmount / reservation.nights : 0);
                     
-                    if (totalNights > postedNightsCount && nightlyRate > 0) {
+                    if (totalNights > postedNightsCount && (nightlyRate > 0 || reservation.rateSnapshot)) {
                       const unpostedNights = totalNights - postedNightsCount;
                       
                       for (let i = 0; i < unpostedNights; i++) {
@@ -503,14 +507,19 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         const nightDate = (checkInDate && !isNaN(checkInDate.getTime()) && checkInDate.getTime() > 0)
                           ? addDays(checkInDate, nightIndex)
                           : new Date();
-                        const isOverstay = nightIndex >= (reservation.nights || 0);
+                        const isOverstay = nightIndex >= bookedNightsCount;
                         const dateFormatted = safeFormatDate(nightDate, 'MMM dd, yyyy', 'Date N/A');
                         
+                        const nightSnapshot = !isOverstay
+                          ? getNightlyRateForStayIndex(reservation, nightIndex + 1, hotel, filteredEntries)
+                          : null;
+                        const rateForThisNight = isOverstay ? nightlyRate : (nightSnapshot?.rate ?? nightlyRate);
+
                         const title = isOverstay 
                           ? `Projected Overstay Room Charge (Night of ${dateFormatted})`
-                          : `Projected Room Charge (Night of ${dateFormatted})`;
-                        
-                        const rateForThisNight = nightlyRate;
+                          : nightSnapshot?.segment === 'extension'
+                            ? `Projected Room Charge [Extension] (Night of ${dateFormatted})`
+                            : `Projected Room Charge (Night of ${dateFormatted})`;
                         
                         if (rateForThisNight <= 0.01 && unpostedNights > 1 && i === unpostedNights - 1) {
                           continue;
@@ -523,7 +532,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                                 {title}
                                 <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
                               </p>
-                              <p className="text-[10px] text-zinc-400">Night {nightIndex + 1} of stay • Rate: {formatCurrency(nightlyRate, currency, exchangeRate)} / night</p>
+                              <p className="text-[10px] text-zinc-400">Night {nightIndex + 1} of stay • Rate: {formatCurrency(rateForThisNight, currency, exchangeRate)} / night</p>
                             </div>
                             <span className="font-bold text-sm text-right">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
                           </div>

@@ -2,6 +2,7 @@ import { Reservation, Hotel, LedgerEntry, Tax, Guest } from '../types';
 import { startOfDay, parseISO, differenceInDays, format, addDays } from 'date-fns';
 import { calculateReservationAccount } from './financialUtils';
 import { calculateStayDuration, StayDuration, getGracePeriodInfo } from './dateUtils';
+import { calculateBookedRoomTotal, resolveLegacyOriginalRate } from './rateSnapshot';
 
 /**
  * Safely parses a date string (YYYY-MM-DD) and optional time string (HH:MM)
@@ -80,36 +81,7 @@ export class BillingEngine {
    * Rates can be any dynamic amount configured by admin.
    */
   static getNightlyRate(res: Reservation, hotel?: Hotel | null, ledgerEntries?: LedgerEntry[]): number {
-    if (res.nightlyRate && res.nightlyRate > 0) {
-      return res.nightlyRate;
-    }
-    // Check if room charge has already posted in ledger
-    if (ledgerEntries && ledgerEntries.length > 0) {
-      const roomDebit = ledgerEntries.find(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate'));
-      if (roomDebit && roomDebit.amount > 0) {
-        // If an inclusive tax debit also exists for this charge, add it back to find the full room rate
-        const inclusiveTax = ledgerEntries.find(e => 
-          e.type === 'debit' && 
-          e.category === 'tax' && 
-          e.description?.toLowerCase().includes('[inclusive]') &&
-          (e.timestamp === roomDebit.timestamp || (roomDebit.id && e.description?.includes(roomDebit.id)))
-        );
-        return Number((roomDebit.amount + (inclusiveTax?.amount || 0)).toFixed(2));
-      }
-    }
-    // Check hotel rooms collection if roomId matches
-    if ((hotel as any)?.rooms && res.roomId) {
-      const room = ((hotel as any).rooms as any[]).find(r => r.id === res.roomId);
-      if (room && room.price > 0) {
-        return room.price;
-      }
-    }
-    // Fallback: initial reservation totalAmount divided by booked nights
-    const bookedNights = Math.max(1, calculateStayDuration(res.checkIn, res.checkOut).bookedNights || res.nights || 1);
-    if (res.totalAmount && res.totalAmount > 0 && res.status !== 'checked_in') {
-      return Number((res.totalAmount / bookedNights).toFixed(2));
-    }
-    return res.totalAmount ? Number((res.totalAmount / bookedNights).toFixed(2)) : 0;
+    return resolveLegacyOriginalRate(res, hotel, ledgerEntries);
   }
 
   /**
@@ -130,8 +102,7 @@ export class BillingEngine {
    */
   static calculateRoomCharges(res: Reservation, hotel?: Hotel | null): number {
     const duration = this.calculateStay(res, hotel);
-    const roomRate = this.getNightlyRate(res, hotel);
-    return Number((roomRate * duration.bookedNights).toFixed(2));
+    return calculateBookedRoomTotal(res, duration.bookedNights, hotel);
   }
 
   /**
@@ -261,6 +232,8 @@ export class BillingEngine {
     let totalPayments = 0;
     let totalRefunds = 0;
 
+    const bookedRoomTotal = calculateBookedRoomTotal(res, stayDuration.bookedNights, hotel, ledgerEntries);
+
     if (resLedger && resLedger.length > 0) {
       // 1. Authoritative calculation from actual ledger entries
       const roomDebits = resLedger.filter(e => e.type === 'debit' && (e.category === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay'));
@@ -283,8 +256,7 @@ export class BillingEngine {
       let unpostedStayCharges = 0;
       let calculatedOverstayGross = 0;
       if (res.status === 'checked_in' && res.autoNightDeduction !== false) {
-        const legitimateTotalNights = stayDuration.totalNights;
-        const totalRoomStayRequired = legitimateTotalNights * nightlyRate;
+        const totalRoomStayRequired = bookedRoomTotal + (stayDuration.overstayNights * nightlyRate);
         if (totalRoomStayRequired > postedRoomChargesSum) {
           unpostedStayCharges = totalRoomStayRequired - postedRoomChargesSum;
           totalCharges += unpostedStayCharges;
@@ -299,7 +271,7 @@ export class BillingEngine {
       const hasInclusiveTaxDebits = taxDebits.some(t => t.description?.toLowerCase().includes('[inclusive]'));
       if (hasInclusiveTaxDebits) {
         // Room debits were posted as pre-tax base, and taxes as separate entries
-        baseRoomGross = stayDuration.bookedNights * nightlyRate;
+        baseRoomGross = bookedRoomTotal;
         inclusiveTaxTotal = taxDebits.filter(t => t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
         exclusiveTaxTotal = taxDebits.filter(t => !t.description?.toLowerCase().includes('[inclusive]')).reduce((sum, t) => sum + t.amount, 0);
       } else if (activeTaxes.some(t => t.isInclusive)) {
@@ -311,7 +283,7 @@ export class BillingEngine {
         baseRoomGross = (stayDuration.bookedNights / Math.max(1, stayDuration.totalNights)) * totalPreTaxStay;
         exclusiveTaxTotal = postedTaxChargesSum;
       } else {
-        baseRoomGross = stayDuration.bookedNights * nightlyRate;
+        baseRoomGross = bookedRoomTotal;
         inclusiveTaxTotal = 0;
         exclusiveTaxTotal = postedTaxChargesSum;
       }
@@ -335,8 +307,8 @@ export class BillingEngine {
 
       totalTaxAmount = inclusiveTaxTotal + exclusiveTaxTotal;
     } else {
-      // 2. Unposted fallback: compute from stay duration and rate
-      const totalRoomStay = nightlyRate * stayDuration.totalNights;
+      // 2. Unposted fallback: compute from stay duration and rate snapshot
+      const totalRoomStay = bookedRoomTotal + (stayDuration.overstayNights * nightlyRate);
       let calculatedTaxTotal = 0;
       let calcIncTotal = 0;
       let calcExclTotal = 0;
@@ -362,7 +334,7 @@ export class BillingEngine {
       inclusiveTaxTotal = calcIncTotal;
       exclusiveTaxTotal = calcExclTotal;
       totalTaxAmount = calculatedTaxTotal;
-      baseRoomGross = (stayDuration.bookedNights * nightlyRate) - (inclusiveTaxTotal * (stayDuration.bookedNights / Math.max(1, stayDuration.totalNights)));
+      baseRoomGross = bookedRoomTotal - (inclusiveTaxTotal * (stayDuration.bookedNights / Math.max(1, stayDuration.totalNights)));
       ancillaryTotal = 0;
       ancillaryCharges = [];
       totalCharges = totalRoomStay + exclusiveTaxTotal;
@@ -539,12 +511,11 @@ export class BillingEngine {
     const factor = Math.pow(10, precision);
 
     const bookedNights = res.nights || 0;
-    const roomRate = res.nightlyRate || (bookedNights > 0 ? (res.totalAmount / bookedNights) : 0) || 0;
-
     const reconstructedLedger = ledgerEntries ? this.reconstructInclusiveTaxes(ledgerEntries) : undefined;
+    const roomRate = this.getNightlyRate(res, hotel, reconstructedLedger);
 
     // 1. Room Charges
-    const roomCharge = this.calculateRoomCharges(res);
+    const roomCharge = this.calculateRoomCharges(res, hotel);
 
     // 2. Overstay Charges
     const overstayCharge = this.calculateOverstay(res, hotel, options);
@@ -714,7 +685,7 @@ export function calculateBilling(
   ledgerEntries?: LedgerEntry[]
 ): BillingState {
   const account = calculateReservationAccount(res, hotel, ledgerEntries);
-  const nightlyRate = res.nightlyRate || (account.totalNights > 0 ? account.totalRoomCharges / account.totalNights : 0);
+  const nightlyRate = res.rateSnapshot?.originalNightlyRate || res.originalNightlyRate || res.nightlyRate || (account.totalNights > 0 ? account.totalRoomCharges / account.totalNights : 0);
   const duration = calculateStayDuration(res.checkIn, res.checkOut);
   const originalNights = duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1);
   return {

@@ -29,6 +29,7 @@ import { db } from '../firebase';
 import { database } from '../utils/database';
 import { logActivity } from '../utils/activityLogger';
 import { postToLedger, settleLedger } from '../services/ledgerService';
+import { buildInitialRateSnapshot, ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { toast } from 'sonner';
 
 export function isRoomDirtyOrUnprepared(room: Room | undefined | null): boolean {
@@ -293,6 +294,8 @@ export function QuickCheckInModal({
       const staffName = profile.displayName || profile.name || profile.email || 'Front Desk Staff';
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
 
+      const arrivalSnapshot = !res.rateSnapshot ? ensureBaseRateSnapshot(res, hotel) : null;
+
       // 1. Update reservation status
       await database.safeUpdate(resRef, {
         status: 'checked_in',
@@ -301,7 +304,12 @@ export function QuickCheckInModal({
         actualCheckIn: now.toISOString(),
         checkInTime: format(now, 'HH:mm'),
         checkedInBy: profile.email || profile.uid || 'System',
-        checkedInByName: staffName
+        checkedInByName: staffName,
+        ...(arrivalSnapshot ? {
+          rateSnapshot: arrivalSnapshot,
+          originalNightlyRate: res.originalNightlyRate ?? arrivalSnapshot.originalNightlyRate,
+          nightlyRate: res.nightlyRate ?? arrivalSnapshot.originalNightlyRate
+        } : {})
       }, {
         hotelId: hotel.id,
         module: 'Front Desk',
@@ -586,6 +594,14 @@ export function QuickCheckInModal({
       }
 
       // 2. Create reservation document with linked guestId
+      const walkInRateSnapshot = buildInitialRateSnapshot({
+        checkIn: checkInDate,
+        nights: walkInNights,
+        nightlyRate: effectiveNightlyRate,
+        rateSource: customRate !== '' ? 'custom_override' : 'room_rate',
+        effectiveDate: checkInDate
+      });
+
       const reservationsCol = collection(db, 'hotels', hotel.id, 'reservations');
       const newResData: any = {
         guestName: trimmedName,
@@ -602,6 +618,8 @@ export function QuickCheckInModal({
         checkOutTime: hotel.defaultCheckOutTime || '12:00',
         nights: walkInNights,
         nightlyRate: effectiveNightlyRate,
+        originalNightlyRate: effectiveNightlyRate,
+        rateSnapshot: walkInRateSnapshot,
         totalAmount: walkInTotalAmount,
         paidAmount: initialPaid,
         paymentStatus,

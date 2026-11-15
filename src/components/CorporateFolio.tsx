@@ -23,7 +23,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, escapeCsvCell } from '../utils';
 import { format } from 'date-fns';
 import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
@@ -706,18 +706,20 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               const csvContent = [
                 headers.join(','),
                 ...ledgerEntries.map(e => [
-                  safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
-                  `"${e.description}"`,
-                  e.category,
-                  e.type === 'debit' ? e.amount : 0,
-                  e.type === 'credit' ? e.amount : 0
+                  escapeCsvCell(safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm')),
+                  escapeCsvCell(e.description),
+                  escapeCsvCell(e.category),
+                  escapeCsvCell(e.type === 'debit' ? e.amount : 0),
+                  escapeCsvCell(e.type === 'credit' ? e.amount : 0)
                 ].join(','))
               ].join('\n');
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
-              link.href = URL.createObjectURL(blob);
+              const url = URL.createObjectURL(blob);
+              link.href = url;
               link.download = `corporate_folio_${currentAccount.name.replace(/\s+/g, '_')}.csv`;
               link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 10000);
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >

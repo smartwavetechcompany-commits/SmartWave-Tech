@@ -55,11 +55,23 @@ function isolateElementForPrint(
     }
   });
 
-  // Remove interactive elements, close buttons, print triggers, inputs, and toasts
+  // Remove interactive elements, close buttons, print triggers, inputs, toasts, and any active script/embed nodes
   const elementsToRemove = cloned.querySelectorAll<HTMLElement>(
-    'button, .print\\:hidden, .no-print, [data-sonner-toaster], .cursor-pointer.hover\\:bg-white\\/10, [class*="print:hidden"], input:not([type="checkbox"]):not([type="radio"]), select, textarea'
+    'button, script, iframe, object, embed, .print\\:hidden, .no-print, [data-sonner-toaster], .cursor-pointer.hover\\:bg-white\\/10, [class*="print:hidden"], input:not([type="checkbox"]):not([type="radio"]), select, textarea'
   );
   elementsToRemove.forEach(el => el.remove());
+
+  // Defense-in-depth: strip any inline on* event attributes or javascript: URLs from cloned elements
+  cloned.querySelectorAll<HTMLElement>('*').forEach(el => {
+    for (const attr of Array.from(el.attributes)) {
+      const attrName = attr.name.toLowerCase();
+      if (attrName.startsWith('on')) {
+        el.removeAttribute(attr.name);
+      } else if ((attrName === 'href' || attrName === 'src') && /^\s*javascript:/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
 
   // Copy canvas contents (QR codes, logos, signatures) from original to clone
   const origCanvases = element.querySelectorAll<HTMLCanvasElement>('canvas');
@@ -132,12 +144,14 @@ function isolateElementForPrint(
   }
 
   const chosenMargin = options?.pageMargin ?? (isDocket ? '0' : '8mm');
+  const safePageSize = /^[a-zA-Z0-9\s]+$/.test(chosenPageSize) ? chosenPageSize : 'A4 portrait';
+  const safeMargin = /^[a-zA-Z0-9.\s%]+$/.test(chosenMargin) ? chosenMargin : '8mm';
 
   styleEl.textContent = `
     @media print {
       @page {
-        size: ${chosenPageSize};
-        margin: ${chosenMargin};
+        size: ${safePageSize};
+        margin: ${safeMargin};
       }
     }
   `;

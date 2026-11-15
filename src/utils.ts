@@ -194,15 +194,23 @@ export function convertCurrency(amount: number, to: 'NGN' | 'USD', exchangeRate:
   return amount;
 }
 
+export function escapeCsvCell(val: unknown): string {
+  if (val === null || val === undefined) return '""';
+  let str = String(val);
+  // Neutralize CSV/Spreadsheet formula injection (=, +, -, @, tab, CR) while preserving genuine signed numbers like -5000
+  const isSignedNumber = typeof val === 'number' || /^-\d+(\.\d+)?$/.test(str.trim());
+  if (!isSignedNumber && /^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
 export function exportToCSV(data: any[], filename: string) {
   if (data.length === 0) return;
   
-  const headers = Object.keys(data[0]).join(',');
+  const headers = Object.keys(data[0]).map(k => escapeCsvCell(k)).join(',');
   const rows = data.map(obj => {
-    return Object.values(obj).map(val => {
-      const str = String(val).replace(/"/g, '""');
-      return `"${str}"`;
-    }).join(',');
+    return Object.values(obj).map(val => escapeCsvCell(val)).join(',');
   });
   
   const csvContent = [headers, ...rows].join('\n');
@@ -217,5 +225,6 @@ export function exportToCSV(data: any[], filename: string) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 }

@@ -472,9 +472,13 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
           });
 
           // Synchronize credential to server for authentication lifecycle
+          const callerToken = await currentUser.getIdToken().catch(() => null);
           fetch('/api/auth/sync-user-password', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+            },
             body: JSON.stringify({
               uid: currentUser.uid,
               email: currentUser.email,

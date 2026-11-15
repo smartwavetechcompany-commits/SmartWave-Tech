@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
+import { ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, safeFormatDate } from '../utils/dateUtils';
 import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
@@ -890,7 +891,15 @@ export function Rooms() {
       const batch = writeBatch(db);
       const resRef = doc(db, 'hotels', hotel.id, 'reservations', res.id);
       
-      batch.update(resRef, { status });
+      const resUpdatePayload: any = { status };
+      if (status === 'checked_in' && !res.rateSnapshot) {
+        const frozenSnapshot = ensureBaseRateSnapshot(res, hotel);
+        resUpdatePayload.rateSnapshot = frozenSnapshot;
+        resUpdatePayload.originalNightlyRate = res.originalNightlyRate ?? frozenSnapshot.originalNightlyRate;
+        resUpdatePayload.nightlyRate = res.nightlyRate ?? frozenSnapshot.originalNightlyRate;
+      }
+
+      batch.update(resRef, resUpdatePayload);
       
       if (status === 'checked_in') {
         batch.update(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), { status: 'occupied' });

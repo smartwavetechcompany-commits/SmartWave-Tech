@@ -5,6 +5,7 @@ import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
 import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
 import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
+import { getNightlyRateForStayIndex, computeOverstayNightAmount } from '../utils/rateSnapshot';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 
@@ -1378,11 +1379,6 @@ export const processAutomatedBillingForReservation = async (
 
   const { checkInDateTime, checkOutDateTime, originalNights } = BillingService.calculateStayWindow(res, hotel);
   const checkOutTime = res.checkOutTime || hotel?.defaultCheckOutTime || '12:00';
-  let nightlyRate = BillingEngine.getNightlyRate(res, hotel);
-
-  if (nightlyRate <= 0) {
-    return { chargedCount: 0, totalAmount: 0 };
-  }
 
   // 1. Fetch current ledger entries for this reservation
   const ledgerQ = query(
@@ -1402,7 +1398,12 @@ export const processAutomatedBillingForReservation = async (
   const stayDuration = BillingEngine.calculateStay(res, hotel, currentTime);
   const maxAllowedOverstayNights = Math.max(0, stayDuration.overstayNights);
   const maxAllowedTotalNights = stayDuration.totalNights;
-  nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+  const nightlyRate = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
+  const hasAnyPositiveSnapshotRate = Boolean(res.rateSnapshot?.nightlyRates?.some(n => n.rate > 0));
+
+  if (nightlyRate <= 0 && !hasAnyPositiveSnapshotRate) {
+    return { chargedCount: 0, totalAmount: 0 };
+  }
 
   let chargedCount = 0;
   let totalAmountCharged = 0;
@@ -1420,7 +1421,7 @@ export const processAutomatedBillingForReservation = async (
     return { chargedCount: 0, totalAmount: 0 };
   }
 
-  // 3. Process Base Stay Nights
+  // 3. Process Booked Stay Nights (Original Confirmed Nights + Approved Extension Nights)
   for (let i = 1; i <= originalNights; i++) {
     const Start = i === 1 
       ? checkInDateTime 
@@ -1458,38 +1459,47 @@ export const processAutomatedBillingForReservation = async (
           }
         }
 
-        // Fallback: if i === 1 and there is ANY room debit in the ledger, treat it as representing Night 1
-        if (i === 1 && (e.category === 'room' || e.chargeType === 'room_rate')) {
+        // Fallback: if i === 1 and there is ANY Night-1 / base room debit in the ledger, treat it as representing Night 1
+        if (i === 1 && (e.category === 'room' || e.chargeType === 'room_rate') && !(e.description || '').toLowerCase().includes('stay extension')) {
           return true;
         }
         return false;
       });
 
       if (!exists && (postedRoomDebits.length + chargedCount) < maxAllowedTotalNights) {
-        await postToLedger(hotel.id, res.guestId, res.id, {
-          amount: nightlyRate,
-          type: 'debit',
-          category: 'room',
-          description: `Nightly Room Charge: ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')}) (Night ${i} of ${originalNights})`,
-          referenceId: `${res.id}_NIGHT_${i}`,
-          postedBy: profileUid,
-          chargePeriodStart: startStr,
-          chargePeriodEnd: endStr,
-          chargeType: 'room_rate'
-        } as any, profileUid, res.corporateId);
+        const nightRateInfo = getNightlyRateForStayIndex(res, i, hotel, ledgerEntries);
+        const nightRateToPost = nightRateInfo.rate;
+        if (nightRateToPost > 0) {
+          const segmentTag = nightRateInfo.segment === 'extension' ? ' [Extension]' : '';
+          await postToLedger(hotel.id, res.guestId, res.id, {
+            amount: nightRateToPost,
+            type: 'debit',
+            category: 'room',
+            description: `Nightly Room Charge${segmentTag}: ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')}) (Night ${i} of ${originalNights})`,
+            referenceId: `${res.id}_NIGHT_${i}`,
+            postedBy: profileUid,
+            chargePeriodStart: startStr,
+            chargePeriodEnd: endStr,
+            chargeType: 'room_rate',
+            rateSegment: nightRateInfo.segment,
+            rateSource: nightRateInfo.rateSource,
+            appliedNightlyRate: nightRateToPost,
+            effectiveDate: nightRateInfo.effectiveDate
+          } as any, profileUid, res.corporateId);
 
-        chargedCount++;
-        totalAmountCharged += nightlyRate;
-        lastChargeTime = currentTime.toISOString();
-        nextChargeTime = BillingService.calculateNextChargeDateTime(res, hotel, i).toISOString();
+          chargedCount++;
+          totalAmountCharged += nightRateToPost;
+          lastChargeTime = currentTime.toISOString();
+          nextChargeTime = BillingService.calculateNextChargeDateTime(res, hotel, i).toISOString();
+        }
       }
     }
   }
 
-  // 4. Process Overstay Nights strictly capped by maxAllowedOverstayNights
+  // 4. Process Unapproved Overstay Nights strictly capped by maxAllowedOverstayNights
   const graceInfo = getGracePeriodInfo(res, hotel, currentTime);
 
-  if (graceInfo.isOverstay && hotel.autoChargeOverstays !== false && maxAllowedOverstayNights > 0) {
+  if (graceInfo.isOverstay && hotel.autoChargeOverstays !== false && maxAllowedOverstayNights > 0 && nightlyRate > 0) {
     const policy = hotel?.overstayPolicy || 'grace';
     const hotelGraceMinutes = graceInfo.totalGraceMinutes;
     const scheduledMs = graceInfo.scheduledCheckoutDateTime.getTime();
@@ -1513,21 +1523,16 @@ export const processAutomatedBillingForReservation = async (
       if (isNightJDue) {
         const startStr = Start.toISOString();
         const endStr = End.toISOString();
-        let targetAmount = nightlyRate;
-
-        if (policy === 'partial' && j === 1) {
-          const partialHours = hotel?.overstayPartialHours ?? 3;
-          const fullHours = hotel?.overstayFullHours ?? 6;
-          const hoursPastDeadline = (nowMs - deadlineForNightJ) / (1000 * 60 * 60);
-          if (hoursPastDeadline <= partialHours) {
-            const partialPercentage = hotel?.overstayPartialPercentage ?? 50;
-            targetAmount = nightlyRate * (partialPercentage / 100);
-          }
-        }
+        const hoursPastDeadline = (nowMs - deadlineForNightJ) / (1000 * 60 * 60);
+        const targetAmount = computeOverstayNightAmount({
+          nightlyRate,
+          hotel,
+          overstayNightIndex: j,
+          hoursPastDeadline
+        });
 
         if (targetAmount > 0) {
           const entryStartDay = format(Start, 'yyyy-MM-dd');
-          const entryEndDay = format(End, 'yyyy-MM-dd');
 
           // Check if already posted by referenceId, charge period, description, or start day
           const alreadyPosted = ledgerEntries.some(e => {
@@ -1557,7 +1562,12 @@ export const processAutomatedBillingForReservation = async (
               postedBy: profileUid,
               chargePeriodStart: startStr,
               chargePeriodEnd: endStr,
-              chargeType: 'overstay'
+              chargeType: 'overstay',
+              rateSegment: 'overstay',
+              rateSource: res.rateSnapshot?.originalRateSource || (res.originalNightlyRate || res.nightlyRate ? 'room_rate' : 'legacy_inferred'),
+              appliedNightlyRate: targetAmount,
+              effectiveDate: entryStartDay,
+              overstayPolicyApplied: policy
             } as any, profileUid, res.corporateId);
 
             chargedCount++;

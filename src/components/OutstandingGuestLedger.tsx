@@ -26,7 +26,7 @@ import {
 import { collection, getDocs, query, where, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount, Guest, Reservation, LedgerEntry } from '../types';
-import { formatCurrency } from '../utils';
+import { formatCurrency, escapeCsvCell } from '../utils';
 import { 
   getOutstandingDebts, 
   subscribeOutstandingDebts,
@@ -437,15 +437,15 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
         `"${isCorp ? 'Corporate' : 'Individual'}"`,
         `"${corpName || ''}"`,
         `"Room ${d.roomNumber || 'N/A'}"`,
-        `"${d.checkoutDate || ''}"`,
+        escapeCsvCell(d.checkoutDate || ''),
         d.agingDays || 0,
         d.originalDebt || 0,
         d.outstandingAmount || 0,
-        `"${d.status}"`,
-        `"${d.guestPhone || ''}"`,
-        `"${d.guestEmail || ''}"`,
-        `"${d.transferredTo?.targetName || ''}"`,
-        `"${(d.notes || '').replace(/"/g, '""')}"`
+        escapeCsvCell(d.status),
+        escapeCsvCell(d.guestPhone || ''),
+        escapeCsvCell(d.guestEmail || ''),
+        escapeCsvCell(d.transferredTo?.targetName || ''),
+        escapeCsvCell(d.notes || '')
       ];
     });
 

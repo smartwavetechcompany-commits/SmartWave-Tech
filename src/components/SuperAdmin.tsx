@@ -263,9 +263,13 @@ export function SuperAdmin() {
 
       // 4. Dispatch branded email invitation to prospective hotel admin
       try {
+        const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
         await fetch('/api/admin/send-tracking-code', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+          },
           body: JSON.stringify({
             email: request.email,
             code,
@@ -375,9 +379,13 @@ export function SuperAdmin() {
 
       if (recipientEmail) {
         try {
+          const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
           await fetch('/api/admin/send-tracking-code', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+            },
             body: JSON.stringify({
               email: recipientEmail,
               code,
@@ -660,11 +668,15 @@ export function SuperAdmin() {
           try {
             const usersQ = query(collection(db, 'users'), where('hotelId', '==', hotel.id));
             const usersSnap = await getDocs(usersQ);
+            const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
             for (const uDoc of usersSnap.docs) {
               const uData = uDoc.data();
               await fetch('/api/auth/delete-user', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+                },
                 body: JSON.stringify({
                   hotelId: hotel.id,
                   staffUid: uDoc.id,

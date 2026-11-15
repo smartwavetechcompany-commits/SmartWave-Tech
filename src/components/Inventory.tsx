@@ -12,10 +12,9 @@ import {
   InventoryLocation, InventoryVendor, PurchaseOrder, InventoryAudit,
   OperationType
 } from '../types';
-import { formatCurrency } from '../utils';
+import { formatCurrency, cn, escapeCsvCell } from '../utils';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../utils';
 import { db, handleFirestoreError } from '../firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { format } from 'date-fns';
@@ -81,8 +80,8 @@ export function Inventory() {
     }
     const headers = ['Item Name', 'Category', 'Quantity', 'Min Threshold', 'Unit Price', 'Status', 'Last Updated'];
     const rows = items.map(item => [
-      `"${(item.name || '').replace(/"/g, '""')}"`,
-      `"${(item.category || '').replace(/"/g, '""')}"`,
+      escapeCsvCell(item.name || ''),
+      escapeCsvCell(item.category || ''),
       item.quantity || 0,
       item.minThreshold || 0,
       (item as any).costPrice || (item as any).price || 0,

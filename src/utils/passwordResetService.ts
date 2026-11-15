@@ -147,9 +147,13 @@ export async function generateAccountActivationToken(options: GenerateActivation
   // 5. Send Activation Email via server endpoint
   let emailSent = false;
   try {
+    const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
     const resp = await fetch('/api/auth/send-account-activation-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+      },
       body: JSON.stringify({
         hotelId,
         hotelName,
@@ -316,9 +320,13 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
   // 5. Send Email via server endpoint & trigger Firebase Auth password reset
   let emailSent = false;
   try {
+    const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
     const resp = await fetch('/api/auth/send-password-reset-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+      },
       body: JSON.stringify({
         hotelId,
         hotelName,

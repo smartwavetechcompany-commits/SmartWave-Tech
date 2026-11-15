@@ -55,6 +55,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { toast } from 'sonner';
 import { calculateBilling, getReservationLiveBalance, calculateGuestAccount } from '../utils/billingEngine';
+import { calculateBookedRoomTotal } from '../utils/rateSnapshot';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate } from '../utils/dateUtils';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
@@ -3199,7 +3200,7 @@ export function Finance() {
                   const originalNightsCount = billingState.originalNights;
                   const nightlyRateCalculated = billingState.nightlyRate;
                   const totalNightsExpected = expectedNightsCount;
-                  const grossStayAmount = nightlyRateCalculated * expectedNightsCount;
+                  const grossStayAmount = calculateBookedRoomTotal(resInstance, originalNightsCount, hotel, diagLedgerEntries) + (billingState.overstayCharge || 0);
                   
                   // 2. QUERY DETAILED ACCRUED ANCILLARY FEES
                   const serviceDebits = diagLedgerEntries.filter(e => e.type === 'debit' && e.category !== 'room' && e.category !== 'tax');

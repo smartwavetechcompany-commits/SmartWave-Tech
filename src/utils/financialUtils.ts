@@ -1,6 +1,7 @@
 import { Reservation, Hotel, LedgerEntry, Guest } from '../types';
 import { BillingEngine } from './billingEngine';
 import { calculateStayDuration } from './dateUtils';
+import { calculateBookedRoomTotal } from './rateSnapshot';
 
 export interface GuestAccountSummary {
   totalCharges: number;
@@ -57,8 +58,12 @@ export function calculateReservationAccount(
 
   if (resLedger && resLedger.length > 0) {
     const nightly = BillingEngine.getNightlyRate(res, hotel, ledgerEntries);
-    const legitimateNights = Math.max(1, duration.totalNights);
-    const maxLegitimateGrossRoom = legitimateNights * nightly;
+    const maxLegitimateGrossRoom = calculateBookedRoomTotal(
+      res,
+      Math.max(1, duration.bookedNights || res.nights || 1),
+      hotel,
+      ledgerEntries
+    ) + (Math.max(0, duration.overstayNights || 0) * nightly);
 
     // Separate debits by category and charge type
     const refundDebits: LedgerEntry[] = [];
@@ -176,7 +181,7 @@ export function calculateReservationAccount(
     // Total Room: (bookedNights + overstayNights) * nightly (3 * ₦180,000 = ₦540,000)
     const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
     const overstayNights = Math.max(0, duration.overstayNights || 0);
-    const baseRoom = bookedNights * nightly;
+    const baseRoom = calculateBookedRoomTotal(res, bookedNights, hotel, ledgerEntries);
     const overstayAmount = (res.status === 'checked_in' && res.autoNightDeduction !== false && overstayNights > 0)
       ? overstayNights * nightly
       : (overstayNights > 0 ? overstayNights * nightly : 0);
@@ -190,8 +195,7 @@ export function calculateReservationAccount(
     const ledgerDebitsSum = resLedger.filter(e => e.type === 'debit' && e.category !== 'refund').reduce((sum, e) => sum + e.amount, 0);
     let unpostedStayCharges = 0;
     if (res.status === 'checked_in' && res.autoNightDeduction !== false) {
-      const legitimateTotalNights = duration.totalNights;
-      const totalRoomStayRequired = legitimateTotalNights * nightly;
+      const totalRoomStayRequired = baseRoom + overstayAmount;
       if (totalRoomStayRequired > postedRoomSum) {
         unpostedStayCharges = totalRoomStayRequired - postedRoomSum;
       }
@@ -211,14 +215,15 @@ export function calculateReservationAccount(
     // Handle unposted base room charge ONLY if no room debits have been posted at all yet (e.g. before night audit or initial posting)
     const roomDebitsPosted = roomDebits.length > 0;
     if (!roomDebitsPosted && res.status === 'checked_in' && totalCharges === 0) {
-      const baseRoom = nightly * duration.totalNights;
-      totalCharges += baseRoom;
-      totalRoomCharges += baseRoom;
+      const unpostedRoom = baseRoom + overstayAmount;
+      totalCharges += unpostedRoom;
+      totalRoomCharges += unpostedRoom;
     }
   } else {
     // Fallback: If no ledger entries exist yet, compute from reservation rate breakdown
     const nightly = BillingEngine.getNightlyRate(res, hotel);
-    const baseRoom = nightly * (duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1));
+    const bookedNightsFallback = duration.bookedNights > 0 ? duration.bookedNights : (res.nights || 1);
+    const baseRoom = calculateBookedRoomTotal(res, bookedNightsFallback, hotel);
     const overstayAmount = (res.autoNightDeduction !== false && duration.overstayNights > 0) 
       ? nightly * duration.overstayNights 
       : 0;

@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db, firebaseConfig } from '../firebase';
+import { db, auth, firebaseConfig } from '../firebase';
 import { UserProfile, UserRole, StaffRole } from '../types';
 
 export interface ProvisionStaffParams {
@@ -56,11 +56,13 @@ export async function provisionStaffAccount(params: ProvisionStaffParams): Promi
 
   // Path 1: Try full-stack Express API route
   try {
+    const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
     const resp = await fetch('/api/auth/create-staff', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
       },
       body: JSON.stringify({
         hotelId,
@@ -320,11 +322,13 @@ export async function resendStaffActivation(params: ResendActivationParams): Pro
 
   // Path 1: Try server API route
   try {
+    const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
     const resp = await fetch('/api/auth/resend-activation-link', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
       },
       body: JSON.stringify({
         hotelId,

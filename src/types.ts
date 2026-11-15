@@ -557,6 +557,8 @@ export interface Reservation {
   discountCode?: string; // Associated promotional / discount campaign code
   promotionId?: string; // ID of the applied Promotion document
   nightlyRate?: number; // Added for nightly audit synchronization
+  originalNightlyRate?: number; // Preserved confirmed nightly rate from original booking
+  rateSnapshot?: ReservationRateSnapshot; // Per-night & extension rate snapshot history
   totalDiscount?: number; // Added to track total discounts separately from payments
   taxAmount?: number;
   taxDetails?: { name: string; percentage: number; amount: number; isInclusive: boolean }[];
@@ -619,6 +621,52 @@ export interface Reservation {
   linkedReservationIds?: string[];
   linkedRoomNumbers?: string[];
   groupBillingPreference?: 'consolidated' | 'separate';
+}
+
+export type RateSourceType =
+  | 'room_rate'
+  | 'rate_configuration'
+  | 'seasonal_rate'
+  | 'weekend_rate'
+  | 'weekday_rate'
+  | 'corporate_contract'
+  | 'custom_override'
+  | 'extension_rate'
+  | 'legacy_inferred'
+  | string;
+
+export interface ReservationNightlyRateRecord {
+  nightIndex: number; // 1-indexed stay night (1..bookedNights)
+  date: string; // YYYY-MM-DD for this night
+  rate: number;
+  source: RateSourceType;
+  segment: 'original' | 'extension';
+  effectiveDate: string; // Effective date / timestamp when rate took effect
+  extensionId?: string;
+  note?: string;
+}
+
+export interface ReservationExtensionRateRecord {
+  id: string;
+  confirmedAt: string;
+  effectiveDate: string; // YYYY-MM-DD start of extension nights
+  previousCheckOut: string;
+  newCheckOut: string;
+  addedNights: number;
+  startNightIndex: number;
+  endNightIndex: number;
+  nightlyRate: number;
+  rateSource: RateSourceType;
+  confirmedBy?: string;
+}
+
+export interface ReservationRateSnapshot {
+  originalNightlyRate: number;
+  originalRateSource: RateSourceType;
+  originalEffectiveDate: string;
+  nightlyRates: ReservationNightlyRateRecord[];
+  extensions?: ReservationExtensionRateRecord[];
+  lastUpdatedAt?: string;
 }
 
 export interface RoomBlocking {
@@ -1061,6 +1109,11 @@ export interface LedgerEntry {
   directPaidAmount?: number;
   skipAutomaticTax?: boolean;
   skipFinanceMirror?: boolean;
+  rateSegment?: 'original' | 'extension' | 'overstay' | 'legacy';
+  rateSource?: string;
+  appliedNightlyRate?: number;
+  effectiveDate?: string;
+  overstayPolicyApplied?: string;
 }
 
 export interface CorporateAccount {

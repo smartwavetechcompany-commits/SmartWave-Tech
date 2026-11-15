@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, onSnapshot, orderBy, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError } from '../firebase';
+import { db, auth, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -47,7 +47,7 @@ import {
   Sparkles,
   Loader2
 } from 'lucide-react';
-import { cn, formatCurrency, safeStringify } from '../utils';
+import { cn, formatCurrency, safeStringify, escapeCsvCell } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/billingEngine';
@@ -726,10 +726,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       try {
         // Call server-side transaction validation logic (idempotent & immutable calculations)
+        const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
         const response = await fetch("/api/ledger/validate-and-post", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            ...(callerToken ? { "Authorization": `Bearer ${callerToken}` } : {})
           },
           body: JSON.stringify({
             hotelId: hotel.id,
@@ -3099,18 +3101,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               const csvContent = [
                 headers.join(','),
                 ...processedDisplayedEntries.map(e => [
-                  safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm'),
-                  `"${typeof e.description === 'string' ? e.description : JSON.stringify(e.description || '')}"`,
-                  typeof e.category === 'string' ? e.category : String((e.category as any)?.name || 'general'),
-                  e.type === 'debit' ? e.amount : 0,
-                  e.type === 'credit' ? e.amount : 0
+                  escapeCsvCell(safeFormatDate(e.timestamp, 'yyyy-MM-dd HH:mm')),
+                  escapeCsvCell(typeof e.description === 'string' ? e.description : JSON.stringify(e.description || '')),
+                  escapeCsvCell(typeof e.category === 'string' ? e.category : String((e.category as any)?.name || 'general')),
+                  escapeCsvCell(e.type === 'debit' ? e.amount : 0),
+                  escapeCsvCell(e.type === 'credit' ? e.amount : 0)
                 ].join(','))
               ].join('\n');
               const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
               const link = document.createElement('a');
-              link.href = URL.createObjectURL(blob);
+              const url = URL.createObjectURL(blob);
+              link.href = url;
               link.download = `folio_${(currentReservation.id || '').slice(-6)}.csv`;
               link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 10000);
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >

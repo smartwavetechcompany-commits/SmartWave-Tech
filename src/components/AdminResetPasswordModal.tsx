@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth, getClientDeviceInfo } from '../contexts/AuthContext';
 import { UserProfile, PasswordResetToken } from '../types';
 import { doc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { database } from '../utils/database';
 import { 
   KeyRound, 
@@ -200,9 +200,13 @@ export function AdminResetPasswordModal({ user, onClose, onSuccess }: Props) {
       toast.success(`Temporary password assigned to ${user.email}`);
 
       // Sync credential to server for authentication lifecycle
+      const callerToken = await auth.currentUser?.getIdToken().catch(() => null);
       fetch('/api/auth/sync-user-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(callerToken ? { 'Authorization': `Bearer ${callerToken}` } : {})
+        },
         body: JSON.stringify({
           uid: user.uid,
           email: user.email,
