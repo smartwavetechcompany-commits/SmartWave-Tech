@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
@@ -7,8 +7,20 @@
     <meta name="description" content="Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls." />
     <meta property="og:title" content="Tyyl Tech PMS" />
     <meta property="og:description" content="Premium Multi-Tenant SaaS Hotel Property Management System with robust subscription tracking and audit controls." />
+    <style>
+      html, body { background-color: #09090b; color: #f4f4f5; }
+      html:not(.dark), html:not(.dark) body { background-color: #ffffff; color: #09090b; }
+    </style>
     <script>
       (function() {
+        try {
+          var savedTheme = localStorage.getItem('pms_theme');
+          if (savedTheme === 'light') {
+            document.documentElement.classList.remove('dark');
+          } else {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {}
         // Defensive suppressor for benign Firestore quota/backoff logs and Vite HMR websocket disconnections
         function isSuppressed(msg) {
           if (!msg) return false;

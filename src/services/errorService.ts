@@ -56,7 +56,9 @@ class ErrorService {
       message.toLowerCase().includes('websocket') ||
       message.toLowerCase().includes('offline') ||
       code === 'unavailable' ||
-      code === 'network-request-failed';
+      code === 'network-request-failed' ||
+      code === 'auth/network-request-failed' ||
+      message.toLowerCase().includes('network-request-failed');
 
     const appError: AppError = {
       message,

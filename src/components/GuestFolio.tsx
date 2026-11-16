@@ -6,7 +6,7 @@ import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount, Promotion } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, settleOverpayment, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, refundGuest, validateRefundRequest, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { logActivity } from '../utils/activityLogger';
@@ -137,6 +137,23 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [settleData, setSettleData] = useState({ 
     splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }] as { amount: number; method: 'cash' | 'card' | 'transfer'; referenceCode?: string; proofUrl?: string }[], 
     notes: '' 
+  });
+  const [refundDraft, setRefundDraft] = useState<{
+    amount: number;
+    method: 'cash' | 'card' | 'transfer';
+    refundDateTime: string;
+    referenceCode: string;
+    reason: string;
+    idempotencyKey: string;
+    step: 'form' | 'confirm';
+  }>({
+    amount: 0,
+    method: 'cash',
+    refundDateTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    referenceCode: '',
+    reason: '',
+    idempotencyKey: '',
+    step: 'form'
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -657,44 +674,6 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     await executeSettlePayment();
   };
 
-  const handleSettleOverpayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!hotel?.id || !profile) return;
-
-    const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
-    const policy = canProcessRefund(hotel, profile, totalAmount);
-    if (!policy.allowed) {
-      toast.error(policy.message || 'Refund denied by policy');
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
-      await settleOverpayment(
-        hotel.id, 
-        currentReservation.guestId || 'unknown', 
-        currentReservation.id, 
-        totalAmount, 
-        settleData.splits[0]?.method || 'cash', 
-        profile.uid, 
-        activeFolio === 'company' ? currentReservation.corporateId : undefined,
-        {
-          uid: profile?.uid,
-          email: profile?.email,
-          role: profile?.role || 'staff',
-          displayName: profile?.displayName || (profile as any)?.name || 'Staff'
-        }
-      );
-      toast.success('Overpayment settled successfully');
-      setShowSettleOverpayment(false);
-    } catch (err: any) {
-      console.error("Settle overpayment error:", err.message || safeStringify(err));
-      toast.error('Failed to settle overpayment');
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   const handlePostCharge = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1114,6 +1093,141 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalCredits = folioBreakdown.tier3.totalPayments;
   const balance = folioBreakdown.tier3.outstandingBalance;
 
+  const folioAvailableCredit = balance < -0.01 ? Number(Math.abs(balance).toFixed(2)) : 0;
+  const groupAvailableCredit = (isMasterWithLinks && groupFinancialSummary)
+    ? (groupFinancialSummary.groupNetBalance < -0.01
+        ? Number(Math.abs(groupFinancialSummary.groupNetBalance).toFixed(2))
+        : 0)
+    : folioAvailableCredit;
+  const maxRefundableCredit = isMasterWithLinks
+    ? Math.min(folioAvailableCredit, groupAvailableCredit)
+    : folioAvailableCredit;
+  const refundPermissionCheck = canProcessRefund(hotel, profile, Math.max(1, maxRefundableCredit));
+
+  const openRefundModal = () => {
+    if (!hotel?.id || !profile) return;
+    if (maxRefundableCredit <= 0.01) {
+      if (isMasterWithLinks && folioAvailableCredit > 0.01 && groupAvailableCredit <= 0.01) {
+        toast.error('Master credit must first cover linked room debt before issuing a cash/bank refund.');
+      } else {
+        toast.info('No refundable credit balance is available on this folio.');
+      }
+      return;
+    }
+    if (!refundPermissionCheck.allowed) {
+      toast.error(refundPermissionCheck.message || 'Refund denied by hotel policy or permissions.');
+      return;
+    }
+
+    setRefundDraft({
+      amount: maxRefundableCredit,
+      method: 'cash',
+      refundDateTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+      referenceCode: '',
+      reason: '',
+      idempotencyKey: `refund_${currentReservation.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      step: 'form'
+    });
+    setShowSettleOverpayment(true);
+  };
+
+  const handleReviewRefund = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile) return;
+
+    const policy = canProcessRefund(hotel, profile, refundDraft.amount);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Refund denied by policy');
+      return;
+    }
+
+    const validation = validateRefundRequest({
+      amount: refundDraft.amount,
+      availableCredit: maxRefundableCredit,
+      method: refundDraft.method,
+      reason: refundDraft.reason,
+      refundDateTime: refundDraft.refundDateTime
+    });
+    if (!validation.isValid) {
+      toast.error(validation.error || 'Please review the refund details.');
+      return;
+    }
+
+    if (
+      refundDraft.method !== 'cash' &&
+      hotel.settings?.payments?.requireTransactionReference &&
+      !refundDraft.referenceCode.trim()
+    ) {
+      toast.error(`A transaction reference ID is required for ${refundDraft.method.toUpperCase()} refunds.`);
+      return;
+    }
+
+    setRefundDraft(prev => ({ ...prev, step: 'confirm' }));
+  };
+
+  const handleConfirmRefund = async () => {
+    if (!hotel?.id || !profile || isSaving) return;
+
+    const policy = canProcessRefund(hotel, profile, refundDraft.amount);
+    if (!policy.allowed) {
+      toast.error(policy.message || 'Refund denied by policy');
+      return;
+    }
+
+    const validation = validateRefundRequest({
+      amount: refundDraft.amount,
+      availableCredit: maxRefundableCredit,
+      method: refundDraft.method,
+      reason: refundDraft.reason,
+      refundDateTime: refundDraft.refundDateTime
+    });
+    if (!validation.isValid) {
+      toast.error(validation.error || 'Refund validation failed');
+      return;
+    }
+
+    const parsedDate = new Date(refundDraft.refundDateTime);
+    const refundIsoTimestamp = !isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : new Date().toISOString();
+
+    await executeRequest(
+      `confirm-refund-${currentReservation.id}-${refundDraft.idempotencyKey}`,
+      async () => {
+        setIsSaving(true);
+        await refundGuest(
+          hotel.id,
+          currentReservation.guestId || 'unknown',
+          currentReservation.id,
+          refundDraft.amount,
+          refundDraft.reason.trim(),
+          profile.uid,
+          activeFolio === 'company' ? currentReservation.corporateId : undefined,
+          {
+            uid: profile.uid,
+            email: profile.email,
+            role: profile.role || 'staff',
+            displayName: profile.displayName || (profile as any)?.name || 'Staff'
+          },
+          {
+            paymentMethod: refundDraft.method,
+            refundDateTime: refundIsoTimestamp,
+            referenceCode: refundDraft.referenceCode.trim() || undefined,
+            idempotencyKey: refundDraft.idempotencyKey,
+            availableCredit: maxRefundableCredit,
+            settlementSource: 'Front Desk'
+          }
+        );
+        toast.success(`Refund of ${formatCurrency(refundDraft.amount, currency, exchangeRate)} recorded & confirmed`);
+        setShowSettleOverpayment(false);
+      },
+      { loadingMessage: 'Recording confirmed refund & updating receipt...', showOverlay: true }
+    ).catch((err: any) => {
+      console.error('Confirm refund error:', err?.message || safeStringify(err));
+      toast.error(err?.message || 'Failed to record refund');
+    }).finally(() => {
+      setIsSaving(false);
+    });
+  };
+
   // Real posted entries only in history items - NO VIRTUAL CREDITS OR PROJECTION REDUCTIONS
   const allHistoryItems = [...processedDisplayedEntries].map(item => ({ ...item, isVirtual: false }));
 
@@ -1290,6 +1404,24 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
               <DollarSign size={14} />
               <span>Settle</span>
             </button>
+            {folioAvailableCredit > 0.01 && (
+              <button
+                type="button"
+                onClick={openRefundModal}
+                disabled={maxRefundableCredit <= 0.01 || !refundPermissionCheck.allowed}
+                title={
+                  !refundPermissionCheck.allowed
+                    ? refundPermissionCheck.message
+                    : maxRefundableCredit <= 0.01
+                      ? 'Apply Master credit to owing linked rooms before issuing a refund'
+                      : 'Record & confirm refund for excess payment'
+                }
+                className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 bg-rose-500/15 text-rose-300 border border-rose-500/40 rounded-lg text-[9px] sm:text-[10px] font-black uppercase tracking-widest hover:bg-rose-500 hover:text-white transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-45 disabled:cursor-not-allowed"
+              >
+                <Banknote size={14} />
+                <span>Refunded</span>
+              </button>
+            )}
             <button 
               type="button"
               onClick={() => setShowReceipt(true)}
@@ -2106,33 +2238,50 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         0
                       );
 
-                      if (owingLinked.length > 0) {
-                        return (
-                          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
-                            <p className="text-[11px] text-amber-300 leading-relaxed">
-                              Master Room {currentReservation.roomNumber} has <strong className="font-mono">{formatCurrency(Math.abs(balance), currency, exchangeRate)}</strong> credit available while linked room(s) ({owingLinked.map(r => `Room ${r.roomNumber}`).join(', ')}) owe <strong className="font-mono">{formatCurrency(owingLinkedTotal, currency, exchangeRate)}</strong>.
-                            </p>
-                            <button
-                              type="button"
-                              onClick={handleApplyMasterCreditToLinked}
-                              disabled={isSaving}
-                              className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-lg text-[11px] uppercase tracking-wider transition-all disabled:opacity-50"
-                            >
-                              {isSaving ? 'Applying Credit...' : 'Apply Master Credit to Linked Room(s)'}
-                            </button>
-                          </div>
-                        );
-                      }
+                      return (
+                        <div className="space-y-2.5">
+                          {owingLinked.length > 0 && (
+                            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+                              <p className="text-[11px] text-amber-300 leading-relaxed">
+                                Master Room {currentReservation.roomNumber} has <strong className="font-mono">{formatCurrency(Math.abs(balance), currency, exchangeRate)}</strong> credit available while linked room(s) ({owingLinked.map(r => `Room ${r.roomNumber}`).join(', ')}) owe <strong className="font-mono">{formatCurrency(owingLinkedTotal, currency, exchangeRate)}</strong>.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={handleApplyMasterCreditToLinked}
+                                disabled={isSaving}
+                                className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-lg text-[11px] uppercase tracking-wider transition-all disabled:opacity-50"
+                              >
+                                {isSaving ? 'Applying Credit...' : 'Apply Master Credit to Linked Room(s)'}
+                              </button>
+                            </div>
+                          )}
 
-                      if (isMasterWithLinks) {
-                        return (
-                          <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300 leading-relaxed">
-                            <strong>Overpayment Credit ({formatCurrency(Math.abs(balance), currency, exchangeRate)}):</strong> Master Room {currentReservation.roomNumber} and all linked room(s) ({linkedGroupReservations.map(r => `Room ${r.roomNumber}`).join(', ')}) are already fully settled (₦0 owed). This excess remains from unused prepaid nights / over-remittance.
-                          </div>
-                        );
-                      }
+                          {isMasterWithLinks && owingLinked.length === 0 && (
+                            <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300 leading-relaxed">
+                              <strong>Overpayment Credit ({formatCurrency(Math.abs(balance), currency, exchangeRate)}):</strong> Master Room {currentReservation.roomNumber} and all linked room(s) ({linkedGroupReservations.map(r => `Room ${r.roomNumber}`).join(', ')}) are already fully settled (₦0 owed). This excess remains from unused prepaid nights / over-remittance.
+                            </div>
+                          )}
 
-                      return null;
+                          {maxRefundableCredit > 0.01 && (
+                            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="text-[11px] text-rose-200 leading-relaxed">
+                                <span className="font-bold text-rose-300 uppercase tracking-wider block text-[10px]">Refundable Excess Payment</span>
+                                Available to refund: <strong className="font-mono text-white">{formatCurrency(maxRefundableCredit, currency, exchangeRate)}</strong>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={openRefundModal}
+                                disabled={!refundPermissionCheck.allowed}
+                                title={!refundPermissionCheck.allowed ? refundPermissionCheck.message : 'Record & confirm guest refund'}
+                                className="px-3.5 py-2 bg-rose-500 hover:bg-rose-400 text-white rounded-lg text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shrink-0 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <Banknote size={14} />
+                                <span>Refunded</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
                     })()}
                   </div>
                 )}
@@ -2223,88 +2372,228 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           )}
 
           {showSettleOverpayment && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[85] flex items-center justify-center p-4 overflow-y-auto">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
+                className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl my-auto"
               >
-                <div className="p-6 border-b border-zinc-800">
-                  <h2 className="text-xl font-bold text-zinc-50">Settle Overpayment</h2>
-                  <p className="text-sm text-zinc-500 mt-1">Refund or balance adjustment for {currentReservation.guestName}</p>
+                <div className="p-6 border-b border-zinc-800 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase tracking-wider">
+                        {refundDraft.step === 'confirm' ? 'Step 2 of 2 • Confirm' : 'Step 1 of 2 • Record'}
+                      </span>
+                      <h2 className="text-xl font-bold text-zinc-50">Refund Confirmation & Receipt</h2>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      {currentReservation.guestName} • Room {currentReservation.roomNumber}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettleOverpayment(false)}
+                    className="p-1.5 text-zinc-500 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
-                <form onSubmit={handleSettleOverpayment}>
-                  <div className="p-6 space-y-4">
-                    <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
-                        <Banknote size={20} />
+
+                {refundDraft.step === 'form' ? (
+                  <form onSubmit={handleReviewRefund}>
+                    <div className="p-6 space-y-4 max-h-[68vh] overflow-y-auto custom-scrollbar">
+                      <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
+                            <Banknote size={20} />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Available Refundable Credit</p>
+                            <p className="text-lg font-black text-emerald-400 font-mono">{formatCurrency(maxRefundableCredit, currency, exchangeRate)}</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRefundDraft(prev => ({ ...prev, amount: maxRefundableCredit }))}
+                          className="px-2.5 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] font-bold uppercase tracking-wider"
+                        >
+                          Full Credit
+                        </button>
                       </div>
-                      <div>
-                        <p className="text-xs font-bold text-zinc-500 uppercase">Available Credit</p>
-                        <p className="text-lg font-bold text-emerald-500">{formatCurrency(Math.abs(balance), currency, exchangeRate)}</p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-zinc-400 uppercase">Refund Amount ({currency}) *</label>
+                          <input
+                            required
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            max={currency === 'USD' ? Number((maxRefundableCredit / exchangeRate).toFixed(2)) : maxRefundableCredit}
+                            value={
+                              refundDraft.amount > 0
+                                ? (currency === 'USD' ? Number((refundDraft.amount / exchangeRate).toFixed(2)) : refundDraft.amount)
+                                : ''
+                            }
+                            onChange={(e) => {
+                              const raw = parseFloat(e.target.value);
+                              const amt = Number.isFinite(raw) ? (currency === 'USD' ? raw * exchangeRate : raw) : 0;
+                              setRefundDraft(prev => ({ ...prev, amount: amt }));
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 font-mono focus:outline-none focus:border-rose-500/50"
+                          />
+                          {refundDraft.amount > maxRefundableCredit + 0.01 && (
+                            <p className="text-[11px] text-rose-400 font-medium">
+                              Cannot exceed available credit of {formatCurrency(maxRefundableCredit, currency, exchangeRate)}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-zinc-400 uppercase">Refund Method *</label>
+                          <select
+                            value={refundDraft.method}
+                            onChange={(e) => setRefundDraft(prev => ({ ...prev, method: e.target.value as 'cash' | 'card' | 'transfer' }))}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-rose-500/50"
+                          >
+                            <option value="cash">Cash</option>
+                            <option value="card">Card</option>
+                            <option value="transfer">Bank Transfer</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-zinc-400 uppercase">Refund Date & Time *</label>
+                          <input
+                            required
+                            type="datetime-local"
+                            value={refundDraft.refundDateTime}
+                            onChange={(e) => setRefundDraft(prev => ({ ...prev, refundDateTime: e.target.value }))}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 text-sm focus:outline-none focus:border-rose-500/50"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-zinc-400 uppercase">
+                            Reference / Transaction ID {refundDraft.method !== 'cash' ? '(Recommended)' : '(Optional)'}
+                          </label>
+                          <input
+                            type="text"
+                            value={refundDraft.referenceCode}
+                            onChange={(e) => setRefundDraft(prev => ({ ...prev, referenceCode: e.target.value }))}
+                            placeholder={refundDraft.method === 'transfer' ? 'e.g. TXN-983421' : 'e.g. POS/Receipt ref'}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 text-sm focus:outline-none focus:border-rose-500/50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-zinc-400 uppercase">Reason for Refund *</label>
+                        <textarea
+                          required
+                          rows={3}
+                          value={refundDraft.reason}
+                          onChange={(e) => setRefundDraft(prev => ({ ...prev, reason: e.target.value }))}
+                          placeholder="e.g. Refund of excess overpayment after early checkout / rate adjustment"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 text-sm focus:outline-none focus:border-rose-500/50"
+                        />
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Refund Amount ({currency})</label>
-                      <input
-                        required
-                        type="number"
-                        value={currency === 'USD' ? ((settleData.splits[0]?.amount || 0) / exchangeRate) || '' : (settleData.splits[0]?.amount || '')}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          const newAmount = currency === 'USD' ? val * exchangeRate : val;
-                          const newSplits = [...settleData.splits];
-                          if (newSplits.length === 0) {
-                            newSplits.push({ amount: newAmount, method: 'cash' });
-                          } else {
-                            newSplits[0].amount = newAmount;
-                          }
-                          setSettleData({ ...settleData, splits: newSplits });
-                        }}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                        max={currency === 'USD' ? Math.abs(balance) / exchangeRate : Math.abs(balance)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Refund Method</label>
-                      <select
-                        value={settleData.splits[0]?.method || 'cash'}
-                        onChange={(e) => {
-                          const newSplits = [...settleData.splits];
-                          if (newSplits.length === 0) {
-                            newSplits.push({ amount: 0, method: e.target.value as any });
-                          } else {
-                            newSplits[0].method = e.target.value as any;
-                          }
-                          setSettleData({ ...settleData, splits: newSplits });
-                        }}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                    <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowSettleOverpayment(false)}
+                        className="flex-1 px-4 py-2.5 bg-zinc-800 text-zinc-300 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
                       >
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="transfer">Bank Transfer</option>
-                      </select>
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={refundDraft.amount <= 0 || refundDraft.amount > maxRefundableCredit + 0.01 || !refundDraft.reason.trim()}
+                        className="flex-1 px-4 py-2.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
+                      >
+                        Review & Confirm
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div>
+                    <div className="p-6 space-y-4 max-h-[68vh] overflow-y-auto custom-scrollbar">
+                      <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl space-y-2.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-zinc-400">Refund Amount</span>
+                          <span className="text-lg font-black text-rose-400 font-mono">
+                            {formatCurrency(refundDraft.amount, currency, exchangeRate)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-zinc-400">Refund Method</span>
+                          <span className="font-bold text-zinc-100 uppercase">{refundDraft.method}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-zinc-400">Refund Date & Time</span>
+                          <span className="font-mono text-zinc-200">{safeFormatDate(refundDraft.refundDateTime, 'MMM d, yyyy HH:mm')}</span>
+                        </div>
+                        {refundDraft.referenceCode.trim() && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-zinc-400">Reference / Transaction ID</span>
+                            <span className="font-mono text-zinc-200">{refundDraft.referenceCode.trim()}</span>
+                          </div>
+                        )}
+                        <div className="pt-2 border-t border-rose-500/20 text-xs">
+                          <span className="text-zinc-400 block mb-0.5">Reason</span>
+                          <span className="text-zinc-100 font-medium">{refundDraft.reason.trim()}</span>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-2xl space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-500">Available Credit Before Refund</span>
+                          <span className="font-mono font-bold text-emerald-400">{formatCurrency(maxRefundableCredit, currency, exchangeRate)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-500">Remaining Credit After Refund</span>
+                          <span className="font-mono font-bold text-zinc-100">
+                            {formatCurrency(Math.max(0, maxRefundableCredit - refundDraft.amount), currency, exchangeRate)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1.5 border-t border-zinc-800/80">
+                          <span className="text-zinc-400 font-semibold">Remaining Net Amount Paid</span>
+                          <span className="font-mono font-black text-emerald-400">
+                            {formatCurrency(Math.max(0, resAccount.totalPayments - folioBreakdown.tier3.totalRefunds - refundDraft.amount), currency, exchangeRate)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        Original payment records remain preserved. Confirming will record this refund as a separate <strong className="text-rose-300">Refunded</strong> transaction on the guest folio, official receipt, finance ledger, and audit trail.
+                      </p>
+                    </div>
+
+                    <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => setRefundDraft(prev => ({ ...prev, step: 'form' }))}
+                        className="flex-1 px-4 py-2.5 bg-zinc-800 text-zinc-300 rounded-xl font-bold hover:bg-zinc-700 transition-colors disabled:opacity-50"
+                      >
+                        Back & Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={handleConfirmRefund}
+                        className="flex-1 px-4 py-2.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {isSaving ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                        <span>{isSaving ? 'Saving Refund...' : 'Confirm & Save Refund'}</span>
+                      </button>
                     </div>
                   </div>
-                  <div className="p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowSettleOverpayment(false)}
-                      className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={settleData.splits.reduce((acc, s) => acc + s.amount, 0) <= 0 || isSaving}
-                      className="flex-1 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
-                    >
-                      {isSaving ? 'Processing...' : 'Confirm Refund'}
-                    </button>
-                  </div>
-                </form>
+                )}
               </motion.div>
             </div>
           )}
@@ -2927,6 +3216,18 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <RefreshCw size={12} className={isReconciling ? "animate-spin" : ""} />
                   {isReconciling ? 'Reconciling...' : 'Reconcile Balance'}
                 </button>
+                {folioAvailableCredit > 0.01 && (
+                  <button
+                    type="button"
+                    onClick={openRefundModal}
+                    disabled={maxRefundableCredit <= 0.01 || !refundPermissionCheck.allowed}
+                    title={!refundPermissionCheck.allowed ? refundPermissionCheck.message : 'Record & confirm guest refund'}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-rose-500/15 text-rose-300 border border-rose-500/30 text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-rose-500 hover:text-white transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    <Banknote size={12} />
+                    Refunded
+                  </button>
+                )}
                 <button 
                   onClick={() => setShowSettlePayment(true)}
                   className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500 text-black text-[10px] font-bold uppercase tracking-wider rounded-lg hover:bg-emerald-400 transition-colors"
@@ -2955,6 +3256,58 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 )}
               </div>
             </div>
+            {(() => {
+              const refundRecords = sortedHistoryForDisplay.filter(
+                e => e.type === 'debit' && String(e.category).toLowerCase() === 'refund' && !String(e.description || '').toLowerCase().includes('linked room')
+              );
+              if (refundRecords.length === 0) return null;
+              const totalRefundedAmount = refundRecords.reduce((acc, r) => acc + (r.amount || 0), 0);
+              return (
+                <div className="px-6 py-3 bg-rose-500/5 border-b border-rose-500/20 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-rose-300 flex items-center gap-1.5">
+                      <Banknote size={13} />
+                      Confirmed Refund Records ({refundRecords.length})
+                    </span>
+                    <span className="text-xs font-black font-mono text-rose-300">
+                      Total Refunded: {formatCurrency(totalRefundedAmount, currency, exchangeRate)} • Remaining Net Paid: {formatCurrency(Math.max(0, resAccount.totalPayments - totalRefundedAmount), currency, exchangeRate)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {refundRecords.map((rf, idx) => {
+                      const methodLabel = (rf.paymentMethod || rf.description?.match(/Refund\s*\(([^)]+)\)/i)?.[1] || 'cash').toUpperCase();
+                      const staffLabel = (rf as any).postedByName || (rf as any).processedBy?.name || 'Staff';
+                      return (
+                        <div key={rf.id || (rf as any).firestoreId || `rf-${idx}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-900/80 border border-rose-500/20 text-xs">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-black uppercase">
+                                {(rf as any).refundStatus || 'Refunded'}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[9px] font-bold uppercase">
+                                {methodLabel}
+                              </span>
+                              <span className="text-[10px] text-zinc-400 font-mono">
+                                {safeFormatDate((rf as any).refundDateTime || rf.timestamp, 'MMM d, yyyy HH:mm')}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-zinc-200 truncate mt-1">
+                              {(rf as any).refundReason || cleanLedgerDescription(rf.description || '')}
+                            </p>
+                            <p className="text-[10px] text-zinc-500">
+                              By {staffLabel}{(rf as any).referenceCode ? ` • Ref: ${(rf as any).referenceCode}` : ''}
+                            </p>
+                          </div>
+                          <span className="text-sm font-black font-mono text-rose-400 shrink-0">
+                            {formatCurrency(rf.amount, currency, exchangeRate)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
@@ -3022,9 +3375,16 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                   </span>
                                 ) : null}
                                 {String(entry.category).toLowerCase() === 'refund' && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
-                                    ↩ Refund Issued
-                                  </span>
+                                  <>
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                      ↩ {(entry as any).refundStatus || 'Refunded'}
+                                    </span>
+                                    {entry.paymentMethod && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                        {entry.paymentMethod}
+                                      </span>
+                                    )}
+                                  </>
                                 )}
                                 {entry.isVirtual && (
                                   <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-500 text-[8px] font-black uppercase rounded tracking-wide border border-amber-500/30">
@@ -3033,9 +3393,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 mt-0.5">
+                            <div className="flex flex-wrap items-center gap-2 mt-0.5">
                               <span className="text-[10px] text-zinc-500 font-mono">
-                                {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${String(entry.id || (entry as any).firestoreId || '').slice(-8).toUpperCase()}`}
+                                {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${String((entry as any).referenceCode || entry.id || (entry as any).firestoreId || '').slice(-10).toUpperCase()}`}
                               </span>
                               {(() => {
                                 const postedName = (entry as any).postedByName;
@@ -3078,7 +3438,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 label = 'Discount';
                               } else if (rawCat === 'refund') {
                                 colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
-                                label = 'Refund';
+                                label = (entry as any).refundStatus || 'Refunded';
                               } else if (rawCat === 'city_ledger' || rawCat === 'transfer') {
                                 colorClass = "bg-indigo-500/10 text-indigo-400 border-indigo-500/30";
                                 label = 'Transfer';

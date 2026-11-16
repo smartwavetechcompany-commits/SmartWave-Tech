@@ -40,7 +40,7 @@ export const postToLedger = async (
   hotelId: string,
   guestId: string,
   reservationId: string,
-  entry: Omit<LedgerEntry, 'id' | 'timestamp' | 'hotelId' | 'guestId' | 'reservationId'>,
+  entry: Omit<LedgerEntry, 'id' | 'timestamp' | 'hotelId' | 'guestId' | 'reservationId'> & { timestamp?: string },
   postedBy: string,
   corporateId?: string,
   paymentMethod: 'cash' | 'card' | 'transfer' = 'cash',
@@ -134,6 +134,18 @@ export const postToLedger = async (
     }
   }
 
+  // 0c. Prevent duplicate refund transactions using idempotencyKey
+  if (entry.type === 'debit' && entry.category === 'refund' && entry.idempotencyKey) {
+    const existingRefundDoc = querySnap.docs.find((d: any) => {
+      const e = d.data() as LedgerEntry;
+      return e.type === 'debit' && e.category === 'refund' && e.idempotencyKey === entry.idempotencyKey;
+    });
+    if (existingRefundDoc) {
+      console.warn(`Duplicate refund skipped for reservation ${reservationId}: key ${entry.idempotencyKey}`);
+      return { id: existingRefundDoc.id, ...(existingRefundDoc.data() as LedgerEntry) };
+    }
+  }
+
   if (!hotelId) {
     throw new Error('hotelId is required to post to ledger.');
   }
@@ -171,7 +183,11 @@ export const postToLedger = async (
     }
   }
 
-  const timestamp = new Date().toISOString();
+  const nowISO = new Date().toISOString();
+  const requestedTimestamp = (entry as any).timestamp;
+  const timestamp = (requestedTimestamp && !isNaN(new Date(requestedTimestamp).getTime()))
+    ? new Date(requestedTimestamp).toISOString()
+    : nowISO;
   
   // 1. Prepare entries list
   const entries: Omit<LedgerEntry, 'id'>[] = [];
@@ -184,6 +200,9 @@ export const postToLedger = async (
     reservationId,
     corporateId: finalCorporateId,
     postedBy,
+    ...(entry.category === 'payment' || entry.category === 'refund'
+      ? { paymentMethod: entry.paymentMethod || paymentMethod }
+      : {}),
     postedByName: userContext?.displayName || (entry as any).postedByName || userContext?.email || (typeof postedBy === 'string' && postedBy.includes('@') ? postedBy : undefined)
   };
   entries.push(mainEntry);
@@ -283,14 +302,21 @@ export const postToLedger = async (
   
   // 3. Post entries to ledger (append-only) using batch
   const postedIds: string[] = [];
-  const nowISO = new Date().toISOString();
   
   entries.forEach(e => {
     const newDocRef = doc(ledgerRef);
-    const { skipFinanceMirror: _skipFinanceMirror, ...persistableEntry } = e;
-    // Ensure every entry has a timestamp for stable ordering
+    const {
+      skipFinanceMirror: _skipFinanceMirror,
+      previousAvailableCredit: _prevCredit,
+      remainingCredit: _remCredit,
+      ...persistableEntry
+    } = e as any;
+    // Strip undefined fields (Firestore rejects explicit undefined values) and ensure stable timestamp
+    const cleanedEntry = Object.fromEntries(
+      Object.entries(persistableEntry).filter(([, value]) => value !== undefined)
+    );
     const finalEntry = {
-      ...persistableEntry,
+      ...cleanedEntry,
       timestamp: e.timestamp || nowISO,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -402,21 +428,43 @@ export const postToLedger = async (
   const financeRef = collection(db, 'hotels', hotelId, 'finance');
   payments.forEach(p => {
     const financeDocRef = doc(financeRef);
-    batch.set(financeDocRef, {
-      type: p.type === 'credit' ? 'income' : 'expense',
-      amount: p.amount,
-      category: p.category === 'payment' ? 'Room Revenue' : 'Other',
-      description: p.description,
-      timestamp,
-      paymentMethod,
-      settlementSource: p.settlementSource || (p.description?.includes('[F&B Outlet]') ? 'F&B Outlet' : (p.description?.includes('[Front Desk]') ? 'Front Desk' : undefined)),
-      guestId,
-      reservationId: reservationId || null,
-      corporateId: p.corporateId || null,
-      referenceId: postedIds[entries.indexOf(p)],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
+    const effectiveMethod = p.paymentMethod || paymentMethod;
+    const staffInfo = userContext
+      ? {
+          uid: userContext.uid || postedBy,
+          name: userContext.displayName || (p as any).postedByName || userContext.email || 'Staff',
+          role: userContext.role || 'staff'
+        }
+      : ((p as any).processedBy || undefined);
+    const financePayload = Object.fromEntries(
+      Object.entries({
+        type: p.type === 'credit' ? 'income' : 'expense',
+        amount: p.amount,
+        category: p.category === 'payment' ? 'Room Revenue' : 'Other',
+        description: p.description,
+        timestamp,
+        paymentMethod: effectiveMethod,
+        settlementSource: p.settlementSource || (p.description?.includes('[F&B Outlet]') ? 'F&B Outlet' : (p.description?.includes('[Front Desk]') ? 'Front Desk' : undefined)),
+        guestId,
+        reservationId: reservationId || null,
+        corporateId: p.corporateId || null,
+        referenceId: postedIds[entries.indexOf(p)],
+        status: 'completed',
+        postedByName: (p as any).postedByName,
+        processedBy: staffInfo,
+        referenceCode: p.referenceCode,
+        ...(p.category === 'refund' ? {
+          refundStatus: (p as any).refundStatus || 'Refunded',
+          refundMethod: effectiveMethod,
+          refundReason: (p as any).refundReason,
+          refundDateTime: (p as any).refundDateTime || timestamp,
+          processedAt: (p as any).processedAt || nowISO
+        } : {}),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }).filter(([, value]) => value !== undefined)
+    );
+    batch.set(financeDocRef, financePayload);
   });
 
   // 7. Commit batch and Log once with high-fidelity action naming and metadata
@@ -458,18 +506,30 @@ export const postToLedger = async (
     module: 'Folio Ledger',
     action: actionName,
     details: logDetails,
-    metadata: {
-      reservationId,
-      guestId,
-      targetId: reservationId,
-      amount: entry.amount,
-      type: entry.type,
-      category: entry.category,
-      paymentMethod,
-      referenceCode: (entry as any).referenceCode,
-      description: entry.description,
-      entriesCount: entries.length
-    },
+    metadata: Object.fromEntries(
+      Object.entries({
+        reservationId,
+        guestId,
+        targetId: reservationId,
+        amount: entry.amount,
+        type: entry.type,
+        category: entry.category,
+        paymentMethod,
+        referenceCode: (entry as any).referenceCode,
+        description: entry.description,
+        entriesCount: entries.length,
+        ...(primaryCat === 'refund' ? {
+          refundStatus: (entry as any).refundStatus || 'Refunded',
+          refundMethod: entry.paymentMethod || paymentMethod,
+          refundReason: (entry as any).refundReason,
+          refundDateTime: (entry as any).refundDateTime || timestamp,
+          processedAt: (entry as any).processedAt || nowISO,
+          processedByName: userContext?.displayName || (entry as any).postedByName || userContext?.email || postedBy,
+          previousAvailableCredit: (entry as any).previousAvailableCredit,
+          remainingCredit: (entry as any).remainingCredit
+        } : {})
+      }).filter(([, value]) => value !== undefined)
+    ),
     userContext: userContext || { uid: postedBy, role: 'staff' }
   });
 
@@ -897,6 +957,54 @@ export const transferLedgerBalance = async (
   }, postedBy, corporateId, 'cash', userContext);
 };
 
+export interface RefundValidationInput {
+  amount: number;
+  availableCredit: number;
+  method: string;
+  reason: string;
+  refundDateTime?: string;
+}
+
+export const validateRefundRequest = (
+  input: RefundValidationInput
+): { isValid: boolean; error?: string } => {
+  const { amount, availableCredit, method, reason, refundDateTime } = input;
+
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    return { isValid: false, error: 'Refund amount must be greater than zero.' };
+  }
+  if (typeof availableCredit !== 'number' || !Number.isFinite(availableCredit) || availableCredit <= 0.01) {
+    return { isValid: false, error: 'No refundable credit balance is available on this account.' };
+  }
+  if (amount > Number(availableCredit.toFixed(2)) + 0.01) {
+    return {
+      isValid: false,
+      error: `Refund amount (${amount.toFixed(2)}) cannot exceed available refundable credit (${availableCredit.toFixed(2)}).`
+    };
+  }
+  if (!['cash', 'card', 'transfer'].includes(String(method || '').toLowerCase())) {
+    return { isValid: false, error: 'Please select a valid refund payment method (cash, card, or transfer).' };
+  }
+  if (!reason || !reason.trim()) {
+    return { isValid: false, error: 'Please provide a reason for this refund.' };
+  }
+  if (refundDateTime && isNaN(new Date(refundDateTime).getTime())) {
+    return { isValid: false, error: 'Please enter a valid refund date and time.' };
+  }
+
+  return { isValid: true };
+};
+
+export interface RefundGuestOptions {
+  paymentMethod?: 'cash' | 'card' | 'transfer';
+  timestamp?: string;
+  refundDateTime?: string;
+  referenceCode?: string;
+  idempotencyKey?: string;
+  availableCredit?: number;
+  settlementSource?: 'Front Desk' | 'F&B Outlet';
+}
+
 export const refundGuest = async (
   hotelId: string,
   guestId: string,
@@ -905,16 +1013,60 @@ export const refundGuest = async (
   reason: string,
   postedBy: string,
   corporateId?: string,
-  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
+  options?: RefundGuestOptions
 ) => {
+  const method = (options?.paymentMethod || 'cash') as 'cash' | 'card' | 'transfer';
+  const cleanReason = (reason || '').replace(/^Refund(?:\s*\([^)]+\))?:\s*/i, '').trim() || 'Guest overpayment refund';
+  const refundDateTime = options?.refundDateTime || options?.timestamp || new Date().toISOString();
+
+  if (options?.availableCredit !== undefined) {
+    const check = validateRefundRequest({
+      amount,
+      availableCredit: options.availableCredit,
+      method,
+      reason: cleanReason,
+      refundDateTime
+    });
+    if (!check.isValid) {
+      throw new Error(check.error || 'Invalid refund request.');
+    }
+  } else if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Refund amount must be greater than zero.');
+  }
+
+  const processedAt = new Date().toISOString();
+  const cleanRef = options?.referenceCode?.trim();
+  const remainingCredit = options?.availableCredit !== undefined
+    ? Math.max(0, Number((options.availableCredit - amount).toFixed(2)))
+    : undefined;
+
   return postToLedger(hotelId, guestId, reservationId, {
-    amount,
+    amount: Number(amount.toFixed(2)),
     type: 'debit',
     category: 'refund',
-    description: `Refund: ${reason}`,
+    paymentMethod: method,
+    description: `Refund (${method.toUpperCase()}): ${cleanReason}`,
     referenceId: reservationId,
-    postedBy
-  }, postedBy, corporateId, 'cash', userContext);
+    timestamp: refundDateTime,
+    postedBy,
+    refundStatus: 'Refunded',
+    refundReason: cleanReason,
+    refundDateTime,
+    processedAt,
+    processedBy: {
+      uid: userContext?.uid || postedBy,
+      name: userContext?.displayName || userContext?.email || 'Staff',
+      role: userContext?.role || 'staff'
+    },
+    ...(cleanRef ? { referenceCode: cleanRef } : {}),
+    ...(options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+    ...(options?.settlementSource ? { settlementSource: options.settlementSource } : {}),
+    ...(options?.availableCredit !== undefined ? {
+      previousAvailableCredit: Number(options.availableCredit.toFixed(2)),
+      remainingCredit
+    } : {})
+  } as any, postedBy, corporateId, method, userContext);
 };
 
 export const settleOverpayment = async (

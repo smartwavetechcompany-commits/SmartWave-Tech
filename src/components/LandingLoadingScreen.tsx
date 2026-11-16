@@ -4,7 +4,7 @@ import { Building2 } from 'lucide-react';
 
 export function LandingLoadingScreen() {
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center relative overflow-hidden select-none">
+    <div className="dark min-h-screen bg-[#09090b] text-zinc-50 flex flex-col items-center justify-center relative overflow-hidden select-none">
       {/* Subtle ambient background glow */}
       <div 
         className="pointer-events-none absolute w-[500px] h-[500px] rounded-full bg-emerald-500/10 blur-[120px] -top-24 -left-24" 

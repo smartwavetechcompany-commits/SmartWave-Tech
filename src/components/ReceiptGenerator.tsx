@@ -721,11 +721,51 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                   <div className="flex-1">
                     <p className={cn("text-sm font-bold", textCol)}>{cleanLedgerDescription(getSafeStr(e.description))}</p>
                     <p className="text-[10px] text-zinc-400">
-                      <span className="font-medium text-zinc-600">{typeLabel}</span> • {safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}
+                      <span className="font-medium text-zinc-600">{typeLabel}</span> • {safeFormatDate(e.timestamp, 'MMM dd, yyyy HH:mm')}
                       {(e as any).referenceCode ? ` • Ref: ${(e as any).referenceCode}` : ''}
                     </p>
                   </div>
                   <span className={cn("font-bold text-sm text-right", textCol)}>
+                    -{formatCurrency(e.amount, currency, exchangeRate)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Refunds Issued Section (Separate from Original Payments & Charges) */}
+      {(type === 'comprehensive' || type === 'corporate') && refundDebits.length > 0 && (
+        <div className="space-y-4 mb-8">
+          <div className="flex justify-between text-[10px] font-bold text-rose-600 uppercase tracking-widest border-b border-rose-100 pb-2">
+            <span>Refunds Issued</span>
+            <span className="text-right">Amount Refunded</span>
+          </div>
+
+          <div className="space-y-3">
+            {refundDebits.map((e, index) => {
+              const rawMethod = e.paymentMethod || getSafeStr(e.description).match(/Refund\s*\(([^)]+)\)/i)?.[1] || 'cash';
+              const refundMethodLabel = String(rawMethod).toUpperCase();
+              const refundTimestamp = (e as any).refundDateTime || e.timestamp;
+              const refundReason = (e as any).refundReason || cleanLedgerDescription(getSafeStr(e.description));
+              const refCode = (e as any).referenceCode;
+
+              return (
+                <div key={`${e.id || 'refund'}-${index}`} className="flex justify-between items-start py-1 px-2.5 rounded-lg bg-rose-50/70 border border-rose-100">
+                  <div className="flex-1 pr-3">
+                    <p className="text-sm font-bold text-rose-700 flex items-center gap-2 flex-wrap">
+                      <span>{refundReason}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[9px] font-black uppercase tracking-wider leading-none">
+                        {(e as any).refundStatus || 'Refunded'}
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-zinc-600 mt-0.5">
+                      <span className="font-semibold text-rose-700">Refund via {refundMethodLabel}</span> • {safeFormatDate(refundTimestamp, 'MMM dd, yyyy HH:mm')}
+                      {refCode ? ` • Ref: ${refCode}` : ''}
+                    </p>
+                  </div>
+                  <span className="font-bold text-sm text-right text-rose-700 whitespace-nowrap">
                     -{formatCurrency(e.amount, currency, exchangeRate)}
                   </span>
                 </div>
@@ -790,10 +830,16 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               </div>
             )}
             {totalRefunds > 0 && (
-              <div className="flex justify-between items-center text-rose-600 text-[10px]">
-                <span className="font-bold uppercase tracking-widest">Refunds Issued</span>
-                <span className="font-bold">+{formatCurrency(totalRefunds, currency, exchangeRate)}</span>
-              </div>
+              <>
+                <div className="flex justify-between items-center text-rose-600 text-[10px]">
+                  <span className="font-bold uppercase tracking-widest">Refunds Issued (Refunded)</span>
+                  <span className="font-bold">-{formatCurrency(totalRefunds, currency, exchangeRate)}</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-800 text-[11px] pt-1 border-t border-zinc-200/70">
+                  <span className="font-extrabold uppercase tracking-wider">Remaining Net Amount Paid</span>
+                  <span className="font-black">{formatCurrency(Math.max(0, totalPayments - totalRefunds), currency, exchangeRate)}</span>
+                </div>
+              </>
             )}
             <div className="border-t border-zinc-200 pt-2 flex justify-between items-center">
               <span 

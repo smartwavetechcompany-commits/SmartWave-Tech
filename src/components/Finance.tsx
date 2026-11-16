@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount, LedgerEntry } from '../types';
-import { settleLedger, refundGuest, settleOverpayment } from '../services/ledgerService';
+import { settleLedger, refundGuest, validateRefundRequest } from '../services/ledgerService';
 import { reconcileFinanceRecords, reconcileLedgerEntries, isActualPaymentLedgerEntry, calculateGuestFinancialPosition } from '../services/financialService';
 import { canProcessRefund } from '../utils/policyUtils';
 import { syncDailyCharges } from '../services/financeService';
@@ -71,7 +71,7 @@ export function Finance() {
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [showAddPOModal, setShowAddPOModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense' | 'refunds'>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [methodFilter, setMethodFilter] = useState('all');
   const [transactionDateFilter, setTransactionDateFilter] = useState<DateFilterValue>(() => getDefaultDateFilter());
@@ -334,6 +334,12 @@ export function Finance() {
     splits: [{ amount: 0, method: 'cash' as const }] as { amount: number; method: 'cash' | 'card' | 'transfer' }[], 
     notes: '' 
   });
+  const [refundMeta, setRefundMeta] = useState({
+    refundDateTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    referenceCode: '',
+    confirmStep: false,
+    idempotencyKey: ''
+  });
 
   useEffect(() => {
     if (showSettleModal) {
@@ -341,6 +347,12 @@ export function Finance() {
         ? (showSettleModal.currentBalance || 0)
         : getGuestLiveBalance(showSettleModal as Guest);
       setSettleType(balance > 0 ? 'payment' : 'refund');
+      setRefundMeta({
+        refundDateTime: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        referenceCode: '',
+        confirmStep: false,
+        idempotencyKey: `fin_refund_${showSettleModal.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      });
     }
   }, [showSettleModal, getGuestLiveBalance]);
   const [showFolio, setShowFolio] = useState(false);
@@ -576,10 +588,9 @@ export function Finance() {
 
   const handleSettleBalance = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hotel?.id || !profile || !showSettleModal) return;
+    if (!hotel?.id || !profile || !showSettleModal || isSaving) return;
 
     try {
-      setIsSaving(true);
       const entity = showSettleModal;
       const totalAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
 
@@ -608,45 +619,98 @@ export function Finance() {
         return;
       }
 
-      // Check refund policy if we are processing a refund
       if (settleType === 'refund') {
         const policy = canProcessRefund(hotel, profile, totalAmount);
         if (!policy.allowed) {
           toast.error(policy.message || 'Refund denied by policy');
           return;
         }
+
+        const availableCredit = currentBalance < -0.01 ? Number(Math.abs(currentBalance).toFixed(2)) : 0;
+        const primaryMethod = settleData.splits.find(s => s.amount > 0)?.method || 'cash';
+        const validation = validateRefundRequest({
+          amount: totalAmount,
+          availableCredit,
+          method: primaryMethod,
+          reason: settleData.notes,
+          refundDateTime: refundMeta.refundDateTime
+        });
+        if (!validation.isValid) {
+          toast.error(validation.error || 'Invalid refund details');
+          return;
+        }
+
+        const hasNonCashSplit = settleData.splits.some(s => s.amount > 0 && s.method !== 'cash');
+        if (hasNonCashSplit && hotel.settings?.payments?.requireTransactionReference && !refundMeta.referenceCode.trim()) {
+          toast.error('A transaction reference / ID is required by hotel policy for non-cash refunds.');
+          return;
+        }
+
+        // Require explicit confirmation step before saving the refund
+        if (!refundMeta.confirmStep) {
+          setRefundMeta(prev => ({ ...prev, confirmStep: true }));
+          return;
+        }
       }
+
+      setIsSaving(true);
+      const parsedRefundDate = new Date(refundMeta.refundDateTime);
+      const refundIsoTimestamp = !isNaN(parsedRefundDate.getTime()) ? parsedRefundDate.toISOString() : new Date().toISOString();
+      const userCtx = {
+        uid: profile.uid,
+        email: profile.email,
+        role: profile.role || 'staff',
+        displayName: profile.displayName || (profile as any)?.name || 'Staff'
+      };
 
       // Process each split
       await executeRequest(
-        `finance-settle-${entityId}`,
+        settleType === 'refund' ? `finance-refund-${entityId}-${refundMeta.idempotencyKey}` : `finance-settle-${entityId}`,
         async () => {
+          let remainingAvailableCredit = currentBalance < -0.01 ? Number(Math.abs(currentBalance).toFixed(2)) : 0;
+          let splitIndex = 0;
+
           for (const split of settleData.splits) {
             if (split.amount > 0) {
               if (settleType === 'payment') {
                 // Settle outstanding debt: Post a payment (credit)
                 await settleLedger(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
               } else {
-                // Post a refund (debit)
-                const reason = settleData.notes || `Refund (${split.method.toUpperCase()})`;
-                if (currentBalance < 0) {
-                  await settleOverpayment(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, split.method, profile.uid, isCorporate ? entityId : undefined);
-                } else {
-                  await refundGuest(hotel.id, isCorporate ? 'corporate' : entityId, lastRes.id, split.amount, reason, profile.uid, isCorporate ? entityId : undefined);
-                }
+                // Post a confirmed refund (debit category: 'refund') preserving original payment records
+                await refundGuest(
+                  hotel.id,
+                  isCorporate ? 'corporate' : entityId,
+                  lastRes.id,
+                  split.amount,
+                  settleData.notes.trim(),
+                  profile.uid,
+                  isCorporate ? entityId : undefined,
+                  userCtx,
+                  {
+                    paymentMethod: split.method,
+                    refundDateTime: refundIsoTimestamp,
+                    referenceCode: refundMeta.referenceCode.trim() || undefined,
+                    idempotencyKey: `${refundMeta.idempotencyKey}_s${splitIndex}`,
+                    availableCredit: remainingAvailableCredit,
+                    settlementSource: 'Front Desk'
+                  }
+                );
+                remainingAvailableCredit = Math.max(0, Number((remainingAvailableCredit - split.amount).toFixed(2)));
+                splitIndex += 1;
               }
             }
           }
 
-          toast.success('Balance settled successfully');
+          toast.success(settleType === 'refund' ? 'Refund confirmed and receipt record saved' : 'Balance settled successfully');
           setShowSettleModal(null);
           setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
+          setRefundMeta(prev => ({ ...prev, confirmStep: false, referenceCode: '' }));
         },
-        { loadingMessage: 'Settling financial balance in ledger...', showOverlay: true }
+        { loadingMessage: settleType === 'refund' ? 'Recording confirmed refund...' : 'Settling financial balance in ledger...', showOverlay: true }
       );
     } catch (err: any) {
       console.error("Settle balance error:", err.message || safeStringify(err));
-      toast.error('Failed to settle balance');
+      toast.error(err?.message || 'Failed to settle balance');
     } finally {
       setIsSaving(false);
     }
@@ -1082,6 +1146,10 @@ export function Finance() {
     }
   };
 
+  const isRefundFinanceRecord = (r: FinanceRecord) =>
+    r.refundStatus === 'Refunded' ||
+    (r.type === 'expense' && (Boolean(r.refundReason) || (r.description || '').toLowerCase().startsWith('refund')));
+
   const filteredRecords = useMemo(() => {
     return validRecords.filter(r => {
       const q = searchQuery.trim().toLowerCase();
@@ -1089,9 +1157,13 @@ export function Finance() {
         fuzzySearch(r.description || '', q) || 
         fuzzySearch(r.category || '', q) ||
         fuzzySearch(r.paymentMethod || '', q) ||
+        fuzzySearch(r.referenceCode || '', q) ||
+        fuzzySearch(r.refundReason || '', q) ||
         String(r.amount).includes(q) ||
         (r.id && r.id.toLowerCase().includes(q));
-      const matchesType = filterType === 'all' || r.type === filterType;
+      const matchesType =
+        filterType === 'all' ||
+        (filterType === 'refunds' ? isRefundFinanceRecord(r) : r.type === filterType);
       const matchesCategory = categoryFilter === 'all' || r.category === categoryFilter;
       const matchesMethod = methodFilter === 'all' || r.paymentMethod === methodFilter;
       const matchesTime = matchesDateFilter(r.timestamp, transactionDateFilter);
@@ -1585,7 +1657,7 @@ export function Finance() {
                   <div className="flex items-center gap-4">
                     <h3 className="font-bold text-zinc-50">Transaction History</h3>
                     <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-                      {(['all', 'income', 'expense'] as const).map((type) => (
+                      {(['all', 'income', 'expense', 'refunds'] as const).map((type) => (
                         <button
                           key={type}
                           onClick={() => {
@@ -1594,7 +1666,9 @@ export function Finance() {
                           }}
                           className={cn(
                             "px-3 py-1 rounded-md text-xs font-medium capitalize transition-all",
-                            filterType === type ? "bg-zinc-800 text-zinc-50 font-bold" : "text-zinc-500 hover:text-zinc-300"
+                            filterType === type
+                              ? (type === 'refunds' ? "bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30" : "bg-zinc-800 text-zinc-50 font-bold")
+                              : "text-zinc-500 hover:text-zinc-300"
                           )}
                         >
                           {type}
@@ -1714,17 +1788,39 @@ export function Finance() {
                         </td>
                       </tr>
                     ) : (
-                      paginatedRecords.map((record) => (
+                      paginatedRecords.map((record) => {
+                        const isRefund = isRefundFinanceRecord(record);
+                        return (
                         <tr key={record.id} className="hover:bg-zinc-800/50 transition-colors">
                           <td className="px-6 py-4">
-                            <div className="text-sm text-zinc-50">{new Date(record.timestamp).toLocaleDateString()}</div>
-                            <div className="text-[10px] text-zinc-500">{new Date(record.timestamp).toLocaleTimeString()}</div>
+                            <div className="text-sm text-zinc-50">{new Date(record.refundDateTime || record.timestamp).toLocaleDateString()}</div>
+                            <div className="text-[10px] text-zinc-500">{new Date(record.refundDateTime || record.timestamp).toLocaleTimeString()}</div>
                           </td>
-                          <td className="px-6 py-4 text-sm text-zinc-50">{record.description}</td>
+                          <td className="px-6 py-4 text-sm text-zinc-50">
+                            <div>{record.description}</div>
+                            {isRefund && (
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-black uppercase">
+                                  {record.refundStatus || 'Refunded'}
+                                </span>
+                                {record.referenceCode && (
+                                  <span className="text-[10px] font-mono text-zinc-400">Ref: {record.referenceCode}</span>
+                                )}
+                                {(record.processedBy?.name || record.postedByName) && (
+                                  <span className="text-[10px] text-zinc-500">By {record.processedBy?.name || record.postedByName}</span>
+                                )}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-6 py-4">
-                            <span className="px-2 py-1 bg-zinc-800 rounded text-[10px] font-medium text-zinc-400">{record.category}</span>
+                            <span className={cn(
+                              "px-2 py-1 rounded text-[10px] font-medium",
+                              isRefund ? "bg-rose-500/15 text-rose-300 border border-rose-500/30 font-bold" : "bg-zinc-800 text-zinc-400"
+                            )}>
+                              {isRefund ? 'Refunded' : record.category}
+                            </span>
                           </td>
-                          <td className="px-6 py-4 text-xs text-zinc-500 capitalize">{record.paymentMethod}</td>
+                          <td className="px-6 py-4 text-xs text-zinc-500 capitalize">{record.refundMethod || record.paymentMethod}</td>
                           <td className={cn("px-6 py-4 text-right font-bold text-sm", record.type === 'income' ? "text-emerald-500" : "text-red-500")}>
                             {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
                           </td>
@@ -1740,7 +1836,8 @@ export function Finance() {
                             </td>
                           )}
                         </tr>
-                      ))
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -1897,11 +1994,11 @@ export function Finance() {
                                 className={cn(
                                   "text-xs font-bold",
                                   getGuestLiveBalance(guest) < -0.01 
-                                    ? "text-red-400 hover:text-red-300" 
+                                    ? "text-rose-400 hover:text-rose-300" 
                                     : "text-emerald-500 hover:text-emerald-400"
                                 )}
                               >
-                                {getGuestLiveBalance(guest) < -0.01 ? 'Refund' : 'Settle'}
+                                {getGuestLiveBalance(guest) < -0.01 ? 'Refunded' : 'Settle'}
                               </button>
                               <button
                                 onClick={() => {
@@ -3037,6 +3134,147 @@ export function Finance() {
                         itemLabel="payments"
                       />
                     </div>
+
+                    {/* Confirmed Refunds & Payouts Record Table */}
+                    {(() => {
+                      const ledgerRefunds = validLedgerEntries
+                        .filter(e =>
+                          e.type === 'debit' &&
+                          String(e.category).toLowerCase() === 'refund' &&
+                          !String(e.description || '').toLowerCase().includes('linked room')
+                        )
+                        .map(e => {
+                          const res = reservations.find(r => r.id === e.reservationId);
+                          const guestObj = guests.find(g => g.id === e.guestId);
+                          const method = (e.paymentMethod || e.description?.match(/Refund\s*\(([^)]+)\)/i)?.[1] || 'cash').toLowerCase();
+                          return {
+                            id: e.id,
+                            timestamp: (e as any).refundDateTime || e.timestamp || '',
+                            guestName: res?.guestName || guestObj?.name || 'Guest',
+                            roomNumber: res?.roomNumber || 'N/A',
+                            method,
+                            referenceCode: e.referenceCode || '',
+                            reason: (e as any).refundReason || e.description || 'Refund',
+                            status: (e as any).refundStatus || 'Refunded',
+                            processedBy: (e as any).postedByName || (e as any).processedBy?.name || 'Staff',
+                            amount: e.amount
+                          };
+                        });
+
+                      const seenLedgerIds = new Set(ledgerRefunds.map(r => r.id));
+                      const standaloneFinanceRefunds = validRecords
+                        .filter(r => isRefundFinanceRecord(r) && (!r.referenceId || !seenLedgerIds.has(r.referenceId)))
+                        .map(r => {
+                          const res = reservations.find(resItem => resItem.id === r.reservationId || resItem.id === r.referenceId);
+                          const guestObj = guests.find(g => g.id === r.guestId);
+                          return {
+                            id: r.id,
+                            timestamp: r.refundDateTime || r.timestamp || '',
+                            guestName: res?.guestName || guestObj?.name || 'Guest',
+                            roomNumber: res?.roomNumber || 'N/A',
+                            method: (r.refundMethod || r.paymentMethod || 'cash').toLowerCase(),
+                            referenceCode: r.referenceCode || '',
+                            reason: r.refundReason || r.description || 'Refund',
+                            status: r.refundStatus || 'Refunded',
+                            processedBy: r.processedBy?.name || r.postedByName || 'Staff',
+                            amount: r.amount
+                          };
+                        });
+
+                      const allRefunds = [...ledgerRefunds, ...standaloneFinanceRefunds]
+                        .filter(rf => {
+                          const q = paymentsSearch.trim().toLowerCase();
+                          const matchSearch = !q ||
+                            rf.guestName.toLowerCase().includes(q) ||
+                            rf.roomNumber.toLowerCase().includes(q) ||
+                            rf.reason.toLowerCase().includes(q) ||
+                            rf.referenceCode.toLowerCase().includes(q);
+                          const matchMethod = paymentsMethodFilter === 'all' || rf.method === paymentsMethodFilter;
+                          return matchSearch && matchMethod;
+                        })
+                        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                      const totalRefundedVal = allRefunds.reduce((acc, rf) => acc + rf.amount, 0);
+
+                      return (
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                          <div className="p-6 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                              <h3 className="font-bold text-zinc-50 flex items-center gap-2">
+                                <span>Confirmed Refunds</span>
+                                <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 text-[10px] font-black uppercase">
+                                  {allRefunds.length} {allRefunds.length === 1 ? 'Record' : 'Records'}
+                                </span>
+                              </h3>
+                              <p className="text-xs text-zinc-500">Verified guest refunds linked to original folio overpayments</p>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] font-bold uppercase text-zinc-500 block">Total Refunded</span>
+                              <span className="text-base font-black font-mono text-rose-400">
+                                {formatCurrency(totalRefundedVal, currency, exchangeRate)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                              <thead>
+                                <tr className="bg-zinc-950/50 border-b border-zinc-800">
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Refund Date & Time</th>
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Guest / Reason</th>
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Room</th>
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Method</th>
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Status</th>
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Processed By</th>
+                                  <th className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Refund Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-zinc-800">
+                                {allRefunds.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={7} className="px-6 py-10 text-center text-zinc-500 italic text-xs">
+                                      No refund transactions recorded.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  allRefunds.map((rf) => (
+                                    <tr key={rf.id} className="hover:bg-zinc-800/40 transition-colors">
+                                      <td className="px-6 py-4 text-xs text-zinc-400 font-mono">
+                                        {safeFormatDate(rf.timestamp, 'MMM d, yyyy HH:mm')}
+                                      </td>
+                                      <td className="px-6 py-4">
+                                        <div className="text-sm font-bold text-zinc-50">{rf.guestName}</div>
+                                        <div className="text-[10px] text-zinc-400 truncate max-w-xs">
+                                          {rf.reason}{rf.referenceCode ? ` • Ref: ${rf.referenceCode}` : ''}
+                                        </div>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                        <span className="px-2 py-0.5 bg-zinc-950 border border-zinc-800 rounded text-xs font-mono font-bold text-zinc-300">
+                                          {rf.roomNumber}
+                                        </span>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                        <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-zinc-800 text-zinc-200 border border-zinc-700">
+                                          {rf.method}
+                                        </span>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                          {rf.status}
+                                        </span>
+                                      </td>
+                                      <td className="px-6 py-4 text-xs text-zinc-400">{rf.processedBy}</td>
+                                      <td className="px-6 py-4 text-right font-bold font-mono text-sm text-rose-400">
+                                        -{formatCurrency(rf.amount, currency, exchangeRate)}
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -3608,12 +3846,18 @@ export function Finance() {
               const balance = 'contactPerson' in showSettleModal
                 ? (showSettleModal.currentBalance || 0)
                 : getGuestLiveBalance(showSettleModal as Guest);
+              const maxRefundCredit = balance < -0.01 ? Number(Math.abs(balance).toFixed(2)) : 0;
+              const totalSplitsAmount = settleData.splits.reduce((acc, s) => acc + s.amount, 0);
               return (
                 <>
                   <div className="p-4 sm:p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900">
                     <div>
                       <h2 className="text-xl font-bold text-zinc-50">
-                        {settleType === 'payment' ? 'Settle Outstanding Debt' : 'Process Refund / Overpayment'}
+                        {settleType === 'payment'
+                          ? 'Settle Outstanding Debt'
+                          : refundMeta.confirmStep
+                            ? 'Confirm Refund & Receipt Record'
+                            : 'Record Refund / Overpayment'}
                       </h2>
                       <p className="text-sm text-zinc-500 mt-1">
                         {'contactPerson' in showSettleModal ? 'Corporate' : 'Guest'}: {showSettleModal.name}
@@ -3629,6 +3873,56 @@ export function Finance() {
                   </div>
                   <form onSubmit={handleSettleBalance} className="flex flex-col flex-1 min-h-0 overflow-hidden">
                     <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto overscroll-contain">
+                      {settleType === 'refund' && refundMeta.confirmStep ? (
+                        <div className="space-y-4">
+                          <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl space-y-2.5 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-400">Refund Amount</span>
+                              <span className="text-lg font-black text-rose-400 font-mono">
+                                {formatCurrency(totalSplitsAmount, currency, exchangeRate)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-400">Method(s)</span>
+                              <span className="font-bold text-zinc-100 uppercase">
+                                {settleData.splits.filter(s => s.amount > 0).map(s => s.method).join(', ')}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-400">Refund Date & Time</span>
+                              <span className="font-mono text-zinc-200">{safeFormatDate(refundMeta.refundDateTime, 'MMM d, yyyy HH:mm')}</span>
+                            </div>
+                            {refundMeta.referenceCode.trim() && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-zinc-400">Reference / Transaction ID</span>
+                                <span className="font-mono text-zinc-200">{refundMeta.referenceCode.trim()}</span>
+                              </div>
+                            )}
+                            <div className="pt-2 border-t border-rose-500/20">
+                              <span className="text-zinc-400 block mb-0.5">Reason for Refund</span>
+                              <span className="text-zinc-100 font-medium">{settleData.notes.trim()}</span>
+                            </div>
+                          </div>
+
+                          <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-2xl space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-500">Available Credit Before Refund</span>
+                              <span className="font-mono font-bold text-emerald-400">{formatCurrency(maxRefundCredit, currency, exchangeRate)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-500">Remaining Credit After Refund</span>
+                              <span className="font-mono font-bold text-zinc-100">
+                                {formatCurrency(Math.max(0, maxRefundCredit - totalSplitsAmount), currency, exchangeRate)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <p className="text-[11px] text-zinc-400 leading-relaxed">
+                            Original payment entries remain untouched. Confirming records a separate <strong className="text-rose-300">Refunded</strong> entry on the guest folio, official receipt, finance records, and audit log.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
                       {/* Balance Banner */}
                       <div className={cn(
                         "p-4 rounded-2xl border flex items-center gap-4",
@@ -3641,7 +3935,9 @@ export function Finance() {
                           <AlertCircle size={20} />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
+                          <p className="text-xs font-bold text-zinc-500 uppercase">
+                            {balance < -0.01 ? 'Available Refundable Credit' : 'Current Balance'}
+                          </p>
                           <p className={cn(
                             "text-lg font-bold",
                             balance > 0 ? "text-red-500" : "text-emerald-500"
@@ -3657,7 +3953,10 @@ export function Finance() {
                         <div className="grid grid-cols-2 gap-2 bg-zinc-950 p-1 rounded-2xl border border-zinc-800">
                           <button
                             type="button"
-                            onClick={() => setSettleType('payment')}
+                            onClick={() => {
+                              setSettleType('payment');
+                              setRefundMeta(prev => ({ ...prev, confirmStep: false }));
+                            }}
                             className={cn(
                               "py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5",
                               settleType === 'payment'
@@ -3670,7 +3969,10 @@ export function Finance() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setSettleType('refund')}
+                            onClick={() => {
+                              setSettleType('refund');
+                              setRefundMeta(prev => ({ ...prev, confirmStep: false }));
+                            }}
                             className={cn(
                               "py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5",
                               settleType === 'refund'
@@ -3730,7 +4032,7 @@ export function Finance() {
                                     onChange={(e) => {
                                       const val = parseFloat(e.target.value);
                                       const newSplits = [...settleData.splits];
-                                      newSplits[index].amount = currency === 'USD' ? val * exchangeRate : val;
+                                      newSplits[index].amount = Number.isFinite(val) ? (currency === 'USD' ? val * exchangeRate : val) : 0;
                                       setSettleData({ ...settleData, splits: newSplits });
                                     }}
                                     className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-50 focus:outline-none focus:border-zinc-700"
@@ -3763,38 +4065,89 @@ export function Finance() {
                             {settleType === 'payment' ? 'Total Settlement' : 'Total Refund'}
                           </span>
                           <span className="text-zinc-50 font-black">
-                            {formatCurrency(settleData.splits.reduce((acc, s) => acc + s.amount, 0), currency, exchangeRate)}
+                            {formatCurrency(totalSplitsAmount, currency, exchangeRate)}
                           </span>
                         </div>
+                        {settleType === 'refund' && totalSplitsAmount > maxRefundCredit + 0.01 && (
+                          <p className="text-[11px] text-rose-400 font-medium">
+                            Refund amount exceeds available refundable credit ({formatCurrency(maxRefundCredit, currency, exchangeRate)}).
+                          </p>
+                        )}
                       </div>
 
+                      {settleType === 'refund' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Refund Date & Time *</label>
+                            <input
+                              required
+                              type="datetime-local"
+                              value={refundMeta.refundDateTime}
+                              onChange={(e) => setRefundMeta(prev => ({ ...prev, refundDateTime: e.target.value }))}
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:outline-none"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase">Reference / Transaction ID</label>
+                            <input
+                              type="text"
+                              value={refundMeta.referenceCode}
+                              onChange={(e) => setRefundMeta(prev => ({ ...prev, referenceCode: e.target.value }))}
+                              placeholder="e.g. TXN-12345"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-zinc-500 uppercase">Notes</label>
+                        <label className="text-xs font-bold text-zinc-500 uppercase">
+                          {settleType === 'refund' ? 'Reason for Refund *' : 'Notes'}
+                        </label>
                         <textarea
+                          required={settleType === 'refund'}
                           value={settleData.notes}
                           onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none min-h-[80px]"
                           placeholder={settleType === 'payment' ? "e.g. Guest paid cash at front desk" : "e.g. Refund of deposit / overpayment"}
                         />
                       </div>
+                        </>
+                      )}
                     </div>
                     <div className="p-4 sm:p-6 bg-zinc-950 border-t border-zinc-800 flex gap-3 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setShowSettleModal(null)}
+                        onClick={() => {
+                          if (settleType === 'refund' && refundMeta.confirmStep) {
+                            setRefundMeta(prev => ({ ...prev, confirmStep: false }));
+                          } else {
+                            setShowSettleModal(null);
+                          }
+                        }}
                         className="flex-1 px-4 py-2 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-colors"
                       >
-                        Cancel
+                        {settleType === 'refund' && refundMeta.confirmStep ? 'Back & Edit' : 'Cancel'}
                       </button>
                       <button
                         type="submit"
-                        disabled={settleData.splits.reduce((acc, s) => acc + s.amount, 0) <= 0 || isSaving}
+                        disabled={
+                          totalSplitsAmount <= 0 ||
+                          isSaving ||
+                          (settleType === 'refund' && (totalSplitsAmount > maxRefundCredit + 0.01 || !settleData.notes.trim()))
+                        }
                         className={cn(
                           "flex-1 px-4 py-2 text-zinc-50 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50",
-                          settleType === 'payment' ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
+                          settleType === 'payment' ? "bg-emerald-500 hover:bg-emerald-600" : "bg-rose-500 hover:bg-rose-600"
                         )}
                       >
-                        {isSaving ? 'Processing...' : settleType === 'payment' ? 'Post Payment' : 'Post Refund'}
+                        {isSaving
+                          ? 'Processing...'
+                          : settleType === 'payment'
+                            ? 'Post Payment'
+                            : refundMeta.confirmStep
+                              ? 'Confirm & Save Refund'
+                              : 'Review & Confirm Refund'}
                       </button>
                     </div>
                   </form>

@@ -589,7 +589,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-zinc-950 flex items-center justify-center p-3 sm:p-6 py-6 sm:py-10 relative overflow-y-auto">
+    <div className="dark min-h-screen min-h-[100dvh] bg-[#09090b] text-zinc-50 flex items-center justify-center p-3 sm:p-6 py-6 sm:py-10 relative overflow-y-auto">
       {/* Notification Toast */}
       {notification && (
         <div className={cn(

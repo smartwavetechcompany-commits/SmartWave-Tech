@@ -803,6 +803,15 @@ export interface FinanceRecord {
   };
   settlementSource?: 'Front Desk' | 'F&B Outlet';
   status?: 'pending' | 'completed' | 'cancelled';
+  reservationId?: string | null;
+  corporateId?: string | null;
+  refundStatus?: 'Refunded' | 'Pending' | 'Cancelled';
+  refundMethod?: 'cash' | 'card' | 'transfer';
+  refundReason?: string;
+  refundDateTime?: string;
+  referenceCode?: string;
+  postedByName?: string;
+  processedAt?: string;
 }
 
 export interface Supplier {
@@ -1114,6 +1123,15 @@ export interface LedgerEntry {
   appliedNightlyRate?: number;
   effectiveDate?: string;
   overstayPolicyApplied?: string;
+  refundStatus?: 'Refunded' | 'Pending' | 'Cancelled';
+  refundReason?: string;
+  refundDateTime?: string;
+  processedAt?: string;
+  processedBy?: {
+    uid: string;
+    name: string;
+    role: string;
+  };
 }
 
 export interface CorporateAccount {

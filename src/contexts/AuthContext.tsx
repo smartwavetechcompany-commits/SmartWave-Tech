@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useState, useMemo, useCallback } from 'react';
 import { onAuthStateChanged, User, signOut as fbSignOut } from 'firebase/auth';
 import { doc, onSnapshot, getDoc, collection, query, where, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
@@ -124,6 +124,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const setTheme = (newTheme: 'light' | 'dark') => {
     setThemeState(newTheme);
     localStorage.setItem('pms_theme', newTheme);
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', newTheme === 'dark');
+    }
   };
 
   // Sign out helper
@@ -146,8 +149,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentSessionId, profile?.hotelId]);
 
-  // Apply theme class
-  useEffect(() => {
+  // Apply theme class synchronously before paint
+  useLayoutEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark') {
       root.classList.add('dark');
@@ -158,7 +161,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // 1. Auth State Listener
   useEffect(() => {
+    let isMounted = true;
+    let onlineRetryHandler: (() => void) | null = null;
+
+    const cleanupOnlineRetry = () => {
+      if (onlineRetryHandler && typeof window !== 'undefined') {
+        window.removeEventListener('online', onlineRetryHandler);
+        onlineRetryHandler = null;
+      }
+    };
+
+    const scheduleSilentOnlineReload = () => {
+      if (typeof window === 'undefined' || onlineRetryHandler) return;
+      onlineRetryHandler = () => {
+        cleanupOnlineRetry();
+        if (!isMounted || !auth.currentUser) return;
+        auth.currentUser.reload()
+          .then(() => {
+            if (!isMounted) return;
+            if (auth.currentUser) {
+              setUser(auth.currentUser);
+            }
+          })
+          .catch(() => {});
+      };
+      window.addEventListener('online', onlineRetryHandler, { once: true });
+    };
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (!isMounted) return;
+      cleanupOnlineRetry();
       queryClient.clear();
       
       if (firebaseUser) {
@@ -168,15 +200,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setHotelResolved(false);
         setHasProfileError(false);
         setHasHotelError(false);
+
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          setUser(firebaseUser);
+          setAuthResolved(true);
+          scheduleSilentOnlineReload();
+          return;
+        }
         
         firebaseUser.reload()
           .then(() => {
+            if (!isMounted) return;
             const freshUser = auth.currentUser;
             setUser(freshUser);
             setAuthResolved(true);
           })
-          .catch((err) => {
-            console.error("Session re-validation error:", err);
+          .catch((err: any) => {
+            if (!isMounted) return;
+            const code = err?.code || '';
+            const message = typeof err?.message === 'string' ? err.message : '';
+            const isNetworkError =
+              code === 'auth/network-request-failed' ||
+              code === 'network-request-failed' ||
+              message.includes('network-request-failed') ||
+              (typeof navigator !== 'undefined' && navigator.onLine === false);
+
+            if (isNetworkError) {
+              console.warn("Session re-validation deferred due to network connectivity; using active cached session.");
+              scheduleSilentOnlineReload();
+            } else {
+              console.error("Session re-validation error:", err);
+            }
             setUser(firebaseUser);
             setAuthResolved(true);
           });
@@ -194,6 +248,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     
     return () => {
+      isMounted = false;
+      cleanupOnlineRetry();
       try {
         unsubscribe();
       } catch (_) {}
