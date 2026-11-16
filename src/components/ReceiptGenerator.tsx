@@ -165,7 +165,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     const cat = getSafeStr(e.category).toLowerCase();
     const desc = getSafeStr(e.description).toLowerCase();
     const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
-    return !isDiscount && (cat === 'transfer' || cat === 'city_ledger' || desc.includes('transfer'));
+    return !isDiscount && (cat === 'transfer' || cat === 'city_ledger' || (cat !== 'payment' && desc.includes('transfer')));
   }).reduce((acc, e) => acc + e.amount, 0);
 
   const totalReversals = credits.filter(e => {
@@ -178,13 +178,20 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     const cat = getSafeStr(e.category).toLowerCase();
     const desc = getSafeStr(e.description).toLowerCase();
     const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
-    const isTransfer = cat === 'transfer' || cat === 'city_ledger' || desc.includes('transfer');
+    const isTransfer = cat === 'transfer' || cat === 'city_ledger' || (cat !== 'payment' && desc.includes('transfer'));
     const isReversal = cat === 'reversal' || desc.startsWith('reversal') || desc.includes('reversal:');
     const isRefund = cat === 'refund';
     return !isDiscount && !isTransfer && !isReversal && !isRefund && (cat === 'payment' || e.type === 'credit');
   }).reduce((acc, e) => acc + e.amount, 0);
 
-  const refundDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() === 'refund');
+  const isLinkedRoomCreditAllocation = (e: LedgerEntry) => {
+    const desc = getSafeStr(e.description).toLowerCase();
+    return desc.includes('linked room') || desc.includes('master credit applied');
+  };
+  const allRefundCategoryDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() === 'refund');
+  const linkedRoomAllocations = allRefundCategoryDebits.filter(isLinkedRoomCreditAllocation);
+  const totalLinkedRoomAllocations = linkedRoomAllocations.reduce((acc, e) => acc + e.amount, 0);
+  const refundDebits = allRefundCategoryDebits.filter(e => !isLinkedRoomCreditAllocation(e));
   const totalRefunds = refundDebits.reduce((acc, e) => acc + e.amount, 0);
   
   const totalTaxDebits = processedEntries.filter(e => getSafeStr(e.category) === 'tax' && e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
@@ -303,7 +310,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
   const hasPaymentInLedger = activeLedger.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
   const totalPaid = totalCredits + (type === 'corporate' ? 0 : (hasPaymentInLedger ? 0 : (reservation?.paidAmount || 0)));
-  const netPaid = Math.max(0, totalPaid - totalRefunds);
+  const netPaid = Math.max(0, totalPaid - totalRefunds - totalLinkedRoomAllocations);
   let balance = grandTotal - netPaid;
 
   // Authoritative fallback cross-check with getReservationLiveBalance
@@ -701,7 +708,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               const desc = getSafeStr(e.description).toLowerCase();
               const isReversal = cat === 'reversal' || desc.startsWith('reversal') || desc.includes('reversal:');
               const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo') || desc.includes('concession');
-              const isTransfer = cat === 'transfer' || cat === 'city_ledger' || desc.includes('transfer');
+              const isTransfer = cat === 'transfer' || cat === 'city_ledger' || (cat !== 'payment' && desc.includes('transfer'));
               
               let typeLabel = "Payment Received";
               let textCol = "text-emerald-600";
@@ -735,7 +742,38 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         </div>
       )}
 
-      {/* Refunds Issued Section (Separate from Original Payments & Charges) */}
+      {/* Linked-Room Credit Allocations Section (Internal Group Transfers, Distinct from Guest Refunds) */}
+      {(type === 'comprehensive' || type === 'corporate') && linkedRoomAllocations.length > 0 && (
+        <div className="space-y-4 mb-8">
+          <div className="flex justify-between text-[10px] font-bold text-indigo-600 uppercase tracking-widest border-b border-indigo-100 pb-2">
+            <span>Linked-Room Credit Allocations</span>
+            <span className="text-right">Amount Applied</span>
+          </div>
+
+          <div className="space-y-3">
+            {linkedRoomAllocations.map((e, index) => (
+              <div key={`${e.id || 'linked-alloc'}-${index}`} className="flex justify-between items-start py-1 px-2.5 rounded-lg bg-indigo-50/70 border border-indigo-100">
+                <div className="flex-1 pr-3">
+                  <p className="text-sm font-bold text-indigo-800 flex items-center gap-2 flex-wrap">
+                    <span>{cleanLedgerDescription(getSafeStr(e.description))}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[9px] font-black uppercase tracking-wider leading-none">
+                      Room Transfer
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">
+                    <span className="font-semibold text-indigo-700">Internal Group Credit Allocation</span> • {safeFormatDate(e.timestamp, 'MMM dd, yyyy HH:mm')}
+                  </p>
+                </div>
+                <span className="font-bold text-sm text-right text-indigo-700 whitespace-nowrap">
+                  -{formatCurrency(e.amount, currency, exchangeRate)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Refunds Issued Section (Separate from Original Payments, Charges & Internal Room Transfers) */}
       {(type === 'comprehensive' || type === 'corporate') && refundDebits.length > 0 && (
         <div className="space-y-4 mb-8">
           <div className="flex justify-between text-[10px] font-bold text-rose-600 uppercase tracking-widest border-b border-rose-100 pb-2">
@@ -827,6 +865,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <div className="flex justify-between items-center text-amber-600 text-[10px]">
                 <span className="font-bold uppercase tracking-widest">Adjustments / Reversals</span>
                 <span className="font-bold">-{formatCurrency(totalReversals, currency, exchangeRate)}</span>
+              </div>
+            )}
+            {totalLinkedRoomAllocations > 0 && (
+              <div className="flex justify-between items-center text-indigo-600 text-[10px]">
+                <span className="font-bold uppercase tracking-widest">Linked-Room Credit Applied</span>
+                <span className="font-bold">-{formatCurrency(totalLinkedRoomAllocations, currency, exchangeRate)}</span>
               </div>
             )}
             {totalRefunds > 0 && (

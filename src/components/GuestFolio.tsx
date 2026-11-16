@@ -3374,7 +3374,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                     (Paid at outlet: {formatCurrency(entry.directPaidAmount, currency, exchangeRate)})
                                   </span>
                                 ) : null}
-                                {String(entry.category).toLowerCase() === 'refund' && (
+                                {String(entry.category).toLowerCase() === 'refund' && !String(entry.description || '').toLowerCase().includes('linked room') && (
                                   <>
                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                                       ↩ {(entry as any).refundStatus || 'Refunded'}
@@ -3437,8 +3437,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 colorClass = "bg-amber-500/10 text-amber-400 border-amber-500/30";
                                 label = 'Discount';
                               } else if (rawCat === 'refund') {
-                                colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
-                                label = (entry as any).refundStatus || 'Refunded';
+                                if (String(entry.description || '').toLowerCase().includes('linked room')) {
+                                  colorClass = "bg-indigo-500/10 text-indigo-400 border-indigo-500/30";
+                                  label = 'Room Transfer';
+                                } else {
+                                  colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+                                  label = (entry as any).refundStatus || 'Refunded';
+                                }
                               } else if (rawCat === 'city_ledger' || rawCat === 'transfer') {
                                 colorClass = "bg-indigo-500/10 text-indigo-400 border-indigo-500/30";
                                 label = 'Transfer';

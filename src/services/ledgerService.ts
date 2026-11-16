@@ -155,7 +155,7 @@ export const postToLedger = async (
   const resRef = reservationId ? doc(db, 'hotels', hotelId, 'reservations', reservationId) : null;
   const hotelRef = doc(db, 'hotels', hotelId);
 
-  const shouldFetchHotel = entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment' && !entry.skipAutomaticTax;
+  const shouldFetchHotel = entry.type === 'debit' && entry.category !== 'tax' && entry.category !== 'payment' && entry.category !== 'refund' && entry.category !== 'transfer' && entry.category !== 'city_ledger' && !entry.skipAutomaticTax;
   
   const [resSnap, hotelSnap] = await Promise.all([
     resRef ? getDoc(resRef) : Promise.resolve(null),
@@ -1050,6 +1050,7 @@ export const refundGuest = async (
     referenceId: reservationId,
     timestamp: refundDateTime,
     postedBy,
+    skipAutomaticTax: true,
     refundStatus: 'Refunded',
     refundReason: cleanReason,
     refundDateTime,
