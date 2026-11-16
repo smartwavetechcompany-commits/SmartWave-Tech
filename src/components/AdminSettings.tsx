@@ -127,6 +127,23 @@ export function AdminSettings() {
       }
     };
 
+    let syncWholeCheckoutGroup = false;
+    if (group === 'checkout') {
+      if (key === 'allowBalanceOutstanding' && nextVal === true) {
+        updated.checkout.preventOwingGuestCheckout = false;
+        updated.checkout.requireApprovalForDebtCheckout = false;
+        updated.checkout.requireFullPaymentBeforeCheckout = false;
+        syncWholeCheckoutGroup = true;
+      } else if ((key === 'preventOwingGuestCheckout' || key === 'requireFullPaymentBeforeCheckout') && nextVal === true) {
+        updated.checkout.allowBalanceOutstanding = false;
+        syncWholeCheckoutGroup = true;
+      } else if (key === 'requireApprovalForDebtCheckout' && nextVal === true) {
+        updated.checkout.preventOwingGuestCheckout = false;
+        updated.checkout.requireFullPaymentBeforeCheckout = false;
+        syncWholeCheckoutGroup = true;
+      }
+    }
+
     if (isSpecialLock) {
       if (!updated.checkout) (updated as any).checkout = {};
       if (!updated.financial) (updated as any).financial = {};
@@ -137,6 +154,8 @@ export function AdminSettings() {
     setLocalSettings(updated);
     if (isSpecialLock) {
       saveSettings(updated);
+    } else if (syncWholeCheckoutGroup) {
+      saveSettings(updated, 'checkout');
     } else {
       saveSettings(updated, group, key);
     }

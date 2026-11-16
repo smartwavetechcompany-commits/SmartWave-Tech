@@ -2369,7 +2369,7 @@ export function FrontDesk() {
     }
 
     if (status === 'checked_out') {
-      const policy = canCheckout(hotel, profile, res);
+      const policy = canCheckout(hotel, profile, res, undefined, customRoles);
       if (!policy.allowed) {
         toast.error(policy.message || 'Check-out denied by hotel policy');
         return;
@@ -2601,7 +2601,7 @@ export function FrontDesk() {
         let blockMessage = '';
 
         if (!res.corporateId && outstandingBalance > 0.01) {
-          const policyResult = canCheckout(hotel, profile, { ...freshResData, ledgerBalance: outstandingBalance });
+          const policyResult = canCheckout(hotel, profile, { ...freshResData, ledgerBalance: outstandingBalance }, undefined, customRoles);
           if (!policyResult.allowed) {
             blockCheckout = true;
             blockMessage = policyResult.message || `Full payment is required before checkout. Outstanding balance is ${formatCurrency(outstandingBalance, currency, exchangeRate)}.`;
@@ -5563,8 +5563,8 @@ export function FrontDesk() {
                               >
                                 <QrCode size={18} />
                               </button>
-                              {hasPermission(profile, 'check_out_guests') && (() => {
-                                const policy = canCheckout(hotel, profile, res);
+                              {(hasPermission(profile, 'check_out_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (() => {
+                                const policy = canCheckout(hotel, profile, res, undefined, customRoles);
                                 const isBlocked = !policy.allowed;
                                 return (
                                   <button 
@@ -6622,7 +6622,7 @@ export function FrontDesk() {
                   Cancel
                 </button>
                 {(() => {
-                  const policy = canCheckout(hotel, profile, checkoutPreviewRes);
+                  const policy = canCheckout(hotel, profile, checkoutPreviewRes, undefined, customRoles);
                   const isBlocked = !policy.allowed;
                   
                   return (

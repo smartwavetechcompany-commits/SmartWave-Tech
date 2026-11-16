@@ -9,12 +9,13 @@ export const canCheckout = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   reservation: Reservation,
-  ledgerEntries?: LedgerEntry[]
+  ledgerEntries?: LedgerEntry[],
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
-  if (!hasPermission(profile, 'check_out_guests')) {
+  if (!hasPermission(profile, 'check_out_guests', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to check out guests.' };
   }
 
@@ -47,6 +48,14 @@ export const canCheckout = (
   }
 
   // Scenario 2: Guest Owes Money (Outstanding Balance > 0)
+  // Policy applies uniformly to every user with check_out_guests permission.
+  if (settings.requireFullPaymentBeforeCheckout) {
+    return { 
+      allowed: false, 
+      message: `Full payment is required before checkout as per hotel policy. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
+    };
+  }
+
   // Check the setting: "Allow Checkout with Outstanding Balance"
   if (!settings.allowBalanceOutstanding) {
     // Corporate postpaid override
@@ -56,34 +65,6 @@ export const canCheckout = (
     return { 
       allowed: false, 
       message: `Checkout blocked. Guest has an outstanding balance of ₦${Math.round(outstandingBalance).toLocaleString()}.` 
-    };
-  }
-
-  // Admin / Manager override permissions checks (applicable when allowBalanceOutstanding is true but other restrictions are enabled)
-  if (settings.preventOwingGuestCheckout) {
-    if (hasPermission(profile, 'void_transaction')) {
-      return { allowed: true };
-    }
-    return { 
-      allowed: false, 
-      message: `Policy prevents checkout for guests with outstanding balances without admin approval. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
-    };
-  }
-
-  if (settings.requireApprovalForDebtCheckout) {
-    if (hasPermission(profile, 'void_transaction')) {
-      return { allowed: true };
-    }
-    return { 
-      allowed: false, 
-      message: `Manager approval is required to checkout a guest with debt. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
-    };
-  }
-
-  if (settings.requireFullPaymentBeforeCheckout) {
-    return { 
-      allowed: false, 
-      message: `Full payment is required before checkout as per hotel policy. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
     };
   }
 
