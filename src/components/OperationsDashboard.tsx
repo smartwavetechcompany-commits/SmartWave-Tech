@@ -58,7 +58,8 @@ import {
 } from 'recharts';
 
 export function OperationsDashboard() {
-  const { hotel, currency, exchangeRate, profile } = useAuth();
+  const { hotel, currency, exchangeRate, profile, customRoles, theme } = useAuth();
+  const isLight = theme === 'light';
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
@@ -990,8 +991,8 @@ export function OperationsDashboard() {
                   className={cn(
                     "p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border shadow-sm relative pr-10 sm:pr-12",
                     alert.type === 'peak' 
-                      ? "bg-red-500/10 border-red-500/20 text-red-200"
-                      : "bg-amber-500/5 border-amber-500/10 text-amber-200"
+                      ? "bg-red-500/10 border-red-500/25 text-red-800 dark:text-red-200"
+                      : "bg-amber-500/8 border-amber-500/20 text-amber-800 dark:text-amber-200"
                   )}
                 >
                   {/* Close/Dismiss individual button */}
@@ -1010,7 +1011,7 @@ export function OperationsDashboard() {
                   <div className="flex items-start gap-3">
                     <div className={cn(
                       "p-2 rounded-lg mt-0.5",
-                      alert.type === 'peak' ? "bg-red-950/60 text-red-450" : "bg-amber-950/60 text-amber-450"
+                      alert.type === 'peak' ? "bg-red-500/15 dark:bg-red-950/60 text-red-600 dark:text-red-400" : "bg-amber-500/15 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400"
                     )}>
                       <AlertTriangle size={16} />
                     </div>
@@ -1019,7 +1020,7 @@ export function OperationsDashboard() {
                         <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{alert.date}</span>
                         <span className={cn(
                           "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded",
-                          alert.type === 'peak' ? "bg-red-500/20 text-red-400" : "bg-amber-500/15 text-amber-400"
+                          alert.type === 'peak' ? "bg-red-500/15 dark:bg-red-500/20 text-red-700 dark:text-red-400" : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
                         )}>
                           {alert.type === 'peak' ? 'Peak Strain Alert' : 'Yield Under-Run'}
                         </span>
@@ -1032,8 +1033,8 @@ export function OperationsDashboard() {
                   <span className={cn(
                     "px-3 py-1 text-[10px] font-black uppercase rounded-lg border tracking-wider shrink-0",
                     alert.type === 'peak' 
-                      ? "bg-red-950/40 border-red-900/40 text-red-300"
-                      : "bg-amber-950/40 border-amber-900/40 text-amber-300"
+                      ? "bg-red-500/12 dark:bg-red-950/40 border-red-500/35 dark:border-red-900/40 text-red-700 dark:text-red-300"
+                      : "bg-amber-500/12 dark:bg-amber-950/40 border-amber-500/35 dark:border-amber-900/40 text-amber-700 dark:text-amber-300"
                   )}>
                     {alert.actionText}
                   </span>
@@ -1434,19 +1435,22 @@ export function OperationsDashboard() {
                     <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" opacity={0.3} />
-                <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickLine={false} />
-                <YAxis stroke="#71717a" fontSize={10} domain={[0, 100]} unit="%" tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={isLight ? "#cbd5e1" : "#27272a"} opacity={isLight ? 0.55 : 0.3} />
+                <XAxis dataKey="date" stroke={isLight ? "#64748b" : "#71717a"} fontSize={10} tickLine={false} />
+                <YAxis stroke={isLight ? "#64748b" : "#71717a"} fontSize={10} domain={[0, 100]} unit="%" tickLine={false} />
                 <ChartTooltip 
-                  contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '12px' }}
+                  contentStyle={isLight
+                    ? { backgroundColor: '#f8f9fb', borderColor: '#cbd5e1', borderRadius: '12px', color: '#0f172a', boxShadow: '0 8px 20px rgba(15,23,42,0.08)' }
+                    : { backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '12px' }
+                  }
                   labelClassName="text-[10px] font-black uppercase text-zinc-500 tracking-wider"
-                  itemStyle={{ fontSize: '11px', color: '#e4e4e7' }}
+                  itemStyle={{ fontSize: '11px', color: isLight ? '#0f172a' : '#e4e4e7' }}
                 />
                 <Area 
                   type="monotone" 
                   dataKey="confidenceUpper" 
                   stroke="none" 
-                  fill="#c084fc" 
+                  fill={isLight ? "#7c3aed" : "#c084fc"} 
                   fillOpacity={0.03} 
                   name="High Confidence Bound"
                 />
@@ -1454,14 +1458,14 @@ export function OperationsDashboard() {
                   type="monotone" 
                   dataKey="confidenceLower" 
                   stroke="none" 
-                  fill="#c084fc" 
+                  fill={isLight ? "#7c3aed" : "#c084fc"} 
                   fillOpacity={0.0} 
                   name="Low Confidence Bound"
                 />
                 <Area 
                   type="monotone" 
                   dataKey="AI Forecasted Load" 
-                  stroke="#c084fc" 
+                  stroke={isLight ? "#7c3aed" : "#c084fc"} 
                   strokeWidth={2.5}
                   fillOpacity={1} 
                   fill="url(#colorProjected)" 
@@ -1470,7 +1474,7 @@ export function OperationsDashboard() {
                 <Area 
                   type="monotone" 
                   dataKey="Active Booked" 
-                  stroke="#10b981" 
+                  stroke={isLight ? "#059669" : "#10b981"} 
                   strokeWidth={1.5}
                   strokeDasharray="4 4"
                   fillOpacity={1} 
@@ -1747,7 +1751,7 @@ export function OperationsDashboard() {
                     value={dateFilter.start}
                     onChange={(e) => setDateFilter(prev => ({ ...prev, start: e.target.value }))}
                     className="bg-transparent text-[11px] font-mono text-zinc-200 focus:outline-none"
-                    style={{ colorScheme: 'dark' }}
+                   
                   />
                   <span className="text-zinc-600 font-mono">-</span>
                   <span className="text-[10px] text-zinc-500 font-semibold uppercase">To</span>
@@ -1757,7 +1761,7 @@ export function OperationsDashboard() {
                     min={dateFilter.start || undefined}
                     onChange={(e) => setDateFilter(prev => ({ ...prev, end: e.target.value }))}
                     className="bg-transparent text-[11px] font-mono text-zinc-200 focus:outline-none"
-                    style={{ colorScheme: 'dark' }}
+                   
                   />
                   {(dateFilter.start || dateFilter.end) && (
                     <button
@@ -2145,6 +2149,7 @@ export function OperationsDashboard() {
           roomTypes={roomTypes}
           hotel={hotel}
           profile={profile}
+          customRoles={customRoles}
           currency={currency}
           exchangeRate={exchangeRate}
           initialSelectedReservation={quickCheckInInitialRes}

@@ -15,6 +15,7 @@ interface DiscountApplicationProps {
   reservation: Reservation;
   currency: 'NGN' | 'USD';
   exchangeRate: number;
+  customRoles?: any[];
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -26,6 +27,7 @@ export function DiscountApplication({
   reservation,
   currency,
   exchangeRate,
+  customRoles = [],
   onClose,
   onSuccess
 }: DiscountApplicationProps) {
@@ -73,7 +75,7 @@ export function DiscountApplication({
     setIsSubmitting(true);
     try {
       // Direct permission policy verification
-      const policyResponse = canApplyDiscount(hotel, profile, discountAmount, originalAmount);
+      const policyResponse = canApplyDiscount(hotel, profile, discountAmount, originalAmount, customRoles);
       if (!policyResponse.allowed) {
         toast.error(policyResponse.message || 'The policy denied applying this discount.');
         setIsSubmitting(false);

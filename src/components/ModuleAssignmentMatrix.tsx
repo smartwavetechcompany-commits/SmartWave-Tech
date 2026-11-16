@@ -725,7 +725,7 @@ export function ModuleAssignmentMatrix({
                           className={cn(
                             "flex items-start gap-2.5 p-2 rounded-lg cursor-pointer border text-xs transition-colors",
                             isGranted 
-                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200" 
+                              ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-800 dark:text-emerald-200" 
                               : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                           )}
                         >

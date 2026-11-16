@@ -198,10 +198,10 @@ export function AccountCreationSummaryModal({ data, onClose, onResendActivation 
         <div className="mx-6 mt-4 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3 text-xs text-emerald-300">
           <ShieldCheck size={18} className="text-emerald-400 shrink-0 mt-0.5" />
           <div className="space-y-1 leading-relaxed">
-            <strong className="font-semibold block text-emerald-300">
+            <strong className="font-semibold block text-emerald-700 dark:text-emerald-300">
               Security Protocol Enforced (No Default Passwords)
             </strong>
-            <p className="text-emerald-200/90">
+            <p className="text-emerald-800 dark:text-emerald-200/90">
               In accordance with hotel security standards, default passwords are not generated or assigned. An activation email with a secure, one-time link has been dispatched to <strong>{data.email}</strong>. The staff member will create their own password to activate their account.
             </p>
           </div>

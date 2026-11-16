@@ -783,7 +783,7 @@ export function Housekeeping() {
         const room = rooms.find(r => r.id === roomId);
         if (!room) continue;
 
-        const policy = canUpdateRoomStatus(hotel, profile, room, status);
+        const policy = canUpdateRoomStatus(hotel, profile, room, status, customRoles);
         if (!policy.allowed) {
           toast.error(`Policy violation for Room ${room.roomNumber}: ${policy.message}`);
           setSelectedRoomIds([]);
@@ -1132,7 +1132,7 @@ export function Housekeeping() {
 
           <button 
             onClick={() => setShowBriefingModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 text-xs font-bold rounded-xl transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-zinc-50 hover:bg-zinc-800 text-xs font-bold rounded-xl transition-all active:scale-95"
             title="Conduct Daily Stand-up Briefing"
           >
             <Megaphone size={14} />
@@ -1141,7 +1141,7 @@ export function Housekeeping() {
 
           <button 
             onClick={handleExportHousekeeping}
-            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 text-xs font-bold rounded-xl transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 text-xs font-bold rounded-xl transition-all active:scale-95"
             title="Export Report"
           >
             <Download size={14} />
@@ -1274,7 +1274,7 @@ export function Housekeeping() {
         <button
           type="button"
           onClick={() => scrollTabs('left')}
-          className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-700/80 text-zinc-300 hover:text-white hover:bg-zinc-800 shadow-sm shrink-0 transition-all cursor-pointer"
+          className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-700/80 text-zinc-300 hover:text-zinc-50 hover:bg-zinc-800 shadow-sm shrink-0 transition-all cursor-pointer"
           title="Scroll tabs left"
           aria-label="Scroll tabs left"
         >
@@ -1291,7 +1291,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'overview'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <ClipboardList size={14} />
@@ -1305,7 +1305,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'cleaning'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Sparkles size={14} />
@@ -1321,7 +1321,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'inspections'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Eye size={14} />
@@ -1337,7 +1337,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'assignments'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Users size={14} />
@@ -1350,7 +1350,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'staff'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <UserIcon size={14} />
@@ -1363,7 +1363,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'inventory'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Package size={14} />
@@ -1379,7 +1379,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'linen'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Shirt size={14} />
@@ -1392,7 +1392,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'chemicals'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <FlaskConical size={14} />
@@ -1405,7 +1405,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'lost_and_found'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Briefcase size={14} />
@@ -1418,7 +1418,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'daily_log'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <FileText size={14} />
@@ -1431,7 +1431,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'requests'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <AlertTriangle size={14} />
@@ -1449,7 +1449,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'briefings'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <Megaphone size={14} />
@@ -1462,7 +1462,7 @@ export function Housekeeping() {
             "px-3.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2",
             activeTab === 'reports'
               ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-              : "bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
           )}
         >
           <FileText size={14} />
@@ -1473,7 +1473,7 @@ export function Housekeeping() {
         <button
           type="button"
           onClick={() => scrollTabs('right')}
-          className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-700/80 text-zinc-300 hover:text-white hover:bg-zinc-800 shadow-sm shrink-0 transition-all cursor-pointer"
+          className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-700/80 text-zinc-300 hover:text-zinc-50 hover:bg-zinc-800 shadow-sm shrink-0 transition-all cursor-pointer"
           title="Scroll tabs right"
           aria-label="Scroll tabs right"
         >
@@ -1507,7 +1507,7 @@ export function Housekeeping() {
                       "px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all whitespace-nowrap flex items-center gap-1",
                       filter === item.id
                         ? "bg-zinc-800 text-emerald-400 border border-emerald-500/30"
-                        : "text-zinc-400 hover:text-white hover:bg-zinc-950/50"
+                        : "text-zinc-400 hover:text-zinc-50 hover:bg-zinc-950/50"
                     )}
                   >
                     <span>{item.label}</span>
@@ -1609,15 +1609,15 @@ export function Housekeeping() {
                     <div
                       key={room.id}
                       className={cn(
-                        "bg-zinc-900 border rounded-2xl p-4.5 space-y-3.5 flex flex-col transition-all relative group shadow-md shadow-black/20",
+                        "bg-zinc-900 border rounded-2xl p-4.5 space-y-3.5 flex flex-col transition-all relative group shadow-sm dark:shadow-md dark:shadow-black/20",
                         isSelected 
                           ? "border-emerald-500 ring-2 ring-emerald-500/20" 
                           : isFailed
-                            ? "border-red-500/40 bg-red-950/5"
+                            ? "border-red-500/40 bg-red-500/8 dark:bg-red-950/5"
                             : isAwaitingInspection
-                              ? "border-amber-500/40 bg-amber-950/5"
+                              ? "border-amber-500/40 bg-amber-500/8 dark:bg-amber-950/5"
                               : isCleaning
-                                ? "border-purple-500/40 bg-purple-950/5"
+                                ? "border-purple-500/40 bg-purple-500/8 dark:bg-purple-950/5"
                                 : "border-zinc-800/80 hover:border-zinc-700"
                       )}
                     >
@@ -1659,7 +1659,7 @@ export function Housekeeping() {
                         <button
                           type="button"
                           onClick={() => setActiveProfileRoom(room)}
-                          className="px-2 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white text-[10px] font-bold transition-all flex items-center gap-1"
+                          className="px-2 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 text-[10px] font-bold transition-all flex items-center gap-1"
                           title="View complete Room Profile"
                         >
                           <Info size={12} />
@@ -1825,7 +1825,7 @@ export function Housekeeping() {
                             const nextPriority = priority === 'normal' ? 'high' : (priority === 'high' ? 'urgent' : 'normal');
                             updateRoomStatus(room.id, room.status, { priority: nextPriority as any });
                           }}
-                          className="py-1.5 bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 hover:text-white text-[11px] font-bold rounded-xl transition-all"
+                          className="py-1.5 bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-50 text-[11px] font-bold rounded-xl transition-all"
                           title="Cycle Cleaning Priority (Normal -> High -> Urgent)"
                         >
                           Set {priority === 'normal' ? 'High' : (priority === 'high' ? 'Urgent' : 'Normal')}
@@ -1870,7 +1870,7 @@ export function Housekeeping() {
                 <div key={room.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-xl font-bold text-white">Room {room.roomNumber}</h3>
+                      <h3 className="text-xl font-bold text-zinc-50">Room {room.roomNumber}</h3>
                       <p className="text-xs text-zinc-400">{room.type} • Floor {room.floor}</p>
                     </div>
                     <span className={cn(
@@ -1942,7 +1942,7 @@ export function Housekeeping() {
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
                 <Users size={18} className="text-emerald-400" />
                 Daily Room Assignment Matrix
               </h2>
@@ -1954,7 +1954,7 @@ export function Housekeeping() {
                 onClick={() => setFilter(filter === 'my_rooms' ? 'all' : 'my_rooms')}
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all",
-                  filter === 'my_rooms' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-300 hover:text-white"
+                  filter === 'my_rooms' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-300 hover:text-zinc-50"
                 )}
               >
                 {filter === 'my_rooms' ? 'Showing My Rooms' : 'Filter My Rooms Only'}
@@ -2066,7 +2066,7 @@ export function Housekeeping() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
                   <Clock size={18} className="text-amber-400" />
                   Rooms Awaiting Supervisor Inspection
                 </h2>
@@ -2083,7 +2083,7 @@ export function Housekeeping() {
                 return (
                   <div key={room.id} className="bg-zinc-950 border border-amber-500/30 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-lg font-bold text-white">Room {room.roomNumber}</span>
+                      <span className="text-lg font-bold text-zinc-50">Room {room.roomNumber}</span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500 text-black">
                         Ready for Insp.
                       </span>
@@ -2120,7 +2120,7 @@ export function Housekeeping() {
 
           {/* Inspection History Log */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
               <ClipboardList size={18} className="text-emerald-400" />
               Recent Inspection Audit Log
             </h2>
@@ -2143,7 +2143,7 @@ export function Housekeeping() {
                       <td className="py-3 px-4 text-zinc-400">
                         {safeFormatDate(ins.timestamp, 'MMM d, HH:mm', 'N/A')}
                       </td>
-                      <td className="py-3 px-4 font-bold text-white">Room {ins.roomNumber}</td>
+                      <td className="py-3 px-4 font-bold text-zinc-50">Room {ins.roomNumber}</td>
                       <td className="py-3 px-4 text-zinc-300">{ins.inspectorName}</td>
                       <td className="py-3 px-4 text-zinc-400">{ins.housekeeperName || 'N/A'}</td>
                       <td className="py-3 px-4">
@@ -2186,7 +2186,7 @@ export function Housekeeping() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
                   <Megaphone size={18} className="text-emerald-400" />
                   Daily Stand-up Briefings
                 </h2>
@@ -2207,7 +2207,7 @@ export function Housekeeping() {
                     <span className="font-bold text-emerald-400 uppercase tracking-wider">{b.shift} Shift</span>
                     <span className="text-zinc-500">{b.date}</span>
                   </div>
-                  <h3 className="font-bold text-white text-sm">{b.topic}</h3>
+                  <h3 className="font-bold text-zinc-50 text-sm">{b.topic}</h3>
                   <div className="text-xs text-zinc-400 space-y-1">
                     <p><span className="text-zinc-500">Supervisor:</span> {b.supervisorName}</p>
                     <p><span className="text-zinc-500">Attendance:</span> {b.attendance?.length || 0} team members</p>
@@ -2244,7 +2244,7 @@ export function Housekeeping() {
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
                 <AlertTriangle size={18} className="text-amber-400" />
                 Guest Housekeeping Requests
               </h2>
@@ -2263,7 +2263,7 @@ export function Housekeeping() {
             {guestRequests.slice((requestPage - 1) * requestPageSize, requestPage * requestPageSize).map((req, i) => (
               <div key={req.id || i} className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-base">Room {req.roomNumber}</span>
+                  <span className="font-bold text-zinc-50 text-base">Room {req.roomNumber}</span>
                   <span className={cn(
                     "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
                     req.status === 'completed' ? "bg-emerald-500/20 text-emerald-400" :
@@ -2315,7 +2315,7 @@ export function Housekeeping() {
       {activeTab === 'reports' && (
         <div className="space-y-6">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <h2 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
               <Award size={18} className="text-emerald-400" />
               Housekeeper Performance Leaderboard
             </h2>
@@ -2339,7 +2339,7 @@ export function Housekeeping() {
 
                     return (
                       <tr key={s.uid} className="hover:bg-zinc-800/40 transition-colors">
-                        <td className="py-3 px-4 font-bold text-white flex items-center gap-2">
+                        <td className="py-3 px-4 font-bold text-zinc-50 flex items-center gap-2">
                           <UserIcon size={14} className="text-emerald-400" />
                           {s.displayName || 'Staff Member'}
                         </td>
@@ -2447,10 +2447,10 @@ export function Housekeeping() {
               <span className="w-7 h-7 rounded-full bg-emerald-500 text-black flex items-center justify-center font-bold text-xs">
                 {selectedRoomIds.length}
               </span>
-              <span className="text-xs font-bold text-white">Selected</span>
+              <span className="text-xs font-bold text-zinc-50">Selected</span>
               <button 
                 onClick={() => setSelectedRoomIds([])}
-                className="text-[10px] text-zinc-400 hover:text-white underline ml-1"
+                className="text-[10px] text-zinc-400 hover:text-zinc-50 underline ml-1"
               >
                 Clear
               </button>
@@ -2460,7 +2460,7 @@ export function Housekeeping() {
 
             <div className="flex items-center gap-2 flex-1">
               <select
-                className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                className="bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-50 focus:outline-none"
                 value={assignStaffId}
                 onChange={(e) => setAssignStaffId(e.target.value)}
               >
@@ -2502,7 +2502,7 @@ export function Housekeeping() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-xl w-full p-5 sm:p-6 space-y-5 my-auto max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
-                <h3 className="text-xl font-black text-white">Room {activeCleaningRoom.roomNumber} Cleaning Checklist</h3>
+                <h3 className="text-xl font-black text-zinc-50">Room {activeCleaningRoom.roomNumber} Cleaning Checklist</h3>
                 <p className="text-xs text-zinc-400">Complete items thoroughly before submitting for supervisor inspection</p>
               </div>
               <div className="flex items-center gap-2">
@@ -2521,7 +2521,7 @@ export function Housekeeping() {
                 </button>
                 <button
                   onClick={() => setActiveCleaningRoom(null)}
-                  className="p-1 text-zinc-500 hover:text-white rounded-lg cursor-pointer"
+                  className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg cursor-pointer"
                   title="Close checklist (cleaning remains active)"
                 >
                   <X size={20} />
@@ -2611,7 +2611,7 @@ export function Housekeeping() {
                   Cleaner Observations / Notes
                 </label>
                 <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
                   placeholder="Optional remarks about linen replacement or room condition..."
                   value={cleaningNotes}
                   onChange={(e) => setCleaningNotes(e.target.value)}
@@ -2660,12 +2660,12 @@ export function Housekeeping() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-xl w-full p-5 sm:p-6 space-y-5 my-auto max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
-                <h3 className="text-xl font-black text-white">Supervisor Inspection: Room {activeInspectionRoom.roomNumber}</h3>
+                <h3 className="text-xl font-black text-zinc-50">Supervisor Inspection: Room {activeInspectionRoom.roomNumber}</h3>
                 <p className="text-xs text-zinc-400">Certify room cleanliness, presentation & guest readiness</p>
               </div>
               <button
                 onClick={() => setActiveInspectionRoom(null)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -2675,7 +2675,7 @@ export function Housekeeping() {
               <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800/80 flex items-center justify-between">
                 <div>
                   <span className="text-xs text-zinc-400">Housekeeper Assigned: </span>
-                  <span className="text-xs font-bold text-white">
+                  <span className="text-xs font-bold text-zinc-50">
                     {staff.find(s => s.uid === activeInspectionRoom.assignedTo)?.displayName || 'Unassigned'}
                   </span>
                 </div>
@@ -2706,7 +2706,7 @@ export function Housekeeping() {
                   Supervisor Remarks / Correction Notes (if Failed)
                 </label>
                 <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-20"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-20"
                   placeholder="Note specific items requiring correction before re-inspection, or general remarks..."
                   value={inspectionRemarks}
                   onChange={(e) => setInspectionRemarks(e.target.value)}
@@ -2741,12 +2741,12 @@ export function Housekeeping() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-amber-400">
                 <Wrench size={18} />
-                <h3 className="text-lg font-bold text-white">Report Maintenance Issue</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Report Maintenance Issue</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowMaintenanceModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -2757,7 +2757,7 @@ export function Housekeeping() {
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. 201"
                 value={maintenanceForm.roomNumber}
                 onChange={(e) => setMaintenanceForm(prev => ({ ...prev, roomNumber: e.target.value }))}
@@ -2767,7 +2767,7 @@ export function Housekeeping() {
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Issue Category</label>
               <select
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={maintenanceForm.category}
                 onChange={(e) => setMaintenanceForm(prev => ({ ...prev, category: e.target.value }))}
               >
@@ -2781,7 +2781,7 @@ export function Housekeeping() {
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Defect Description</label>
               <textarea
                 required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-20"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-20"
                 placeholder="Describe the problem (e.g. AC not cooling, shower leak)..."
                 value={maintenanceForm.issue}
                 onChange={(e) => setMaintenanceForm(prev => ({ ...prev, issue: e.target.value }))}
@@ -2791,7 +2791,7 @@ export function Housekeeping() {
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Priority</label>
               <select
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={maintenanceForm.priority}
                 onChange={(e) => setMaintenanceForm(prev => ({ ...prev, priority: e.target.value as any }))}
               >
@@ -2838,12 +2838,12 @@ export function Housekeeping() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <Megaphone size={18} />
-                <h3 className="text-lg font-bold text-white">Daily Stand-up Briefing</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Daily Stand-up Briefing</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowBriefingModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -2853,7 +2853,7 @@ export function Housekeeping() {
               <div>
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Shift</label>
                 <select
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={briefingForm.shift}
                   onChange={(e) => setBriefingForm(prev => ({ ...prev, shift: e.target.value as any }))}
                 >
@@ -2869,7 +2869,7 @@ export function Housekeeping() {
                 <input
                   required
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={briefingForm.topic}
                   onChange={(e) => setBriefingForm(prev => ({ ...prev, topic: e.target.value }))}
                 />
@@ -2904,7 +2904,7 @@ export function Housekeeping() {
               <div>
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Announcements</label>
                 <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
                   placeholder="VIP guest arrivals, events, or general announcements..."
                   value={briefingForm.announcements}
                   onChange={(e) => setBriefingForm(prev => ({ ...prev, announcements: e.target.value }))}
@@ -2915,7 +2915,7 @@ export function Housekeeping() {
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Safety Reminders</label>
                 <input
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={briefingForm.safetyReminders}
                   onChange={(e) => setBriefingForm(prev => ({ ...prev, safetyReminders: e.target.value }))}
                 />
@@ -2948,12 +2948,12 @@ export function Housekeeping() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <Plus size={18} />
-                <h3 className="text-lg font-bold text-white">Log Guest Request</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Log Guest Request</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowGuestRequestModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -2964,7 +2964,7 @@ export function Housekeeping() {
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. 104"
                 value={guestRequestForm.roomNumber}
                 onChange={(e) => setGuestRequestForm(prev => ({ ...prev, roomNumber: e.target.value }))}
@@ -2974,7 +2974,7 @@ export function Housekeeping() {
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Requested Item</label>
               <select
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={guestRequestForm.item}
                 onChange={(e) => setGuestRequestForm(prev => ({ ...prev, item: e.target.value }))}
               >
@@ -2989,7 +2989,7 @@ export function Housekeeping() {
               <input
                 type="number"
                 min="1"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={guestRequestForm.quantity}
                 onChange={(e) => setGuestRequestForm(prev => ({ ...prev, quantity: parseInt(e.target.value, 10) || 1 }))}
               />
@@ -2998,7 +2998,7 @@ export function Housekeeping() {
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Assign Housekeeper (Optional)</label>
               <select
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={guestRequestForm.assignedTo}
                 onChange={(e) => setGuestRequestForm(prev => ({ ...prev, assignedTo: e.target.value }))}
               >

@@ -142,11 +142,11 @@ export function OnboardingTour() {
                   {hotelInitials}
                 </div>
               )}
-              <span className="text-sm font-bold text-white tracking-tight">{hotelDisplayName} Onboarding</span>
+              <span className="text-sm font-bold text-zinc-50 tracking-tight">{hotelDisplayName} Onboarding</span>
             </div>
             <button 
               onClick={handleComplete}
-              className="p-2 text-zinc-500 hover:text-white transition-colors"
+              className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
             >
               <X size={20} />
             </button>
@@ -165,7 +165,7 @@ export function OnboardingTour() {
                 {steps[currentStep].icon}
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-black text-white tracking-tight">
+                <h2 className="text-2xl font-black text-zinc-50 tracking-tight">
                   {steps[currentStep].title}
                 </h2>
                 <p className="text-zinc-400 leading-relaxed">
@@ -193,7 +193,7 @@ export function OnboardingTour() {
               {currentStep > 0 && (
                 <button 
                   onClick={prevStep}
-                  className="px-4 py-2 rounded-xl text-sm font-bold text-zinc-400 hover:text-white transition-colors flex items-center gap-1"
+                  className="px-4 py-2 rounded-xl text-sm font-bold text-zinc-400 hover:text-zinc-50 transition-colors flex items-center gap-1"
                 >
                   <ChevronLeft size={18} />
                   Back

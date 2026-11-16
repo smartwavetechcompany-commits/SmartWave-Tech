@@ -562,6 +562,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [profile?.hotelId, user?.uid, currentSessionId]);
 
+  // 5b. Idle Session Timeout Enforcement (Admin Controls -> Security -> Auto-Logout Buffer)
+  useEffect(() => {
+    const timeoutMinutes = hotel?.settings?.security?.sessionTimeoutMinutes ?? 30;
+    if (!user || !profile || !timeoutMinutes || timeoutMinutes <= 0) return;
+
+    const timeoutMs = timeoutMinutes * 60 * 1000;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastResetAt = Date.now();
+
+    const triggerLogout = () => {
+      toast.info(`Session timed out after ${timeoutMinutes} minutes of inactivity.`);
+      signOut();
+    };
+
+    const scheduleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(triggerLogout, timeoutMs);
+    };
+
+    const handleActivity = () => {
+      const now = Date.now();
+      if (now - lastResetAt > 5000) {
+        lastResetAt = now;
+        scheduleTimer();
+      }
+    };
+
+    scheduleTimer();
+    const events: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    if (typeof window !== 'undefined') {
+      events.forEach(ev => window.addEventListener(ev, handleActivity, { passive: true }));
+    }
+
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (typeof window !== 'undefined') {
+        events.forEach(ev => window.removeEventListener(ev, handleActivity));
+      }
+    };
+  }, [user, profile, hotel?.settings?.security?.sessionTimeoutMinutes, signOut]);
+
   // 6. System Settings Fetcher
   useEffect(() => {
     let retryCount = 0;

@@ -184,7 +184,8 @@ const getInitialDashboardData = (hotelId?: string) => {
 };
 
 export function Dashboard() {
-  const { hotel, profile, isSubscriptionActive, currency, exchangeRate, customRoles } = useAuth();
+  const { hotel, profile, isSubscriptionActive, currency, exchangeRate, customRoles, theme } = useAuth();
+  const isLight = theme === 'light';
 
   // Instant hydration from session cache to eliminate any loading skeleton freeze
   const cachedData = useMemo(() => getInitialDashboardData(hotel?.id), [hotel?.id]);
@@ -762,7 +763,7 @@ export function Dashboard() {
         <button 
           onClick={handleRefresh}
           disabled={refreshing}
-          className="p-1.5 sm:p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
+          className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
           title="Refresh Data"
         >
           <RefreshCw size={18} className={refreshing ? "animate-spin text-emerald-500" : ""} />
@@ -859,14 +860,17 @@ export function Dashboard() {
                         <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis dataKey="name" stroke="#71717a" fontSize={9} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#71717a" fontSize={9} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={isLight ? "#dce2eb" : "#27272a"} vertical={false} />
+                    <XAxis dataKey="name" stroke={isLight ? "#64748b" : "#71717a"} fontSize={9} tickLine={false} axisLine={false} />
+                    <YAxis stroke={isLight ? "#64748b" : "#71717a"} fontSize={9} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', fontSize: '10px' }}
-                      itemStyle={{ color: '#10b981' }}
+                      contentStyle={isLight
+                        ? { backgroundColor: '#f8f9fb', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '10px', color: '#0f172a', boxShadow: '0 8px 20px rgba(15,23,42,0.08)' }
+                        : { backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', fontSize: '10px' }
+                      }
+                      itemStyle={{ color: isLight ? '#047857' : '#10b981' }}
                     />
-                    <Area type="monotone" dataKey="amount" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
+                    <Area type="monotone" dataKey="amount" stroke={isLight ? "#059669" : "#10b981"} fillOpacity={1} fill="url(#colorRev)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

@@ -37,14 +37,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <AlertTriangle size={24} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">Something went wrong</h3>
+            <h3 className="text-lg font-bold text-zinc-50">Something went wrong</h3>
             <p className="text-sm text-zinc-500 max-w-xs mx-auto mt-1">
               We encountered an issue displaying this component. This is often due to a temporary connection problem.
             </p>
           </div>
           <button 
             onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-800 text-white rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-50 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
           >
             <RefreshCw size={14} />
             Reload Application

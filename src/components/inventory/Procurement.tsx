@@ -195,7 +195,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
           onClick={() => setActiveTab('po')}
           className={cn(
             "px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
-            activeTab === 'po' ? "bg-zinc-800 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+            activeTab === 'po' ? "bg-zinc-800 text-zinc-50 shadow-lg" : "text-zinc-500 hover:text-zinc-300"
           )}
         >
           <ShoppingCart size={18} />
@@ -205,7 +205,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
           onClick={() => setActiveTab('vendors')}
           className={cn(
             "px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
-            activeTab === 'vendors' ? "bg-zinc-800 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+            activeTab === 'vendors' ? "bg-zinc-800 text-zinc-50 shadow-lg" : "text-zinc-500 hover:text-zinc-300"
           )}
         >
           <Users size={18} />
@@ -216,7 +216,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
       {activeTab === 'po' ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-white">Purchase Orders</h3>
+            <h3 className="text-xl font-bold text-zinc-50">Purchase Orders</h3>
             <button
               onClick={() => setShowAddPO(true)}
               className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-6 py-2.5 rounded-xl font-bold transition-all active:scale-95"
@@ -243,7 +243,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold text-white">{po.poNumber}</span>
+                          <span className="text-lg font-bold text-zinc-50">{po.poNumber}</span>
                           <span className={cn(
                             "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
                             po.status === 'received' ? "bg-emerald-500/10 text-emerald-500" :
@@ -262,7 +262,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                     <div className="flex flex-wrap gap-8 items-center">
                       <div className="text-center">
                         <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest mb-1">Items</div>
-                        <div className="text-sm font-bold text-white">{po.items.length} SKUs</div>
+                        <div className="text-sm font-bold text-zinc-50">{po.items.length} SKUs</div>
                       </div>
                       <div className="text-center">
                         <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest mb-1">Total Amount</div>
@@ -291,7 +291,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                           Receive Goods
                         </button>
                       )}
-                      <button className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-xl transition-all">
+                      <button className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all">
                         <MoreHorizontal size={20} />
                       </button>
                     </div>
@@ -316,7 +316,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
       ) : (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-white">Inventory Vendors</h3>
+            <h3 className="text-xl font-bold text-zinc-50">Inventory Vendors</h3>
             <button
               onClick={() => setShowAddVendor(true)}
               className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-6 py-2.5 rounded-xl font-bold transition-all active:scale-95"
@@ -340,7 +340,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                     {vendor.status}
                   </span>
                 </div>
-                <h4 className="text-lg font-bold text-white mb-1">{vendor.name}</h4>
+                <h4 className="text-lg font-bold text-zinc-50 mb-1">{vendor.name}</h4>
                 <p className="text-sm text-zinc-500 mb-4">{vendor.category || 'General Supplier'}</p>
                 
                 <div className="space-y-3 mb-6">
@@ -394,8 +394,8 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
               className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] w-full max-w-md overflow-hidden"
             >
               <div className="p-8 border-b border-zinc-800 flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-white">Add Vendor</h2>
-                <button onClick={() => setShowAddVendor(false)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <h2 className="text-2xl font-bold text-zinc-50">Add Vendor</h2>
+                <button onClick={() => setShowAddVendor(false)} className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors">
                   <XCircle size={24} />
                 </button>
               </div>
@@ -407,7 +407,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                     type="text"
                     value={vendorForm.name}
                     onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -417,7 +417,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                       type="email"
                       value={vendorForm.email}
                       onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                   <div className="space-y-2">
@@ -426,7 +426,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                       type="text"
                       value={vendorForm.phone}
                       onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                 </div>
@@ -436,7 +436,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                     type="text"
                     value={vendorForm.category}
                     onChange={(e) => setVendorForm({ ...vendorForm, category: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     placeholder="e.g. Food & Beverage, Linen"
                   />
                 </div>
@@ -472,8 +472,8 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
               className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
               <div className="p-8 border-b border-zinc-800 flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-white">Create Purchase Order</h2>
-                <button onClick={() => setShowAddPO(false)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <h2 className="text-2xl font-bold text-zinc-50">Create Purchase Order</h2>
+                <button onClick={() => setShowAddPO(false)} className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors">
                   <XCircle size={24} />
                 </button>
               </div>
@@ -485,7 +485,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                       required
                       value={poForm.supplierId}
                       onChange={(e) => setPoForm({ ...poForm, supplierId: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">Select Vendor</option>
                       {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -499,8 +499,8 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                         type="date"
                         value={poForm.dueDate}
                         onChange={(e) => setPoForm({ ...poForm, dueDate: e.target.value })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-4 pr-10 py-3 text-white focus:outline-none focus:border-emerald-500/50 appearance-none"
-                        style={{ colorScheme: 'dark' }}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-4 pr-10 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50 appearance-none"
+                       
                       />
                       <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                     </div>
@@ -541,7 +541,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                               };
                               setPoForm({ ...poForm, items: newItems });
                             }}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-50 focus:outline-none"
                           >
                             <option value="">Select Item</option>
                             {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
@@ -560,7 +560,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                               newItems[index] = { ...item, quantity: qty, total: qty * item.unitPrice };
                               setPoForm({ ...poForm, items: newItems });
                             }}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-50 focus:outline-none"
                           />
                         </div>
                         <div className="col-span-2 space-y-1">
@@ -576,7 +576,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                               newItems[index] = { ...item, unitPrice: price, total: price * item.quantity };
                               setPoForm({ ...poForm, items: newItems });
                             }}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-50 focus:outline-none"
                           />
                         </div>
                         <div className="col-span-2 space-y-1">
@@ -607,7 +607,7 @@ export function Procurement({ vendors, purchaseOrders, items }: ProcurementProps
                   <textarea
                     value={poForm.notes}
                     onChange={(e) => setPoForm({ ...poForm, notes: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
                     placeholder="Enter any specific delivery instructions..."
                   />
                 </div>

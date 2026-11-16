@@ -276,7 +276,7 @@ export function HousekeepingChemicals() {
             <FlaskConical size={20} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white">Housekeeping Chemical Safety & Stock Register</h2>
+            <h2 className="text-lg font-black text-zinc-50">Housekeeping Chemical Safety & Stock Register</h2>
             <p className="text-xs text-zinc-400">
               Mandatory safety guidelines, PPE notes, dilution ratios, expiry dates, and par levels
             </p>
@@ -332,7 +332,7 @@ export function HousekeepingChemicals() {
           <input
             type="text"
             placeholder="Search chemical name, storage, safety notes..."
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -350,7 +350,7 @@ export function HousekeepingChemicals() {
             <div key={c.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 flex flex-col justify-between">
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="text-base font-bold text-white leading-tight">{c.name}</h3>
+                  <h3 className="text-base font-bold text-zinc-50 leading-tight">{c.name}</h3>
                   <div className="flex flex-col items-end gap-1">
                     {isLow && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30">
@@ -369,7 +369,7 @@ export function HousekeepingChemicals() {
                 <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Available Balance</span>
-                    <div className="text-xl font-mono font-black text-white mt-0.5">
+                    <div className="text-xl font-mono font-black text-zinc-50 mt-0.5">
                       {c.quantity} <span className="text-xs font-normal text-zinc-400">{c.unit}</span>
                     </div>
                   </div>
@@ -446,12 +446,12 @@ export function HousekeepingChemicals() {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-amber-400">
                 <FlaskConical size={18} />
-                <h3 className="text-lg font-bold text-white">Add Housekeeping Chemical</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Add Housekeeping Chemical</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -462,7 +462,7 @@ export function HousekeepingChemicals() {
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Chlorinated Sanitizer 5L"
                 value={form.name}
                 onChange={(e) => setForm(prev => ({ ...prev, name: e.target.value }))}
@@ -476,7 +476,7 @@ export function HousekeepingChemicals() {
                   required
                   type="number"
                   min="0"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500 font-mono"
                   value={form.quantity}
                   onChange={(e) => setForm(prev => ({ ...prev, quantity: parseFloat(e.target.value) || 0 }))}
                 />
@@ -487,7 +487,7 @@ export function HousekeepingChemicals() {
                 <input
                   required
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   placeholder="Liters, Bottles, Gallons"
                   value={form.unit}
                   onChange={(e) => setForm(prev => ({ ...prev, unit: e.target.value }))}
@@ -501,7 +501,7 @@ export function HousekeepingChemicals() {
                 <input
                   required
                   type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={form.dateReceived}
                   onChange={(e) => setForm(prev => ({ ...prev, dateReceived: e.target.value }))}
                 />
@@ -512,7 +512,7 @@ export function HousekeepingChemicals() {
                 <input
                   required
                   type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={form.expiryDate}
                   onChange={(e) => setForm(prev => ({ ...prev, expiryDate: e.target.value }))}
                 />
@@ -525,7 +525,7 @@ export function HousekeepingChemicals() {
                 <input
                   required
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   placeholder="Locker A / Janitorial Room"
                   value={form.storageLocation}
                   onChange={(e) => setForm(prev => ({ ...prev, storageLocation: e.target.value }))}
@@ -537,7 +537,7 @@ export function HousekeepingChemicals() {
                 <input
                   type="number"
                   min="1"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500 font-mono"
                   value={form.minimumLevel}
                   onChange={(e) => setForm(prev => ({ ...prev, minimumLevel: parseInt(e.target.value, 10) || 1 }))}
                 />
@@ -548,7 +548,7 @@ export function HousekeepingChemicals() {
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Usage Guidelines</label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Bathroom tile and grout sanitizing"
                 value={form.usage}
                 onChange={(e) => setForm(prev => ({ ...prev, usage: e.target.value }))}
@@ -558,7 +558,7 @@ export function HousekeepingChemicals() {
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Safety Notes & PPE Requirements</label>
               <textarea
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
                 placeholder="Protective gloves, goggles, dilution ratios..."
                 value={form.safetyNotes}
                 onChange={(e) => setForm(prev => ({ ...prev, safetyNotes: e.target.value }))}
@@ -589,18 +589,18 @@ export function HousekeepingChemicals() {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <form onSubmit={handleDeductUsage} className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-5 space-y-4 my-auto shadow-2xl">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <h3 className="text-base font-bold text-white">Record Chemical Consumption</h3>
+              <h3 className="text-base font-bold text-zinc-50">Record Chemical Consumption</h3>
               <button
                 type="button"
                 onClick={() => setActiveUsageChemical(null)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs">
-              <span className="font-bold text-white block">{activeUsageChemical.name}</span>
+              <span className="font-bold text-zinc-50 block">{activeUsageChemical.name}</span>
               <span className="text-zinc-400">Current Balance: {activeUsageChemical.quantity} {activeUsageChemical.unit}</span>
             </div>
 
@@ -613,7 +613,7 @@ export function HousekeepingChemicals() {
                 type="number"
                 step="any"
                 min="0.1"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500 font-mono"
                 value={useQuantity}
                 onChange={(e) => setUseQuantity(parseFloat(e.target.value) || 1)}
               />

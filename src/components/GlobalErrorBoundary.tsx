@@ -69,7 +69,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
             </div>
 
             {this.state.error && (
-              <div className="bg-black/60 p-3 rounded-xl text-left overflow-auto max-h-48 border border-zinc-800 space-y-2">
+              <div className="bg-zinc-950 p-3 rounded-xl text-left overflow-auto max-h-48 border border-zinc-800 space-y-2">
                 <code className="text-xs text-red-400 font-mono block break-words">
                   {this.state.error.name}: {this.state.error.message}
                 </code>

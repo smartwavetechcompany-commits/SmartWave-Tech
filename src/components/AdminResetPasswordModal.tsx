@@ -351,7 +351,7 @@ export function AdminResetPasswordModal({ user, onClose, onSuccess }: Props) {
                     value={adminNote}
                     onChange={(e) => setAdminNote(e.target.value)}
                     placeholder="e.g. As requested during your shift handoff..."
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-50 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
 
@@ -391,7 +391,7 @@ export function AdminResetPasswordModal({ user, onClose, onSuccess }: Props) {
                     <Check size={16} />
                     <span>Password Reset Link Active & Dispatched</span>
                   </div>
-                  <p className="text-xs text-emerald-200/90 leading-relaxed">
+                  <p className="text-xs text-emerald-800 dark:text-emerald-200/90 leading-relaxed">
                     A secure password reset email has been sent to <strong>{user.email}</strong>. The link is time-limited to <strong>{durationMinutes >= 60 ? `${durationMinutes / 60} hour(s)` : `${durationMinutes} minutes`}</strong> (expires at {new Date(generatedResult.token.expiresAt).toLocaleTimeString()}).
                   </p>
                 </div>

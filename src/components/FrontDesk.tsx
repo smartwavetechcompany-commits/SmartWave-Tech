@@ -62,7 +62,7 @@ import { fuzzySearch } from '../utils/searchUtils';
 import { roomService } from '../services/roomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { hasPermission } from '../utils/permissions';
-import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canApplyDiscount } from '../utils/policyUtils';
+import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canMarkNoShow, canApplyDiscount } from '../utils/policyUtils';
 import { logActivity } from '../utils/activityLogger';
 import { getRoomDisplayStatus, isRoomAvailable, checkStayExtensionConflict } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
@@ -1133,7 +1133,7 @@ export function FrontDesk() {
   const handleBooking = async () => {
     if (!hotel?.id || !profile || loading) return;
 
-    if (!hasPermission(profile, 'create_reservations')) {
+    if (!hasPermission(profile, 'create_reservations', customRoles)) {
       toast.error('Permission denied: You do not have permission to create reservations.');
       return;
     }
@@ -1175,9 +1175,15 @@ export function FrontDesk() {
 
     // Check for blocked rooms and occupancy
     const preventOverbooking = hotel.settings?.reservations?.preventOverbooking ?? true;
+    const allowDoubleBookingOverride = hotel.settings?.reservations?.allowDoubleBookingOverride ?? false;
+    const canOverrideDoubleBooking = allowDoubleBookingOverride && (
+      profile.role === 'hotelAdmin' ||
+      profile.role === 'superAdmin' ||
+      hasPermission(profile, 'bypass_inventory_limits', customRoles)
+    );
     
     for (const stay of allStays) {
-      if (preventOverbooking && !isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel)) {
+      if (preventOverbooking && !canOverrideDoubleBooking && !isRoomAvailable(stay.roomId, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel)) {
         const room = rooms.find(r => r.id === stay.roomId);
         const activeRes = reservations.find(r => r.roomId === stay.roomId && r.status === 'checked_in');
         if (activeRes) {
@@ -1636,7 +1642,7 @@ export function FrontDesk() {
   const deleteReservation = async (res: Reservation) => {
     if (!hotel?.id || !profile || !res?.id) return;
     
-    const isAdminUser = profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' || hasPermission(profile, 'delete_reservation');
+    const isAdminUser = profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' || hasPermission(profile, 'delete_reservation', customRoles) || hasPermission(profile, 'delete_reservations', customRoles);
     if (!isAdminUser) {
       toast.error('Only administrators can delete reservations');
       return;
@@ -1681,27 +1687,35 @@ export function FrontDesk() {
     e.preventDefault();
     if (!hotel?.id || !editingReservation || !profile) return;
 
-    const policy = canEditReservation(hotel, profile, editingReservation);
+    const policy = canEditReservation(hotel, profile, editingReservation, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Editing denied by hotel policy');
       return;
     }
 
-    if (!hasPermission(profile, 'edit_reservation')) {
+    if (!hasPermission(profile, 'edit_reservation', customRoles) && !hasPermission(profile, 'edit_reservations', customRoles)) {
       toast.error('You do not have permission to edit reservations');
       return;
     }
 
     // Check if new dates conflict with another reservation or active stay in this room
+    const preventOverbooking = hotel.settings?.reservations?.preventOverbooking ?? true;
+    const allowDoubleBookingOverride = hotel.settings?.reservations?.allowDoubleBookingOverride ?? false;
+    const canOverrideDoubleBooking = allowDoubleBookingOverride && (
+      profile.role === 'hotelAdmin' ||
+      profile.role === 'superAdmin' ||
+      hasPermission(profile, 'bypass_inventory_limits', customRoles)
+    );
     if (!isRoomAvailable(editingReservation.roomId, editForm.checkIn, editForm.checkOut, reservations, roomBlockings, hotel, editingReservation.id)) {
       const room = rooms.find(r => r.id === editingReservation.roomId);
       const activeRes = reservations.find(r => r.roomId === editingReservation.roomId && r.status === 'checked_in' && r.id !== editingReservation.id);
       if (activeRes) {
         toast.error(`Room ${room?.roomNumber || editingReservation.roomNumber} is occupied by "${activeRes.guestName}". Cannot change dates to overlap with active stay.`);
-      } else {
+        return;
+      } else if (preventOverbooking && !canOverrideDoubleBooking) {
         toast.error(`The selected dates conflict with another reservation or maintenance block for Room ${room?.roomNumber || editingReservation.roomNumber}.`);
+        return;
       }
-      return;
     }
 
     try {
@@ -1763,7 +1777,7 @@ export function FrontDesk() {
         if (res && (res.status === 'pending' || res.status === 'confirmed')) {
           const room = rooms.find(r => r.id === res.roomId);
           const guest = guests.find(g => g.id === res.guestId);
-          const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
+          const policy = canCheckIn(hotel, profile, res, room, guest, reservations, customRoles);
           
           if (!policy.allowed) {
             skippedCount++;
@@ -1813,7 +1827,7 @@ export function FrontDesk() {
 
   const handlePostponeStay = async () => {
     if (!showPostponeModal || !hotel?.id || !newCheckOutDate || !profile) return;
-    if (!hasPermission(profile, 'edit_reservation') && !hasPermission(profile, 'extend_stay')) {
+    if (!hasPermission(profile, 'edit_reservation', customRoles) && !hasPermission(profile, 'edit_reservations', customRoles) && !hasPermission(profile, 'extend_stay', customRoles)) {
       toast.error('You do not have permission to extend stays or edit reservations');
       return;
     }
@@ -2109,13 +2123,13 @@ export function FrontDesk() {
       finalAmount = Math.min(finalAmount, modalPromoLimit);
     }
 
-    const policy = canApplyDiscount(hotel, profile, finalAmount, showDiscountModal.totalAmount);
+    const policy = canApplyDiscount(hotel, profile, finalAmount, showDiscountModal.totalAmount, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Discount denied by hotel policy');
       return;
     }
 
-    if (!hasPermission(profile, 'edit_reservation')) {
+    if (!hasPermission(profile, 'edit_reservation', customRoles) && !hasPermission(profile, 'edit_reservations', customRoles)) {
       toast.error('You do not have permission to apply discounts');
       return;
     }
@@ -2361,7 +2375,7 @@ export function FrontDesk() {
 
       const room = rooms.find(r => r.id === res.roomId);
       const guest = guests.find(g => g.id === res.guestId);
-      const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
+      const policy = canCheckIn(hotel, profile, res, room, guest, reservations, customRoles);
       if (!policy.allowed) {
         toast.error(policy.message || 'Check-in denied by hotel policy');
         return;
@@ -2376,8 +2390,16 @@ export function FrontDesk() {
       }
     }
 
-    if (status === 'cancelled' || status === 'no_show') {
-      const policy = canCancelReservation(hotel, profile, res);
+    if (status === 'cancelled') {
+      const policy = canCancelReservation(hotel, profile, res, customRoles);
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Action denied by hotel policy');
+        return;
+      }
+    }
+
+    if (status === 'no_show') {
+      const policy = canMarkNoShow(hotel, profile, res, customRoles);
       if (!policy.allowed) {
         toast.error(policy.message || 'Action denied by hotel policy');
         return;
@@ -2828,7 +2850,7 @@ export function FrontDesk() {
 
   const updatePayment = async (res: Reservation, amount: number) => {
     if (!hotel?.id || !profile) return;
-    if (!hasPermission(profile, 'process_payments')) {
+    if (!hasPermission(profile, 'process_payments', customRoles) && !hasPermission(profile, 'receive_payments', customRoles)) {
       toast.error('You do not have permission to process payments');
       return;
     }
@@ -3219,7 +3241,7 @@ export function FrontDesk() {
               </div>
             </div>
           )}
-          {(hasPermission(profile, 'run_night_audit') || hasPermission(profile, 'nightly_audit') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+          {(hasPermission(profile, 'run_night_audit', customRoles) || hasPermission(profile, 'nightly_audit', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <button 
               onClick={() => setShowNightAuditModal(true)}
               disabled={isAuditing}
@@ -3229,7 +3251,7 @@ export function FrontDesk() {
               <RefreshCw size={18} className={cn(isAuditing && "animate-spin")} />
             </button>
           )}
-          {(hotel?.settings?.reservations?.allowWalkIn ?? true) && hasPermission(profile, 'create_reservations') && (
+          {(hotel?.settings?.reservations?.allowWalkIn ?? true) && hasPermission(profile, 'create_reservations', customRoles) && (
             <>
               <button 
                 onClick={() => setShowAvailableRooms(true)}
@@ -3709,7 +3731,7 @@ export function FrontDesk() {
                   <motion.div 
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="p-3.5 bg-amber-500/10 border border-amber-500/20 text-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    className="p-3.5 bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                   >
                     <div className="flex items-start gap-2.5">
                       <div className="p-1.5 bg-amber-500/20 rounded-lg text-amber-400 mt-0.5 sm:mt-0">
@@ -3718,7 +3740,7 @@ export function FrontDesk() {
                       <div>
                         <p className="font-semibold text-amber-300">Returning Guest Detected ({staysCount} previous {staysCount === 1 ? 'visit' : 'visits'})</p>
                         <p className="text-zinc-400 mt-0.5">
-                          We found an existing profile for <span className="text-white font-medium">{match.name}</span> ({match.email || match.phone || 'No contact'}). Match level is high.
+                          We found an existing profile for <span className="text-zinc-50 font-medium">{match.name}</span> ({match.email || match.phone || 'No contact'}). Match level is high.
                         </p>
                       </div>
                     </div>
@@ -3786,9 +3808,18 @@ export function FrontDesk() {
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
                   {(() => {
-                    const availableRoomsList = rooms.filter(r =>
-                      isRoomAvailable(r.id, newBooking.checkIn, newBooking.checkOut, reservations, roomBlockings, hotel) || r.id === newBooking.roomId
+                    const preventOverbooking = hotel?.settings?.reservations?.preventOverbooking ?? true;
+                    const allowDoubleBookingOverride = hotel?.settings?.reservations?.allowDoubleBookingOverride ?? false;
+                    const canOverrideDoubleBooking = allowDoubleBookingOverride && (
+                      profile?.role === 'hotelAdmin' ||
+                      profile?.role === 'superAdmin' ||
+                      hasPermission(profile, 'bypass_inventory_limits', customRoles)
                     );
+                    const availableRoomsList = (!preventOverbooking || canOverrideDoubleBooking)
+                      ? rooms
+                      : rooms.filter(r =>
+                          isRoomAvailable(r.id, newBooking.checkIn, newBooking.checkOut, reservations, roomBlockings, hotel) || r.id === newBooking.roomId
+                        );
                     const getRoomPricingLabel = (room: Room) => {
                       let displayPrice = room.price;
                       let isNegotiated = false;
@@ -4131,7 +4162,7 @@ export function FrontDesk() {
               <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-white">Auto Night Deduction</h4>
+                    <h4 className="text-sm font-bold text-zinc-50">Auto Night Deduction</h4>
                     <p className="text-[10px] text-zinc-500">Automatically charge room rate every night at midnight</p>
                   </div>
                   <button
@@ -4157,7 +4188,7 @@ export function FrontDesk() {
                       <input 
                         type="date" 
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                        style={{ colorScheme: 'dark' }}
+                       
                         value={newBooking.checkIn}
                         min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                         onChange={(e) => setNewBooking({ ...newBooking, checkIn: e.target.value })}
@@ -4167,7 +4198,7 @@ export function FrontDesk() {
                     <input 
                       type="time"
                       className="w-full sm:w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={newBooking.checkInTime}
                       onChange={(e) => setNewBooking({ ...newBooking, checkInTime: e.target.value })}
                     />
@@ -4180,7 +4211,7 @@ export function FrontDesk() {
                       <input 
                         type="date" 
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                        style={{ colorScheme: 'dark' }}
+                       
                         value={newBooking.checkOut}
                         min={newBooking.checkIn}
                         onChange={(e) => setNewBooking({ ...newBooking, checkOut: e.target.value })}
@@ -4190,7 +4221,7 @@ export function FrontDesk() {
                     <input 
                       type="time"
                       className="w-full sm:w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={newBooking.checkOutTime}
                       onChange={(e) => setNewBooking({ ...newBooking, checkOutTime: e.target.value })}
                     />
@@ -4243,7 +4274,7 @@ export function FrontDesk() {
                       <button
                         type="button"
                         onClick={handleRemovePromoCode}
-                        className="px-3 py-1.5 bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-800/60 rounded-lg text-xs font-semibold transition-colors"
+                        className="px-3 py-1.5 bg-red-500/12 dark:bg-red-950/60 hover:bg-red-500/20 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 border border-red-500/35 dark:border-red-800/60 rounded-lg text-xs font-semibold transition-colors"
                       >
                         Remove
                       </button>
@@ -4261,22 +4292,22 @@ export function FrontDesk() {
 
                   {/* Validation Feedback Banner */}
                   {promoValidationResult.status === 'valid' && (
-                    <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg space-y-1 text-xs">
-                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                    <div className="p-3 bg-emerald-500/10 dark:bg-emerald-950/30 border border-emerald-500/30 dark:border-emerald-800/40 rounded-lg space-y-1 text-xs">
+                      <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-semibold">
                         <CheckCircle2 size={13} />
                         {promoValidationResult.message}
                       </div>
-                      <div className="flex items-center justify-between text-[11px] pt-1 text-zinc-300 border-t border-emerald-900/30">
+                      <div className="flex items-center justify-between text-[11px] pt-1 text-zinc-300 border-t border-emerald-500/20 dark:border-emerald-900/30">
                         <span>Original Charge: <strong className="font-mono text-zinc-200">{formatCurrency(promoValidationResult.originalCharge || 0, currency, exchangeRate)}</strong></span>
-                        <span className="text-emerald-400 font-bold">Discount: -{formatCurrency(promoValidationResult.discountAmount || 0, currency, exchangeRate)}</span>
-                        <span>Revised Charge: <strong className="font-mono text-white">{formatCurrency(promoValidationResult.revisedCharge || 0, currency, exchangeRate)}</strong></span>
+                        <span className="text-emerald-700 dark:text-emerald-400 font-bold">Discount: -{formatCurrency(promoValidationResult.discountAmount || 0, currency, exchangeRate)}</span>
+                        <span>Revised Charge: <strong className="font-mono text-zinc-50">{formatCurrency(promoValidationResult.revisedCharge || 0, currency, exchangeRate)}</strong></span>
                       </div>
                     </div>
                   )}
 
                   {promoValidationResult.status === 'invalid' && (
-                    <div className="p-2.5 bg-red-950/40 border border-red-900/40 rounded-lg flex items-start gap-2 text-xs text-red-300">
-                      <AlertCircle size={14} className="shrink-0 mt-0.5 text-red-400" />
+                    <div className="p-2.5 bg-red-500/10 dark:bg-red-950/40 border border-red-500/35 dark:border-red-900/40 rounded-lg flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
+                      <AlertCircle size={14} className="shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
                       <span>{promoValidationResult.message}</span>
                     </div>
                   )}
@@ -4645,9 +4676,18 @@ export function FrontDesk() {
                       <div>
                         <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Room</label>
                         {(() => {
-                          const availableStayRooms = rooms.filter(r =>
-                            isRoomAvailable(r.id, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel) || r.id === stay.roomId
+                          const preventOverbooking = hotel?.settings?.reservations?.preventOverbooking ?? true;
+                          const allowDoubleBookingOverride = hotel?.settings?.reservations?.allowDoubleBookingOverride ?? false;
+                          const canOverrideDoubleBooking = allowDoubleBookingOverride && (
+                            profile?.role === 'hotelAdmin' ||
+                            profile?.role === 'superAdmin' ||
+                            hasPermission(profile, 'bypass_inventory_limits', customRoles)
                           );
+                          const availableStayRooms = (!preventOverbooking || canOverrideDoubleBooking)
+                            ? rooms
+                            : rooms.filter(r =>
+                                isRoomAvailable(r.id, stay.checkIn, stay.checkOut, reservations, roomBlockings, hotel) || r.id === stay.roomId
+                              );
                           const getStayRoomPricingLabel = (room: Room) => {
                             let displayPrice = room.price;
                             let isNegotiated = false;
@@ -4758,7 +4798,7 @@ export function FrontDesk() {
                             <input 
                               type="date" 
                               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                              style={{ colorScheme: 'dark' }}
+                             
                               value={stay.checkIn}
                               onChange={(e) => {
                                 const updated = [...newBooking.additionalStays];
@@ -4775,7 +4815,7 @@ export function FrontDesk() {
                             <input 
                               type="date" 
                               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                              style={{ colorScheme: 'dark' }}
+                             
                               value={stay.checkOut}
                               onChange={(e) => {
                                 const updated = [...newBooking.additionalStays];
@@ -4981,7 +5021,7 @@ export function FrontDesk() {
               <input 
                 type="date"
                 className="bg-transparent text-[10px] font-bold text-zinc-400 focus:outline-none appearance-none w-24"
-                style={{ colorScheme: 'dark' }}
+               
                 value={dateRange.start}
                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
               />
@@ -4989,7 +5029,7 @@ export function FrontDesk() {
               <input 
                 type="date"
                 className="bg-transparent text-[10px] font-bold text-zinc-400 focus:outline-none appearance-none w-24"
-                style={{ colorScheme: 'dark' }}
+               
                 value={dateRange.end}
                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
               />
@@ -5496,7 +5536,7 @@ export function FrontDesk() {
                         <>
                           {res.status === 'checked_in' && (
                             <>
-                              {(hasPermission(profile, 'edit_reservations') || hasPermission(profile, 'manage_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'edit_reservations', customRoles) || hasPermission(profile, 'manage_rooms', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
                                   onClick={() => setShowTransferModal(res)}
@@ -5506,7 +5546,7 @@ export function FrontDesk() {
                                   <RefreshCw size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'extend_stay') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'extend_stay', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
                                   onClick={() => {
@@ -5519,7 +5559,7 @@ export function FrontDesk() {
                                   <Calendar size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'edit_reservations') || hasPermission(profile, 'post_charges') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'edit_reservations', customRoles) || hasPermission(profile, 'post_charges', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
                                   onClick={() => openDiscountModal(res)}
@@ -5529,7 +5569,7 @@ export function FrontDesk() {
                                   <Tag size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'post_charges') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'post_charges', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   type="button"
                                   onClick={() => setShowChargeModal(res)}
@@ -5641,7 +5681,7 @@ export function FrontDesk() {
                                   <CheckCircle2 size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'receive_payments') || hasPermission(profile, 'process_payments') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'receive_payments', customRoles) || hasPermission(profile, 'process_payments', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   onClick={() => {
                                     const amount = prompt("Enter payment amount:");
@@ -5655,7 +5695,7 @@ export function FrontDesk() {
                                   <DollarSign size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'check_in_guests') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'check_in_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   onClick={() => updateReservationStatus(res, 'checked_in')}
                                   className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -5664,40 +5704,40 @@ export function FrontDesk() {
                                     if (activeStay) return `Room ${res.roomNumber} is currently occupied by "${activeStay.guestName}". They must check out first.`;
                                     const room = rooms.find(r => r.id === res.roomId);
                                     const guest = guests.find(g => g.id === res.guestId);
-                                    const policy = canCheckIn(hotel, profile, res, room, guest, reservations);
+                                    const policy = canCheckIn(hotel, profile, res, room, guest, reservations, customRoles);
                                     return policy.allowed ? "Check In" : policy.message;
                                   })()}
                                   disabled={loading || (() => {
                                     const activeStay = reservations.find(r => r.roomId === res.roomId && r.status === 'checked_in' && r.id !== res.id);
                                     if (activeStay) return true;
-                                    return !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId), reservations).allowed;
+                                    return !canCheckIn(hotel, profile, res, rooms.find(r => r.id === res.roomId), guests.find(g => g.id === res.guestId), reservations, customRoles).allowed;
                                   })()}
                                 >
                                   <CheckCircle2 size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'cancel_reservations') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'cancel_reservations', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   onClick={() => setShowConfirmAction({ res, action: 'no_show' })}
                                   className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                                   title={(() => {
-                                    const policy = canCancelReservation(hotel, profile, res); // No-show uses same cancel policy
+                                    const policy = canMarkNoShow(hotel, profile, res, customRoles);
                                     return policy.allowed ? "Mark No-Show" : policy.message;
                                   })()}
-                                  disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
+                                  disabled={loading || !canMarkNoShow(hotel, profile, res, customRoles).allowed}
                                 >
                                   <UserX size={18} />
                                 </button>
                               )}
-                              {(hasPermission(profile, 'cancel_reservations') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                              {(hasPermission(profile, 'cancel_reservations', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                                 <button 
                                   onClick={() => setShowConfirmAction({ res, action: 'cancelled' })}
                                   className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                                   title={(() => {
-                                    const policy = canCancelReservation(hotel, profile, res);
+                                    const policy = canCancelReservation(hotel, profile, res, customRoles);
                                     return policy.allowed ? "Cancel" : policy.message;
                                   })()}
-                                  disabled={loading || !canCancelReservation(hotel, profile, res).allowed}
+                                  disabled={loading || !canCancelReservation(hotel, profile, res, customRoles).allowed}
                                 >
                                   <XCircle size={18} />
                                 </button>
@@ -5705,10 +5745,10 @@ export function FrontDesk() {
                             </>
                           )}
 
-                          {(profile && (hasPermission(profile, 'edit_reservations') || profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
+                          {(profile && (hasPermission(profile, 'edit_reservations', customRoles) || profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
                             <button 
                               onClick={() => {
-                                const policy = canEditReservation(hotel, profile, res);
+                                const policy = canEditReservation(hotel, profile, res, customRoles);
                                 if (!policy.allowed) {
                                   toast.error(policy.message || 'Editing disabled');
                                   return;
@@ -5724,12 +5764,12 @@ export function FrontDesk() {
                               }}
                               className={cn(
                                 "p-2 rounded-lg transition-all active:scale-90",
-                                !canEditReservation(hotel, profile, res).allowed
+                                !canEditReservation(hotel, profile, res, customRoles).allowed
                                   ? "text-zinc-600 cursor-not-allowed"
                                   : "text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800"
                               )}
                               title={(() => {
-                                const policy = canEditReservation(hotel, profile, res);
+                                const policy = canEditReservation(hotel, profile, res, customRoles);
                                 return policy.allowed ? "Edit Reservation" : policy.message;
                               })()}
                             >
@@ -5776,7 +5816,7 @@ export function FrontDesk() {
                             SmartKey
                           </button>
 
-                          {(profile && (hasPermission(profile, 'delete_reservations') || profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
+                          {(profile && (hasPermission(profile, 'delete_reservations', customRoles) || profile.role === 'hotelAdmin' || profile.role === 'superAdmin')) && (
                             <button 
                               onClick={() => setShowConfirmAction({ res, action: 'delete' })}
                               className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all active:scale-90 disabled:opacity-50"
@@ -5824,7 +5864,7 @@ export function FrontDesk() {
                     <input 
                       type="date" 
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={editForm.checkIn}
                       min={profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin' ? undefined : format(new Date(), 'yyyy-MM-dd')}
                       onChange={(e) => setEditForm({ ...editForm, checkIn: e.target.value })}
@@ -5838,7 +5878,7 @@ export function FrontDesk() {
                     <input 
                       type="date" 
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={editForm.checkOut}
                       onChange={(e) => setEditForm({ ...editForm, checkOut: e.target.value })}
                     />
@@ -5923,7 +5963,7 @@ export function FrontDesk() {
                   <option value="">Select clean / ready room</option>
                   {rooms.filter(r => {
                     if (r.id === showTransferModal.roomId) return false;
-                    const policy = canCheckIn(hotel, profile, showTransferModal, r, null, reservations);
+                    const policy = canCheckIn(hotel, profile, showTransferModal, r, null, reservations, customRoles);
                     return policy.allowed && r.status !== 'occupied';
                   }).map(room => (
                     <option key={room.id} value={room.id}>
@@ -6110,7 +6150,7 @@ export function FrontDesk() {
                     value={newCheckOutDate}
                     onChange={(e) => setNewCheckOutDate(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none appearance-none"
-                    style={{ colorScheme: 'dark' }}
+                   
                   />
                   <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                 </div>
@@ -6133,7 +6173,7 @@ export function FrontDesk() {
                         <AlertTriangle size={14} />
                         <span>Extension Blocked</span>
                       </div>
-                      <p className="text-xs text-red-200">
+                      <p className="text-xs text-red-700 dark:text-red-200">
                         {conflictCheck.reason || 'This extension overlaps with an existing reservation.'}
                       </p>
                     </div>

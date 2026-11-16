@@ -64,7 +64,7 @@ interface GuestFolioProps {
 }
 
 export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioProps) {
-  const { hotel, currency, exchangeRate, profile } = useAuth();
+  const { hotel, currency, exchangeRate, profile, customRoles } = useAuth();
   const { executeRequest, isPending } = useRequestManager();
   const [currentReservation, setCurrentReservation] = useState<Reservation>(reservation);
   const reservationRef = useRef<Reservation>(reservation);
@@ -335,13 +335,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       finalAmount = Math.min(finalAmount, modalPromoLimit);
     }
 
-    const policy = canApplyDiscount(hotel, profile, finalAmount, currentReservation.totalAmount);
+    const policy = canApplyDiscount(hotel, profile, finalAmount, currentReservation.totalAmount, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Discount denied by hotel policy');
       return;
     }
 
-    if (!hasPermission(profile, 'edit_reservation')) {
+    if (!hasPermission(profile, 'edit_reservation', customRoles) && !hasPermission(profile, 'edit_reservations', customRoles)) {
       toast.error('You do not have permission to apply discounts');
       return;
     }
@@ -612,7 +612,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     e.preventDefault();
     if (!hotel?.id || !profile) return;
 
-    const policy = canEditInvoice(hotel, profile, currentReservation);
+    const policy = canEditInvoice(hotel, profile, currentReservation, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Invoice is locked');
       return;
@@ -679,7 +679,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     e.preventDefault();
     if (!hotel?.id || !profile || !currentReservation.guestId || isSaving) return;
 
-    const policy = canEditInvoice(hotel, profile, currentReservation);
+    const policy = canEditInvoice(hotel, profile, currentReservation, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Invoice is locked');
       return;
@@ -706,7 +706,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       // Policy check: allowManualLedgerAdjustments
       const allowManual = hotel?.settings?.financial?.allowManualLedgerAdjustments;
-      if (allowManual === false && !hasPermission(profile, 'void_transaction')) {
+      if (allowManual === false && !hasPermission(profile, 'void_transaction', customRoles)) {
         toast.error("Manual ledger adjustments are disabled by hotel configuration.");
         setIsSaving(false);
         return;
@@ -721,7 +721,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
         const discountAmount = baseAmount - amountAfterDiscount;
         if (discountAmount > 0 || item.category === 'discount') {
-          const policy = canApplyDiscount(hotel, profile, discountAmount || baseAmount, baseAmount || currentReservation.totalAmount);
+          const policy = canApplyDiscount(hotel, profile, discountAmount || baseAmount, baseAmount || currentReservation.totalAmount, customRoles);
           if (!policy.allowed) {
             toast.error(`${item.description || item.category}: ${policy.message || 'Discount denied by policy'}`);
             setIsSaving(false);
@@ -1102,7 +1102,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const maxRefundableCredit = isMasterWithLinks
     ? Math.min(folioAvailableCredit, groupAvailableCredit)
     : folioAvailableCredit;
-  const refundPermissionCheck = canProcessRefund(hotel, profile, Math.max(1, maxRefundableCredit));
+  const refundPermissionCheck = canProcessRefund(hotel, profile, Math.max(1, maxRefundableCredit), customRoles);
 
   const openRefundModal = () => {
     if (!hotel?.id || !profile) return;
@@ -1135,7 +1135,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     e.preventDefault();
     if (!hotel?.id || !profile) return;
 
-    const policy = canProcessRefund(hotel, profile, refundDraft.amount);
+    const policy = canProcessRefund(hotel, profile, refundDraft.amount, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Refund denied by policy');
       return;
@@ -1168,7 +1168,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const handleConfirmRefund = async () => {
     if (!hotel?.id || !profile || isSaving) return;
 
-    const policy = canProcessRefund(hotel, profile, refundDraft.amount);
+    const policy = canProcessRefund(hotel, profile, refundDraft.amount, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Refund denied by policy');
       return;
@@ -1268,8 +1268,14 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
   const handleVoidEntry = async () => {
     if (!hotel?.id || !confirmDelete || !profile || isDeleting) return;
-    
-    const policy = canVoidTransaction(hotel, profile, confirmDelete);
+
+    const isPaymentEntry = confirmDelete.type === 'credit' && String(confirmDelete.category || '').toLowerCase() === 'payment';
+    if (isPaymentEntry && hotel.settings?.payments?.allowPaymentReversal === false) {
+      toast.error('Payment reversal is disabled by Admin Controls.');
+      return;
+    }
+
+    const policy = canVoidTransaction(hotel, profile, confirmDelete, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Voiding denied');
       return;
@@ -1479,7 +1485,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 </button>
                 <button 
                   onClick={() => setShowReceipt(false)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-white/10 rounded-full transition-all"
+                  className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-full transition-all"
                   title="Close"
                 >
                   <XCircle size={28} />
@@ -1513,7 +1519,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                 className={cn(
                   "flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 whitespace-nowrap shrink-0",
                   folioTab === 'ledger'
-                    ? "bg-zinc-100 text-black shadow-md"
+                    ? "bg-zinc-900 text-zinc-50 border border-zinc-700 dark:bg-zinc-100 dark:text-black dark:border-transparent shadow-md"
                     : "bg-zinc-900/90 text-zinc-400 hover:text-zinc-200 border border-zinc-800"
                 )}
               >
@@ -1546,11 +1552,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   onClick={() => setActiveFolio('all')}
                   className={cn(
                     "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1",
-                    activeFolio === 'all' ? "bg-zinc-100 text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-300"
+                    activeFolio === 'all' ? "bg-zinc-800 text-zinc-50 border border-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:border-transparent shadow-sm" : "text-zinc-500 hover:text-zinc-300"
                   )}
                 >
                   <span>All Charges</span>
-                  <span className={cn("px-1.5 py-0.2 rounded-full text-[9px] font-mono", activeFolio === 'all' ? "bg-zinc-300 text-zinc-900" : "bg-zinc-800 text-zinc-400")}>
+                  <span className={cn("px-1.5 py-0.2 rounded-full text-[9px] font-mono", activeFolio === 'all' ? "bg-zinc-700 text-zinc-50 dark:bg-zinc-300 dark:text-zinc-900" : "bg-zinc-800 text-zinc-400")}>
                     {ledgerEntries.length}
                   </span>
                 </button>
@@ -1684,7 +1690,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             <button
               type="button"
               onClick={() => setShowReceipt(true)}
-              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-zinc-800 border border-zinc-700 rounded-xl sm:rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-zinc-800 border border-zinc-700 rounded-xl sm:rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-zinc-50 transition-all group active:scale-95"
             >
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-zinc-900 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
                 <Printer size={16} className="sm:size-5" />
@@ -2264,9 +2270,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
                           {maxRefundableCredit > 0.01 && (
                             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                              <div className="text-[11px] text-rose-200 leading-relaxed">
-                                <span className="font-bold text-rose-300 uppercase tracking-wider block text-[10px]">Refundable Excess Payment</span>
-                                Available to refund: <strong className="font-mono text-white">{formatCurrency(maxRefundableCredit, currency, exchangeRate)}</strong>
+                              <div className="text-[11px] text-rose-800 dark:text-rose-200 leading-relaxed">
+                                <span className="font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider block text-[10px]">Refundable Excess Payment</span>
+                                Available to refund: <strong className="font-mono text-zinc-50">{formatCurrency(maxRefundableCredit, currency, exchangeRate)}</strong>
                               </div>
                               <button
                                 type="button"
@@ -2393,7 +2399,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <button
                     type="button"
                     onClick={() => setShowSettleOverpayment(false)}
-                    className="p-1.5 text-zinc-500 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+                    className="p-1.5 text-zinc-500 hover:text-zinc-50 rounded-lg hover:bg-zinc-800 transition-colors"
                   >
                     <X size={18} />
                   </button>
@@ -2615,7 +2621,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <p className="text-xs text-zinc-500">Previous stays for {currentReservation.guestName}</p>
                     </div>
                   </div>
-                  <button onClick={() => setShowGuestHistory(false)} className="text-zinc-500 hover:text-white">
+                  <button onClick={() => setShowGuestHistory(false)} className="text-zinc-500 hover:text-zinc-50">
                     <XCircle size={24} />
                   </button>
                 </div>
@@ -3487,7 +3493,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                   <Tag size={13} />
                                 </button>
                               )}
-                              {hasPermission(profile, 'void_transaction') && !entry.isVirtual && (
+                              {hasPermission(profile, 'void_transaction', customRoles) && !entry.isVirtual && (
                                 <button
                                   onClick={() => setConfirmDelete(entry)}
                                   className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
@@ -3518,7 +3524,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <td className="px-6 py-4 text-right text-sm font-black text-zinc-500">
                       —
                     </td>
-                    {hasPermission(profile, 'void_transaction') && (
+                    {hasPermission(profile, 'void_transaction', customRoles) && (
                       <td className="px-6 py-4"></td>
                     )}
                   </tr>
@@ -3531,7 +3537,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       {formatCurrency(Math.abs(balance), currency, exchangeRate)}
                       {balance > 0 ? " (Owing)" : balance < 0 ? " (Credit)" : " (Settled)"}
                     </td>
-                    {hasPermission(profile, 'void_transaction') && (
+                    {hasPermission(profile, 'void_transaction', customRoles) && (
                       <td className="px-6 py-2"></td>
                     )}
                   </tr>
@@ -3608,6 +3614,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
           reservation={currentReservation}
           currency={currency}
           exchangeRate={exchangeRate}
+          customRoles={customRoles}
           onClose={() => setDiscountingEntry(null)}
           onSuccess={() => {
             // Real-time snapshot takes care of local states, just dismiss

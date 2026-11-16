@@ -790,13 +790,13 @@ export function CorporateManagement() {
     <div className="p-8 space-y-8">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Corporate Accounts</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Corporate Accounts</h1>
           <p className="text-zinc-400">Manage corporate partnerships and billing</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleExport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
@@ -806,7 +806,7 @@ export function CorporateManagement() {
               <button 
                 onClick={postDailyCharges}
                 disabled={loading}
-                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50"
               >
                 {loading ? <RefreshCw size={18} className="animate-spin" /> : <Clock size={18} />}
                 {loading ? 'Posting...' : 'Post Daily Charges'}
@@ -897,7 +897,7 @@ export function CorporateManagement() {
               <Clock size={20} className="animate-pulse" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-white">Pending Collection Alerts ({accounts.filter(a => (a.currentBalance || 0) > 0).length})</h4>
+              <h4 className="text-sm font-bold text-zinc-50">Pending Collection Alerts ({accounts.filter(a => (a.currentBalance || 0) > 0).length})</h4>
               <p className="text-xs text-zinc-400 mt-0.5">
                 Some accounts have pending transfer debt or outstanding balances. Please follow up for timely collections.
                 {accounts.some(a => (a.currentBalance || 0) > (a.creditLimit || 0)) && (
@@ -908,7 +908,7 @@ export function CorporateManagement() {
           </div>
           <div className="flex flex-wrap gap-2">
             {accounts.filter(a => (a.currentBalance || 0) > 0).slice(0, 3).map(a => (
-              <span key={a.id} className="text-[10px] bg-red-950/40 text-red-400 border border-red-900/30 px-2 py-1 rounded-lg font-bold">
+              <span key={a.id} className="text-[10px] bg-red-500/12 dark:bg-red-950/40 text-red-700 dark:text-red-400 border border-red-500/30 dark:border-red-900/30 px-2 py-1 rounded-lg font-bold">
                 {a.name}: {formatCurrency(a.currentBalance, currency, exchangeRate)}
               </span>
             ))}
@@ -1020,20 +1020,20 @@ export function CorporateManagement() {
                         <Building2 size={20} />
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-white">{account.name}</div>
+                        <div className="text-sm font-bold text-zinc-50">{account.name}</div>
                         <div className="text-xs text-zinc-500">{account.taxId}</div>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm text-white">{account.contactPerson}</div>
+                    <div className="text-sm text-zinc-50">{account.contactPerson}</div>
                     <div className="text-xs text-zinc-500">{account.email}</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={cn(
                         "text-sm font-bold",
-                        (account.currentBalance || 0) > 0 ? "text-red-500" : (account.currentBalance || 0) < 0 ? "text-emerald-500" : "text-white"
+                        (account.currentBalance || 0) > 0 ? "text-red-500" : (account.currentBalance || 0) < 0 ? "text-emerald-500" : "text-zinc-50"
                       )}>
                         Balance: {formatCurrency(account.currentBalance || 0, currency, exchangeRate)}
                       </span>
@@ -1118,7 +1118,7 @@ export function CorporateManagement() {
                               });
                               setShowAddModal(true);
                             }}
-                            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                            className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
                           >
                             <Edit2 size={18} />
                           </button>
@@ -1164,7 +1164,7 @@ export function CorporateManagement() {
               className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-md max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
             >
               <div className="p-6 border-b border-zinc-800 shrink-0 bg-zinc-900 sticky top-0 z-10">
-                <h2 className="text-xl font-bold text-white">Manual Adjustment</h2>
+                <h2 className="text-xl font-bold text-zinc-50">Manual Adjustment</h2>
                 <p className="text-sm text-zinc-500">{showAdjustmentModal.name}</p>
               </div>
               <form onSubmit={handleManualAdjustment} className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -1175,7 +1175,7 @@ export function CorporateManagement() {
                     <select
                       value={adjustmentData.type}
                       onChange={(e) => setAdjustmentData({ ...adjustmentData, type: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="credit">Payment / Credit (-)</option>
                       <option value="debit">Charge / Debit (+)</option>
@@ -1189,7 +1189,7 @@ export function CorporateManagement() {
                       min="1"
                       value={adjustmentData.amount}
                       onChange={(e) => setAdjustmentData({ ...adjustmentData, amount: Number(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                 </div>
@@ -1199,7 +1199,7 @@ export function CorporateManagement() {
                     <select
                       value={adjustmentData.paymentMethod}
                       onChange={(e) => setAdjustmentData({ ...adjustmentData, paymentMethod: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="cash">Cash</option>
                       <option value="card">Card</option>
@@ -1213,7 +1213,7 @@ export function CorporateManagement() {
                     required
                     value={adjustmentData.description}
                     onChange={(e) => setAdjustmentData({ ...adjustmentData, description: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
                     placeholder="e.g. Monthly settlement, Service charge adjustment..."
                   />
                 </div>
@@ -1274,7 +1274,7 @@ export function CorporateManagement() {
                 `}</style>
                 <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-950 no-print">
                   <div>
-                    <h2 className="text-xl font-bold text-white">Settlement Successful</h2>
+                    <h2 className="text-xl font-bold text-zinc-50">Settlement Successful</h2>
                     <p className="text-sm text-zinc-500">Unified corporate debt clearance processed and invoice generated.</p>
                   </div>
                   <button 
@@ -1282,7 +1282,7 @@ export function CorporateManagement() {
                       setShowBulkSettleModal(false);
                       setBulkSettleReceipt(null);
                     }}
-                    className="text-zinc-400 hover:text-white hover:bg-zinc-800 p-1 rounded-full transition-all"
+                    className="text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 p-1 rounded-full transition-all"
                   >
                     <XCircle size={24} />
                   </button>
@@ -1397,13 +1397,13 @@ export function CorporateManagement() {
               <form onSubmit={handleBulkSettle}>
                 <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-950">
                   <div>
-                    <h2 className="text-xl font-bold text-white">Bulk Settle Debt</h2>
+                    <h2 className="text-xl font-bold text-zinc-50">Bulk Settle Debt</h2>
                     <p className="text-xs text-zinc-500 mt-0.5">Settle outstanding balances for {bulkSettleAccounts.length} selected accounts simultaneously.</p>
                   </div>
                   <button 
                     type="button"
                     onClick={() => setShowBulkSettleModal(false)}
-                    className="text-zinc-500 hover:text-white"
+                    className="text-zinc-500 hover:text-zinc-50"
                   >
                     <XCircle size={22} />
                   </button>
@@ -1417,7 +1417,7 @@ export function CorporateManagement() {
                       {bulkSettleAccounts.map((account, index) => (
                         <div key={account.accountId} className="p-4 bg-zinc-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="space-y-1">
-                            <div className="text-sm font-bold text-white">{account.accountName}</div>
+                            <div className="text-sm font-bold text-zinc-50">{account.accountName}</div>
                             <div className="text-xs text-red-400 font-semibold">
                               Outstanding Debt: {formatCurrency(account.currentBalance, currency, exchangeRate)}
                             </div>
@@ -1435,7 +1435,7 @@ export function CorporateManagement() {
                                   const val = Math.min(account.currentBalance, Math.max(0, Number(e.target.value)));
                                   setBulkSettleAccounts(prev => prev.map((a, idx) => idx === index ? { ...a, paymentAmount: val } : a));
                                 }}
-                                className="bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white w-40 font-mono text-right focus:outline-none focus:border-emerald-500"
+                                className="bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 w-40 font-mono text-right focus:outline-none focus:border-emerald-500"
                               />
                             </div>
                             <button
@@ -1475,7 +1475,7 @@ export function CorporateManagement() {
                       <select
                         value={bulkPaymentMethod}
                         onChange={(e) => setBulkPaymentMethod(e.target.value as any)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500/50 text-sm"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-50 focus:outline-none focus:border-emerald-500/50 text-sm"
                       >
                         <option value="transfer">Bank Transfer</option>
                         <option value="card">Card</option>
@@ -1492,7 +1492,7 @@ export function CorporateManagement() {
                         required
                         value={bulkDescription}
                         onChange={(e) => setBulkDescription(e.target.value)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500/50 text-sm"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-zinc-50 focus:outline-none focus:border-emerald-500/50 text-sm"
                         placeholder="e.g. Unified Invoice Clearing Q2"
                       />
                     </div>
@@ -1554,8 +1554,8 @@ export function CorporateManagement() {
               className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
-                <h2 className="text-xl font-bold text-white">{editingAccount ? 'Edit Account' : 'Add Corporate Account'}</h2>
-                <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white">
+                <h2 className="text-xl font-bold text-zinc-50">{editingAccount ? 'Edit Account' : 'Add Corporate Account'}</h2>
+                <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-zinc-50">
                   <X size={20} />
                 </button>
               </div>
@@ -1568,7 +1568,7 @@ export function CorporateManagement() {
                     type="text"
                     value={newAccount.name}
                     onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1578,7 +1578,7 @@ export function CorporateManagement() {
                     type="text"
                     value={newAccount.contactPerson}
                     onChange={(e) => setNewAccount({ ...newAccount, contactPerson: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1588,7 +1588,7 @@ export function CorporateManagement() {
                     type="email"
                     value={newAccount.email}
                     onChange={(e) => setNewAccount({ ...newAccount, email: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1598,7 +1598,7 @@ export function CorporateManagement() {
                     type="tel"
                     value={newAccount.phone}
                     onChange={(e) => setNewAccount({ ...newAccount, phone: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1607,7 +1607,7 @@ export function CorporateManagement() {
                     type="text"
                     value={newAccount.taxId}
                     onChange={(e) => setNewAccount({ ...newAccount, taxId: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1616,7 +1616,7 @@ export function CorporateManagement() {
                     type="number"
                     value={newAccount.creditLimit}
                     onChange={(e) => setNewAccount({ ...newAccount, creditLimit: Number(e.target.value) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
                   <div className="space-y-2">
@@ -1624,7 +1624,7 @@ export function CorporateManagement() {
                     <select
                       value={newAccount.billingCycle}
                       onChange={(e) => setNewAccount({ ...newAccount, billingCycle: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="daily">Daily</option>
                       <option value="weekly">Weekly</option>
@@ -1638,7 +1638,7 @@ export function CorporateManagement() {
                   <textarea
                     value={newAccount.address}
                     onChange={(e) => setNewAccount({ ...newAccount, address: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
                   />
                 </div>
               </div>
@@ -1679,10 +1679,10 @@ export function CorporateManagement() {
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
                 <div>
-                  <h2 className="text-xl font-bold text-white">Negotiated Rates</h2>
+                  <h2 className="text-xl font-bold text-zinc-50">Negotiated Rates</h2>
                   <p className="text-sm text-zinc-500">{showRatesModal.name}</p>
                 </div>
-                <button onClick={() => setShowRatesModal(null)} className="text-zinc-500 hover:text-white">
+                <button onClick={() => setShowRatesModal(null)} className="text-zinc-500 hover:text-zinc-50">
                   <X size={24} />
                 </button>
               </div>
@@ -1691,7 +1691,7 @@ export function CorporateManagement() {
               {/* Add Rate Form */}
               {hasPermission() ? (
                 <div className="p-6 border-r border-zinc-800 bg-zinc-950/50">
-                  <h3 className="text-sm font-bold text-white mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-zinc-50 mb-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Plus size={16} className="text-emerald-500" />
                       {editingRate ? 'Edit Rate' : 'Add New Rate'}
@@ -1712,7 +1712,7 @@ export function CorporateManagement() {
                             conditions: ''
                           });
                         }}
-                        className="text-[10px] text-zinc-500 hover:text-white"
+                        className="text-[10px] text-zinc-500 hover:text-zinc-50"
                       >
                         Cancel
                       </button>
@@ -1733,7 +1733,7 @@ export function CorporateManagement() {
                             rate: selectedType ? selectedType.basePrice : newRate.rate
                           });
                         }}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="">Select Type</option>
                         {availableRoomTypes.map(type => (
@@ -1752,7 +1752,7 @@ export function CorporateManagement() {
                         <select
                           value={newRate.discountType}
                           onChange={(e) => setNewRate({ ...newRate, discountType: e.target.value as any })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="fixed">Fixed Amount</option>
                           <option value="percentage">Percentage (%)</option>
@@ -1765,7 +1765,7 @@ export function CorporateManagement() {
                             type="number"
                             value={newRate.discountValue}
                             onChange={(e) => setNewRate({ ...newRate, discountValue: Number(e.target.value) })}
-                            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             placeholder="0"
                           />
                           <button
@@ -1801,7 +1801,7 @@ export function CorporateManagement() {
                           type="number"
                           value={newRate.rate}
                           onChange={(e) => setNewRate({ ...newRate, rate: Number(e.target.value) })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                       <div className="space-y-1">
@@ -1809,7 +1809,7 @@ export function CorporateManagement() {
                         <select
                           value={newRate.currency}
                           onChange={(e) => setNewRate({ ...newRate, currency: e.target.value as any })}
-                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="NGN">₦ (NGN)</option>
                           <option value="USD">$ (USD)</option>
@@ -1825,8 +1825,8 @@ export function CorporateManagement() {
                             type="date"
                             value={newRate.startDate}
                             onChange={(e) => setNewRate({ ...newRate, startDate: e.target.value })}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50 appearance-none"
-                            style={{ colorScheme: 'dark' }}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50 appearance-none"
+                           
                           />
                           <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
                         </div>
@@ -1839,8 +1839,8 @@ export function CorporateManagement() {
                             type="date"
                             value={newRate.endDate}
                             onChange={(e) => setNewRate({ ...newRate, endDate: e.target.value })}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50 appearance-none"
-                            style={{ colorScheme: 'dark' }}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50 appearance-none"
+                           
                           />
                           <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
                         </div>
@@ -1851,7 +1851,7 @@ export function CorporateManagement() {
                       <textarea
                         value={newRate.conditions}
                         onChange={(e) => setNewRate({ ...newRate, conditions: e.target.value })}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50 h-16 resize-none"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-16 resize-none"
                       />
                     </div>
                     <button
@@ -1891,7 +1891,7 @@ export function CorporateManagement() {
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-white">{rate.roomType}</span>
+                                <span className="text-sm font-bold text-zinc-50">{rate.roomType}</span>
                                 <span className={cn(
                                   "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase",
                                   isActive ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-800 text-zinc-500"
@@ -1899,7 +1899,7 @@ export function CorporateManagement() {
                                   {isActive ? 'Active' : 'Inactive'}
                                 </span>
                               </div>
-                              <div className="text-lg font-bold text-white">
+                              <div className="text-lg font-bold text-zinc-50">
                                 {rate.currency === 'NGN' ? '₦' : '$'}{rate.rate.toLocaleString()}
                                 {rate.discountValue > 0 && (
                                   <span className="text-[10px] text-emerald-500 ml-2">

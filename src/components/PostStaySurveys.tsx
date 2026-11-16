@@ -533,8 +533,8 @@ export function PostStaySurveys({ hotelId, currency, exchangeRate }: PostStaySur
                     </h5>
 
                     {selectedSurvey.managerResponse ? (
-                      <div className="bg-emerald-950/20 border border-emerald-800/20 p-4 rounded-xl space-y-2 text-left pointer-events-none">
-                        <div className="flex justify-between text-[10px] font-bold text-emerald-400">
+                      <div className="bg-emerald-500/10 dark:bg-emerald-950/20 border border-emerald-500/25 dark:border-emerald-800/20 p-4 rounded-xl space-y-2 text-left pointer-events-none">
+                        <div className="flex justify-between text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
                           <span>Service Manager Response:</span>
                           <span>Posted</span>
                         </div>

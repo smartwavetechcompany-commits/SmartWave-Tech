@@ -322,7 +322,7 @@ export function AvailableRoomsModal({
                     value={checkIn}
                     onChange={(e) => handleCheckInChange(e.target.value)}
                     className="bg-transparent text-zinc-50 text-xs font-bold outline-none cursor-pointer"
-                    style={{ colorScheme: 'dark' }}
+                   
                   />
                 </div>
               </div>
@@ -343,7 +343,7 @@ export function AvailableRoomsModal({
                     min={format(addDays(parseISO(checkIn), 1), 'yyyy-MM-dd')}
                     onChange={(e) => handleCheckOutChange(e.target.value)}
                     className="bg-transparent text-zinc-50 text-xs font-bold outline-none cursor-pointer"
-                    style={{ colorScheme: 'dark' }}
+                   
                   />
                 </div>
               </div>

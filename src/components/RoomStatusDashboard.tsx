@@ -299,66 +299,66 @@ export function RoomStatusDashboard() {
       case 'occupied':
         return {
           label: 'Occupied',
-          cardBg: 'bg-red-950/20 hover:bg-red-950/30 border-red-500/50 hover:border-red-500',
-          badgeBg: 'bg-red-500 text-white',
-          textColor: 'text-red-400',
-          dotColor: 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'
+          cardBg: 'bg-red-500/10 hover:bg-red-500/15 dark:bg-red-950/20 dark:hover:bg-red-950/30 border-red-500/40 dark:border-red-500/50 hover:border-red-500',
+          badgeBg: 'bg-red-600 dark:bg-red-500 text-white',
+          textColor: 'text-red-700 dark:text-red-400',
+          dotColor: 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.45)]'
         };
       case 'vacant':
         return {
           label: 'Vacant',
-          cardBg: 'bg-emerald-950/20 hover:bg-emerald-950/30 border-emerald-500/50 hover:border-emerald-500',
+          cardBg: 'bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/30 border-emerald-500/40 dark:border-emerald-500/50 hover:border-emerald-500',
           badgeBg: 'bg-emerald-500 text-black',
-          textColor: 'text-emerald-400',
-          dotColor: 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]'
+          textColor: 'text-emerald-700 dark:text-emerald-400',
+          dotColor: 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.45)]'
         };
       case 'reserved':
         return {
           label: 'Reserved',
-          cardBg: 'bg-blue-950/20 hover:bg-blue-950/30 border-blue-500/50 hover:border-blue-500',
-          badgeBg: 'bg-blue-500 text-white',
-          textColor: 'text-blue-400',
-          dotColor: 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'
+          cardBg: 'bg-blue-500/10 hover:bg-blue-500/15 dark:bg-blue-950/20 dark:hover:bg-blue-950/30 border-blue-500/40 dark:border-blue-500/50 hover:border-blue-500',
+          badgeBg: 'bg-blue-600 dark:bg-blue-500 text-white',
+          textColor: 'text-blue-700 dark:text-blue-400',
+          dotColor: 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.45)]'
         };
       case 'out_of_order':
         return {
           label: 'Out of Order',
-          cardBg: 'bg-zinc-900/60 hover:bg-zinc-900 border-zinc-600/60 hover:border-zinc-500',
-          badgeBg: 'bg-zinc-600 text-zinc-100',
+          cardBg: 'bg-zinc-900 hover:bg-zinc-800/70 dark:bg-zinc-900/60 dark:hover:bg-zinc-900 border-zinc-700 dark:border-zinc-600/60 hover:border-zinc-600 dark:hover:border-zinc-500',
+          badgeBg: 'bg-zinc-600 text-white dark:text-zinc-100',
           textColor: 'text-zinc-400',
-          dotColor: 'bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.5)]'
+          dotColor: 'bg-zinc-500 shadow-[0_0_10px_rgba(113,113,122,0.45)]'
         };
       case 'dirty':
         return {
           label: 'Dirty',
-          cardBg: 'bg-amber-950/20 hover:bg-amber-950/30 border-amber-600/50 hover:border-amber-500',
+          cardBg: 'bg-amber-500/10 hover:bg-amber-500/15 dark:bg-amber-950/20 dark:hover:bg-amber-950/30 border-amber-600/40 dark:border-amber-600/50 hover:border-amber-500',
           badgeBg: 'bg-amber-600 text-white',
-          textColor: 'text-amber-400',
-          dotColor: 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]'
+          textColor: 'text-amber-700 dark:text-amber-400',
+          dotColor: 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.45)]'
         };
       case 'clean':
         return {
           label: 'Clean',
-          cardBg: 'bg-teal-950/20 hover:bg-teal-950/30 border-teal-400/50 hover:border-teal-400',
-          badgeBg: 'bg-teal-500 text-black',
-          textColor: 'text-teal-300',
-          dotColor: 'bg-teal-400 shadow-[0_0_10px_rgba(45,212,191,0.5)]'
+          cardBg: 'bg-teal-500/10 hover:bg-teal-500/15 dark:bg-teal-950/20 dark:hover:bg-teal-950/30 border-teal-500/40 dark:border-teal-400/50 hover:border-teal-500 dark:hover:border-teal-400',
+          badgeBg: 'bg-teal-600 dark:bg-teal-500 text-white dark:text-black',
+          textColor: 'text-teal-700 dark:text-teal-300',
+          dotColor: 'bg-teal-500 dark:bg-teal-400 shadow-[0_0_10px_rgba(45,212,191,0.45)]'
         };
       case 'inspected':
         return {
           label: 'Inspected',
-          cardBg: 'bg-emerald-950/30 hover:bg-emerald-950/40 border-emerald-400/50 hover:border-emerald-400',
+          cardBg: 'bg-emerald-500/12 hover:bg-emerald-500/18 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/40 border-emerald-500/45 dark:border-emerald-400/50 hover:border-emerald-500 dark:hover:border-emerald-400',
           badgeBg: 'bg-emerald-600 text-white',
-          textColor: 'text-emerald-300',
-          dotColor: 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]'
+          textColor: 'text-emerald-700 dark:text-emerald-300',
+          dotColor: 'bg-emerald-500 dark:bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.45)]'
         };
       case 'housekeeping_pending':
         return {
           label: 'Housekeeping Pending',
-          cardBg: 'bg-yellow-950/20 hover:bg-yellow-950/30 border-yellow-400/50 hover:border-yellow-400',
+          cardBg: 'bg-yellow-500/10 hover:bg-yellow-500/15 dark:bg-yellow-950/20 dark:hover:bg-yellow-950/30 border-yellow-500/45 dark:border-yellow-400/50 hover:border-yellow-500 dark:hover:border-yellow-400',
           badgeBg: 'bg-yellow-500 text-black',
-          textColor: 'text-yellow-300',
-          dotColor: 'bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.5)]'
+          textColor: 'text-yellow-700 dark:text-yellow-300',
+          dotColor: 'bg-yellow-500 dark:bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.45)]'
         };
     }
   };
@@ -808,8 +808,8 @@ export function RoomStatusDashboard() {
 
                   {/* Reserved Details: Dates of Reservation & Next Date of Availability */}
                   {detailedResInfo.isReserved && (
-                    <div className="mt-2 p-2 rounded-xl bg-blue-950/70 border border-blue-500/40 text-[11px] space-y-1 text-left">
-                      <div className="flex items-center justify-between text-blue-400 font-bold">
+                    <div className="mt-2 p-2 rounded-xl bg-blue-500/10 dark:bg-blue-950/70 border border-blue-500/35 dark:border-blue-500/40 text-[11px] space-y-1 text-left">
+                      <div className="flex items-center justify-between text-blue-700 dark:text-blue-400 font-bold">
                         <span className="flex items-center gap-1">
                           <Calendar size={11} className="shrink-0" />
                           Reservation Dates:
@@ -820,16 +820,16 @@ export function RoomStatusDashboard() {
                       </div>
                       <div className="pt-1 border-t border-blue-500/20 flex items-center justify-between text-[10px]">
                         <span className="text-zinc-400">Next Available:</span>
-                        <span className="text-emerald-400 font-bold font-mono">{detailedResInfo.nextAvailableDate}</span>
+                        <span className="text-emerald-700 dark:text-emerald-400 font-bold font-mono">{detailedResInfo.nextAvailableDate}</span>
                       </div>
                     </div>
                   )}
 
                   {/* If Occupied, also display Next Available Date */}
                   {effectiveStatus === 'occupied' && (
-                    <div className="mt-2 p-1.5 rounded-lg bg-red-950/40 border border-red-500/30 text-[10px] flex items-center justify-between">
+                    <div className="mt-2 p-1.5 rounded-lg bg-red-500/10 dark:bg-red-950/40 border border-red-500/30 text-[10px] flex items-center justify-between">
                       <span className="text-zinc-400">Next Available:</span>
-                      <span className="text-emerald-400 font-bold font-mono">{detailedResInfo.nextAvailableDate}</span>
+                      <span className="text-emerald-700 dark:text-emerald-400 font-bold font-mono">{detailedResInfo.nextAvailableDate}</span>
                     </div>
                   )}
                 </div>
@@ -1040,7 +1040,7 @@ export function RoomStatusDashboard() {
 
               <button
                 onClick={() => handleQuickStatusUpdate('maintenance')}
-                className="p-2.5 rounded-xl text-left text-xs font-bold bg-amber-950/40 hover:bg-amber-900/40 text-amber-400 border border-amber-500/40 transition-all flex items-center justify-between"
+                className="p-2.5 rounded-xl text-left text-xs font-bold bg-amber-500/12 dark:bg-amber-950/40 hover:bg-amber-500/20 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-500/40 transition-all flex items-center justify-between"
               >
                 <span>Under Maintenance</span>
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />

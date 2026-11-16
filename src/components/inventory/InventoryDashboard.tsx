@@ -76,7 +76,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
                 <stat.icon size={24} />
               </div>
             </div>
-            <div className="text-2xl font-bold text-white mb-1">{stat.value}</div>
+            <div className="text-2xl font-bold text-zinc-50 mb-1">{stat.value}</div>
             <div className="text-sm text-zinc-500 font-medium">{stat.label}</div>
           </motion.div>
         ))}
@@ -88,7 +88,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
           <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <AlertTriangle className="text-amber-500" size={20} />
-              <h3 className="text-lg font-bold text-white">Critical Stock Alerts</h3>
+              <h3 className="text-lg font-bold text-zinc-50">Critical Stock Alerts</h3>
             </div>
             <span className="px-3 py-1 bg-amber-500/10 text-amber-500 text-xs font-bold rounded-full">
               {lowStockCount} Items
@@ -102,7 +102,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
                     <Package size={20} />
                   </div>
                   <div>
-                    <div className="text-sm font-bold text-white">{item.name}</div>
+                    <div className="text-sm font-bold text-zinc-50">{item.name}</div>
                     <div className="text-xs text-zinc-500">{item.category} • SKU: {item.sku}</div>
                   </div>
                 </div>
@@ -140,7 +140,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
         <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
           <div className="p-6 border-b border-zinc-800 flex items-center gap-3">
             <History className="text-blue-500" size={20} />
-            <h3 className="text-lg font-bold text-white">Recent Movements</h3>
+            <h3 className="text-lg font-bold text-zinc-50">Recent Movements</h3>
           </div>
           <div className="p-6 space-y-6">
             {recentTransactions.map((tx) => {
@@ -158,7 +158,7 @@ export function InventoryDashboard({ items, transactions }: InventoryDashboardPr
                      <TrendingUp size={16} />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold text-white truncate">
+                    <div className="text-sm font-bold text-zinc-50 truncate">
                       {item?.name || 'Unknown Item'}
                     </div>
                     <div className="text-xs text-zinc-500 flex items-center justify-between">

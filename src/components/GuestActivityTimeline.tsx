@@ -484,7 +484,7 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
               className={cn(
                 "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap",
                 categoryFilter === 'all'
-                  ? "bg-zinc-100 text-black shadow-sm"
+                  ? "bg-zinc-900 text-zinc-50 border border-zinc-700 dark:bg-zinc-100 dark:text-black dark:border-transparent shadow-sm"
                   : "bg-zinc-900/90 text-zinc-400 hover:text-zinc-200 border border-zinc-800"
               )}
             >
@@ -672,7 +672,7 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
                                 <span className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
                                   State Before Change:
                                 </span>
-                                <pre className="font-mono text-[10px] text-red-400/90 whitespace-pre-wrap overflow-x-auto bg-black/40 p-2 rounded-lg border border-red-500/10">
+                                <pre className="font-mono text-[10px] text-red-400/90 whitespace-pre-wrap overflow-x-auto bg-zinc-900 dark:bg-black/40 p-2 rounded-lg border border-red-500/20 dark:border-red-500/10">
                                   {typeof log.before === 'string' ? log.before : JSON.stringify(log.before, null, 2)}
                                 </pre>
                               </div>
@@ -682,7 +682,7 @@ export const GuestActivityTimeline: React.FC<GuestActivityTimelineProps> = ({
                                 <span className="text-[10px] font-bold uppercase text-emerald-500/80 block mb-1">
                                   State After Change:
                                 </span>
-                                <pre className="font-mono text-[10px] text-emerald-400/90 whitespace-pre-wrap overflow-x-auto bg-black/40 p-2 rounded-lg border border-emerald-500/10">
+                                <pre className="font-mono text-[10px] text-emerald-400/90 whitespace-pre-wrap overflow-x-auto bg-zinc-900 dark:bg-black/40 p-2 rounded-lg border border-emerald-500/20 dark:border-emerald-500/10">
                                   {typeof log.after === 'string' ? log.after : JSON.stringify(log.after, null, 2)}
                                 </pre>
                               </div>

@@ -1005,7 +1005,7 @@ export function SuperAdmin() {
         </div>
         <button 
           onClick={() => window.location.reload()}
-          className="px-6 py-2 bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 transition-all"
+          className="px-6 py-2 bg-zinc-800 text-zinc-50 rounded-lg hover:bg-zinc-700 transition-all"
         >
           Retry Connection
         </button>
@@ -1024,7 +1024,7 @@ export function SuperAdmin() {
             <div className="flex gap-4">
               <button 
                 onClick={() => setConfirmAction(null)}
-                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white transition-all active:scale-95"
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-all active:scale-95"
               >
                 Cancel
               </button>
@@ -1314,7 +1314,7 @@ export function SuperAdmin() {
                     <input 
                       type="date"
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-3 pr-10 py-2 text-zinc-50 text-sm appearance-none"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={customExpiryDate}
                       onChange={(e) => setCustomExpiryDate(e.target.value)}
                     />
@@ -1332,7 +1332,7 @@ export function SuperAdmin() {
 
             <button 
               onClick={() => setExtendingCode(null)}
-              className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
+              className="w-full mt-4 py-2 text-zinc-500 hover:text-zinc-50 transition-colors text-sm"
             >
               Cancel
             </button>
@@ -1398,7 +1398,7 @@ export function SuperAdmin() {
 
             <button 
               onClick={() => setExtendingHotel(null)}
-              className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
+              className="w-full mt-4 py-2 text-zinc-500 hover:text-zinc-50 transition-colors text-sm"
             >
               Cancel
             </button>
@@ -1493,7 +1493,7 @@ export function SuperAdmin() {
             </div>
             <button 
               onClick={() => setChangingPlanHotel(null)}
-              className="w-full mt-4 py-2 text-zinc-500 hover:text-white transition-colors text-sm"
+              className="w-full mt-4 py-2 text-zinc-500 hover:text-zinc-50 transition-colors text-sm"
             >
               Cancel
             </button>
@@ -1512,7 +1512,7 @@ export function SuperAdmin() {
               </div>
               <button 
                 onClick={() => setManagingStaffHotel(null)}
-                className="p-2 text-zinc-500 hover:text-white transition-colors"
+                className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
               >
                 <XCircle size={24} />
               </button>
@@ -1535,7 +1535,7 @@ export function SuperAdmin() {
               </div>
               <button 
                 onClick={() => setTogglingFeaturesHotel(null)}
-                className="p-2 text-zinc-500 hover:text-white transition-colors"
+                className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
               >
                 <XCircle size={24} />
               </button>
@@ -1708,7 +1708,7 @@ export function SuperAdmin() {
                               </button>
                               <button 
                                 onClick={() => setManagingStaffHotel(hotel)}
-                                className="p-2 text-zinc-500 hover:text-white rounded-lg transition-all active:scale-90"
+                                className="p-2 text-zinc-500 hover:text-zinc-50 rounded-lg transition-all active:scale-90"
                                 title="Manage Staff"
                               >
                                 <Users size={18} />
@@ -1793,7 +1793,7 @@ export function SuperAdmin() {
                   onClick={() => setFilterStatus('pending')}
                   className={cn(
                     "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                    filterStatus === 'pending' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 hover:text-white"
+                    filterStatus === 'pending' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 hover:text-zinc-50"
                   )}
                 >
                   Pending
@@ -1802,7 +1802,7 @@ export function SuperAdmin() {
                   onClick={() => setFilterStatus('approved')}
                   className={cn(
                     "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                    filterStatus === 'approved' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 hover:text-white"
+                    filterStatus === 'approved' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-500 hover:text-zinc-50"
                   )}
                 >
                   Approved
@@ -2203,7 +2203,7 @@ export function SuperAdmin() {
           <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl print:max-h-none print:overflow-visible print:w-full print:static">
             <button 
               onClick={() => setViewingReceipt(null)}
-              className="absolute top-4 right-4 z-10 p-2 bg-white/10 hover:bg-white/20 text-zinc-50 rounded-full transition-all print:hidden"
+              className="absolute top-4 right-4 z-10 p-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-300 rounded-full transition-all shadow-sm print:hidden"
             >
               <XCircle size={20} />
             </button>

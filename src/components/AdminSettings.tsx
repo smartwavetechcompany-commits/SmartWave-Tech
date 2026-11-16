@@ -127,23 +127,6 @@ export function AdminSettings() {
       }
     };
 
-    let syncWholeCheckoutGroup = false;
-    if (group === 'checkout') {
-      if (key === 'allowBalanceOutstanding' && nextVal === true) {
-        updated.checkout.preventOwingGuestCheckout = false;
-        updated.checkout.requireApprovalForDebtCheckout = false;
-        updated.checkout.requireFullPaymentBeforeCheckout = false;
-        syncWholeCheckoutGroup = true;
-      } else if ((key === 'preventOwingGuestCheckout' || key === 'requireFullPaymentBeforeCheckout') && nextVal === true) {
-        updated.checkout.allowBalanceOutstanding = false;
-        syncWholeCheckoutGroup = true;
-      } else if (key === 'requireApprovalForDebtCheckout' && nextVal === true) {
-        updated.checkout.preventOwingGuestCheckout = false;
-        updated.checkout.requireFullPaymentBeforeCheckout = false;
-        syncWholeCheckoutGroup = true;
-      }
-    }
-
     if (isSpecialLock) {
       if (!updated.checkout) (updated as any).checkout = {};
       if (!updated.financial) (updated as any).financial = {};
@@ -154,8 +137,6 @@ export function AdminSettings() {
     setLocalSettings(updated);
     if (isSpecialLock) {
       saveSettings(updated);
-    } else if (syncWholeCheckoutGroup) {
-      saveSettings(updated, 'checkout');
     } else {
       saveSettings(updated, group, key);
     }
@@ -739,7 +720,7 @@ export function AdminSettings() {
                 {renderToggle('financial', 'allowRefunds', 'Enable Refund Processing', 'Allow the reversal of payments back to guests.')}
                 {renderToggle('financial', 'requireApprovalForRefunds', 'Refunds Require Approval', 'Manager/Admin override required for all refund transactions.')}
                 {renderToggle('financial', 'allowDiscounts', 'Enable Discount Engine', 'Support manual price adjustments on folios.')}
-                <div className="p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex items-center justify-between">
+                <div className="p-4 bg-emerald-500/10 dark:bg-emerald-950/20 border border-emerald-500/25 dark:border-emerald-500/20 rounded-xl flex items-center justify-between">
                   <div className="space-y-0.5">
                     <p className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                       <Tag size={15} className="text-emerald-400" />

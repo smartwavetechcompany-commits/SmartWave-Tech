@@ -157,14 +157,14 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
             placeholder="Search by name or SKU..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-all"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-12 pr-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50 transition-all"
           />
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+            className="bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           >
             <option value="all">All Categories</option>
             {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -210,7 +210,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                         <Package size={24} />
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-white">{item.name}</div>
+                        <div className="text-sm font-bold text-zinc-50">{item.name}</div>
                         <div className="text-[10px] font-mono text-zinc-500 mt-0.5">SKU: {item.sku}</div>
                         {item.barcode && (
                           <div className="flex items-center gap-1 text-[10px] text-zinc-600 mt-1">
@@ -266,7 +266,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                   </td>
                   <td className="px-6 py-4">
                     <div className="space-y-1">
-                      <div className="text-sm font-bold text-white">
+                      <div className="text-sm font-bold text-zinc-50">
                         {formatCurrency(item.price, currency, exchangeRate)}
                       </div>
                       <div className="text-[10px] text-zinc-500 font-medium uppercase">
@@ -309,7 +309,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           });
                           setShowAddModal(true);
                         }}
-                        className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
+                        className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all"
                       >
                         <Edit2 size={18} />
                       </button>
@@ -365,11 +365,11 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                     <Package size={24} />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-bold text-white">{editingItem ? 'Edit Item' : 'Create New Item'}</h2>
+                    <h2 className="text-2xl font-bold text-zinc-50">{editingItem ? 'Edit Item' : 'Create New Item'}</h2>
                     <p className="text-sm text-zinc-500">Define item master details and stock parameters</p>
                   </div>
                 </div>
-                <button onClick={handleCloseModal} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <button onClick={handleCloseModal} className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors">
                   <XCircle size={24} />
                 </button>
               </div>
@@ -392,7 +392,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                             type="text"
                             value={formData.sku}
                             onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             placeholder="SKU-001"
                           />
                           <button
@@ -413,7 +413,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                             type="text"
                             value={formData.barcode}
                             onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             placeholder="EAN-13"
                           />
                         </div>
@@ -427,7 +427,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                         type="text"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         placeholder="e.g. Luxury Bath Towel"
                       />
                     </div>
@@ -440,7 +440,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                             required
                             value={formData.category}
                             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           >
                             <option value="">Select Category</option>
                             {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -466,7 +466,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           type="text"
                           value={formData.subcategory}
                           onChange={(e) => setFormData({ ...formData, subcategory: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           placeholder="e.g. Linen"
                         />
                       </div>
@@ -478,7 +478,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                         <select
                           value={formData.type}
                           onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="consumable">Consumable</option>
                           <option value="non-consumable">Non-Consumable</option>
@@ -492,7 +492,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           type="text"
                           value={formData.unit}
                           onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           placeholder="pcs, kg, liters"
                         />
                       </div>
@@ -514,7 +514,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           type="number"
                           value={formData.quantity}
                           onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                       <div className="space-y-2">
@@ -525,7 +525,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           step="0.01"
                           value={formData.price}
                           onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                     </div>
@@ -538,7 +538,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           type="number"
                           value={formData.minThreshold}
                           onChange={(e) => setFormData({ ...formData, minThreshold: parseInt(e.target.value) })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                       <div className="space-y-2">
@@ -547,7 +547,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           type="number"
                           value={formData.maxThreshold}
                           onChange={(e) => setFormData({ ...formData, maxThreshold: parseInt(e.target.value) })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                     </div>
@@ -558,7 +558,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                         <select
                           value={formData.valuationMethod}
                           onChange={(e) => setFormData({ ...formData, valuationMethod: e.target.value as any })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="WAC">Weighted Average (WAC)</option>
                           <option value="FIFO">First In First Out (FIFO)</option>
@@ -570,7 +570,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                         <select
                           value={formData.status}
                           onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="active">Active</option>
                           <option value="discontinued">Discontinued</option>
@@ -587,7 +587,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                           type="text"
                           value={formData.department}
                           onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                           placeholder="e.g. Housekeeping, Kitchen"
                         />
                       </div>
@@ -600,7 +600,7 @@ export function ItemMaster({ items, categories, defaultShowAddModal, defaultShow
                   <textarea
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-3xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 min-h-[100px]"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-3xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50 min-h-[100px]"
                     placeholder="Enter item description, usage instructions, or storage requirements..."
                   />
                 </div>
@@ -708,9 +708,9 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
         <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Layers className="text-emerald-500" size={24} />
-            <h2 className="text-xl font-bold text-white">Manage Categories</h2>
+            <h2 className="text-xl font-bold text-zinc-50">Manage Categories</h2>
           </div>
-          <button onClick={onClose} className="p-2 text-zinc-500 hover:text-white">
+          <button onClick={onClose} className="p-2 text-zinc-500 hover:text-zinc-50">
             <XCircle size={24} />
           </button>
         </div>
@@ -725,7 +725,7 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
                   type="text"
                   value={newCategory.name}
                   onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-50 text-sm focus:outline-none focus:border-emerald-500/50"
                   placeholder="e.g. Beverages"
                 />
               </div>
@@ -735,7 +735,7 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
                   type="text"
                   value={newCategory.description}
                   onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500/50"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-50 text-sm focus:outline-none focus:border-emerald-500/50"
                   placeholder="Optional"
                 />
               </div>
@@ -777,7 +777,7 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
               {categories.slice((catPage - 1) * catPageSize, catPage * catPageSize).map(cat => (
                 <div key={cat.id} className="flex items-center justify-between bg-zinc-950/50 p-3 rounded-xl border border-zinc-800 group hover:border-zinc-700 transition-all">
                   <div>
-                    <div className="text-sm font-bold text-white flex items-center gap-2">
+                    <div className="text-sm font-bold text-zinc-50 flex items-center gap-2">
                       {cat.name}
                       {cat.isFB && (
                         <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 text-[8px] font-bold rounded uppercase">F&B</span>
@@ -791,7 +791,7 @@ function CategoryManager({ categories, onClose, hotelId }: CategoryManagerProps)
                         setEditingCategory(cat);
                         setNewCategory({ name: cat.name, description: cat.description || '', isFB: cat.isFB || false });
                       }}
-                      className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg"
+                      className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg"
                     >
                       <Edit2 size={14} />
                     </button>

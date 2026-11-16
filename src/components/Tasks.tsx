@@ -502,7 +502,7 @@ export function Tasks() {
                     <input
                       type="date"
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={newTask.dueDate}
                       onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
                     />
@@ -512,7 +512,7 @@ export function Tasks() {
                     <input
                       type="time"
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none transition-all"
-                      style={{ colorScheme: 'dark' }}
+                     
                       value={newTask.reminderAt}
                       onChange={(e) => setNewTask({ ...newTask, reminderAt: e.target.value })}
                     />

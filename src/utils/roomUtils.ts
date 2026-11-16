@@ -3,11 +3,38 @@ import { isWithinInterval, parseISO, startOfDay, endOfDay, addDays, format } fro
 
 export type DisplayRoomStatus = Room['status'] | 'occupied' | 'reserved' | 'blocked';
 
+const isBlockingActiveForDate = (
+  b: RoomBlocking,
+  date: Date,
+  hotel: Hotel | null = null,
+  now: Date = new Date()
+): boolean => {
+  const start = startOfDay(parseISO(b.startDate));
+  const end = endOfDay(parseISO(b.endDate));
+  const autoExpire = hotel?.settings?.roomBlocking?.autoExpireTempBlocks ?? true;
+
+  if (autoExpire) {
+    if (b.endTime && /^\d{2}:\d{2}$/.test(b.endTime)) {
+      const exactExpiry = new Date(`${b.endDate}T${b.endTime}:00`);
+      if (!isNaN(exactExpiry.getTime()) && now > exactExpiry) {
+        return false;
+      }
+    } else if (now > end) {
+      return false;
+    }
+    return date >= start && date <= end;
+  }
+
+  // When autoExpireTempBlocks is disabled, blocks remain in effect past endDate until manually removed
+  return date >= start && (date <= end || now > end);
+};
+
 export const getRoomDisplayStatus = (
   room: Room,
   reservations: Reservation[],
   roomBlockings: RoomBlocking[] = [],
-  targetDate: Date = new Date()
+  targetDate: Date = new Date(),
+  hotel: Hotel | null = null
 ): DisplayRoomStatus => {
   const date = startOfDay(targetDate);
 
@@ -23,11 +50,10 @@ export const getRoomDisplayStatus = (
   if (activeReservation) return 'occupied';
 
   // 2. Check for manual blockings
+  const now = new Date();
   const isBlocked = roomBlockings.some(b => {
     if (b.roomId !== room.id) return false;
-    const start = startOfDay(parseISO(b.startDate));
-    const end = endOfDay(parseISO(b.endDate));
-    return date >= start && date <= end;
+    return isBlockingActiveForDate(b, date, hotel, now);
   });
   if (isBlocked) return 'maintenance'; // or 'blocked' if we add it to type
 
@@ -75,7 +101,8 @@ export const getRoomDetailedReservationInfo = (
   room: Room,
   reservations: Reservation[],
   roomBlockings: RoomBlocking[] = [],
-  targetDate: Date = new Date()
+  targetDate: Date = new Date(),
+  hotel: Hotel | null = null
 ): RoomReservationInfo => {
   const today = startOfDay(targetDate);
 
@@ -116,7 +143,7 @@ export const getRoomDetailedReservationInfo = (
   const isOccupied = !!activeStay;
   const isReserved = !isOccupied && (!!reservedToday || !!upcomingRes || room.status === 'reserved');
 
-  const baseDisplayStatus = getRoomDisplayStatus(room, reservations, roomBlockings, targetDate);
+  const baseDisplayStatus = getRoomDisplayStatus(room, reservations, roomBlockings, targetDate, hotel);
   const displayStatus: DisplayRoomStatus = isOccupied ? 'occupied' : isReserved ? 'reserved' : baseDisplayStatus;
 
   if (!relevantRes) {
@@ -335,11 +362,27 @@ export const isRoomAvailable = (
   // Check Blockings if setting is enabled (or defaults to true)
   const preventBookingBlocked = hotel?.settings?.roomBlocking?.preventBookingBlocked ?? true;
   if (preventBookingBlocked) {
+    const autoExpire = hotel?.settings?.roomBlocking?.autoExpireTempBlocks ?? true;
+    const now = new Date();
     const hasBlock = roomBlockings.some(b => {
       if (b.roomId !== roomId) return false;
       const blockStart = startOfDay(parseISO(b.startDate));
       const blockEnd = endOfDay(parseISO(b.endDate));
-      return start <= blockEnd && end >= blockStart;
+
+      if (autoExpire) {
+        if (b.endTime && /^\d{2}:\d{2}$/.test(b.endTime)) {
+          const exactExpiry = new Date(`${b.endDate}T${b.endTime}:00`);
+          if (!isNaN(exactExpiry.getTime()) && now > exactExpiry) {
+            return false;
+          }
+        } else if (now > blockEnd) {
+          return false;
+        }
+        return start <= blockEnd && end >= blockStart;
+      }
+
+      // When auto-expire is disabled, unremoved blocks hold room availability past endDate
+      return (start <= blockEnd && end >= blockStart) || (now > blockEnd && end >= blockStart);
     });
 
     if (hasBlock) return false;

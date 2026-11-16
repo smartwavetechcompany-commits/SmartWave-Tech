@@ -193,7 +193,7 @@ export function Inventory() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Inventory Management</h1>
+          <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Inventory Management</h1>
           <p className="text-zinc-500">Manage supplies, food, and beverage stock</p>
         </div>
         
@@ -201,12 +201,12 @@ export function Inventory() {
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400">
             <div className="flex items-center gap-1.5">
               <Calendar size={14} className="text-emerald-500" />
-              <input type="date" className="bg-transparent outline-none appearance-none" style={{ colorScheme: 'dark' }} defaultValue="2026-04-01" />
+              <input type="date" className="bg-transparent outline-none appearance-none" defaultValue="2026-04-01" />
             </div>
             <span>to</span>
             <div className="flex items-center gap-1.5">
               <Calendar size={14} className="text-emerald-500" />
-              <input type="date" className="bg-transparent outline-none appearance-none" style={{ colorScheme: 'dark' }} defaultValue="2026-04-12" />
+              <input type="date" className="bg-transparent outline-none appearance-none" defaultValue="2026-04-12" />
             </div>
           </div>
           <select className="bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-xs text-zinc-400 outline-none">
@@ -215,7 +215,7 @@ export function Inventory() {
           {canExport && (
             <button 
               onClick={handleExportReport}
-              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95"
+              className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95"
             >
               <Download size={16} />
               Export Report
@@ -238,7 +238,7 @@ export function Inventory() {
                   setActiveTab('items');
                   setShouldOpenCategoryModal(true);
                 }}
-                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95"
+                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95"
               >
                 <Layers size={16} />
                 Categories
@@ -267,7 +267,7 @@ export function Inventory() {
             placeholder="Search inventory..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-12 pr-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -277,7 +277,7 @@ export function Inventory() {
               onClick={() => setFilterCategory(cat)}
               className={cn(
                 "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                filterCategory === cat ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white"
+                filterCategory === cat ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-50"
               )}
             >
               {cat}
@@ -302,9 +302,9 @@ export function Inventory() {
           <tbody className="divide-y divide-zinc-800">
             {filteredItems.slice((itemsPage - 1) * itemsPageSize, itemsPage * itemsPageSize).map(item => (
               <tr key={item.id} className="hover:bg-zinc-800/30 transition-colors">
-                <td className="px-6 py-4 font-bold text-white text-sm">{item.name}</td>
+                <td className="px-6 py-4 font-bold text-zinc-50 text-sm">{item.name}</td>
                 <td className="px-6 py-4 text-zinc-400 text-sm">{item.category}</td>
-                <td className="px-6 py-4 text-center text-white text-sm font-bold">{item.quantity}</td>
+                <td className="px-6 py-4 text-center text-zinc-50 text-sm font-bold">{item.quantity}</td>
                 <td className="px-6 py-4 text-center">
                   <span className={cn(
                     "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
@@ -317,7 +317,7 @@ export function Inventory() {
                   {safeFormatDate(item.lastUpdated, 'dd/MM/yyyy', '-')}
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <button className="text-zinc-500 hover:text-white transition-colors">
+                  <button className="text-zinc-500 hover:text-zinc-50 transition-colors">
                     <MoreHorizontal size={18} />
                   </button>
                 </td>
@@ -351,7 +351,7 @@ export function Inventory() {
       {/* Keep the tabbed view for advanced features if needed, but default to this dashboard */}
       <div className="pt-12 border-t border-zinc-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-          <h2 className="text-xl font-bold text-white">Advanced Inventory Modules</h2>
+          <h2 className="text-xl font-bold text-zinc-50">Advanced Inventory Modules</h2>
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-1.5 rounded-xl overflow-x-auto max-w-full custom-scrollbar">
             {['dashboard', 'items', 'procurement', 'movements', 'auditing', 'reports'].map(tab => (
               <button
@@ -359,7 +359,7 @@ export function Inventory() {
                 onClick={() => setActiveTab(tab as InventoryTab)}
                 className={cn(
                   "px-4 py-2 rounded-lg text-xs font-bold transition-all capitalize",
-                  activeTab === tab ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-white"
+                  activeTab === tab ? "bg-emerald-500 text-black" : "text-zinc-500 hover:text-zinc-50"
                 )}
               >
                 {tab}

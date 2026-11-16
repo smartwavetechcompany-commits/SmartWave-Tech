@@ -2433,7 +2433,7 @@ export function Settings() {
                   <div className="flex items-center gap-4">
                     <div className={cn(
                       "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
-                      theme === 'dark' ? "bg-zinc-800 text-zinc-50" : "bg-zinc-200 text-zinc-900"
+                      theme === 'dark' ? "bg-zinc-800 text-zinc-50" : "bg-amber-500/12 border border-amber-500/25 text-amber-600"
                     )}>
                       {theme === 'dark' ? <Moon size={24} /> : <Sun size={24} />}
                     </div>
@@ -2445,12 +2445,12 @@ export function Settings() {
                   <button 
                     onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                     className={cn(
-                      "w-14 h-8 rounded-full p-1 transition-all duration-300",
-                      theme === 'dark' ? "bg-emerald-500" : "bg-zinc-700"
+                      "w-14 h-8 rounded-full p-1 transition-all duration-300 border",
+                      theme === 'dark' ? "bg-emerald-500 border-emerald-500" : "bg-zinc-700 border-zinc-600/40"
                     )}
                   >
                     <div className={cn(
-                      "w-6 h-6 rounded-full bg-zinc-50 shadow-lg transition-all duration-300 transform",
+                      "w-6 h-6 rounded-full bg-white shadow-md transition-all duration-300 transform",
                       theme === 'dark' ? "translate-x-6" : "translate-x-0"
                     )} />
                   </button>

@@ -18,6 +18,7 @@ import { db, auth } from '../firebase';
 import { OperationType } from '../types';
 import { errorService, ErrorSeverity } from '../services/errorService';
 import { deepCloneSafe, safeStringify } from '../utils';
+import { shouldLogActivity } from './activityLogger';
 
 /**
  * Audit log entry structure
@@ -48,6 +49,7 @@ export async function createAuditLog(
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) {
   if (!hotelId) return;
+  if (!shouldLogActivity(module, action)) return;
   try {
     const user = auth.currentUser;
     // Extract targetId, reservationId, guestId if available in metadata

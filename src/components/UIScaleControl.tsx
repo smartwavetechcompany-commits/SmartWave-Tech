@@ -83,7 +83,7 @@ export function UIScaleControl() {
           type="button"
           onClick={handleZoomOut}
           disabled={scale <= MIN_SCALE}
-          className="p-1 hover:text-white hover:bg-zinc-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-1 hover:text-zinc-50 hover:bg-zinc-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           title="Zoom out interface (Make UI smaller)"
           aria-label="Zoom out interface"
         >
@@ -95,7 +95,7 @@ export function UIScaleControl() {
           onClick={() => setIsOpen(!isOpen)}
           className={cn(
             "px-1.5 py-0.5 text-[10px] font-bold tracking-tight rounded transition-colors flex items-center gap-1",
-            scale !== DEFAULT_SCALE ? "text-emerald-400" : "text-zinc-300 hover:text-white"
+            scale !== DEFAULT_SCALE ? "text-emerald-400" : "text-zinc-300 hover:text-zinc-50"
           )}
           title="Click to select preset UI density scale"
           aria-label="Current UI scale"
@@ -107,7 +107,7 @@ export function UIScaleControl() {
           type="button"
           onClick={handleZoomIn}
           disabled={scale >= MAX_SCALE}
-          className="p-1 hover:text-white hover:bg-zinc-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-1 hover:text-zinc-50 hover:bg-zinc-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           title="Zoom in interface (Make UI larger)"
           aria-label="Zoom in interface"
         >
@@ -148,7 +148,7 @@ export function UIScaleControl() {
                   "w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left",
                   scale === preset.value
                     ? "bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20"
-                    : "text-zinc-300 hover:bg-zinc-800/80 hover:text-white"
+                    : "text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-50"
                 )}
               >
                 <span>{preset.label}</span>

@@ -49,7 +49,7 @@ import { calculateStayDuration, safeFormatDate, parseTimestampToDate } from '../
 import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { addDays, subDays, startOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
+import { addDays, subDays, startOfDay, endOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
 import { roomService } from '../services/roomService';
 import { getRoomDisplayStatus, getRoomDetailedReservationInfo, RoomReservationInfo } from '../utils/roomUtils';
 import { hasPermission } from '../utils/permissions';
@@ -78,16 +78,30 @@ export function Rooms() {
   const isRoomBlocked = (roomId: string, date?: Date) => {
     const targetDate = startOfDay(date || new Date());
     const targetDay = targetDate.getDay();
-    
+    const autoExpire = hotel?.settings?.roomBlocking?.autoExpireTempBlocks ?? true;
+    const now = new Date();
+
     return blockings.some(b => {
       if (b.roomId !== roomId) return false;
 
       const start = startOfDay(parseISO(b.startDate));
-      const end = startOfDay(parseISO(b.endDate));
+      const end = endOfDay(parseISO(b.endDate));
 
-      // 1. Check date range
-      const isInDateRange = targetDate >= start && targetDate <= end;
-      if (!isInDateRange) return false;
+      if (autoExpire) {
+        if (b.endTime && /^\d{2}:\d{2}$/.test(b.endTime)) {
+          const exactExpiry = new Date(`${b.endDate}T${b.endTime}:00`);
+          if (!isNaN(exactExpiry.getTime()) && now > exactExpiry) {
+            return false;
+          }
+        } else if (now > end) {
+          return false;
+        }
+        const isInDateRange = targetDate >= start && targetDate <= end;
+        if (!isInDateRange) return false;
+      } else {
+        const isInDateRange = targetDate >= start && (targetDate <= end || now > end);
+        if (!isInDateRange) return false;
+      }
 
       // 2. Check frequency/recurring
       if (b.frequency === 'weekly' && b.daysOfWeek && b.daysOfWeek.length > 0) {
@@ -99,11 +113,6 @@ export function Rooms() {
         if (targetDate.getDate() !== startDayOfMonth) return false;
       }
 
-      // Note: Time-based blocking (startTime/endTime) is handled by restricting 
-      // check-in/out visibility or adding specific UI indicators, but for 
-      // daily/calendar views, any block on that day usually keeps it unavailable 
-      // unless we want to be hyper-specific.
-      
       return true;
     });
   };
@@ -305,7 +314,7 @@ export function Rooms() {
   const addRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
-    if (!hasPermission(profile, 'create_rooms')) {
+    if (!hasPermission(profile, 'create_rooms', customRoles)) {
       toast.error('Access denied: You do not have permission to create rooms.');
       return;
     }
@@ -335,7 +344,7 @@ export function Rooms() {
   const addRoomType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id) return;
-    if (!hasPermission(profile, 'manage_rooms')) {
+    if (!hasPermission(profile, 'manage_rooms', customRoles)) {
       toast.error('Access denied: You do not have permission to manage room types.');
       return;
     }
@@ -381,7 +390,7 @@ export function Rooms() {
   const updateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !editingRoom) return;
-    if (!hasPermission(profile, 'edit_rooms')) {
+    if (!hasPermission(profile, 'edit_rooms', customRoles)) {
       toast.error('Access denied: You do not have permission to edit rooms.');
       return;
     }
@@ -407,7 +416,7 @@ export function Rooms() {
 
   const deleteRoomType = async (id: string) => {
     if (!hotel?.id) return;
-    if (!hasPermission(profile, 'manage_rooms') && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+    if (!hasPermission(profile, 'manage_rooms', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
       toast.error('Only authorized administrators can delete room types');
       return;
     }
@@ -427,7 +436,7 @@ export function Rooms() {
 
   const deleteRoom = async (id: string) => {
     if (!hotel?.id) return;
-    if (!hasPermission(profile, 'delete_rooms') && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
+    if (!hasPermission(profile, 'delete_rooms', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
       toast.error('Access denied: You do not have permission to delete rooms.');
       return;
     }
@@ -579,13 +588,13 @@ export function Rooms() {
   };
 
   const statusColors = {
-    clean: 'border-emerald-500 text-emerald-500 bg-emerald-500/5',
-    dirty: 'border-red-500 text-red-500 bg-red-500/5',
-    occupied: 'border-blue-500 text-blue-500 bg-blue-500/5',
-    maintenance: 'border-amber-500 text-amber-500 bg-amber-500/5',
-    vacant: 'border-zinc-500 text-zinc-500 bg-zinc-500/5',
-    out_of_service: 'border-zinc-800 text-zinc-800 bg-zinc-800/5',
-    reserved: 'border-indigo-500 text-indigo-400 bg-indigo-500/10',
+    clean: 'border-emerald-500/60 dark:border-emerald-500 text-emerald-700 dark:text-emerald-500 bg-emerald-500/10 dark:bg-emerald-500/5',
+    dirty: 'border-red-500/60 dark:border-red-500 text-red-700 dark:text-red-500 bg-red-500/10 dark:bg-red-500/5',
+    occupied: 'border-blue-500/60 dark:border-blue-500 text-blue-700 dark:text-blue-500 bg-blue-500/10 dark:bg-blue-500/5',
+    maintenance: 'border-amber-500/60 dark:border-amber-500 text-amber-700 dark:text-amber-500 bg-amber-500/10 dark:bg-amber-500/5',
+    vacant: 'border-zinc-500/60 dark:border-zinc-500 text-zinc-600 dark:text-zinc-500 bg-zinc-500/10 dark:bg-zinc-500/5',
+    out_of_service: 'border-zinc-700 dark:border-zinc-800 text-zinc-400 dark:text-zinc-800 bg-zinc-800/40 dark:bg-zinc-800/5',
+    reserved: 'border-indigo-500/60 dark:border-indigo-500 text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 dark:bg-indigo-500/10',
   };
 
   const filteredRooms = rooms.filter(room => {
@@ -1006,7 +1015,7 @@ export function Rooms() {
             <CheckCircle2 size={15} />
             <span>Available Rooms</span>
           </button>
-          {hasPermission(profile, 'create_rooms') && (
+          {hasPermission(profile, 'create_rooms', customRoles) && (
             <button 
               onClick={() => setIsAddingRoom(true)}
               className="bg-emerald-500 text-black px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-400 transition-all active:scale-95 shadow-sm shadow-emerald-500/20"
@@ -1023,7 +1032,7 @@ export function Rooms() {
             <Download size={15} />
             <span>Export Report</span>
           </button>
-          {hasPermission(profile, 'manage_rooms') && (
+          {hasPermission(profile, 'manage_rooms', customRoles) && (
             <>
               <button 
                 onClick={() => setIsManagingTypes(true)}
@@ -1286,7 +1295,7 @@ export function Rooms() {
             </button>
             <button 
               onClick={() => bulkUpdateStatus('out_of_service')}
-              className="px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 text-xs font-bold hover:bg-zinc-700 hover:text-white transition-all"
+              className="px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 text-xs font-bold hover:bg-zinc-700 hover:text-zinc-50 transition-all"
             >
               Out of Service
             </button>
@@ -1294,7 +1303,7 @@ export function Rooms() {
 
           <button 
             onClick={() => setSelectedRooms([])}
-            className="ml-4 p-2 text-zinc-500 hover:text-white transition-colors"
+            className="ml-4 p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
           >
             <XCircle size={20} />
           </button>
@@ -1312,7 +1321,7 @@ export function Rooms() {
                   required
                   type="text" 
                   placeholder="e.g. 101, 204A"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:border-emerald-500 outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:border-emerald-500 outline-none"
                   value={newRoom.roomNumber}
                   onChange={(e) => setNewRoom({ ...newRoom, roomNumber: e.target.value })}
                 />
@@ -1508,7 +1517,7 @@ export function Rooms() {
                       data.daysOfWeek = days;
                     }
 
-                    const policy = canBlockRoom(hotel, profile, startDate, endDate, reason, data.frequency, !!(data.startTime || data.endTime));
+                    const policy = canBlockRoom(hotel, profile, startDate, endDate, reason, data.frequency, !!(data.startTime || data.endTime), customRoles);
                     if (!policy.allowed) {
                       toast.error(policy.message || 'Room blocking denied by hotel policy');
                       setIsBlockingRoom(false);
@@ -1547,7 +1556,7 @@ export function Rooms() {
                           type="date" 
                           required 
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
-                          style={{ colorScheme: 'dark' }}
+                         
                         />
                         <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
                       </div>
@@ -1560,7 +1569,7 @@ export function Rooms() {
                           type="date" 
                           required 
                           className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-4 pr-10 py-2 text-zinc-50 focus:border-emerald-500 outline-none" 
-                          style={{ colorScheme: 'dark' }}
+                         
                         />
                         <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={16} />
                       </div>
@@ -1647,7 +1656,7 @@ export function Rooms() {
                       <button 
                         onClick={async () => {
                           if (hotel?.id) {
-                            const policy = canUnblockRoom(hotel, profile);
+                            const policy = canUnblockRoom(hotel, profile, customRoles);
                             if (!policy.allowed) {
                               toast.error(policy.message || 'Unblocking denied by hotel policy');
                               return;
@@ -2396,7 +2405,7 @@ export function Rooms() {
             </div>
           ) : (
             filteredRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map((room) => {
-              const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings);
+              const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings, undefined, hotel);
               const displayStatus = resInfo.displayStatus;
               return (
                 <motion.div
@@ -2421,23 +2430,23 @@ export function Rooms() {
                     </div>
                       <div className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex flex-col gap-1 items-end">
                         <div className="flex gap-1">
-                          {hasPermission(profile, 'edit_rooms') && (
+                          {hasPermission(profile, 'edit_rooms', customRoles) && (
                             <button 
                               onClick={(e) => { e.stopPropagation(); setEditingRoom(room); }} 
-                              className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/5"
+                              className="p-1.5 bg-zinc-900/80 dark:bg-white/10 hover:bg-zinc-800 dark:hover:bg-white/20 rounded-lg transition-colors border border-zinc-700 dark:border-white/5 text-zinc-100"
                               title="Edit Room Details"
                             >
                               <Edit2 size={12} />
                             </button>
                           )}
-                          {hasPermission(profile, 'block_rooms') && (
+                          {hasPermission(profile, 'block_rooms', customRoles) && (
                             <button 
                               onClick={(e) => { 
                                 e.stopPropagation(); 
                                 setSelectedRoomForBlocking(room.id);
                                 setIsManagingBlockings(true);
                               }} 
-                              className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-amber-400 border border-white/5"
+                              className="p-1.5 bg-zinc-900/80 dark:bg-white/10 hover:bg-zinc-800 dark:hover:bg-white/20 rounded-lg transition-colors text-amber-600 dark:text-amber-400 border border-zinc-700 dark:border-white/5"
                               title="Block Room / Maintenance"
                             >
                               <Wrench size={12} />
@@ -2453,7 +2462,9 @@ export function Rooms() {
                                 onClick={(e) => { e.stopPropagation(); updateStatus(room.id, s); }}
                                 className={cn(
                                   "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter transition-all border",
-                                  room.status === s ? "bg-white/20 border-white/20" : "bg-white/5 border-transparent opacity-40 hover:opacity-100"
+                                  room.status === s
+                                    ? "bg-zinc-900 dark:bg-white/20 border-zinc-700 dark:border-white/20 text-zinc-50 shadow-xs"
+                                    : "bg-zinc-900/40 dark:bg-white/5 border-transparent opacity-60 hover:opacity-100"
                                 )}
                                 title={`Set room to ${s}`}
                               >
@@ -2470,12 +2481,12 @@ export function Rooms() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <div className={cn(
                           "px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest border shadow-sm",
-                          displayStatus === 'clean' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
-                          displayStatus === 'dirty' ? "bg-red-500/20 border-red-500/30 text-red-400" :
-                          displayStatus === 'maintenance' ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
-                          displayStatus === 'occupied' ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
-                          displayStatus === 'reserved' ? "bg-indigo-500/20 border-indigo-500/30 text-indigo-300" :
-                          "bg-zinc-800 border-zinc-700 text-zinc-400"
+                          displayStatus === 'clean' ? "bg-emerald-500/15 dark:bg-emerald-500/20 border-emerald-500/30 text-emerald-700 dark:text-emerald-400" :
+                          displayStatus === 'dirty' ? "bg-red-500/15 dark:bg-red-500/20 border-red-500/30 text-red-700 dark:text-red-400" :
+                          displayStatus === 'maintenance' ? "bg-amber-500/15 dark:bg-amber-500/20 border-amber-500/30 text-amber-700 dark:text-amber-400" :
+                          displayStatus === 'occupied' ? "bg-blue-500/15 dark:bg-blue-500/20 border-blue-500/30 text-blue-700 dark:text-blue-400" :
+                          displayStatus === 'reserved' ? "bg-indigo-500/15 dark:bg-indigo-500/20 border-indigo-500/30 text-indigo-700 dark:text-indigo-300" :
+                          "bg-zinc-800 border-zinc-700 text-zinc-300 dark:text-zinc-400"
                         )}>
                           {displayStatus.replace('_', ' ')}
                         </div>
@@ -2485,39 +2496,39 @@ export function Rooms() {
                           </div>
                         )}
                       </div>
-                      <div className="text-[10px] font-bold opacity-60">{room.capacity} Pax</div>
+                      <div className="text-[10px] font-bold opacity-75">{room.capacity} Pax</div>
                     </div>
 
                     {/* Prominently display reservation dates & next availability when room has a reservation */}
                     {resInfo.isReserved && (
-                      <div className="bg-indigo-950/70 border border-indigo-500/30 rounded-lg p-2 text-left space-y-1">
+                      <div className="bg-indigo-500/10 dark:bg-indigo-950/70 border border-indigo-500/30 rounded-lg p-2 text-left space-y-1">
                         <div className="flex items-center justify-between text-[10px]">
-                          <span className="font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
-                            <Calendar size={10} className="text-indigo-400 shrink-0" />
+                          <span className="font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                            <Calendar size={10} className="text-indigo-700 dark:text-indigo-400 shrink-0" />
                             Reserved
                           </span>
                           {resInfo.guestName && (
-                            <span className="text-[9px] text-zinc-300 font-semibold truncate max-w-[80px]" title={resInfo.guestName}>
+                            <span className="text-[9px] text-zinc-200 dark:text-zinc-300 font-semibold truncate max-w-[80px]" title={resInfo.guestName}>
                               {resInfo.guestName}
                             </span>
                           )}
                         </div>
-                        <div className="text-[9px] text-zinc-200 font-mono">
+                        <div className="text-[9px] text-zinc-100 dark:text-zinc-200 font-mono">
                           {resInfo.reservationDates}
                         </div>
                         <div className="pt-1 border-t border-indigo-500/20 flex items-center justify-between text-[9px]">
                           <span className="text-zinc-400">Next Available:</span>
-                          <span className="text-emerald-400 font-bold font-mono">{resInfo.nextAvailableDate}</span>
+                          <span className="text-emerald-700 dark:text-emerald-400 font-bold font-mono">{resInfo.nextAvailableDate}</span>
                         </div>
                       </div>
                     )}
 
                     {/* If occupied, show next available date */}
                     {resInfo.isOccupied && (
-                      <div className="bg-blue-950/50 border border-blue-500/30 rounded-lg p-1.5 text-left space-y-0.5">
+                      <div className="bg-blue-500/10 dark:bg-blue-950/50 border border-blue-500/30 rounded-lg p-1.5 text-left space-y-0.5">
                         <div className="flex items-center justify-between text-[9px]">
                           <span className="text-zinc-400">Next Available:</span>
-                          <span className="text-emerald-400 font-bold font-mono">{resInfo.nextAvailableDate}</span>
+                          <span className="text-emerald-700 dark:text-emerald-400 font-bold font-mono">{resInfo.nextAvailableDate}</span>
                         </div>
                       </div>
                     )}
@@ -2525,19 +2536,19 @@ export function Rooms() {
                 {room.amenities && room.amenities.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(room.amenities || []).slice(0, 3).map(a => (
-                      <span key={a} className="text-[7px] px-1 bg-white/5 rounded border border-white/10 opacity-60">{a}</span>
+                      <span key={a} className="text-[7px] px-1 bg-zinc-900/70 dark:bg-white/5 rounded border border-zinc-700/60 dark:border-white/10 opacity-80">{a}</span>
                     ))}
-                    {room.amenities.length > 3 && <span className="text-[7px] opacity-40">+{room.amenities.length - 3}</span>}
+                    {room.amenities.length > 3 && <span className="text-[7px] opacity-60">+{room.amenities.length - 3}</span>}
                   </div>
                 )}
 
                 {room.notes && (
-                  <div className="bg-black/20 p-2 rounded-lg border border-white/5">
-                    <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider opacity-50 mb-0.5">
+                  <div className="bg-zinc-900/75 dark:bg-black/20 p-2 rounded-lg border border-zinc-700/60 dark:border-white/5">
+                    <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider opacity-70 mb-0.5">
                       <FileText size={8} />
                       Notes
                     </div>
-                    <p className="text-[9px] leading-tight line-clamp-2 opacity-80 italic">
+                    <p className="text-[9px] leading-tight line-clamp-2 opacity-90 italic">
                       {room.notes}
                     </p>
                   </div>
@@ -2588,7 +2599,7 @@ export function Rooms() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {filteredRooms.slice((roomPage - 1) * roomPageSize, roomPage * roomPageSize).map((room) => {
-                const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings);
+                const resInfo = getRoomDetailedReservationInfo(room, reservations, blockings, undefined, hotel);
                 const displayStatus = resInfo.displayStatus;
               return (
                 <tr key={room.id} className="hover:bg-zinc-800/50 transition-colors group">
@@ -2693,10 +2704,10 @@ export function Rooms() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {hasPermission(profile, 'edit_rooms') && (
+                      {hasPermission(profile, 'edit_rooms', customRoles) && (
                         <button onClick={() => setEditingRoom(room)} className="p-1 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded" title="Edit Room"><Edit2 size={16} /></button>
                       )}
-                      {hasPermission(profile, 'block_rooms') && (
+                      {hasPermission(profile, 'block_rooms', customRoles) && (
                         <button 
                           onClick={() => {
                             setSelectedRoomForBlocking(room.id);
@@ -2708,7 +2719,7 @@ export function Rooms() {
                           <XCircle size={16} />
                         </button>
                       )}
-                      {(hasPermission(profile, 'delete_rooms') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
+                      {(hasPermission(profile, 'delete_rooms', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
                         <button onClick={() => setShowConfirmDeleteRoom(room.id)} className="p-1 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded" title="Delete Room"><Trash2 size={16} /></button>
                       )}
                     </div>
@@ -3063,7 +3074,7 @@ export function Rooms() {
                       required
                       value={editingRoom.roomNumber}
                       onChange={(e) => setEditingRoom({ ...editingRoom, roomNumber: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                   <div className="space-y-2">
@@ -3071,7 +3082,7 @@ export function Rooms() {
                     <select
                       value={editingRoom.status}
                       onChange={(e) => setEditingRoom({ ...editingRoom, status: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="clean">Clean</option>
                       <option value="dirty">Dirty</option>
@@ -3115,7 +3126,7 @@ export function Rooms() {
                   <textarea
                     value={editingRoom.notes || ''}
                     onChange={(e) => setEditingRoom({ ...editingRoom, notes: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500/50 h-32 resize-none"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-32 resize-none"
                     placeholder="Add notes about repairs, special requests, or room condition..."
                   />
                 </div>
@@ -3127,7 +3138,7 @@ export function Rooms() {
                       type="text"
                       value={editingRoom.floor}
                       onChange={(e) => setEditingRoom({ ...editingRoom, floor: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                   <div className="space-y-2">
@@ -3136,7 +3147,7 @@ export function Rooms() {
                       type="number"
                       value={editingRoom.price}
                       onChange={(e) => setEditingRoom({ ...editingRoom, price: Number(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                 </div>

@@ -129,8 +129,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   }, [hotel?.name, profile?.role]);
 
   return (
-    <div className="w-64 max-w-[85vw] bg-zinc-950 text-zinc-400 flex flex-col h-screen h-[100dvh] border-r border-zinc-800">
-      <div className="p-4 sm:p-5 flex items-center justify-between border-b border-zinc-800/60 shrink-0">
+    <div className="w-64 max-w-[85vw] bg-[#f4f6f9] dark:bg-zinc-950 text-zinc-400 flex flex-col h-screen h-[100dvh] border-r border-zinc-800 shadow-[1px_0_0_rgba(15,23,42,0.03)] dark:shadow-none">
+      <div className="p-4 sm:p-5 flex items-center justify-between border-b border-zinc-800/80 dark:border-zinc-800/60 shrink-0">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {hotel?.branding?.logoUrl ? (
             <img 
@@ -194,7 +194,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               target="_self"
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 min-h-[42px] rounded-lg transition-all duration-200 active:scale-[0.98]",
-                isActive ? "bg-emerald-500/10 text-emerald-500" : "hover:bg-zinc-900 hover:text-zinc-50",
+                isActive
+                  ? "bg-emerald-500/12 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-semibold border border-emerald-600/20 dark:border-transparent"
+                  : "hover:bg-zinc-800/75 dark:hover:bg-zinc-900 hover:text-zinc-50",
                 isDisabled ? "opacity-50 cursor-not-allowed active:scale-100" : "cursor-pointer"
               )}
             >

@@ -90,7 +90,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
                 value={dateRange.start}
                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                 className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-2 focus:outline-none appearance-none"
-                style={{ colorScheme: 'dark' }}
+               
               />
             </div>
             <span className="text-zinc-600 text-xs">to</span>
@@ -101,7 +101,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
                 value={dateRange.end}
                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                 className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-2 focus:outline-none appearance-none"
-                style={{ colorScheme: 'dark' }}
+               
               />
             </div>
           </div>
@@ -109,7 +109,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
         <div className="flex gap-3">
           <button
             onClick={exportStockReport}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all"
+            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-50 px-6 py-2.5 rounded-xl font-bold text-sm transition-all"
           >
             <Package size={18} />
             Stock Report
@@ -130,7 +130,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
               <Building2 className="text-blue-500" size={24} />
-              <h3 className="text-xl font-bold text-white">Consumption by Department</h3>
+              <h3 className="text-xl font-bold text-zinc-50">Consumption by Department</h3>
             </div>
             <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Cost Allocation</div>
           </div>
@@ -140,7 +140,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
                 <div key={dept} className="space-y-2">
                   <div className="flex justify-between items-end">
                     <span className="text-sm font-bold text-zinc-300">{dept}</span>
-                    <span className="text-sm font-bold text-white">{formatCurrency(cost, currency, exchangeRate)}</span>
+                    <span className="text-sm font-bold text-zinc-50">{formatCurrency(cost, currency, exchangeRate)}</span>
                   </div>
                   <div className="w-full h-2 bg-zinc-950 rounded-full overflow-hidden">
                     <div 
@@ -163,14 +163,14 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
               <DollarSign className="text-emerald-500" size={24} />
-              <h3 className="text-xl font-bold text-white">Inventory Valuation</h3>
+              <h3 className="text-xl font-bold text-zinc-50">Inventory Valuation</h3>
             </div>
             <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Financial Summary</div>
           </div>
           <div className="grid grid-cols-2 gap-6">
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest mb-2">Total Asset Value</div>
-              <div className="text-2xl font-bold text-white">
+              <div className="text-2xl font-bold text-zinc-50">
                 {formatCurrency(items.reduce((acc, i) => acc + (i.quantity * i.price), 0), currency, exchangeRate)}
               </div>
             </div>
@@ -203,7 +203,7 @@ export function InventoryReports({ items, transactions }: InventoryReportsProps)
               .map(item => (
                 <div key={item.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-800/50">
                   <div className="text-sm font-medium text-zinc-300">{item.name}</div>
-                  <div className="text-sm font-bold text-white">{formatCurrency(item.cost, currency, exchangeRate)}</div>
+                  <div className="text-sm font-bold text-zinc-50">{formatCurrency(item.cost, currency, exchangeRate)}</div>
                 </div>
               ))
             }

@@ -98,7 +98,7 @@ function DashboardRoute() {
 }
 
 function AppContent() {
-  const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection, hasHotelError } = useAuth();
+  const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection, hasHotelError, theme } = useAuth();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [resetCompletedInfo, setResetCompletedInfo] = React.useState<{ email?: string; message?: string } | null>(null);
   const location = useLocation();
@@ -144,7 +144,7 @@ function AppContent() {
   if (isResetFlow && !isUserActive) {
     return (
       <>
-        <Toaster position="top-right" theme="dark" richColors />
+        <Toaster position="top-right" theme={theme} richColors />
         {oobCodeParam || isSetPasswordRoute ? (
           <SetPasswordPage
             onNavigateToLogin={(prefilledEmail, msg) => {
@@ -176,7 +176,7 @@ function AppContent() {
     const sessionMsg = typeof window !== 'undefined' ? sessionStorage.getItem('pms_login_success_msg') : null;
     return (
       <>
-        <Toaster position="top-right" theme="dark" richColors />
+        <Toaster position="top-right" theme={theme} richColors />
         <AuthPage 
           initialEmail={resetCompletedInfo?.email || sessionEmail || undefined}
           initialSuccessMessage={resetCompletedInfo?.message || sessionMsg || undefined}

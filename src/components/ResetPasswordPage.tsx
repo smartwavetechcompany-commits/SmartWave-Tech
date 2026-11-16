@@ -167,7 +167,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 text-emerald-400 mb-4 shadow-xl">
             {isActivation ? <UserCheck size={28} /> : <KeyRound size={28} />}
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">
             {isActivation ? 'Staff Account Activation' : 'Staff Password Reset'}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
@@ -197,7 +197,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                   <AlertTriangle size={18} className="shrink-0" />
                   <span>Invalid or Expired Link</span>
                 </div>
-                <p className="text-xs text-red-200/90 leading-relaxed">
+                <p className="text-xs text-red-700 dark:text-red-200/90 leading-relaxed">
                   {validationError}
                 </p>
               </div>
@@ -214,7 +214,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               <div className="pt-2">
                 <button
                   onClick={() => handleBackToLogin(false)}
-                  className="w-full py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-semibold transition-all flex items-center justify-center gap-2"
+                  className="w-full py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-50 text-sm font-semibold transition-all flex items-center justify-center gap-2"
                 >
                   <ArrowLeft size={16} />
                   Return to Sign In
@@ -231,7 +231,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               </div>
               
               <div className="space-y-2">
-                <h2 className="text-xl font-bold text-white">
+                <h2 className="text-xl font-bold text-zinc-50">
                   {isActivation ? 'Account Activated Successfully!' : 'Password Successfully Set!'}
                 </h2>
                 <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mx-auto">
@@ -301,8 +301,8 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
               </div>
 
               {isActivation && (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300/90 leading-relaxed">
-                  <span className="font-bold text-emerald-400 block mb-0.5">Welcome to the Team!</span>
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs text-emerald-800 dark:text-emerald-300/90 leading-relaxed">
+                  <span className="font-bold text-emerald-700 dark:text-emerald-400 block mb-0.5">Welcome to the Team!</span>
                   Default passwords are not provided for security compliance. Please establish your personal password below to activate your account.
                 </div>
               )}
@@ -325,7 +325,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Enter strong password"
                     required
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 pr-10 transition-all font-mono"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-50 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 pr-10 transition-all font-mono"
                   />
                   <button
                     type="button"
@@ -371,7 +371,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Re-enter password"
                     required
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 pr-10 transition-all font-mono"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-50 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 pr-10 transition-all font-mono"
                   />
                   <button
                     type="button"

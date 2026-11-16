@@ -207,7 +207,7 @@ export function SubscriptionExpiredPage() {
             </div>
             
             <div className="space-y-2">
-              <h1 className="text-3xl font-bold text-white tracking-tight">Subscription Expired</h1>
+              <h1 className="text-3xl font-bold text-zinc-50 tracking-tight">Subscription Expired</h1>
               <p className="text-zinc-400">
                 Your access to <strong>{hotel?.name || 'the system'}</strong> has been suspended due to an expired subscription.
               </p>
@@ -234,14 +234,14 @@ export function SubscriptionExpiredPage() {
               <div className="grid grid-cols-2 gap-3">
                 <button 
                   onClick={() => setIsRequesting(true)}
-                  className="bg-zinc-800 text-white font-bold py-3 rounded-xl hover:bg-zinc-700 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  className="bg-zinc-800 text-zinc-50 font-bold py-3 rounded-xl hover:bg-zinc-700 transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
                   <CreditCard size={20} />
                   Request Renewal
                 </button>
                 <button 
                   onClick={() => auth.signOut()}
-                  className="bg-zinc-800 text-white font-bold py-3 rounded-xl hover:bg-zinc-700 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  className="bg-zinc-800 text-zinc-50 font-bold py-3 rounded-xl hover:bg-zinc-700 transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
                   <ArrowLeft size={20} />
                   Sign Out
@@ -259,11 +259,11 @@ export function SubscriptionExpiredPage() {
             <div className="flex items-center gap-4 mb-2">
               <button 
                 onClick={() => setIsRenewing(false)}
-                className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
               >
                 <ArrowLeft size={20} />
               </button>
-              <h2 className="text-2xl font-bold text-white">Renew Subscription</h2>
+              <h2 className="text-2xl font-bold text-zinc-50">Renew Subscription</h2>
             </div>
 
             <p className="text-zinc-400 text-sm">
@@ -277,7 +277,7 @@ export function SubscriptionExpiredPage() {
                   required
                   type="text"
                   placeholder="Enter your tracking code"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-white text-lg font-mono focus:outline-none focus:border-emerald-500 transition-colors"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-50 text-lg font-mono focus:outline-none focus:border-emerald-500 transition-colors"
                   value={trackingCode}
                   onChange={(e) => setTrackingCode(e.target.value.toUpperCase())}
                 />
@@ -302,11 +302,11 @@ export function SubscriptionExpiredPage() {
             <div className="flex items-center gap-4 mb-2">
               <button 
                 onClick={() => setIsRequesting(false)}
-                className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all"
               >
                 <ArrowLeft size={20} />
               </button>
-              <h2 className="text-2xl font-bold text-white">Renew Subscription</h2>
+              <h2 className="text-2xl font-bold text-zinc-50">Renew Subscription</h2>
             </div>
 
             <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-6 space-y-4">
@@ -318,15 +318,15 @@ export function SubscriptionExpiredPage() {
               <div className="grid grid-cols-1 gap-4 text-sm">
                 <div className="space-y-1">
                   <span className="text-zinc-500 text-[10px] uppercase font-bold">Bank Name</span>
-                  <p className="text-white font-medium">{settings?.bankName || 'N/A'}</p>
+                  <p className="text-zinc-50 font-medium">{settings?.bankName || 'N/A'}</p>
                 </div>
                 <div className="space-y-1">
                   <span className="text-zinc-500 text-[10px] uppercase font-bold">Account Number</span>
-                  <p className="text-white font-mono text-lg">{settings?.accountNumber || 'N/A'}</p>
+                  <p className="text-zinc-50 font-mono text-lg">{settings?.accountNumber || 'N/A'}</p>
                 </div>
                 <div className="space-y-1">
                   <span className="text-zinc-500 text-[10px] uppercase font-bold">Account Name</span>
-                  <p className="text-white font-medium">{settings?.accountName || 'N/A'}</p>
+                  <p className="text-zinc-50 font-medium">{settings?.accountName || 'N/A'}</p>
                 </div>
               </div>
 
@@ -344,7 +344,7 @@ export function SubscriptionExpiredPage() {
                 <input
                   required
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500 transition-colors"
                   value={formData.hotelName}
                   onChange={(e) => setFormData({ ...formData, hotelName: e.target.value })}
                 />
@@ -354,7 +354,7 @@ export function SubscriptionExpiredPage() {
                 <input
                   required
                   type="email"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500 transition-colors"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
@@ -362,7 +362,7 @@ export function SubscriptionExpiredPage() {
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Payment Reference / Message</label>
                 <textarea
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-colors h-24 resize-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500 transition-colors h-24 resize-none"
                   placeholder="Enter transaction ID or any other details..."
                   value={formData.message}
                   onChange={(e) => setFormData({ ...formData, message: e.target.value })}

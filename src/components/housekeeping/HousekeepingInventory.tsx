@@ -392,7 +392,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <Package size={18} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white">Housekeeping Inventory & Stock Management</h2>
+              <h2 className="text-lg font-black text-zinc-50">Housekeeping Inventory & Stock Management</h2>
               <p className="text-xs text-zinc-400">Complete stock tracking, issues to staff, vendor receiving, and par levels</p>
             </div>
           </div>
@@ -481,7 +481,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
             onClick={() => setViewMode('inventory')}
             className={cn(
               "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5",
-              viewMode === 'inventory' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-300 hover:text-white"
+              viewMode === 'inventory' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-300 hover:text-zinc-50"
             )}
           >
             <Layers size={14} />
@@ -492,7 +492,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
             onClick={() => setViewMode('history')}
             className={cn(
               "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5",
-              viewMode === 'history' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-300 hover:text-white"
+              viewMode === 'history' ? "bg-emerald-500 text-black" : "bg-zinc-800 text-zinc-300 hover:text-zinc-50"
             )}
           >
             <History size={14} />
@@ -552,7 +552,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                   const isLow = (item.balance || 0) <= (item.minStockLevel || 5);
                   return (
                     <tr key={item.id} className="hover:bg-zinc-800/40 transition-colors">
-                      <td className="py-3 px-4 font-bold text-white">
+                      <td className="py-3 px-4 font-bold text-zinc-50">
                         <div>{item.name}</div>
                         <span className="text-[10px] text-zinc-500 font-normal">{item.unit}</span>
                       </td>
@@ -566,7 +566,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                       <td className="py-3 px-3 text-right font-mono text-amber-400">-{item.issued || 0}</td>
                       <td className="py-3 px-3 text-right font-mono text-zinc-400">{item.used || 0}</td>
                       <td className="py-3 px-3 text-right font-mono text-rose-400">{item.damaged || 0}</td>
-                      <td className="py-3 px-4 text-right font-mono font-black text-sm text-white">
+                      <td className="py-3 px-4 text-right font-mono font-black text-sm text-zinc-50">
                         {item.balance || 0}
                       </td>
                       <td className="py-3 px-3 text-right font-mono text-zinc-500">{item.minStockLevel || 0}</td>
@@ -635,7 +635,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
       {viewMode === 'history' && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <h3 className="text-sm font-bold text-zinc-50 flex items-center gap-2">
               <History size={16} className="text-emerald-400" />
               Stock Issue & Delivery History
             </h3>
@@ -671,7 +671,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                           {isIssue ? 'Issued' : 'Received'}
                         </span>
                       </td>
-                      <td className="py-3 px-4 font-bold text-white">{tx.itemName}</td>
+                      <td className="py-3 px-4 font-bold text-zinc-50">{tx.itemName}</td>
                       <td className="py-3 px-4 text-right font-mono font-bold">
                         {isIssue ? `-${tx.quantity}` : `+${tx.quantity}`} {tx.unit || ''}
                       </td>
@@ -716,12 +716,12 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <Package size={18} />
-                <h3 className="text-lg font-bold text-white">Add New Inventory Item</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Add New Inventory Item</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddItemModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -732,7 +732,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Lavender Room Spray"
                 value={newItemForm.name}
                 onChange={(e) => setNewItemForm(prev => ({ ...prev, name: e.target.value }))}
@@ -743,7 +743,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <div>
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Category</label>
                 <select
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={newItemForm.category}
                   onChange={(e) => setNewItemForm(prev => ({ ...prev, category: e.target.value }))}
                 >
@@ -761,7 +761,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 <input
                   required
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   placeholder="e.g. pcs, bottles, packs, kg"
                   value={newItemForm.unit}
                   onChange={(e) => setNewItemForm(prev => ({ ...prev, unit: e.target.value }))}
@@ -775,7 +775,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 <input
                   type="number"
                   min="0"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={newItemForm.openingStock}
                   onChange={(e) => setNewItemForm(prev => ({ ...prev, openingStock: parseInt(e.target.value, 10) || 0 }))}
                 />
@@ -786,7 +786,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 <input
                   type="number"
                   min="1"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={newItemForm.minStockLevel}
                   onChange={(e) => setNewItemForm(prev => ({ ...prev, minStockLevel: parseInt(e.target.value, 10) || 1 }))}
                 />
@@ -819,12 +819,12 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-amber-400">
                 <ArrowUpRight size={18} />
-                <h3 className="text-lg font-bold text-white">Issue Stock to Housekeeper</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Issue Stock to Housekeeper</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowIssueModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -834,7 +834,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Select Supply Item</label>
               <select
                 required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={issueForm.itemId}
                 onChange={(e) => setIssueForm(prev => ({ ...prev, itemId: e.target.value }))}
               >
@@ -851,7 +851,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Mary or select from staff"
                 list="staff-names"
                 value={issueForm.staffName}
@@ -871,7 +871,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                   required
                   type="number"
                   min="1"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={issueForm.quantity}
                   onChange={(e) => setIssueForm(prev => ({ ...prev, quantity: parseInt(e.target.value, 10) || 1 }))}
                 />
@@ -882,7 +882,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 <input
                   required
                   type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={issueForm.date}
                   onChange={(e) => setIssueForm(prev => ({ ...prev, date: e.target.value }))}
                 />
@@ -893,7 +893,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Purpose / Target Floor</label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. 2nd Floor Room Refresh"
                 value={issueForm.purpose}
                 onChange={(e) => setIssueForm(prev => ({ ...prev, purpose: e.target.value }))}
@@ -926,12 +926,12 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <ArrowDownLeft size={18} />
-                <h3 className="text-lg font-bold text-white">Receive Stock Delivery</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Receive Stock Delivery</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowReceiveModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -941,7 +941,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Select Supply Item</label>
               <select
                 required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={receiveForm.itemId}
                 onChange={(e) => setReceiveForm(prev => ({ ...prev, itemId: e.target.value }))}
               >
@@ -958,7 +958,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Apex Hospitality Supplies"
                 value={receiveForm.supplier}
                 onChange={(e) => setReceiveForm(prev => ({ ...prev, supplier: e.target.value }))}
@@ -972,7 +972,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                   required
                   type="number"
                   min="1"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={receiveForm.quantity}
                   onChange={(e) => setReceiveForm(prev => ({ ...prev, quantity: parseInt(e.target.value, 10) || 1 }))}
                 />
@@ -983,7 +983,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
                 <input
                   required
                   type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={receiveForm.date}
                   onChange={(e) => setReceiveForm(prev => ({ ...prev, date: e.target.value }))}
                 />
@@ -994,7 +994,7 @@ export function HousekeepingInventory({ staff }: HousekeepingInventoryProps) {
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Invoice / Delivery Ref #</label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. INV-2026-8819"
                 value={receiveForm.invoiceRef}
                 onChange={(e) => setReceiveForm(prev => ({ ...prev, invoiceRef: e.target.value }))}

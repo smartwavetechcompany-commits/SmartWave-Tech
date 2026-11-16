@@ -149,7 +149,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
                      searchResults.reservations.length > 0;
 
   return (
-    <div className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 sticky top-0 z-40">
+    <div className="h-16 border-b border-zinc-800 bg-[#f5f7fa]/90 dark:bg-zinc-950/60 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 sticky top-0 z-40">
       <div className="flex items-center gap-2 sm:gap-4 flex-1">
         <button 
           onClick={onMenuClick}
@@ -315,13 +315,13 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           <button 
             type="button"
             onClick={() => setIsGlobalSearchOpen(true)}
-            className="w-full bg-zinc-900/60 border border-zinc-800 hover:border-zinc-700/80 rounded-xl pl-10 pr-3 py-1.5 text-xs text-left text-zinc-400 flex items-center justify-between group transition-all cursor-pointer shadow-sm relative"
+            className="w-full bg-[#e9edf3] dark:bg-zinc-900/60 border border-zinc-700/80 dark:border-zinc-800 hover:border-zinc-600 dark:hover:border-zinc-700/80 rounded-xl pl-10 pr-3 py-1.5 text-xs text-left text-zinc-400 flex items-center justify-between group transition-all cursor-pointer shadow-sm relative"
           >
             <div className="flex items-center gap-2">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 group-hover:text-emerald-400 transition-colors" size={16} />
-              <span className="truncate group-hover:text-zinc-200">Search guests, reservations, room numbers...</span>
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" size={16} />
+              <span className="truncate group-hover:text-zinc-100 dark:group-hover:text-zinc-200">Search guests, reservations, room numbers...</span>
             </div>
-            <kbd className="hidden lg:inline-flex items-center font-mono text-[10px] text-zinc-500 bg-zinc-950 border border-zinc-800 px-1.5 py-0.5 rounded">
+            <kbd className="hidden lg:inline-flex items-center font-mono text-[10px] text-zinc-500 bg-zinc-900 dark:bg-zinc-950 border border-zinc-700 dark:border-zinc-800 px-1.5 py-0.5 rounded">
               Ctrl K
             </kbd>
           </button>

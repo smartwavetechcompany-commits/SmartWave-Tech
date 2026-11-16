@@ -32,6 +32,7 @@ import {
   Download
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface RevenueHeatmapProps {
   records: FinanceRecord[];
@@ -62,6 +63,8 @@ export function RevenueHeatmap({
   exchangeRate,
   ledgerEntries = []
 }: RevenueHeatmapProps) {
+  const { theme } = useAuth();
+  const isLight = theme === 'light';
   const [currentMonth, setCurrentMonth] = useState<Date>(() => startOfMonth(new Date()));
   const [filterMode, setFilterMode] = useState<'all' | 'peaks' | 'weekends'>('all');
   const [hoveredDay, setHoveredDay] = useState<DayData | null>(null);
@@ -250,7 +253,9 @@ export function RevenueHeatmap({
     const maxRev = monthStats.maxRev || 1;
     const colorScale = d3.scaleLinear<string>()
       .domain([0, maxRev * 0.25, maxRev * 0.6, maxRev])
-      .range(['#18181b', '#064e3b', '#059669', '#10b981'])
+      .range(isLight
+        ? ['#e6ecf3', '#a7f3d0', '#34d399', '#059669']
+        : ['#18181b', '#064e3b', '#059669', '#10b981'])
       .clamp(true);
 
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -263,7 +268,9 @@ export function RevenueHeatmap({
         .attr('x', i * (cellWidth + gap) + cellWidth / 2)
         .attr('y', -16)
         .attr('text-anchor', 'middle')
-        .attr('fill', i === 0 || i === 6 ? '#a1a1aa' : '#71717a')
+        .attr('fill', isLight
+          ? (i === 0 || i === 6 ? '#475569' : '#64748b')
+          : (i === 0 || i === 6 ? '#a1a1aa' : '#71717a'))
         .attr('font-size', '11px')
         .attr('font-weight', '700')
         .attr('letter-spacing', '0.05em')
@@ -278,7 +285,7 @@ export function RevenueHeatmap({
         .attr('x', -14)
         .attr('y', w * (cellHeight + gap) + cellHeight / 2 + 4)
         .attr('text-anchor', 'end')
-        .attr('fill', '#52525b')
+        .attr('fill', isLight ? '#64748b' : '#52525b')
         .attr('font-size', '10px')
         .attr('font-weight', '600')
         .text(`W${w + 1}`);
@@ -304,6 +311,11 @@ export function RevenueHeatmap({
         .style('opacity', isDimmed ? 0.25 : 1)
         .style('transition', 'all 0.2s ease');
 
+      const defaultStroke = day.isToday
+        ? (isLight ? '#0284c7' : '#38bdf8')
+        : (day.isPeak ? (isLight ? '#059669' : '#34d399') : (isLight ? '#cbd5e1' : '#27272a'));
+      const isDarkHighCell = isLight && day.revenue >= maxRev * 0.65;
+
       // Cell Background Rect
       const rect = cellG
         .append('rect')
@@ -311,8 +323,8 @@ export function RevenueHeatmap({
         .attr('height', cellHeight)
         .attr('rx', 10)
         .attr('ry', 10)
-        .attr('fill', day.revenue > 0 ? colorScale(day.revenue) : '#141416')
-        .attr('stroke', day.isToday ? '#38bdf8' : (day.isPeak ? '#34d399' : '#27272a'))
+        .attr('fill', day.revenue > 0 ? colorScale(day.revenue) : (isLight ? '#eef1f6' : '#141416'))
+        .attr('stroke', defaultStroke)
         .attr('stroke-width', day.isToday ? 2 : (day.isPeak ? 1.5 : 1))
         .attr('stroke-dasharray', day.isToday ? 'none' : 'none');
 
@@ -321,7 +333,11 @@ export function RevenueHeatmap({
         .append('text')
         .attr('x', 10)
         .attr('y', 18)
-        .attr('fill', day.isToday ? '#38bdf8' : (day.revenue > 0 ? '#f4f4f5' : '#71717a'))
+        .attr('fill', day.isToday
+          ? (isLight ? (isDarkHighCell ? '#e0f2fe' : '#0369a1') : '#38bdf8')
+          : isLight
+            ? (isDarkHighCell ? '#ffffff' : (day.revenue > 0 ? '#0f172a' : '#64748b'))
+            : (day.revenue > 0 ? '#f4f4f5' : '#71717a'))
         .attr('font-size', '12px')
         .attr('font-weight', day.isToday || day.isPeak ? '800' : '600')
         .text(day.dayOfMonth);
@@ -345,7 +361,9 @@ export function RevenueHeatmap({
           .attr('x', cellWidth - 10)
           .attr('y', cellHeight - 12)
           .attr('text-anchor', 'end')
-          .attr('fill', day.isPeak ? '#ffffff' : '#e4e4e7')
+          .attr('fill', isLight
+            ? (isDarkHighCell ? '#ffffff' : '#065f46')
+            : (day.isPeak ? '#ffffff' : '#e4e4e7'))
           .attr('font-size', '11px')
           .attr('font-weight', '700')
           .text(revShort);
@@ -356,7 +374,9 @@ export function RevenueHeatmap({
             .append('text')
             .attr('x', 10)
             .attr('y', cellHeight - 12)
-            .attr('fill', day.isPeak ? '#fcd34d' : '#a1a1aa')
+            .attr('fill', isLight
+              ? (isDarkHighCell ? '#fef3c7' : (day.isPeak ? '#b45309' : '#475569'))
+              : (day.isPeak ? '#fcd34d' : '#a1a1aa'))
             .attr('font-size', '9px')
             .attr('font-weight', '600')
             .text(`${day.bookingCount} rms`);
@@ -367,7 +387,7 @@ export function RevenueHeatmap({
           .attr('x', cellWidth / 2)
           .attr('y', cellHeight / 2 + 8)
           .attr('text-anchor', 'middle')
-          .attr('fill', '#3f3f46')
+          .attr('fill', isLight ? '#94a3b8' : '#3f3f46')
           .attr('font-size', '10px')
           .attr('font-weight', '500')
           .text('—');
@@ -379,7 +399,7 @@ export function RevenueHeatmap({
           rect
             .transition()
             .duration(150)
-            .attr('stroke', '#10b981')
+            .attr('stroke', isLight ? '#059669' : '#10b981')
             .attr('stroke-width', 2.5);
 
           setHoveredDay(day);
@@ -394,7 +414,7 @@ export function RevenueHeatmap({
           rect
             .transition()
             .duration(150)
-            .attr('stroke', day.isToday ? '#38bdf8' : (day.isPeak ? '#34d399' : '#27272a'))
+            .attr('stroke', defaultStroke)
             .attr('stroke-width', day.isToday ? 2 : (day.isPeak ? 1.5 : 1));
 
           setHoveredDay(null);
@@ -402,7 +422,7 @@ export function RevenueHeatmap({
         });
     });
 
-  }, [monthDaysData, monthStats, filterMode, currency, exchangeRate]);
+  }, [monthDaysData, monthStats, filterMode, currency, exchangeRate, isLight]);
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-xl relative overflow-hidden">
@@ -468,7 +488,7 @@ export function RevenueHeatmap({
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
               title="Previous Month"
             >
               <ChevronLeft size={16} />
@@ -484,7 +504,7 @@ export function RevenueHeatmap({
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
               title="Next Month"
             >
               <ChevronRight size={16} />
@@ -575,7 +595,7 @@ export function RevenueHeatmap({
               transform: 'translate(-50%, -100%)',
               pointerEvents: 'none'
             }}
-            className="z-50 bg-zinc-950 border border-zinc-700/80 rounded-xl px-3.5 py-2.5 shadow-2xl backdrop-blur-md text-left min-w-[190px] animate-in fade-in zoom-in-95 duration-100"
+            className="z-50 bg-zinc-900 border border-zinc-700/80 rounded-xl px-3.5 py-2.5 shadow-2xl backdrop-blur-md text-left min-w-[190px] animate-in fade-in zoom-in-95 duration-100"
           >
             <div className="flex items-center justify-between gap-2 border-b border-zinc-800 pb-1.5 mb-1.5">
               <span className="text-xs font-bold text-zinc-200">
@@ -621,10 +641,10 @@ export function RevenueHeatmap({
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] text-zinc-500">₦0</span>
             <div className="flex items-center gap-1">
-              <span className="w-3.5 h-3.5 rounded bg-[#141416] border border-zinc-800" title="Zero" />
-              <span className="w-3.5 h-3.5 rounded bg-[#064e3b]" title="Low" />
-              <span className="w-3.5 h-3.5 rounded bg-[#059669]" title="Moderate" />
-              <span className="w-3.5 h-3.5 rounded bg-[#10b981]" title="High" />
+              <span className="w-3.5 h-3.5 rounded bg-[#eef1f6] dark:bg-[#141416] border border-zinc-700 dark:border-zinc-800" title="Zero" />
+              <span className="w-3.5 h-3.5 rounded bg-[#a7f3d0] dark:bg-[#064e3b]" title="Low" />
+              <span className="w-3.5 h-3.5 rounded bg-[#34d399] dark:bg-[#059669]" title="Moderate" />
+              <span className="w-3.5 h-3.5 rounded bg-[#059669] dark:bg-[#10b981]" title="High" />
             </div>
             <span className="text-[10px] text-emerald-400 font-bold">
               {formatCurrency(monthStats.maxRev, currency, exchangeRate)} (Peak)

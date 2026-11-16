@@ -18,8 +18,8 @@ export const DEFAULT_BOOKING_SOURCES: BookingSource[] = [
 export const DEFAULT_SETTINGS: HotelSettings = {
   checkout: {
     allowBalanceOutstanding: false,
-    preventOwingGuestCheckout: false,
-    requireApprovalForDebtCheckout: false,
+    preventOwingGuestCheckout: true,
+    requireApprovalForDebtCheckout: true,
     autoMarkUnpaidAsDebt: false,
     allowPartialPaymentCheckout: true,
     requireFullPaymentBeforeCheckout: false,

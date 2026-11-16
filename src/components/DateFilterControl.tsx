@@ -235,7 +235,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
             value={value.day}
             onChange={(e) => onChange({ ...value, day: e.target.value })}
             className="bg-transparent text-zinc-200 text-xs font-mono focus:outline-none cursor-pointer"
-            style={{ colorScheme: 'dark' }}
+           
           />
           <button
             type="button"
@@ -319,7 +319,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
             value={value.startDate}
             onChange={(e) => onChange({ ...value, startDate: e.target.value })}
             className="bg-transparent text-zinc-200 text-[11px] font-mono focus:outline-none cursor-pointer w-[95px]"
-            style={{ colorScheme: 'dark' }}
+           
           />
           <span className="text-zinc-600 text-[10px]">to</span>
           <input
@@ -327,7 +327,7 @@ export const DateFilterControl: React.FC<DateFilterControlProps> = ({
             value={value.endDate}
             onChange={(e) => onChange({ ...value, endDate: e.target.value })}
             className="bg-transparent text-zinc-200 text-[11px] font-mono focus:outline-none cursor-pointer w-[95px]"
-            style={{ colorScheme: 'dark' }}
+           
           />
         </div>
       )}

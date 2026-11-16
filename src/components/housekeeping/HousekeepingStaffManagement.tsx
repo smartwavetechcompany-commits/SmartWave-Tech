@@ -130,7 +130,7 @@ export function HousekeepingStaffManagement({
             <Users size={20} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white">Housekeeping Team & Shift Workload</h2>
+            <h2 className="text-lg font-black text-zinc-50">Housekeeping Team & Shift Workload</h2>
             <p className="text-xs text-zinc-400">
               Staff profiles, assigned floors/areas, daily room allocations, and shift statuses
             </p>
@@ -142,7 +142,7 @@ export function HousekeepingStaffManagement({
           <input
             type="text"
             placeholder="Search staff by name, ID, phone..."
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -166,7 +166,7 @@ export function HousekeepingStaffManagement({
                       {(member.displayName || member.name || member.email || 'H')[0].toUpperCase()}
                     </div>
                     <div>
-                      <h3 className="font-bold text-white text-base leading-tight">
+                      <h3 className="font-bold text-zinc-50 text-base leading-tight">
                         {member.displayName || member.name || 'Team Member'}
                       </h3>
                       <p className="text-xs text-zinc-400">
@@ -197,7 +197,7 @@ export function HousekeepingStaffManagement({
                       <div className="flex items-center gap-1">
                         <input
                           type="text"
-                          className="bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-[11px] text-white w-28"
+                          className="bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-[11px] text-zinc-50 w-28"
                           value={areaInput}
                           onChange={(e) => setAreaInput(e.target.value)}
                         />
@@ -302,7 +302,7 @@ export function HousekeepingStaffManagement({
           <form onSubmit={handleSaveRoomAssignments} className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-5 sm:p-6 space-y-4 my-auto shadow-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
-                <h3 className="text-lg font-bold text-white">
+                <h3 className="text-lg font-bold text-zinc-50">
                   Assign Rooms to {selectedStaff.displayName || selectedStaff.email}
                 </h3>
                 <p className="text-xs text-zinc-400">Select rooms to allocate to this housekeeper for today's shift</p>
@@ -310,7 +310,7 @@ export function HousekeepingStaffManagement({
               <button
                 type="button"
                 onClick={() => setShowAssignModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -318,7 +318,7 @@ export function HousekeepingStaffManagement({
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               <div className="flex items-center justify-between text-xs text-zinc-400 bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
-                <span>Selected: <strong className="text-white">{selectedRoomIds.length} rooms</strong></span>
+                <span>Selected: <strong className="text-zinc-50">{selectedRoomIds.length} rooms</strong></span>
                 <button
                   type="button"
                   onClick={() => {
@@ -343,7 +343,7 @@ export function HousekeepingStaffManagement({
                       className={cn(
                         "p-3 rounded-xl border cursor-pointer select-none transition-all flex flex-col justify-between space-y-1.5",
                         isSelected
-                          ? "bg-emerald-500/10 border-emerald-500 text-white"
+                          ? "bg-emerald-500/10 border-emerald-500 text-zinc-50"
                           : "bg-zinc-950 border-zinc-800 hover:border-zinc-700 text-zinc-300"
                       )}
                     >

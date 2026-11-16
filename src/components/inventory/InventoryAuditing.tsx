@@ -115,13 +115,13 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-bold text-white">Inventory Auditing</h3>
+          <h3 className="text-xl font-bold text-zinc-50">Inventory Auditing</h3>
           <p className="text-sm text-zinc-500">Perform physical stock counts and track variances</p>
         </div>
         <div className="flex gap-3">
           <select
             onChange={(e) => e.target.value && startNewAudit(e.target.value)}
-            className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+            className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
           >
             <option value="">Start New Audit...</option>
             {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -142,7 +142,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                     <ClipboardCheck size={24} />
                   </div>
                   <div>
-                    <div className="text-lg font-bold text-white">
+                    <div className="text-lg font-bold text-zinc-50">
                       Audit: {location?.name || 'Full Inventory'}
                     </div>
                     <div className="text-sm text-zinc-500 font-medium mt-0.5">
@@ -154,7 +154,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                 <div className="flex flex-wrap gap-8 items-center">
                   <div className="text-center">
                     <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest mb-1">Items Audited</div>
-                    <div className="text-sm font-bold text-white">{audit.items.length}</div>
+                    <div className="text-sm font-bold text-zinc-50">{audit.items.length}</div>
                   </div>
                   <div className="text-center">
                     <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest mb-1">Variances</div>
@@ -167,7 +167,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                   </div>
                 </div>
 
-                <button className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-xl transition-all">
+                <button className="p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all">
                   <History size={20} />
                 </button>
               </div>
@@ -209,11 +209,11 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                     <ClipboardCheck size={24} />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-bold text-white">Physical Stock Count</h2>
+                    <h2 className="text-2xl font-bold text-zinc-50">Physical Stock Count</h2>
                     <p className="text-sm text-zinc-500">Location: {locations.find(l => l.id === activeAudit.locationId)?.name || 'Full Inventory'}</p>
                   </div>
                 </div>
-                <button onClick={() => setShowAuditModal(false)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <button onClick={() => setShowAuditModal(false)} className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors">
                   <XCircle size={24} />
                 </button>
               </div>
@@ -236,7 +236,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                       return (
                         <tr key={item.itemId} className="hover:bg-zinc-800/30 transition-colors">
                           <td className="px-4 py-4">
-                            <div className="text-sm font-bold text-white">{invItem?.name}</div>
+                            <div className="text-sm font-bold text-zinc-50">{invItem?.name}</div>
                             <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-tighter">SKU: {invItem?.sku}</div>
                           </td>
                           <td className="px-4 py-4">
@@ -254,7 +254,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                                   setActiveAudit({ ...activeAudit, items: newItems });
                                 }
                               }}
-                              className="w-24 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+                              className="w-24 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             />
                           </td>
                           <td className="px-4 py-4">
@@ -279,7 +279,7 @@ export function InventoryAuditing({ items, audits, locations }: InventoryAuditin
                                 }
                               }}
                               placeholder="e.g. Damage, Miscount"
-                              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                             />
                           </td>
                         </tr>

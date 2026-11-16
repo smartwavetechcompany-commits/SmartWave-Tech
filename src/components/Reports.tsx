@@ -69,7 +69,8 @@ import { Sparkles } from 'lucide-react';
 import { Pagination } from './Pagination';
 
 export function Reports() {
-  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles, theme } = useAuth();
+  const isLight = theme === 'light';
   const canViewFinances = hasFinancialVisibility(profile, customRoles);
   const [dateRange, setDateRange] = useState({
     start: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
@@ -886,8 +887,8 @@ export function Reports() {
   };
 
   const exportPDF = () => {
-    if (!hasPermission(profile, 'export_reports')) {
-      toast.error('Permission denied: You do not have permission to export reports.');
+    if ((hotel?.settings?.reporting?.allowExports === false) || (!hasPermission(profile, 'export_reports', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin')) {
+      toast.error(hotel?.settings?.reporting?.allowExports === false ? 'Report exporting is disabled by hotel policy.' : 'Permission denied: You do not have permission to export reports.');
       return;
     }
 
@@ -974,8 +975,8 @@ export function Reports() {
   };
 
   const exportExcel = () => {
-    if (!hasPermission(profile, 'export_reports')) {
-      toast.error('Permission denied: You do not have permission to export reports.');
+    if ((hotel?.settings?.reporting?.allowExports === false) || (!hasPermission(profile, 'export_reports', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin')) {
+      toast.error(hotel?.settings?.reporting?.allowExports === false ? 'Report exporting is disabled by hotel policy.' : 'Permission denied: You do not have permission to export reports.');
       return;
     }
 
@@ -1067,12 +1068,12 @@ export function Reports() {
 
     // Check for restrictive settings
     const settings = hotel?.settings?.reporting;
-    if (settings?.restrictSensitiveReports && !['hotelAdmin', 'manager'].includes(profile?.role || '')) {
-      if (['profit_loss', 'revenue_analysis', 'financial_ledger', 'expenses_detail'].includes(r.id)) return false;
+    if (settings?.restrictSensitiveReports && !['hotelAdmin', 'superAdmin'].includes(profile?.role || '') && profile?.staffRole !== 'manager') {
+      if (['profit_loss', 'revenue_analysis', 'financial_ledger', 'expenses_detail', 'trial_balance', 'balance_sheet', 'net_income'].includes(r.id)) return false;
     }
 
-    if (settings?.allowRevenueAnalytics === false && ['revenue_analysis', 'profit_loss'].includes(r.id)) return false;
-    if (settings?.allowOccupancyAnalytics === false && ['occupancy_rate'].includes(r.id)) return false;
+    if (settings?.allowRevenueAnalytics === false && ['revenue_analysis', 'profit_loss', 'daily_sales', 'monthly_sales', 'net_income'].includes(r.id)) return false;
+    if (settings?.allowOccupancyAnalytics === false && ['occupancy_rate', 'occupancy', 'occupancy_ratio'].includes(r.id)) return false;
 
     return true;
   });
@@ -1106,27 +1107,34 @@ export function Reports() {
         </div>
         
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-xl relative">
-            <Calendar size={18} className="text-emerald-500 ml-2 pointer-events-none" />
-            <input 
-              type="date" 
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
-              style={{ colorScheme: 'dark' }}
-            />
-            <span className="text-zinc-600">to</span>
-            <input 
-              type="date" 
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
-              style={{ colorScheme: 'dark' }}
-            />
-          </div>
+          {(hotel?.settings?.reporting?.allowFiltering ?? true) ? (
+            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2 rounded-xl relative">
+              <Calendar size={18} className="text-emerald-500 ml-2 pointer-events-none" />
+              <input 
+                type="date" 
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
+               
+              />
+              <span className="text-zinc-600">to</span>
+              <input 
+                type="date" 
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                className="bg-transparent text-zinc-50 text-sm outline-none border-none p-1 appearance-none"
+               
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-zinc-900/60 border border-zinc-800 px-3 py-2 rounded-xl text-xs text-zinc-400">
+              <Calendar size={16} className="text-emerald-500" />
+              <span>{dateRange.start} to {dateRange.end}</span>
+            </div>
+          )}
 
           <div className="flex gap-2">
-            {hasPermission(profile, 'print_reports') && (
+            {(hasPermission(profile, 'print_reports', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
               <button 
                 onClick={() => {
                   const reportTitle = reportTypes.find(r => r.id === activeReport)?.label || 'Report';
@@ -1150,7 +1158,7 @@ export function Reports() {
                 Print
               </button>
             )}
-            {(hotel?.settings?.reporting?.allowExports ?? true) && hasPermission(profile, 'export_reports') && (
+            {(hotel?.settings?.reporting?.allowExports ?? true) && (hasPermission(profile, 'export_reports', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
               <>
                 <button 
                   onClick={exportPDF}
@@ -1252,15 +1260,18 @@ export function Reports() {
                       <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="name" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={isLight ? "#dce2eb" : "#27272a"} vertical={false} />
+                  <XAxis dataKey="name" stroke={isLight ? "#64748b" : "#71717a"} fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke={isLight ? "#64748b" : "#71717a"} fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => currency === 'USD' ? `$${(value/exchangeRate).toFixed(0)}` : `₦${value.toLocaleString()}`} />
                   <Tooltip 
-                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
-                    itemStyle={{ color: '#10b981' }}
+                    contentStyle={isLight
+                      ? { backgroundColor: '#f8f9fb', border: '1px solid #cbd5e1', borderRadius: '8px', color: '#0f172a', boxShadow: '0 8px 20px rgba(15,23,42,0.08)' }
+                      : { backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }
+                    }
+                    itemStyle={{ color: isLight ? '#047857' : '#10b981' }}
                     formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
                   />
-                  <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRev)" />
+                  <Area type="monotone" dataKey="revenue" stroke={isLight ? "#059669" : "#10b981"} fillOpacity={1} fill="url(#colorRev)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -1285,7 +1296,10 @@ export function Reports() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                    contentStyle={isLight
+                      ? { backgroundColor: '#f8f9fb', border: '1px solid #cbd5e1', borderRadius: '8px', color: '#0f172a', boxShadow: '0 8px 20px rgba(15,23,42,0.08)' }
+                      : { backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }
+                    }
                     formatter={(value: number) => formatCurrency(value, currency, exchangeRate)}
                   />
                 </PieChart>

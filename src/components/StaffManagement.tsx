@@ -750,18 +750,20 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
           Custom Roles & Permissions ({customRoles.length})
         </button>
 
-        <button
-          onClick={() => setActiveTab('sessions')}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors",
-            activeTab === 'sessions'
-              ? "border-emerald-500 text-emerald-400"
-              : "border-transparent text-zinc-400 hover:text-zinc-200"
-          )}
-        >
-          <Laptop size={16} />
-          Session Control Center
-        </button>
+        {(authHotel?.settings?.staff?.allowSessionMonitoring ?? false) && (
+          <button
+            onClick={() => setActiveTab('sessions')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors",
+              activeTab === 'sessions'
+                ? "border-emerald-500 text-emerald-400"
+                : "border-transparent text-zinc-400 hover:text-zinc-200"
+            )}
+          >
+            <Laptop size={16} />
+            Session Control Center
+          </button>
+        )}
       </div>
 
       {/* Tab 1: Staff Directory */}
@@ -1180,7 +1182,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       )}
 
       {/* Tab 3: Active Sessions */}
-      {activeTab === 'sessions' && (
+      {(authHotel?.settings?.staff?.allowSessionMonitoring ?? false) && activeTab === 'sessions' && (
         <SessionControlCenter />
       )}
 

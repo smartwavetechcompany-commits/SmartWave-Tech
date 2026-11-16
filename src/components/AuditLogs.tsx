@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { collection, onSnapshot, collectionGroup } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import { AuditLog, OperationType } from '../types';
 import { format, isValid, subDays, startOfDay, endOfDay } from 'date-fns';
 import { 
@@ -161,7 +162,14 @@ export function AuditLogs() {
     direction: 'desc'
   });
 
-  const { hotel, profile } = useAuth();
+  const { hotel, profile, customRoles } = useAuth();
+  const allowLogAccess = Boolean(
+    profile && (
+      profile.role === 'superAdmin' ||
+      profile.role === 'hotelAdmin' ||
+      (!(hotel?.settings?.auditLogs?.restrictLogVisibility ?? true) && hasPermission(profile, 'view_activity_logs', customRoles))
+    )
+  );
 
   const safeFormat = (date: any, formatStr: string) => {
     try {
@@ -204,8 +212,8 @@ export function AuditLogs() {
 
   useEffect(() => {
     if (!profile || hasPermissionError) return;
-    if (profile.role !== 'superAdmin' && profile.role !== 'hotelAdmin') return;
-    if (profile.role === 'hotelAdmin' && !hotel?.id) return;
+    if (!allowLogAccess) return;
+    if (profile.role !== 'superAdmin' && !hotel?.id) return;
 
     setLoading(true);
     let unsubLogs: () => void = () => {};
@@ -272,7 +280,7 @@ export function AuditLogs() {
       unsubLogs();
       unsubHotels();
     };
-  }, [hotel?.id, profile?.uid, profile?.role, hasPermissionError]);
+  }, [hotel?.id, profile?.uid, profile?.role, allowLogAccess, hasPermissionError]);
 
   const handleSort = (key: typeof sortConfig.key) => {
     setSortConfig(prev => ({
@@ -366,7 +374,7 @@ export function AuditLogs() {
     return filteredAndSortedLogs.slice(startIndex, startIndex + logsPerPage);
   }, [filteredAndSortedLogs, currentPage, logsPerPage]);
 
-  if (profile?.role !== 'superAdmin' && profile?.role !== 'hotelAdmin') {
+  if (!allowLogAccess) {
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center">
         <Lock size={48} className="mx-auto text-zinc-700 mb-4" />
@@ -419,7 +427,7 @@ export function AuditLogs() {
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
               className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none min-w-[130px]"
-              style={{ colorScheme: 'dark' }}
+             
             />
             <span className="text-zinc-600 text-[10px]">to</span>
             <input 
@@ -427,7 +435,7 @@ export function AuditLogs() {
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
               className="bg-transparent text-[10px] sm:text-xs text-zinc-50 outline-none border-none min-w-[130px]"
-              style={{ colorScheme: 'dark' }}
+             
             />
             {(dateRange.start || dateRange.end || moduleFilter !== 'all' || searchQuery) && (
               <div className="flex items-center gap-1 ml-1 border-l border-zinc-700 pl-2">

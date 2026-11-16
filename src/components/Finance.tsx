@@ -45,7 +45,8 @@ import {
   Percent,
   Trash2,
   PlusCircle,
-  XCircle
+  XCircle,
+  Lock
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { exportTableToPDF } from '../utils/pdfExport';
@@ -62,7 +63,8 @@ import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFi
 import { hasPermission } from '../utils/permissions';
 
 export function Finance() {
-  const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles, theme } = useAuth();
+  const isLight = theme === 'light';
   const { executeRequest, isPending } = useRequestManager();
   const [records, setRecords] = useState<FinanceRecord[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -620,7 +622,7 @@ export function Finance() {
       }
 
       if (settleType === 'refund') {
-        const policy = canProcessRefund(hotel, profile, totalAmount);
+        const policy = canProcessRefund(hotel, profile, totalAmount, customRoles);
         if (!policy.allowed) {
           toast.error(policy.message || 'Refund denied by policy');
           return;
@@ -1483,6 +1485,22 @@ export function Finance() {
     toast.success('Financial PDF exported successfully');
   };
 
+  if (
+    hotel?.settings?.financial?.allowFinancialReportViewing === false &&
+    profile?.role !== 'hotelAdmin' &&
+    profile?.role !== 'superAdmin'
+  ) {
+    return (
+      <div className="p-6 lg:p-8">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center">
+          <Lock size={48} className="mx-auto text-zinc-700 mb-4" />
+          <h3 className="text-lg font-bold text-zinc-50 mb-2">Finance Access Restricted</h3>
+          <p className="text-zinc-400 text-sm">Financial reports and module access are currently restricted by Admin Controls.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 lg:p-6 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -1576,12 +1594,15 @@ export function Finance() {
                   <div className="h-[250px] w-full min-w-0 relative" style={{ minHeight: 250, width: '100%' }}>
                     <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={200} debounce={50} initialDimension={{ width: 500, height: 250 }}>
                       <BarChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                        <XAxis dataKey="name" stroke="#71717a" fontSize={10} axisLine={false} tickLine={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={isLight ? "#dce2eb" : "#27272a"} vertical={false} />
+                        <XAxis dataKey="name" stroke={isLight ? "#64748b" : "#71717a"} fontSize={10} axisLine={false} tickLine={false} />
                         <YAxis hide />
                         <Tooltip 
                           cursor={{ fill: 'transparent' }}
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                          contentStyle={isLight
+                            ? { backgroundColor: '#f8f9fb', border: '1px solid #cbd5e1', borderRadius: '8px', color: '#0f172a', boxShadow: '0 8px 20px rgba(15,23,42,0.08)' }
+                            : { backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }
+                          }
                         />
                         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                           {chartData.map((entry, index) => (
@@ -3347,7 +3368,7 @@ export function Finance() {
                       <button
                         type="button"
                         onClick={() => handleDownloadReport(report.title, 'csv')}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-zinc-950 border border-zinc-800 text-zinc-300 rounded-xl hover:text-white hover:bg-zinc-800 text-xs font-bold transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-zinc-950 border border-zinc-800 text-zinc-300 rounded-xl hover:text-zinc-50 hover:bg-zinc-800 text-xs font-bold transition-colors"
                         title="Export report as CSV spreadsheet"
                       >
                         <Download size={13} />
@@ -4468,7 +4489,7 @@ export function Finance() {
                         value={newPO.dueDate}
                         onChange={(e) => setNewPO({ ...newPO, dueDate: e.target.value })}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 appearance-none"
-                        style={{ colorScheme: 'dark' }}
+                       
                       />
                       <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" size={18} />
                     </div>

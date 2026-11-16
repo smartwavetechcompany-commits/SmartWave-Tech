@@ -225,7 +225,7 @@ export function HousekeepingLinen() {
             <Shirt size={20} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white">Linen Management & Laundry Flow</h2>
+            <h2 className="text-lg font-black text-zinc-50">Linen Management & Laundry Flow</h2>
             <p className="text-xs text-zinc-400">
               Clean Stock → Issued → Used → Laundry → Returned → Stock movement pipeline
             </p>
@@ -258,7 +258,7 @@ export function HousekeepingLinen() {
         <div className="bg-zinc-900 border border-emerald-500/20 p-3.5 rounded-2xl flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">Clean on Shelf</span>
-            <span className="text-xl font-black text-white mt-0.5 block">{totalClean} pcs</span>
+            <span className="text-xl font-black text-zinc-50 mt-0.5 block">{totalClean} pcs</span>
           </div>
           <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
             <ShieldCheck size={16} />
@@ -315,7 +315,7 @@ export function HousekeepingLinen() {
               {linens.slice((linenPage - 1) * linenPageSize, linenPage * linenPageSize).map(item => {
                 return (
                   <tr key={item.id} className="hover:bg-zinc-800/40 transition-colors">
-                    <td className="py-3 px-4 font-bold text-white">
+                    <td className="py-3 px-4 font-bold text-zinc-50">
                       {item.name}
                     </td>
                     <td className="py-3 px-3 text-right font-mono font-bold text-emerald-400">
@@ -407,7 +407,7 @@ export function HousekeepingLinen() {
       {/* Movement History Log */}
       {movements.length > 0 && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-3">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <h3 className="text-sm font-bold text-zinc-50 flex items-center gap-2">
             <History size={16} className="text-emerald-400" />
             Recent Linen Dispatches & Laundry Turnaround Logs
           </h3>
@@ -428,7 +428,7 @@ export function HousekeepingLinen() {
                     <td className="py-2.5 px-3 text-zinc-400 font-mono">
                       {safeFormatDate(m.timestamp, 'MMM d, HH:mm', '')}
                     </td>
-                    <td className="py-2.5 px-3 font-bold text-white">{m.linenName}</td>
+                    <td className="py-2.5 px-3 font-bold text-zinc-50">{m.linenName}</td>
                     <td className="py-2.5 px-3 text-zinc-300">{m.details}</td>
                     <td className="py-2.5 px-3 text-zinc-400">{m.handledBy}</td>
                     <td className="py-2.5 px-3 text-zinc-400 italic">{m.notes || '-'}</td>
@@ -455,7 +455,7 @@ export function HousekeepingLinen() {
           <form onSubmit={handleExecuteAction} className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 my-auto shadow-2xl">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div>
-                <h3 className="text-lg font-bold text-white capitalize">
+                <h3 className="text-lg font-bold text-zinc-50 capitalize">
                   {actionType === 'send_laundry' && 'Send Soiled Linen to Laundry'}
                   {actionType === 'return_laundry' && 'Receive Clean Linen from Laundry'}
                   {actionType === 'issue_rooms' && 'Issue Clean Linen to Floor / Rooms'}
@@ -469,7 +469,7 @@ export function HousekeepingLinen() {
                   setSelectedLinen(null);
                   setActionType(null);
                 }}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -483,7 +483,7 @@ export function HousekeepingLinen() {
                 required
                 type="number"
                 min="1"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500 font-mono"
                 value={quantity}
                 onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 1)}
               />
@@ -495,7 +495,7 @@ export function HousekeepingLinen() {
               </label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Dispatched via Laundry Truck A, Batch #4"
                 value={actionNotes}
                 onChange={(e) => setActionNotes(e.target.value)}

@@ -67,6 +67,7 @@ interface QuickCheckInModalProps {
   roomTypes?: RoomType[];
   hotel: Hotel | null;
   profile: any;
+  customRoles?: any[];
   currency: 'NGN' | 'USD' | string;
   exchangeRate: number;
   initialSelectedReservation?: Reservation | null;
@@ -81,6 +82,7 @@ export function QuickCheckInModal({
   roomTypes = [],
   hotel,
   profile,
+  customRoles = [],
   currency,
   exchangeRate,
   initialSelectedReservation = null
@@ -154,11 +156,21 @@ export function QuickCheckInModal({
     );
   }, [liveReservations, todayStr]);
 
+  const allowWalkIn = hotel?.settings?.reservations?.allowWalkIn ?? true;
+  const preventCheckInDirty = hotel?.settings?.checkIn?.preventCheckInDirty ?? true;
+  const preventCheckInMaintenance = hotel?.settings?.checkIn?.preventCheckInMaintenance ?? true;
+
   // Mode: 'arrivals' (select existing arrival) or 'walkin' (express walk-in arrival)
   const [activeMode, setActiveMode] = useState<'arrivals' | 'walkin'>(() => {
-    if (initialSelectedReservation) return 'arrivals';
+    if (initialSelectedReservation || !allowWalkIn) return 'arrivals';
     return todayArrivals.length > 0 ? 'arrivals' : 'walkin';
   });
+
+  useEffect(() => {
+    if (!allowWalkIn && activeMode === 'walkin') {
+      setActiveMode('arrivals');
+    }
+  }, [allowWalkIn, activeMode]);
 
   const [arrivalSearch, setArrivalSearch] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -191,18 +203,21 @@ export function QuickCheckInModal({
   const availableRoomsForWalkIn = useMemo(() => {
     if (!checkInDate || !checkOutDate) return [];
     return liveRooms.filter(room => {
-      // Physical status check: cannot be occupied or maintenance/out_of_service
-      if (room.status === 'occupied' || room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order') {
+      // Physical status check: cannot be occupied; maintenance/out_of_service checked via preventCheckInMaintenance
+      if (room.status === 'occupied') {
         return false;
       }
-      // Cleanliness check: A dirty/unprepared room must NEVER be assigned for immediate walk-in check-in
-      if (isRoomDirtyOrUnprepared(room)) {
+      if (preventCheckInMaintenance && (room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order')) {
+        return false;
+      }
+      // Cleanliness check when preventCheckInDirty is enabled
+      if (preventCheckInDirty && isRoomDirtyOrUnprepared(room)) {
         return false;
       }
       // Check availability against all reservations and blockings
       return isRoomAvailable(room.id, checkInDate, checkOutDate, liveReservations, liveBlockings, hotel);
     });
-  }, [liveRooms, checkInDate, checkOutDate, liveReservations, liveBlockings, hotel]);
+  }, [liveRooms, checkInDate, checkOutDate, liveReservations, liveBlockings, hotel, preventCheckInDirty, preventCheckInMaintenance]);
 
   // Selected room details
   const selectedRoom = useMemo(() => {
@@ -259,7 +274,7 @@ export function QuickCheckInModal({
     }
 
     // Permission check
-    const canDoCheckIn = hasPermission(profile, 'check_in_guests') || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+    const canDoCheckIn = hasPermission(profile, 'check_in_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
     if (!canDoCheckIn) {
       toast.error('Access denied: You do not have permission to check in guests.');
       return;
@@ -277,12 +292,12 @@ export function QuickCheckInModal({
     }
 
     const room = liveRooms.find(r => r.id === res.roomId);
-    if (isRoomDirtyOrUnprepared(room)) {
+    if (preventCheckInDirty && isRoomDirtyOrUnprepared(room)) {
       toast.error(`Check-in Blocked: Room ${res.roomNumber} is currently dirty. Housekeeping must service and inspect the room before check-in.`);
       return;
     }
 
-    const policy = canCheckIn(hotel, profile, res, room, undefined, liveReservations);
+    const policy = canCheckIn(hotel, profile, res, room, undefined, liveReservations, customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Check-in denied by hotel policy');
       return;
@@ -513,9 +528,32 @@ export function QuickCheckInModal({
       return;
     }
 
-    // Cleanliness check: cannot check in to a dirty room
-    if (isRoomDirtyOrUnprepared(selectedRoom)) {
+    if (!allowWalkIn) {
+      toast.error('Walk-in bookings are disabled by Admin Controls.');
+      return;
+    }
+
+    // Cleanliness check when preventCheckInDirty is enabled
+    if (preventCheckInDirty && isRoomDirtyOrUnprepared(selectedRoom)) {
       toast.error(`Check-in Blocked: Room ${selectedRoom.roomNumber} is currently dirty. Housekeeping must service and inspect the room before check-in.`);
+      return;
+    }
+
+    const parsedPayPreview = paymentOption !== 'unpaid' && paymentAmount !== '' ? Math.max(0, Number(paymentAmount)) : 0;
+    const walkInPolicyRes: any = {
+      id: 'walkin_preview',
+      roomId: selectedRoom.id,
+      roomNumber: selectedRoom.roomNumber,
+      checkIn: checkInDate,
+      checkOut: checkOutDate,
+      totalAmount: walkInTotalAmount,
+      paidAmount: parsedPayPreview,
+      guestName: guestName.trim(),
+      status: 'confirmed'
+    };
+    const walkInPolicy = canCheckIn(hotel, profile, walkInPolicyRes, selectedRoom, undefined, liveReservations, customRoles);
+    if (!walkInPolicy.allowed) {
+      toast.error(walkInPolicy.message || 'Check-in denied by hotel policy');
       return;
     }
 
@@ -766,19 +804,21 @@ export function QuickCheckInModal({
                 {todayArrivals.length}
               </span>
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveMode('walkin')}
-              className={cn(
-                "flex-1 min-h-[44px] pb-2.5 pt-2 text-[11px] sm:text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer",
-                activeMode === 'walkin'
-                  ? "border-emerald-500 text-emerald-400"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-              )}
-            >
-              <Sparkles size={14} className="shrink-0" />
-              <span className="truncate">Express Walk-In</span>
-            </button>
+            {allowWalkIn && (
+              <button
+                type="button"
+                onClick={() => setActiveMode('walkin')}
+                className={cn(
+                  "flex-1 min-h-[44px] pb-2.5 pt-2 text-[11px] sm:text-xs font-bold border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer",
+                  activeMode === 'walkin'
+                    ? "border-emerald-500 text-emerald-400"
+                    : "border-transparent text-zinc-400 hover:text-zinc-200"
+                )}
+              >
+                <Sparkles size={14} className="shrink-0" />
+                <span className="truncate">Express Walk-In</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -811,14 +851,16 @@ export function QuickCheckInModal({
                       All scheduled guests for today have already checked in or none were booked.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveMode('walkin')}
-                    className="mt-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    <span>Switch to Express Walk-In</span>
-                    <ArrowRight size={14} />
-                  </button>
+                  {allowWalkIn && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveMode('walkin')}
+                      className="mt-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      <span>Switch to Express Walk-In</span>
+                      <ArrowRight size={14} />
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -830,6 +872,7 @@ export function QuickCheckInModal({
                       r.id !== res.id
                     );
                     const isDirty = isRoomDirtyOrUnprepared(room);
+                    const isDirtyBlocked = preventCheckInDirty && isDirty;
                     const isProcessing = processingId === res.id;
 
                     return (
@@ -839,7 +882,7 @@ export function QuickCheckInModal({
                           "p-3.5 sm:p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3",
                           activeOccupant 
                             ? "bg-red-500/5 border-red-500/20" 
-                            : isDirty
+                            : isDirtyBlocked
                               ? "bg-amber-500/5 border-amber-500/20"
                               : "bg-zinc-950/60 border-zinc-800 hover:border-zinc-700"
                         )}
@@ -894,7 +937,7 @@ export function QuickCheckInModal({
                             </div>
                           )}
 
-                          {!activeOccupant && isDirty && (
+                          {!activeOccupant && isDirtyBlocked && (
                             <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium">
                               <AlertCircle size={13} />
                               <span>Room {res.roomNumber} is dirty. Housekeeping must service and inspect before check-in.</span>
@@ -905,11 +948,11 @@ export function QuickCheckInModal({
                         <div className="w-full sm:w-auto sm:self-center shrink-0 pt-1 sm:pt-0">
                           <button
                             type="button"
-                            disabled={isProcessing || !!activeOccupant || isDirty}
+                            disabled={isProcessing || !!activeOccupant || isDirtyBlocked}
                             onClick={() => handleCheckInArrival(res)}
                             className={cn(
                               "w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm cursor-pointer",
-                              activeOccupant || isDirty
+                              activeOccupant || isDirtyBlocked
                                 ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700"
                                 : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black shadow-emerald-950/40"
                             )}
@@ -919,7 +962,7 @@ export function QuickCheckInModal({
                                 <span className="w-3.5 h-3.5 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
                                 <span>Checking In...</span>
                               </>
-                            ) : isDirty ? (
+                            ) : isDirtyBlocked ? (
                               <>
                                 <AlertCircle size={15} className="text-amber-400" />
                                 <span>Room Dirty</span>
@@ -1029,7 +1072,7 @@ export function QuickCheckInModal({
                       type="date"
                       value={checkInDate}
                       onChange={(e) => setCheckInDate(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[44px] [color-scheme:dark]"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     />
                   </div>
                   <div>
@@ -1039,7 +1082,7 @@ export function QuickCheckInModal({
                       value={checkOutDate}
                       min={checkInDate}
                       onChange={(e) => setCheckOutDate(e.target.value)}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[44px] [color-scheme:dark]"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-base sm:text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     />
                   </div>
                 </div>

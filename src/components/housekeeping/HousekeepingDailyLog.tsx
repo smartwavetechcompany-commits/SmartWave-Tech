@@ -186,7 +186,7 @@ export function HousekeepingDailyLogView({
             <FileText size={20} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white">Daily Housekeeping Handover Log</h2>
+            <h2 className="text-lg font-black text-zinc-50">Daily Housekeeping Handover Log</h2>
             <p className="text-xs text-zinc-400">
               End-of-day summary of cleaning operations, inspections, maintenance, attendance, and pending issues
             </p>
@@ -219,7 +219,7 @@ export function HousekeepingDailyLogView({
             <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
               Live Operations Today
             </span>
-            <h3 className="text-xl font-black text-white">{format(new Date(), 'EEEE, MMMM d, yyyy')}</h3>
+            <h3 className="text-xl font-black text-zinc-50">{format(new Date(), 'EEEE, MMMM d, yyyy')}</h3>
           </div>
           <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 self-start sm:self-auto">
             Shift in Progress
@@ -288,7 +288,7 @@ export function HousekeepingDailyLogView({
 
       {/* Historical Daily Logs (Shift Handover Archive) */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+        <h3 className="text-sm font-bold text-zinc-50 flex items-center gap-2">
           <History size={16} className="text-emerald-400" />
           Shift Handover & Daily Log Archive
         </h3>
@@ -298,11 +298,11 @@ export function HousekeepingDailyLogView({
             <div key={log.id} className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-zinc-800 flex items-center justify-center text-white font-mono font-bold text-xs">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-50 font-mono font-bold text-xs">
                     {log.date?.slice(5)}
                   </div>
                   <div>
-                    <h4 className="font-bold text-white text-sm">
+                    <h4 className="font-bold text-zinc-50 text-sm">
                       Daily Summary — {safeFormatDate(log.date, 'MMMM d, yyyy', log.date || '')}
                     </h4>
                     <p className="text-[11px] text-zinc-400">Supervisor: {log.supervisorName}</p>
@@ -367,12 +367,12 @@ export function HousekeepingDailyLogView({
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <FileText size={18} />
-                <h3 className="text-lg font-bold text-white">Seal Daily Housekeeping Log</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Seal Daily Housekeeping Log</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowLogModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -399,7 +399,7 @@ export function HousekeepingDailyLogView({
               </label>
               <textarea
                 required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-18"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-18"
                 value={form.stockUsedSummary}
                 onChange={(e) => setForm(prev => ({ ...prev, stockUsedSummary: e.target.value }))}
               />
@@ -411,7 +411,7 @@ export function HousekeepingDailyLogView({
               </label>
               <textarea
                 required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-18"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-18"
                 value={form.pendingIssues}
                 onChange={(e) => setForm(prev => ({ ...prev, pendingIssues: e.target.value }))}
               />
@@ -423,7 +423,7 @@ export function HousekeepingDailyLogView({
               </label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="Overall shift performance and feedback"
                 value={form.notes}
                 onChange={(e) => setForm(prev => ({ ...prev, notes: e.target.value }))}

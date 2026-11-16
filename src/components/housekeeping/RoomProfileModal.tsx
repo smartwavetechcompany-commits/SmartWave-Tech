@@ -141,7 +141,7 @@ export function RoomProfileModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-xl font-black text-white">Room {room.roomNumber}</h3>
+                <h3 className="text-xl font-black text-zinc-50">Room {room.roomNumber}</h3>
                 <span className={cn(
                   "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border",
                   hkDisplay.color
@@ -156,7 +156,7 @@ export function RoomProfileModal({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white rounded-xl bg-zinc-800/60 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 text-zinc-400 hover:text-zinc-50 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 transition-colors"
           >
             <X size={18} />
           </button>
@@ -174,7 +174,7 @@ export function RoomProfileModal({
                   occupancyStatus === 'Occupied' ? "bg-blue-400" :
                   occupancyStatus === 'Expected Arrival' ? "bg-amber-400" : "bg-emerald-400"
                 )} />
-                <span className="text-xs font-bold text-white">{occupancyStatus}</span>
+                <span className="text-xs font-bold text-zinc-50">{occupancyStatus}</span>
               </div>
               {currentReservation && (
                 <p className="text-[11px] text-zinc-400 mt-1 truncate">
@@ -186,7 +186,7 @@ export function RoomProfileModal({
             <div className="bg-zinc-950 p-3 rounded-2xl border border-zinc-800/80">
               <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Housekeeping Status</span>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs font-bold text-white capitalize">{room.status}</span>
+                <span className="text-xs font-bold text-zinc-50 capitalize">{room.status}</span>
                 {room.cleaningPriority && (
                   <span className={cn(
                     "px-1.5 py-0.2 text-[9px] rounded font-bold uppercase",
@@ -263,7 +263,7 @@ export function RoomProfileModal({
                   Assign Housekeeper
                 </label>
                 <select
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={selectedStaff}
                   onChange={(e) => setSelectedStaff(e.target.value)}
                 >
@@ -279,7 +279,7 @@ export function RoomProfileModal({
                   Cleaning Priority
                 </label>
                 <select
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={selectedPriority}
                   onChange={(e) => setSelectedPriority(e.target.value as any)}
                 >
@@ -296,7 +296,7 @@ export function RoomProfileModal({
                 Room Remarks / Special Instructions
               </label>
               <textarea
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-16"
                 placeholder="e.g. VIP guest arrival, extra feathered pillows requested..."
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}

@@ -386,7 +386,7 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 text-emerald-400 mb-4 shadow-xl">
             <UserCheck size={28} />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">
             Staff Account Activation
           </h1>
           <p className="text-zinc-400 text-sm mt-1.5">
@@ -414,10 +414,10 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
               <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3">
                 <AlertTriangle className="text-rose-400 shrink-0 mt-0.5" size={20} />
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold text-rose-300">
+                  <h3 className="text-sm font-semibold text-rose-700 dark:text-rose-300">
                     {errorCode === 'auth/expired-action-code' ? 'Activation Link Expired' : 'Unable to Activate Account'}
                   </h3>
-                  <p className="text-xs text-rose-200/80 leading-relaxed">
+                  <p className="text-xs text-rose-800 dark:text-rose-200/80 leading-relaxed">
                     {validationError}
                   </p>
                 </div>
@@ -601,7 +601,7 @@ export function SetPasswordPage({ onNavigateToLogin }: Props) {
               </div>
               
               <div className="space-y-2">
-                <h2 className="text-xl font-bold text-white">
+                <h2 className="text-xl font-bold text-zinc-50">
                   Account Activated Successfully!
                 </h2>
                 <p className="text-xs text-zinc-300 max-w-xs mx-auto leading-relaxed">

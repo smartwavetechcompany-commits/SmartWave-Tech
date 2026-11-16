@@ -1211,7 +1211,7 @@ export function BreakfastList() {
                           key={entry.id}
                           className={cn(
                             "hover:bg-zinc-800/30 transition-colors",
-                            entry.isServed ? "bg-emerald-950/10" : ""
+                            entry.isServed ? "bg-emerald-500/8 dark:bg-emerald-950/10" : ""
                           )}
                         >
                           <td className="py-3 px-4 font-bold text-zinc-50">

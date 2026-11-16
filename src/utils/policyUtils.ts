@@ -77,12 +77,13 @@ export const canCheckIn = (
   reservation: Reservation,
   room: Room | undefined,
   guest?: Guest | null,
-  allReservations: Reservation[] = []
+  allReservations: Reservation[] = [],
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
 
   // Granular Action Permission Check (Rule 2)
-  if (!hasPermission(profile, 'check_in_guests')) {
+  if (!hasPermission(profile, 'check_in_guests', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to check in guests.' };
   }
 
@@ -102,6 +103,19 @@ export const canCheckIn = (
   }
   
   const settings = hotel.settings?.checkIn;
+
+  // Enforce allowEarlyCheckIn when explicitly disabled
+  if (settings?.allowEarlyCheckIn === false && reservation.checkIn) {
+    const scheduledTimeRaw = (reservation.checkInTime || hotel.defaultCheckInTime || '14:00').trim();
+    const scheduledTime = /^\d{2}:\d{2}$/.test(scheduledTimeRaw) ? scheduledTimeRaw : '14:00';
+    const scheduledStart = new Date(`${reservation.checkIn}T${scheduledTime}:00`);
+    if (!isNaN(scheduledStart.getTime()) && new Date() < scheduledStart) {
+      return {
+        allowed: false,
+        message: `Early check-in is disabled by hotel policy. Scheduled check-in opens at ${reservation.checkIn} ${scheduledTime}.`
+      };
+    }
+  }
 
   // Check Blacklist (DNR)
   if (hotel.settings?.guests?.allowBlacklisting && guest) {
@@ -135,20 +149,24 @@ export const canCheckIn = (
     }
 
     if (settings?.requireRoomInspection && room.status !== 'clean' && room.status !== 'vacant' && room.status !== 'inspected' && room.housekeepingStatus !== 'ready' && (room.housekeepingStatus as string) !== 'clean') {
-      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms')) {
+      if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms', customRoles)) {
         return { allowed: false, message: `Room ${room.roomNumber} must be clean and inspected before check-in.` };
       }
     }
   }
 
+  const totalAmount = reservation.totalAmount || 0;
+  const paidAmount = (reservation.paidAmount || 0) + (reservation.totalDiscount || 0);
   if (settings?.requirePaymentBeforeCheckIn) {
-    const totalAmount = reservation.totalAmount || 0;
-    const paidAmount = (reservation.paidAmount || 0) + (reservation.totalDiscount || 0);
-    if (paidAmount < totalAmount) {
-      if (!settings.allowCheckInPendingBalance) {
+    if (settings.allowCheckInPendingBalance === false) {
+      if (paidAmount + 0.01 < totalAmount) {
         return { allowed: false, message: 'Full payment is required before check-in as per hotel policy.' };
       }
+    } else if (totalAmount > 0.01 && paidAmount <= 0.01) {
+      return { allowed: false, message: 'A minimum deposit or upfront payment is required before check-in as per hotel policy.' };
     }
+  } else if (settings?.allowCheckInPendingBalance === false && totalAmount > 0.01 && paidAmount <= 0.01) {
+    return { allowed: false, message: 'Check-in with zero upfront payment is disabled by hotel policy. Please collect a payment first.' };
   }
 
   const guestSettings = hotel.settings?.guests;
@@ -170,12 +188,13 @@ export const canCheckIn = (
 export const canEditReservation = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  reservation: Reservation
+  reservation: Reservation,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
-  if (!hasPermission(profile, 'edit_reservations')) {
+  if (!hasPermission(profile, 'edit_reservations', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to edit reservations.' };
   }
 
@@ -186,7 +205,12 @@ export const canEditReservation = (
     return { allowed: false, message: 'Reservation editing is currently disabled by administrator.' };
   }
 
-  if (settings.requireApprovalForEdits) {
+  const isApprover =
+    profile.role === 'hotelAdmin' ||
+    profile.role === 'superAdmin' ||
+    profile.staffRole === 'manager' ||
+    hasPermission(profile, 'override_checkout', customRoles);
+  if (settings.requireApprovalForEdits && !isApprover) {
     return { allowed: false, message: 'Manager approval required to edit reservations.' };
   }
 
@@ -196,12 +220,13 @@ export const canEditReservation = (
 export const canCancelReservation = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  reservation: Reservation
+  reservation: Reservation,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
-  if (!hasPermission(profile, 'cancel_reservations')) {
+  if (!hasPermission(profile, 'cancel_reservations', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to cancel reservations.' };
   }
 
@@ -210,6 +235,26 @@ export const canCancelReservation = (
 
   if (!settings.allowCancellation) {
     return { allowed: false, message: 'Cancellations are currently disabled by administrator.' };
+  }
+
+  return { allowed: true };
+};
+
+export const canMarkNoShow = (
+  hotel: Hotel | null,
+  profile: UserProfile | null,
+  reservation: Reservation,
+  customRoles: any[] = []
+): { allowed: boolean; message?: string } => {
+  if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
+
+  if (!hasPermission(profile, 'cancel_reservations', customRoles)) {
+    return { allowed: false, message: 'Access denied: You do not have permission to mark reservations as no-show.' };
+  }
+
+  const settings = hotel.settings?.reservations;
+  if (settings && settings.allowNoShow === false) {
+    return { allowed: false, message: 'Marking reservations as No-Show is currently disabled by administrator.' };
   }
 
   return { allowed: true };
@@ -258,23 +303,24 @@ export const canUpdateRoomStatus = (
 export const canProcessRefund = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  amount: number
+  amount: number,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
-  if (!hasPermission(profile, 'process_refunds') && !hasPermission(profile, 'approve_refund') && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+  if (!hasPermission(profile, 'process_refunds', customRoles) && !hasPermission(profile, 'approve_refund', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
     return { allowed: false, message: 'Access denied: You do not have permission to process refunds.' };
   }
 
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowRefunds && !hasPermission(profile, 'void_transaction')) {
+  if (!settings.allowRefunds) {
     return { allowed: false, message: 'Refund processing is currently disabled by administrator.' };
   }
 
-  if (settings.requireApprovalForRefunds && !hasPermission(profile, 'void_transaction') && !hasPermission(profile, 'approve_refund')) {
+  if (settings.requireApprovalForRefunds && !hasPermission(profile, 'void_transaction', customRoles) && !hasPermission(profile, 'approve_refund', customRoles)) {
     return { allowed: false, message: 'Manager approval is required to process refunds.' };
   }
 
@@ -285,20 +331,21 @@ export const canApplyDiscount = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   amount: number,
-  totalAmount: number
+  totalAmount: number,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowDiscounts && !hasPermission(profile, 'edit_reservation')) {
+  if (!settings.allowDiscounts) {
     return { allowed: false, message: 'Discounts are currently disabled by administrator.' };
   }
 
-  const percentage = (amount / totalAmount) * 100;
+  const percentage = totalAmount > 0 ? (amount / totalAmount) * 100 : 0;
   if (settings.requireApprovalForLargeDiscounts && percentage > (settings.largeDiscountThreshold || 10)) {
-    if (!hasPermission(profile, 'void_transaction')) {
+    if (!hasPermission(profile, 'void_transaction', customRoles)) {
       return { allowed: false, message: `Discounts above ${settings.largeDiscountThreshold}% require manager approval.` };
     }
   }
@@ -309,21 +356,22 @@ export const canApplyDiscount = (
 export const canManageGuest = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  action: 'create' | 'edit' | 'delete' | 'blacklist' | 'export'
+  action: 'create' | 'edit' | 'delete' | 'blacklist' | 'export',
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Strict Granular Permission Check (Rule 2)
-  if (action === 'create' && !hasPermission(profile, 'add_guests')) {
+  if (action === 'create' && !hasPermission(profile, 'add_guests', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to add guests.' };
   }
-  if (action === 'edit' && !hasPermission(profile, 'edit_guests')) {
+  if (action === 'edit' && !hasPermission(profile, 'edit_guests', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to edit guests.' };
   }
-  if (action === 'delete' && !hasPermission(profile, 'delete_guests')) {
+  if (action === 'delete' && !hasPermission(profile, 'delete_guests', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to delete guests.' };
   }
-  if (action === 'export' && !hasPermission(profile, 'export_guests')) {
+  if (action === 'export' && !hasPermission(profile, 'export_guests', customRoles)) {
     return { allowed: false, message: 'Access denied: You do not have permission to export guests.' };
   }
 
@@ -338,7 +386,7 @@ export const canManageGuest = (
     return { allowed: false, message: 'Guest record deletion is currently restricted.' };
   }
 
-  if (action === 'blacklist' && !settings.allowBlacklisting && !hasPermission(profile, 'manage_staff')) {
+  if (action === 'blacklist' && !settings.allowBlacklisting && !hasPermission(profile, 'manage_staff', customRoles)) {
     return { allowed: false, message: 'Blacklisting functionality is currently disabled.' };
   }
 
@@ -352,14 +400,15 @@ export const canBlockRoom = (
   endDate: string,
   reason: string,
   frequency?: string,
-  hasPartialTimes?: boolean
+  hasPartialTimes?: boolean,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.roomBlocking;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowBlocking && !hasPermission(profile, 'manage_rooms')) {
+  if (!settings.allowBlocking) {
     return { allowed: false, message: 'Room blocking is currently disabled by administrator.' };
   }
 
@@ -367,25 +416,25 @@ export const canBlockRoom = (
     return { allowed: false, message: 'A reason or category is required for room blocking.' };
   }
 
-  if (reason === 'maintenance' && !settings.allowMaintenanceBlocks && !hasPermission(profile, 'manage_rooms')) {
+  if (reason === 'maintenance' && !settings.allowMaintenanceBlocks) {
     return { allowed: false, message: 'Maintenance blocks are currently disabled.' };
   }
 
-  if (reason === 'housekeeping' && !settings.allowHousekeepingBlocks && !hasPermission(profile, 'manage_rooms')) {
+  if (reason === 'housekeeping' && !settings.allowHousekeepingBlocks) {
     return { allowed: false, message: 'Housekeeping cleaning blocks are currently disabled.' };
   }
 
-  if (frequency && frequency !== 'once' && !settings.allowRecurringBlocks && !hasPermission(profile, 'manage_rooms')) {
+  if (frequency && frequency !== 'once' && !settings.allowRecurringBlocks) {
     return { allowed: false, message: 'Recurring room blocks are disabled by configuration.' };
   }
 
-  if (hasPartialTimes && !settings.allowPartialDayBlocks && !hasPermission(profile, 'manage_rooms')) {
+  if (hasPartialTimes && !settings.allowPartialDayBlocks) {
     return { allowed: false, message: 'Partial-day room blocking is disabled by configuration.' };
   }
 
   const duration = differenceInDays(new Date(endDate), new Date(startDate)) + 1;
   const maxDur = settings.maxBlockDuration || 30;
-  if (duration > maxDur && !hasPermission(profile, 'manage_rooms')) {
+  if (duration > maxDur) {
     return { allowed: false, message: `Policy limits room blocks to a maximum of ${maxDur} days.` };
   }
 
@@ -394,14 +443,15 @@ export const canBlockRoom = (
 
 export const canUnblockRoom = (
   hotel: Hotel | null,
-  profile: UserProfile | null
+  profile: UserProfile | null,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.roomBlocking;
   if (!settings) return { allowed: true };
 
-  if (!settings.allowUnblocking && !hasPermission(profile, 'remove_room_blocks')) {
+  if (!settings.allowUnblocking && !hasPermission(profile, 'remove_room_blocks', customRoles) && !hasPermission(profile, 'unblock_rooms', customRoles)) {
     return { allowed: false, message: 'Unblocking rooms is currently restricted to administrators.' };
   }
 
@@ -411,20 +461,17 @@ export const canUnblockRoom = (
 export const canVoidTransaction = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  entry: LedgerEntry
+  entry: LedgerEntry,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
-  if (!hasPermission(profile, 'void_transaction')) {
+  if (!hasPermission(profile, 'void_transaction', customRoles)) {
     return { allowed: false, message: 'You do not have permission to void transactions.' };
   }
-
-  const invoiceLocking = settings.lockInvoicesAfterCheckout;
-  // If we had a checkout status on reservation, we'd check it here.
-  // For now, let's assume we check if the entry is old or if there are other flags.
 
   return { allowed: true };
 };
@@ -432,7 +479,8 @@ export const canVoidTransaction = (
 export const canEditInvoice = (
   hotel: Hotel | null,
   profile: UserProfile | null,
-  reservation: Reservation
+  reservation: Reservation,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
@@ -443,12 +491,12 @@ export const canEditInvoice = (
   // Check both financial and checkout settings (defaults to true if not explicitly disabled)
   const isInvoiceLocked = financialSettings?.lockInvoicesAfterCheckout ?? checkoutSettings?.lockInvoicesAfterCheckout ?? true;
 
-  if (reservation.status === 'checked_out' && isInvoiceLocked && !hasPermission(profile, 'void_transaction')) {
+  if (reservation.status === 'checked_out' && isInvoiceLocked && !hasPermission(profile, 'void_transaction', customRoles)) {
     return { allowed: false, message: 'Invoices are locked for checked-out reservations. Manager override required.' };
   }
 
   const allowInvoiceEditingAfterPayment = financialSettings?.allowInvoiceEditingAfterPayment ?? false;
-  if (reservation.ledgerBalance === 0 && !allowInvoiceEditingAfterPayment && !hasPermission(profile, 'void_transaction')) {
+  if (reservation.ledgerBalance === 0 && !allowInvoiceEditingAfterPayment && !hasPermission(profile, 'void_transaction', customRoles)) {
      return { allowed: false, message: 'Editing is disabled for fully paid invoices. Manager override required.' };
   }
 
@@ -457,14 +505,15 @@ export const canEditInvoice = (
 
 export const canReleaseNoShow = (
   hotel: Hotel | null,
-  profile: UserProfile | null
+  profile: UserProfile | null,
+  customRoles: any[] = []
 ): { allowed: boolean; message?: string } => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.reservations;
   if (!settings) return { allowed: true };
 
-  if (!settings.autoReleaseNoShow && !hasPermission(profile, 'manage_rooms')) {
+  if (!settings.autoReleaseNoShow && !hasPermission(profile, 'manage_rooms', customRoles)) {
     return { allowed: false, message: 'Manual release of no-shows is restricted.' };
   }
 

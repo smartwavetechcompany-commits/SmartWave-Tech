@@ -233,7 +233,7 @@ export function CommandPalette() {
                 localStorage.setItem('hide_shortcut_badge', 'true');
                 setShowNotificationBadge(false);
               }}
-              className="ml-1 p-1 bg-zinc-950/55 rounded-full hover:bg-zinc-800 hover:text-white transition-all text-zinc-500 cursor-pointer pointer-events-auto"
+              className="ml-1 p-1 bg-zinc-950/55 rounded-full hover:bg-zinc-800 hover:text-zinc-50 transition-all text-zinc-500 cursor-pointer pointer-events-auto"
               title="Dismiss warning overlay"
             >
               <X size={10} />

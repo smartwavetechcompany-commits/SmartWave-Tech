@@ -796,12 +796,12 @@ export function PromotionsManagement() {
                       {promo.type.replace('_', ' ').toUpperCase()}
                     </span>
                     {promo.targetGuestType === 'corporate_only' && (
-                      <span className="px-2 py-0.5 bg-cyan-950/70 text-cyan-400 border border-cyan-800/40 rounded-md flex items-center gap-1 font-semibold">
+                      <span className="px-2 py-0.5 bg-cyan-500/12 dark:bg-cyan-950/70 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30 dark:border-cyan-800/40 rounded-md flex items-center gap-1 font-semibold">
                         <Building2 size={10} /> Corporate Only
                       </span>
                     )}
                     {promo.targetGuestType === 'selected_corporate' && (
-                      <span className="px-2 py-0.5 bg-indigo-950/70 text-indigo-300 border border-indigo-800/40 rounded-md flex items-center gap-1 font-semibold">
+                      <span className="px-2 py-0.5 bg-indigo-500/12 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 dark:border-indigo-800/40 rounded-md flex items-center gap-1 font-semibold">
                         <Building2 size={10} /> Selected Corporate ({promo.eligibleCorporateIds?.length || 0})
                       </span>
                     )}
@@ -811,7 +811,7 @@ export function PromotionsManagement() {
                       </span>
                     )}
                     {promo.allowStackOnNegotiatedRate && (
-                      <span className="px-2 py-0.5 bg-cyan-950/60 text-cyan-400 border border-cyan-800/40 rounded-md">
+                      <span className="px-2 py-0.5 bg-cyan-500/12 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30 dark:border-cyan-800/40 rounded-md">
                         Stacks w/ Negotiated Rate
                       </span>
                     )}
@@ -826,7 +826,7 @@ export function PromotionsManagement() {
                       </span>
                     ) : null}
                     {promo.combinable ? (
-                      <span className="px-2 py-0.5 bg-emerald-950/60 text-emerald-400 border border-emerald-900/40 rounded-md">
+                      <span className="px-2 py-0.5 bg-emerald-500/12 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 dark:border-emerald-900/40 rounded-md">
                         Combinable
                       </span>
                     ) : null}
@@ -896,10 +896,10 @@ export function PromotionsManagement() {
                       <Edit3 size={15} />
                     </button>
                     {isDeletingId === promo.id ? (
-                      <div className="flex items-center gap-1 bg-red-950/80 border border-red-800 rounded-lg p-1">
+                      <div className="flex items-center gap-1 bg-red-500/12 dark:bg-red-950/80 border border-red-500/40 dark:border-red-800 rounded-lg p-1">
                         <button
                           onClick={() => handleDeletePromotion(promo)}
-                          className="text-[10px] text-red-200 font-bold px-1.5 py-0.5 hover:bg-red-900 rounded"
+                          className="text-[10px] text-red-700 dark:text-red-200 font-bold px-1.5 py-0.5 hover:bg-red-500/20 dark:hover:bg-red-900 rounded"
                         >
                           Confirm
                         </button>
@@ -1367,7 +1367,7 @@ export function PromotionsManagement() {
                             className={cn(
                               "p-2.5 rounded-xl border text-left transition-all",
                               isSelected 
-                                ? "bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm" 
+                                ? "bg-cyan-500/12 dark:bg-cyan-950/50 border-cyan-600 dark:border-cyan-500 text-cyan-800 dark:text-cyan-200 shadow-sm" 
                                 : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
                             )}
                           >
@@ -1419,7 +1419,7 @@ export function PromotionsManagement() {
                                 className={cn(
                                   "flex items-center justify-between p-2 rounded-lg border text-xs text-left transition-all",
                                   isChecked 
-                                    ? "bg-cyan-950/50 border-cyan-600 text-cyan-200 font-semibold" 
+                                    ? "bg-cyan-500/12 dark:bg-cyan-950/50 border-cyan-600 text-cyan-800 dark:text-cyan-200 font-semibold" 
                                     : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
                                 )}
                               >
@@ -1431,7 +1431,7 @@ export function PromotionsManagement() {
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
                                   {isSuspended && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/80 text-red-400 border border-red-900/50">
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/15 dark:bg-red-950/80 text-red-700 dark:text-red-400 border border-red-500/35 dark:border-red-900/50">
                                       Suspended
                                     </span>
                                   )}

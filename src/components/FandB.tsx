@@ -1815,7 +1815,7 @@ export function FandB() {
                   value={reportFilter.startDate}
                   onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
                   className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
-                  style={{ colorScheme: 'dark' }}
+                 
                 />
               </div>
               <span className="text-zinc-600 text-xs">-</span>
@@ -1826,7 +1826,7 @@ export function FandB() {
                   value={reportFilter.endDate}
                   onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
                   className="bg-transparent text-xs text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
-                  style={{ colorScheme: 'dark' }}
+                 
                 />
               </div>
             </div>
@@ -3552,7 +3552,7 @@ export function FandB() {
           <div className="relative w-full max-w-lg my-8">
             <button 
               onClick={() => setPrintingOrder(null)}
-              className="absolute -top-12 right-0 p-2 text-zinc-50 hover:bg-white/10 rounded-full transition-all print:hidden"
+              className="absolute -top-12 right-0 p-2 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-50 border border-zinc-700 rounded-full transition-all shadow-lg print:hidden"
             >
               <XCircle size={32} />
             </button>
@@ -4057,7 +4057,7 @@ export function FandB() {
                             outletName: outlet?.name || 'Main Restaurant'
                           });
                         }}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       >
                         {configuredOutlets.map(outlet => (
                           <option key={outlet.id} value={outlet.id}>
@@ -4071,7 +4071,7 @@ export function FandB() {
                       <select
                         value={newOrder.orderType}
                         onChange={(e) => setNewOrder({ ...newOrder, orderType: e.target.value as any })}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="dine_in">Dine-in</option>
                         <option value="room_service">Room Service</option>
@@ -4089,7 +4089,7 @@ export function FandB() {
                         const table = tables.find(t => t.id === e.target.value);
                         setNewOrder({ ...newOrder, tableId: e.target.value, tableNumber: table?.tableNumber || '' });
                       }}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">No Table</option>
                       {tables.map(table => (
@@ -4118,7 +4118,7 @@ export function FandB() {
                             : newOrder.payments
                         });
                       }}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">Select Room</option>
                       <option value="Walk-in">Walk-in Guest</option>
@@ -4344,7 +4344,7 @@ export function FandB() {
                         type="number"
                         value={newOrder.discount || ''}
                         onChange={(e) => setNewOrder({ ...newOrder, discount: Number(e.target.value) })}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         placeholder="0"
                       />
                     </div>
@@ -4353,7 +4353,7 @@ export function FandB() {
                       <select
                         value={newOrder.discountType}
                         onChange={(e) => setNewOrder({ ...newOrder, discountType: e.target.value as any })}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       >
                         <option value="fixed">Fixed</option>
                         <option value="percentage">%</option>
@@ -4366,7 +4366,7 @@ export function FandB() {
                     <textarea
                       value={newOrder.notes}
                       onChange={(e) => setNewOrder({ ...newOrder, notes: e.target.value })}
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
                       placeholder="e.g. No onions, extra ice..."
                     />
                   </div>

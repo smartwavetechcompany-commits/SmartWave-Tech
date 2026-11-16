@@ -648,7 +648,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
                       onClick={() => setAdminNote(note)}
                       className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
                         adminNote === note
-                          ? 'bg-zinc-700 text-white border-zinc-500'
+                          ? 'bg-zinc-700 text-zinc-50 border-zinc-500'
                           : 'bg-zinc-800/70 text-zinc-400 border-zinc-700/60 hover:text-zinc-200'
                       }`}
                     >
@@ -722,7 +722,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
                 type="button"
                 disabled={isSubmitting}
                 onClick={handleCancelRequest}
-                className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
+                className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-zinc-50 rounded-lg text-xs font-bold transition-colors"
               >
                 Withdraw Request
               </button>
@@ -747,10 +747,10 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
 
               {/* Policy Explanation */}
               {!isAdmin && (
-                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl text-xs text-blue-300 flex items-start gap-2.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                   <p className="leading-relaxed text-[11px]">
-                    <span className="font-bold text-blue-200">Hotel Admin Approval Required:</span> Front Desk staff must submit a request before applying grace periods different from the hotel's standard policy. The Hotel Admin will review and accept or reject your request with a note.
+                    <span className="font-bold text-blue-800 dark:text-blue-200">Hotel Admin Approval Required:</span> Front Desk staff must submit a request before applying grace periods different from the hotel's standard policy. The Hotel Admin will review and accept or reject your request with a note.
                   </p>
                 </div>
               )}
@@ -769,7 +769,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
                       className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all ${
                         extensionMinutes === preset.value
                           ? 'bg-amber-500 text-zinc-950 border-amber-400 shadow-md shadow-amber-500/20'
-                          : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-750 hover:text-white'
+                          : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-50'
                       }`}
                     >
                       {preset.label}
@@ -806,7 +806,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
                       onClick={() => setReason(qr)}
                       className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
                         reason === qr
-                          ? 'bg-zinc-700 text-white border-zinc-500'
+                          ? 'bg-zinc-700 text-zinc-50 border-zinc-500'
                           : 'bg-zinc-800/60 text-zinc-400 border-zinc-700/60 hover:text-zinc-200'
                       }`}
                     >
@@ -919,7 +919,7 @@ export const ExtendGracePeriodModal: React.FC<ExtendGracePeriodModalProps> = ({
               type="button"
               disabled={isSubmitting}
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-xs font-semibold text-zinc-300 hover:text-zinc-50 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors disabled:opacity-50"
             >
               Cancel
             </button>

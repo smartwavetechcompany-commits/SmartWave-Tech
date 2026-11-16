@@ -538,13 +538,13 @@ export function GuestManagement() {
     if (!hotel?.id || !profile) return;
 
     if (editingGuest) {
-      const policy = canManageGuest(hotel, profile, 'edit');
+      const policy = canManageGuest(hotel, profile, 'edit', customRoles);
       if (!policy.allowed) {
         toast.error(policy.message || 'Editing denied by hotel policy');
         return;
       }
     } else {
-      const policy = canManageGuest(hotel, profile, 'create');
+      const policy = canManageGuest(hotel, profile, 'create', customRoles);
       if (!policy.allowed) {
         toast.error(policy.message || 'Access denied: You do not have permission to add guests.');
         return;
@@ -673,7 +673,7 @@ export function GuestManagement() {
       return;
     }
 
-    const policy = canManageGuest(hotel, profile, 'delete');
+    const policy = canManageGuest(hotel, profile, 'delete', customRoles);
     if (!policy.allowed) {
       toast.error(policy.message || 'Deletion denied by hotel policy');
       return;
@@ -881,7 +881,7 @@ export function GuestManagement() {
                 value={reportFilter.startDate}
                 onChange={(e) => setReportFilter({ ...reportFilter, startDate: e.target.value })}
                 className="bg-transparent text-[10px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
-                style={{ colorScheme: 'dark' }}
+               
               />
             </div>
             <span className="text-zinc-600 text-[10px]">to</span>
@@ -892,7 +892,7 @@ export function GuestManagement() {
                 value={reportFilter.endDate}
                 onChange={(e) => setReportFilter({ ...reportFilter, endDate: e.target.value })}
                 className="bg-transparent text-[10px] text-zinc-400 font-bold px-1 py-1 focus:outline-none appearance-none"
-                style={{ colorScheme: 'dark' }}
+               
               />
             </div>
             <div className="w-px h-4 bg-zinc-800 mx-1" />
@@ -1381,23 +1381,23 @@ export function GuestManagement() {
 
                     {/* Prominent Debt / Credit Banner */}
                     {getGuestLiveBalance(guest) > 0.01 && (
-                      <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-red-950/60 border border-red-500/40 flex items-center justify-between text-xs font-bold text-red-400 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold text-red-400">
-                          <AlertTriangle size={12} className="shrink-0 text-red-400" />
+                      <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-red-500/10 dark:bg-red-950/60 border border-red-500/35 dark:border-red-500/40 flex items-center justify-between text-xs font-bold text-red-700 dark:text-red-400 shadow-sm">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold text-red-700 dark:text-red-400">
+                          <AlertTriangle size={12} className="shrink-0 text-red-700 dark:text-red-400" />
                           <span>Outstanding Debt</span>
                         </div>
-                        <span className="text-xs font-extrabold text-red-300">
+                        <span className="text-xs font-extrabold text-red-700 dark:text-red-300">
                           {formatCurrency(getGuestLiveBalance(guest), currency, exchangeRate)}
                         </span>
                       </div>
                     )}
                     {getGuestLiveBalance(guest) < -0.01 && (
-                      <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between text-xs font-bold text-emerald-400 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold text-emerald-400">
-                          <CheckCircle2 size={12} className="shrink-0 text-emerald-400" />
+                      <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-400 shadow-sm">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold text-emerald-700 dark:text-emerald-400">
+                          <CheckCircle2 size={12} className="shrink-0 text-emerald-700 dark:text-emerald-400" />
                           <span>Credit Balance</span>
                         </div>
-                        <span className="text-xs font-extrabold text-emerald-300">
+                        <span className="text-xs font-extrabold text-emerald-700 dark:text-emerald-300">
                           {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}
                         </span>
                       </div>
@@ -1446,9 +1446,9 @@ export function GuestManagement() {
                       <div className={cn(
                         "p-2 rounded-lg border flex flex-col justify-center transition-all",
                         getGuestLiveBalance(guest) > 0.01 
-                          ? "bg-red-950/30 border-red-500/40" 
+                          ? "bg-red-500/10 dark:bg-red-950/30 border-red-500/35 dark:border-red-500/40" 
                           : getGuestLiveBalance(guest) < -0.01 
-                            ? "bg-emerald-950/30 border-emerald-500/30" 
+                            ? "bg-emerald-500/10 dark:bg-emerald-950/30 border-emerald-500/30" 
                             : "bg-zinc-950 border-zinc-800/50"
                       )}>
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">
@@ -1808,7 +1808,7 @@ export function GuestManagement() {
 
                   <div className={cn(
                     "p-4 rounded-xl border shadow-md",
-                    isDebt ? "bg-red-950/20 border-red-500/40" : isCredit ? "bg-emerald-950/20 border-emerald-500/40" : "bg-zinc-900 border-zinc-800"
+                    isDebt ? "bg-red-500/10 dark:bg-red-950/20 border-red-500/40" : isCredit ? "bg-emerald-500/10 dark:bg-emerald-950/20 border-emerald-500/40" : "bg-zinc-900 border-zinc-800"
                   )}>
                     <div className="flex items-center justify-between mb-2">
                       <div className={cn(

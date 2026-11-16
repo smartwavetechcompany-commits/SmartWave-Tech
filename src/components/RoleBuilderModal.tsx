@@ -22,6 +22,7 @@ interface Props {
 export function RoleBuilderModal({ role, onClose, onSuccess }: Props) {
   const { profile, hotel } = useAuth();
   const hotelId = profile?.hotelId || hotel?.id;
+  const enableRoleInheritance = hotel?.settings?.staff?.enableRoleInheritance ?? true;
 
   const [name, setName] = useState(role?.name || '');
   const [description, setDescription] = useState(role?.description || '');
@@ -62,7 +63,7 @@ export function RoleBuilderModal({ role, onClose, onSuccess }: Props) {
         name: name.trim(),
         description: description.trim(),
         permissions: selectedPermissions,
-        inheritsFrom: inheritsFrom ? (inheritsFrom as StaffRole) : undefined,
+        inheritsFrom: enableRoleInheritance && inheritsFrom ? (inheritsFrom as StaffRole) : undefined,
         isSystem: false,
         status: 'active',
         createdAt: role?.createdAt || new Date().toISOString(),
@@ -134,24 +135,26 @@ export function RoleBuilderModal({ role, onClose, onSuccess }: Props) {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                Inherit Base Role Template (Optional)
-              </label>
-              <select
-                value={inheritsFrom}
-                onChange={(e) => handleInheritChange(e.target.value as any)}
-                className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors"
-              >
-                <option value="">-- No base template (Manual configuration) --</option>
-                <option value="frontDesk">Front Desk (Guest Check-in/Out, Rooms)</option>
-                <option value="housekeeper">Housekeeping (Room statuses, Turndown)</option>
-                <option value="maintenance">Maintenance (Repairs, Inspections)</option>
-                <option value="accountant">Accountant (Ledgers, Payments, Financials)</option>
-                <option value="manager">Manager (Staff oversight, Rate management)</option>
-                <option value="hotelAdmin">Hotel Admin (Full property administrative access)</option>
-              </select>
-            </div>
+            {enableRoleInheritance && (
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                  Inherit Base Role Template (Optional)
+                </label>
+                <select
+                  value={inheritsFrom}
+                  onChange={(e) => handleInheritChange(e.target.value as any)}
+                  className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                >
+                  <option value="">-- No base template (Manual configuration) --</option>
+                  <option value="frontDesk">Front Desk (Guest Check-in/Out, Rooms)</option>
+                  <option value="housekeeper">Housekeeping (Room statuses, Turndown)</option>
+                  <option value="maintenance">Maintenance (Repairs, Inspections)</option>
+                  <option value="accountant">Accountant (Ledgers, Payments, Financials)</option>
+                  <option value="manager">Manager (Staff oversight, Rate management)</option>
+                  <option value="hotelAdmin">Hotel Admin (Full property administrative access)</option>
+                </select>
+              </div>
+            )}
 
             <div className="sm:col-span-2">
               <label className="block text-xs font-semibold text-zinc-300 mb-1.5">

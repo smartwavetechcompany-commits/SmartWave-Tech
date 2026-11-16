@@ -106,7 +106,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-bold text-white">Stock Movements</h3>
+          <h3 className="text-xl font-bold text-zinc-50">Stock Movements</h3>
           <p className="text-sm text-zinc-500">Track all inventory ins, outs, and transfers</p>
         </div>
         <button
@@ -124,7 +124,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
             <TrendingUp size={24} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-white">
+            <div className="text-2xl font-bold text-zinc-50">
               {transactions.filter(t => t.type === 'stock_in').length}
             </div>
             <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Total Stock-In</div>
@@ -135,7 +135,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
             <TrendingDown size={24} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-white">
+            <div className="text-2xl font-bold text-zinc-50">
               {transactions.filter(t => t.type === 'consumption' || t.type === 'stock_out').length}
             </div>
             <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Total Consumption</div>
@@ -146,7 +146,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
             <RefreshCw size={24} />
           </div>
           <div>
-            <div className="text-2xl font-bold text-white">
+            <div className="text-2xl font-bold text-zinc-50">
               {transactions.filter(t => t.type === 'transfer').length}
             </div>
             <div className="text-xs text-zinc-500 font-bold uppercase tracking-widest">Internal Transfers</div>
@@ -163,7 +163,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
               placeholder="Filter transactions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500/50"
             />
           </div>
         </div>
@@ -188,7 +188,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                       <div className="text-xs text-zinc-400 font-medium">{safeFormatDate(tx.timestamp, 'MMM d, HH:mm')}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-white">{item?.name || 'Unknown Item'}</div>
+                      <div className="text-sm font-bold text-zinc-50">{item?.name || 'Unknown Item'}</div>
                     </td>
                     <td className="px-6 py-4">
                       <span className={cn(
@@ -250,8 +250,8 @@ export function StockMovements({ items, transactions, locations }: StockMovement
               className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] w-full max-w-md overflow-hidden"
             >
               <div className="p-8 border-b border-zinc-800 flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-white">Record Movement</h2>
-                <button onClick={() => setShowMoveModal(false)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <h2 className="text-2xl font-bold text-zinc-50">Record Movement</h2>
+                <button onClick={() => setShowMoveModal(false)} className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors">
                   <XCircle size={24} />
                 </button>
               </div>
@@ -262,7 +262,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                     required
                     value={moveForm.type}
                     onChange={(e) => setMoveForm({ ...moveForm, type: e.target.value as any })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   >
                     <option value="consumption">Consumption (Usage)</option>
                     <option value="stock_out">Stock Out (Issue)</option>
@@ -279,7 +279,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                     required
                     value={moveForm.itemId}
                     onChange={(e) => setMoveForm({ ...moveForm, itemId: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   >
                     <option value="">Select Item</option>
                     {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.quantity} {i.unit} available)</option>)}
@@ -295,7 +295,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                       min="1"
                       value={moveForm.quantity}
                       onChange={(e) => setMoveForm({ ...moveForm, quantity: parseInt(e.target.value) })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     />
                   </div>
                   <div className="space-y-2">
@@ -304,7 +304,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                       type="text"
                       value={moveForm.department}
                       onChange={(e) => setMoveForm({ ...moveForm, department: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                       placeholder="e.g. Housekeeping"
                     />
                   </div>
@@ -316,7 +316,7 @@ export function StockMovements({ items, transactions, locations }: StockMovement
                     required
                     value={moveForm.reason}
                     onChange={(e) => setMoveForm({ ...moveForm, reason: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 text-zinc-50 focus:outline-none focus:border-emerald-500/50 min-h-[80px]"
                     placeholder="Why is this movement being recorded?"
                   />
                 </div>

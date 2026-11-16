@@ -527,7 +527,7 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
               <ShieldAlert className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <h3 className="text-lg font-bold text-zinc-50 flex items-center gap-2">
                 Ledger Audit & Diagnostics
                 {flaggedCount > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/20 text-red-400 border border-red-500/30">
@@ -548,14 +548,14 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
             <button
               onClick={exportToCSV}
               title="Export Ledger Audit CSV"
-              className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors flex items-center gap-1.5 text-xs"
+              className="p-2 text-zinc-400 hover:text-zinc-50 rounded-lg hover:bg-zinc-800 transition-colors flex items-center gap-1.5 text-xs"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Export CSV</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+              className="p-2 text-zinc-400 hover:text-zinc-50 rounded-lg hover:bg-zinc-800 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -639,25 +639,25 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
               <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs">
                 <button
                   onClick={() => setFilterType('all')}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'all' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'all' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-50'}`}
                 >
                   All ({auditedEntries.length})
                 </button>
                 <button
                   onClick={() => setFilterType('flagged')}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'flagged' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-zinc-400 hover:text-white'}`}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'flagged' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-zinc-400 hover:text-zinc-50'}`}
                 >
                   Flagged ({flaggedCount})
                 </button>
                 <button
                   onClick={() => setFilterType('debit')}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'debit' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'debit' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-50'}`}
                 >
                   Debits
                 </button>
                 <button
                   onClick={() => setFilterType('credit')}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'credit' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${filterType === 'credit' ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:text-zinc-50'}`}
                 >
                   Credits
                 </button>

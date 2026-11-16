@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -36,22 +37,23 @@
 
 @layer base {
   :root {
-    --bg-color: #ffffff;
-    --text-color: #09090b;
-    --zinc-950: #ffffff;
-    --zinc-900: #f4f4f5;
-    --zinc-800: #e4e4e7;
-    --zinc-700: #d4d4d8;
-    --zinc-600: #a1a1aa;
-    --zinc-500: #71717a;
-    --zinc-400: #52525b;
-    --zinc-300: #3f3f46;
-    --zinc-200: #27272a;
-    --zinc-100: #18181b;
-    --zinc-50: #09090b;
+    --bg-color: #eceff4;
+    --text-color: #0f172a;
+    --zinc-950: #eceff4;
+    --zinc-900: #f7f8fa;
+    --zinc-800: #dfe4ec;
+    --zinc-700: #cbd3df;
+    --zinc-600: #6b778a;
+    --zinc-500: #5a6679;
+    --zinc-400: #475569;
+    --zinc-300: #334155;
+    --zinc-200: #1e293b;
+    --zinc-100: #141c2b;
+    --zinc-50: #0f172a;
   }
 
   .dark {
+    color-scheme: dark;
     --bg-color: #09090b;
     --text-color: #f4f4f5;
     --zinc-950: #09090b;
@@ -155,7 +157,7 @@
   }
 
   :root:not(.dark) * {
-    scrollbar-color: rgba(113, 113, 122, 0.65) rgba(228, 228, 231, 0.85);
+    scrollbar-color: rgba(100, 116, 139, 0.55) rgba(223, 228, 236, 0.85);
   }
 
   /* Universal WebKit scrollbars (Vertical & Horizontal) */
@@ -170,7 +172,7 @@
   }
 
   :root:not(.dark) ::-webkit-scrollbar-track {
-    background: rgba(228, 228, 231, 0.85);
+    background: rgba(223, 228, 236, 0.85);
   }
 
   ::-webkit-scrollbar-thumb {
@@ -181,8 +183,19 @@
     transition: background-color 0.2s ease;
   }
 
+  :root:not(.dark) ::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.52);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(161, 161, 170, 0.95);
+    background-clip: padding-box;
+  }
+
+  :root:not(.dark) ::-webkit-scrollbar-thumb:hover {
+    background: rgba(71, 85, 105, 0.8);
     background-clip: padding-box;
   }
 
@@ -196,7 +209,146 @@
   }
 
   :root:not(.dark) ::-webkit-scrollbar-corner {
-    background: rgba(228, 228, 231, 0.85);
+    background: rgba(223, 228, 236, 0.85);
+  }
+
+  /* ================================================================ */
+  /* LIGHT MODE ENTERPRISE VISUAL REFINEMENT ENGINE                   */
+  /* Calibrates contrast, form wells, tables, cards & focus rings     */
+  /* while leaving Dark Mode and isolated #print-root untouched.      */
+  /* ================================================================ */
+  :root:not(.dark) {
+    color-scheme: light;
+    --color-emerald-300: color-mix(in srgb, var(--primary-color, #10b981) 58%, #0f172a);
+    --color-emerald-400: color-mix(in srgb, var(--primary-color, #10b981) 74%, #0f172a);
+  }
+
+  /* Ensure native form controls & date pickers always render in light scheme */
+  :root:not(.dark) :where(input, select, textarea):not(.dark *) {
+    color-scheme: light !important;
+  }
+
+  :root:not(.dark) :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.bg-transparent),
+    select:not(.bg-transparent),
+    textarea:not(.bg-transparent)
+  ):not(.dark *):not(#print-root *) {
+    background-color: #f1f4f8;
+    border-color: #c8d1de;
+    color: #0f172a;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  :root:not(.dark) :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+    select,
+    textarea
+  ):not(.dark *):not(#print-root *)::placeholder {
+    color: #64748b;
+  }
+
+  :root:not(.dark) :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.bg-transparent),
+    select:not(.bg-transparent),
+    textarea:not(.bg-transparent)
+  ):not(.dark *):not(#print-root *):focus {
+    background-color: #fbfcfd;
+    border-color: color-mix(in srgb, var(--primary-color, #10b981) 82%, #065f46);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color, #10b981) 18%, transparent);
+    outline: none;
+  }
+
+  /* Accessible focus-visible indicator across interactive controls in Light Mode */
+  :root:not(.dark) :where(button, a, [role="button"], [tabindex]):not(.dark *):focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--primary-color, #10b981) 82%, #065f46);
+    outline-offset: 2px;
+  }
+
+  /* Subtle elevation & crisp border separation for cards, panels, and tables */
+  :root:not(.dark) #root .bg-zinc-900.border:not(.dark *) {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.045);
+  }
+
+  :root:not(.dark) #root table thead th:not(.dark *) {
+    background-color: #e9edf3;
+    border-bottom-color: #cfd7e3;
+    color: #334155;
+  }
+
+  :root:not(.dark) #root table tbody tr:not(.dark *) {
+    border-color: #e2e8f0;
+  }
+
+  :root:not(.dark) #root table tbody tr:hover:not(.dark *) {
+    background-color: #eef2f7;
+  }
+
+  /* Guarantee WCAG AA legibility for semantic status text on light surfaces */
+  :root:not(.dark) #root :where(.text-amber-200, .text-amber-300, .text-amber-400, .text-amber-500):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-amber-500"]):not([class*="bg-amber-600"]) {
+    color: #b45309;
+  }
+  :root:not(.dark) #root :where(.text-yellow-200, .text-yellow-300, .text-yellow-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-yellow-"]) {
+    color: #a16207;
+  }
+  :root:not(.dark) #root :where(.text-orange-200, .text-orange-300, .text-orange-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-orange-500"]):not([class*="bg-orange-600"]) {
+    color: #c2410c;
+  }
+  :root:not(.dark) #root :where(.text-blue-200, .text-blue-300, .text-blue-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-blue-500"]):not([class*="bg-blue-600"]) {
+    color: #1d4ed8;
+  }
+  :root:not(.dark) #root :where(.text-indigo-200, .text-indigo-300, .text-indigo-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-indigo-600"]) {
+    color: #4338ca;
+  }
+  :root:not(.dark) #root :where(.text-purple-200, .text-purple-300, .text-purple-400, .text-violet-200, .text-violet-300, .text-violet-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-purple-600"]):not([class*="bg-purple-500"]) {
+    color: #6d28d9;
+  }
+  :root:not(.dark) #root :where(.text-red-200, .text-red-300, .text-red-400, .text-rose-200, .text-rose-300, .text-rose-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-red-500"]):not([class*="bg-red-600"]):not([class*="bg-rose-500"]):not([class*="bg-rose-600"]) {
+    color: #b91c1c;
+  }
+  :root:not(.dark) #root :where(.text-cyan-200, .text-cyan-300, .text-cyan-400, .text-sky-200, .text-sky-300, .text-sky-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-cyan-500"]):not([class*="bg-sky-500"]) {
+    color: #0e7490;
+  }
+  :root:not(.dark) #root :where(.text-teal-200, .text-teal-300, .text-teal-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-teal-500"]):not([class*="bg-teal-600"]) {
+    color: #0f766e;
+  }
+  :root:not(.dark) #root :where(.text-emerald-200, .text-green-200, .text-green-300, .text-green-400):not(.dark *):not(.bg-white *):not(.print-container *):not([class*="bg-emerald-500"]):not([class*="bg-emerald-600"]):not([class*="bg-green-500"]):not([class*="bg-green-600"]) {
+    color: #047857;
+  }
+
+  /* Neutralize pure-white text inside light-surface buttons, badges, or headings when legacy text-white appears on bg-zinc-* */
+  :root:not(.dark) #root :is(h1, h2, h3, h4, input, select, textarea, th, td, label).text-white:not(.dark *):not(.print-container *) {
+    color: #0f172a;
+  }
+  :root:not(.dark) #root .bg-zinc-800.text-white:not(.dark *),
+  :root:not(.dark) #root .bg-zinc-900.text-white:not(.dark *),
+  :root:not(.dark) #root .bg-zinc-950.text-white:not(.dark *) {
+    color: #0f172a;
+  }
+
+  /* Restore canonical un-inverted Zinc palette on explicit white paper/receipt/print containers */
+  :root:not(.dark) :where(.bg-white, .print-container, .receipt-container, #print-root, #standard-print-document) {
+    --zinc-50: #fafafa;
+    --zinc-100: #f4f4f5;
+    --zinc-200: #e4e4e7;
+    --zinc-300: #d4d4d8;
+    --zinc-400: #a1a1aa;
+    --zinc-500: #71717a;
+    --zinc-600: #52525b;
+    --zinc-700: #3f3f46;
+    --zinc-800: #27272a;
+    --zinc-900: #18181b;
+    --zinc-950: #09090b;
+    --color-zinc-50: #fafafa;
+    --color-zinc-100: #f4f4f5;
+    --color-zinc-200: #e4e4e7;
+    --color-zinc-300: #d4d4d8;
+    --color-zinc-400: #a1a1aa;
+    --color-zinc-500: #71717a;
+    --color-zinc-600: #52525b;
+    --color-zinc-700: #3f3f46;
+    --color-zinc-800: #27272a;
+    --color-zinc-900: #18181b;
+    --color-zinc-950: #09090b;
   }
 }
 
@@ -205,7 +357,7 @@
 }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  @apply text-white font-bold mt-6 mb-4;
+  @apply text-zinc-50 font-bold mt-6 mb-4;
 }
 
 .markdown-body p {
@@ -599,17 +751,17 @@
   animation: modernOverlayFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Light mode overlay styling */
+/* Light mode overlay styling — softer frosted slate veil */
 :root:not(.dark) .fixed.inset-0[class*="bg-"]:not(#print-root),
 :root:not(.dark) .fixed.inset-0[class*="backdrop-"]:not(#print-root) {
   background: radial-gradient(
     circle at 50% 35%,
-    rgba(30, 41, 59, 0.48) 0%,
-    rgba(15, 23, 42, 0.70) 50%,
-    rgba(2, 6, 23, 0.86) 100%
+    rgba(30, 41, 59, 0.28) 0%,
+    rgba(15, 23, 42, 0.44) 55%,
+    rgba(15, 23, 42, 0.58) 100%
   ) !important;
-  backdrop-filter: blur(16px) saturate(160%) contrast(102%) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(160%) contrast(102%) !important;
+  backdrop-filter: blur(10px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(135%) !important;
 }
 
 /* Subtle luminous halo centered behind modal dialogs */
@@ -667,11 +819,10 @@
 :root:not(.dark) .fixed.inset-0:not(#print-root) > [class*="motion"]:not(.print-container),
 :root:not(.dark) .fixed.inset-0:not(#print-root) .min-h-full > div:not(.print-container) {
   box-shadow: 
-    0 0 0 1px rgba(0, 0, 0, 0.08),
-    0 1px 3px 0 rgba(0, 0, 0, 0.12),
-    0 14px 28px -6px rgba(15, 23, 42, 0.18),
-    0 30px 65px -12px rgba(15, 23, 42, 0.28),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.8) !important;
+    0 0 0 1px rgba(15, 23, 42, 0.10),
+    0 4px 12px -2px rgba(15, 23, 42, 0.08),
+    0 20px 44px -10px rgba(15, 23, 42, 0.18),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.7) !important;
 }
 
 /* Smooth entrance animation for static dialog containers */

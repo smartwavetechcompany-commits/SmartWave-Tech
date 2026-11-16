@@ -2,6 +2,7 @@ import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AuditLog } from '../types';
 import { deepCloneSafe } from '../utils';
+import { settingsManager } from '../services/settingsManager';
 
 export interface LogActivityExtra {
   reservationId?: string;
@@ -10,6 +11,44 @@ export interface LogActivityExtra {
   guestName?: string;
   metadata?: any;
   status?: 'success' | 'failure';
+}
+
+export function shouldLogActivity(moduleName: string, actionName: string): boolean {
+  const settings = settingsManager.getSettings();
+  const auditSettings = settings?.auditLogs;
+  const staffSettings = settings?.staff;
+
+  const act = (actionName || '').toUpperCase();
+  const mod = (moduleName || '').toLowerCase();
+
+  // Always preserve Admin Controls audit trail
+  if (act.includes('ADMIN_SETTINGS') || mod === 'admin settings' || mod === 'configuration engine') {
+    return true;
+  }
+
+  if (auditSettings?.enableFullLogging === false || staffSettings?.allowActivityTracking === false) {
+    return false;
+  }
+
+  if (auditSettings) {
+    if (auditSettings.trackDeletions === false && (act.includes('DELETE') || act.includes('VOID') || act.includes('REMOVE'))) {
+      return false;
+    }
+    if (auditSettings.trackAuthEvents === false && (mod === 'auth' || act.includes('LOGIN') || act.includes('LOGOUT') || act.includes('PASSWORD') || act.includes('SESSION'))) {
+      return false;
+    }
+    if (auditSettings.trackPayments === false && (mod === 'finance' || mod === 'ledger' || act.includes('PAYMENT') || act.includes('REFUND') || act.includes('SETTLE') || act.includes('LEDGER') || act.includes('DISCOUNT'))) {
+      return false;
+    }
+    if (auditSettings.trackReservations === false && (mod === 'front desk' || mod === 'reservations' || act.includes('RESERVATION') || act.includes('CHECK_IN') || act.includes('CHECKIN') || act.includes('CHECK_OUT') || act.includes('CHECKOUT') || act.includes('BOOKING'))) {
+      return false;
+    }
+    if (auditSettings.trackRoomChanges === false && (mod === 'rooms' || mod === 'housekeeping' || mod === 'maintenance' || act.includes('ROOM') || act.includes('BLOCK') || act.includes('HOUSEKEEPING'))) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export const logActivity = async (
@@ -24,6 +63,7 @@ export const logActivity = async (
   extra?: LogActivityExtra
 ) => {
   if (!hotelId) return;
+  if (!shouldLogActivity(module, action)) return;
   try {
     // Infer reservationId and guestId if not explicitly provided
     let reservationId = extra?.reservationId;

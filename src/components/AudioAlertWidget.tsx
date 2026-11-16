@@ -362,7 +362,7 @@ export function AudioAlertWidget() {
                           className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-between gap-2"
                         >
                           <div className="min-w-0">
-                            <div className="text-xs font-bold text-red-200 truncate">
+                            <div className="text-xs font-bold text-red-700 dark:text-red-200 truncate">
                               Room {res.roomNumber} - {res.guestName}
                             </div>
                             <div className="text-[10px] text-red-400 font-medium truncate">
@@ -411,7 +411,7 @@ export function AudioAlertWidget() {
                           className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2"
                         >
                           <div className="min-w-0">
-                            <div className="text-xs font-bold text-amber-200 truncate">
+                            <div className="text-xs font-bold text-amber-700 dark:text-amber-200 truncate">
                               Room {res.roomNumber} - {res.guestName}
                             </div>
                             <div className="text-[10px] text-amber-400 font-medium">
@@ -494,13 +494,13 @@ export function AudioAlertWidget() {
                       return (
                         <div
                           key={res.id}
-                          className="p-2.5 rounded-xl bg-red-950/40 border border-red-800/40 flex items-center justify-between gap-2"
+                          className="p-2.5 rounded-xl bg-red-500/10 dark:bg-red-950/40 border border-red-500/30 dark:border-red-800/40 flex items-center justify-between gap-2"
                         >
                           <div className="min-w-0">
-                            <div className="text-xs font-bold text-red-200 truncate">
+                            <div className="text-xs font-bold text-red-700 dark:text-red-200 truncate">
                               Debtor: {res.guestName} (Room {res.roomNumber})
                             </div>
-                            <div className="text-[10px] text-red-400 font-medium">
+                            <div className="text-[10px] text-red-600 dark:text-red-400 font-medium">
                               Unpaid: {formatCurrency(bal, currency, exchangeRate)}
                             </div>
                           </div>

@@ -345,28 +345,28 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               <Building2 size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Corporate Folio</h2>
+              <h2 className="text-xl font-bold text-zinc-50">Corporate Folio</h2>
               <p className="text-sm text-zinc-500">{currentAccount.name}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setShowReceipt(true)}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
+              className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all"
               title="Print Receipt"
             >
               <Receipt size={20} />
             </button>
             <button 
               onClick={() => setShowReceipt(true)}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all"
+              className="p-2 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-xl transition-all"
               title="Print Corporate Statement & Folio"
             >
               <Printer size={20} />
             </button>
             <button 
               onClick={onClose}
-              className="p-2 text-zinc-500 hover:text-white transition-colors"
+              className="p-2 text-zinc-500 hover:text-zinc-50 transition-colors"
             >
               <XCircle size={24} />
             </button>
@@ -392,7 +392,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                 </button>
                 <button 
                   onClick={() => setShowReceipt(false)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-white/10 rounded-full transition-all"
+                  className="p-1.5 text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800 rounded-full transition-all"
                   title="Close"
                 >
                   <XCircle size={28} />
@@ -458,7 +458,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
 
             <button
               onClick={() => setShowReceipt(true)}
-              className="flex items-center justify-center gap-3 p-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all group active:scale-95"
+              className="flex items-center justify-center gap-3 p-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-zinc-300 hover:bg-zinc-700 hover:text-zinc-50 transition-all group active:scale-95"
             >
               <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center group-hover:bg-black/20">
                 <Printer size={20} />
@@ -475,10 +475,10 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
                 <Building2 size={18} className="text-blue-500" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Account Details</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Account Details</h3>
               </div>
               <div className="space-y-2">
-                <p className="text-lg font-bold text-white">{currentAccount.name}</p>
+                <p className="text-lg font-bold text-zinc-50">{currentAccount.name}</p>
                 <p className="text-sm text-zinc-400">{currentAccount.contactPerson}</p>
                 <p className="text-sm text-zinc-400">{currentAccount.email}</p>
                 <p className="text-sm text-zinc-400">{currentAccount.phone}</p>
@@ -488,20 +488,20 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
                 <FileText size={18} className="text-emerald-500" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Billing Info</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Billing Info</h3>
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Tax ID</span>
-                  <span className="text-white font-medium">{currentAccount.taxId}</span>
+                  <span className="text-zinc-50 font-medium">{currentAccount.taxId}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Cycle</span>
-                  <span className="text-white font-medium capitalize">{currentAccount.billingCycle}</span>
+                  <span className="text-zinc-50 font-medium capitalize">{currentAccount.billingCycle}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Credit Limit</span>
-                  <span className="text-white font-bold">{formatCurrency(currentAccount.creditLimit, currency, exchangeRate)}</span>
+                  <span className="text-zinc-50 font-bold">{formatCurrency(currentAccount.creditLimit, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Available Credit</span>
@@ -513,19 +513,19 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-800">
               <div className="flex items-center gap-3 mb-4">
                 <DollarSign size={18} className="text-amber-500" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Financial Summary</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Financial Summary</h3>
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Total Charges</span>
-                  <span className="text-white font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>
+                  <span className="text-zinc-50 font-bold">{formatCurrency(totalDebits, currency, exchangeRate)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Total Payments</span>
                   <span className="text-emerald-500 font-bold">{formatCurrency(totalCredits, currency, exchangeRate)}</span>
                 </div>
                 <div className="pt-3 border-t border-zinc-800 flex justify-between items-center">
-                  <span className="text-sm font-bold text-white uppercase">Outstanding</span>
+                  <span className="text-sm font-bold text-zinc-50 uppercase">Outstanding</span>
                   <span className={cn(
                     "text-xl font-bold",
                     balance > 0 ? "text-red-500" : "text-emerald-500"
@@ -541,7 +541,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
           {individualReservations.length > 0 && (
             <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
               <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Individual Guest Balances</h3>
+                <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Individual Guest Balances</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -558,7 +558,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     {individualReservations.slice((resPage - 1) * resPageSize, resPage * resPageSize).map((res) => (
                       <tr key={res.id} className="hover:bg-zinc-900/50 transition-colors">
                         <td className="px-6 py-4">
-                          <div className="text-sm text-white font-medium">{res.guestName}</div>
+                          <div className="text-sm text-zinc-50 font-medium">{res.guestName}</div>
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-400">
                           Room {res.roomNumber}
@@ -602,7 +602,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
           {/* Ledger Entries Table */}
           <div className="bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden">
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">Transaction History</h3>
+              <h3 className="text-sm font-bold text-zinc-50 uppercase tracking-wider">Transaction History</h3>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -643,7 +643,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            <div className="text-sm text-white font-medium">
+                            <div className="text-sm text-zinc-50 font-medium">
                               {typeof entry.description === 'string' 
                                 ? entry.description 
                                 : (entry.description && typeof entry.description === 'object' ? ((entry.description as any).name || (entry.description as any).text || JSON.stringify(entry.description)) : '')}
@@ -721,7 +721,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               link.click();
               setTimeout(() => URL.revokeObjectURL(url), 10000);
             }}
-            className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-white rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
+            className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >
             <Download size={18} />
             Export CSV
@@ -820,7 +820,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                 className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
               >
                 <div className="p-6 border-b border-zinc-800">
-                  <h2 className="text-xl font-bold text-white">Settle Corporate Payment</h2>
+                  <h2 className="text-xl font-bold text-zinc-50">Settle Corporate Payment</h2>
                   <p className="text-sm text-zinc-500">Post a credit to settle the outstanding balance</p>
                 </div>
                 <form onSubmit={handleSettlePayment}>
@@ -917,7 +917,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                       <textarea
                         value={settleData.notes}
                         onChange={(e) => setSettleData({ ...settleData, notes: e.target.value })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
                         placeholder="e.g. Monthly settlement, Check #1234..."
                       />
                     </div>
@@ -952,7 +952,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                 className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden"
               >
                 <div className="p-6 border-b border-zinc-800">
-                  <h2 className="text-xl font-bold text-white">Post Corporate Charge</h2>
+                  <h2 className="text-xl font-bold text-zinc-50">Post Corporate Charge</h2>
                   <p className="text-sm text-zinc-500">Add a debit entry to the corporate account</p>
                 </div>
                 <form onSubmit={handlePostCharge}>
@@ -963,7 +963,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                         <select
                           value={chargeData.category}
                           onChange={(e) => setChargeData({ ...chargeData, category: e.target.value })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         >
                           <option value="room">Room</option>
                           <option value="f&b">F&B</option>
@@ -979,7 +979,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                           min="1"
                           value={chargeData.amount}
                           onChange={(e) => setChargeData({ ...chargeData, amount: Number(e.target.value) })}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50"
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                         />
                       </div>
                     </div>
@@ -989,7 +989,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                         required
                         value={chargeData.description}
                         onChange={(e) => setChargeData({ ...chargeData, description: e.target.value })}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
                         placeholder="e.g. Conference room rental, Extra service fee..."
                       />
                     </div>

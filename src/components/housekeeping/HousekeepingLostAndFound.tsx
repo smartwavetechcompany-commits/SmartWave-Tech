@@ -228,7 +228,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
             <Briefcase size={20} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white">Hotel Lost & Found Register</h2>
+            <h2 className="text-lg font-black text-zinc-50">Hotel Lost & Found Register</h2>
             <p className="text-xs text-zinc-400">Track guest belongings left behind, secure storage locations, and guest return receipts</p>
           </div>
         </div>
@@ -257,7 +257,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
         <div className="bg-zinc-900 border border-zinc-800 p-3.5 rounded-2xl flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Safely Stored</span>
-            <span className="text-xl font-black text-white mt-0.5 block">{storedCount}</span>
+            <span className="text-xl font-black text-zinc-50 mt-0.5 block">{storedCount}</span>
           </div>
           <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
             <Archive size={16} />
@@ -312,7 +312,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
                 "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5",
                 statusFilter === tab.id
                   ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
-                  : "bg-zinc-950 text-zinc-400 hover:text-white"
+                  : "bg-zinc-950 text-zinc-400 hover:text-zinc-50"
               )}
             >
               <span>{tab.label}</span>
@@ -328,7 +328,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
           <input
             type="text"
             placeholder="Search items, rooms, guests..."
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -342,7 +342,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
             <div key={item.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3.5 flex flex-col justify-between">
               <div className="space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="text-base font-bold text-white leading-tight">{item.item}</h3>
+                  <h3 className="text-base font-bold text-zinc-50 leading-tight">{item.item}</h3>
                   <span className={cn(
                     "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0",
                     item.status === 'stored' ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" :
@@ -362,7 +362,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
                       <MapPin size={12} className="text-amber-400" />
                       Location Found:
                     </span>
-                    <span className="font-bold text-white">{item.roomLocation}</span>
+                    <span className="font-bold text-zinc-50">{item.roomLocation}</span>
                   </div>
                   <div className="flex items-center justify-between text-zinc-400">
                     <span className="flex items-center gap-1.5">
@@ -453,12 +453,12 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-purple-400">
                 <Briefcase size={18} />
-                <h3 className="text-lg font-bold text-white">Log Found Belonging</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Log Found Belonging</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowLogModal(false)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -469,7 +469,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Black Leather Wallet / iPhone Charger"
                 value={logForm.item}
                 onChange={(e) => setLogForm(prev => ({ ...prev, item: e.target.value }))}
@@ -482,7 +482,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
                 <input
                   required
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   placeholder="e.g. Room 204 or Lobby"
                   value={logForm.roomLocation}
                   onChange={(e) => setLogForm(prev => ({ ...prev, roomLocation: e.target.value }))}
@@ -493,7 +493,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
                 <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Guest Name (if known)</label>
                 <input
                   type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   placeholder="e.g. John Doe"
                   value={logForm.guestName}
                   onChange={(e) => setLogForm(prev => ({ ...prev, guestName: e.target.value }))}
@@ -507,7 +507,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
                 <input
                   required
                   type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={logForm.dateFound}
                   onChange={(e) => setLogForm(prev => ({ ...prev, dateFound: e.target.value }))}
                 />
@@ -518,7 +518,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
                 <input
                   required
                   type="time"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                   value={logForm.timeFound}
                   onChange={(e) => setLogForm(prev => ({ ...prev, timeFound: e.target.value }))}
                 />
@@ -530,7 +530,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Mary (Housekeeper)"
                 value={logForm.foundBy}
                 onChange={(e) => setLogForm(prev => ({ ...prev, foundBy: e.target.value }))}
@@ -540,7 +540,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
             <div>
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Description / Identifying Marks</label>
               <textarea
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-18"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-xs text-zinc-50 placeholder-zinc-500 outline-none focus:border-emerald-500 resize-none h-18"
                 placeholder="Details such as brand, colour, contents, or serial number..."
                 value={logForm.description}
                 onChange={(e) => setLogForm(prev => ({ ...prev, description: e.target.value }))}
@@ -551,7 +551,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Safe Storage Location</label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Housekeeping Office Cupboard B"
                 value={logForm.storageLocation}
                 onChange={(e) => setLogForm(prev => ({ ...prev, storageLocation: e.target.value }))}
@@ -584,12 +584,12 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <CheckCircle2 size={18} />
-                <h3 className="text-lg font-bold text-white">Record Guest Return</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Record Guest Return</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setReturnItemTarget(null)}
-                className="p-1 text-zinc-500 hover:text-white rounded-lg"
+                className="p-1 text-zinc-500 hover:text-zinc-50 rounded-lg"
               >
                 <X size={20} />
               </button>
@@ -597,7 +597,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
 
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs">
               <span className="text-zinc-500">Item: </span>
-              <span className="font-bold text-white">{returnItemTarget.item}</span>
+              <span className="font-bold text-zinc-50">{returnItemTarget.item}</span>
               <p className="text-zinc-400 mt-1">Found in {returnItemTarget.roomLocation} on {returnItemTarget.dateFound}</p>
             </div>
 
@@ -606,7 +606,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
               <input
                 required
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="Full name of person collecting"
                 value={returnForm.receivedBy}
                 onChange={(e) => setReturnForm(prev => ({ ...prev, receivedBy: e.target.value }))}
@@ -618,7 +618,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
               <input
                 required
                 type="date"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 value={returnForm.dateReturned}
                 onChange={(e) => setReturnForm(prev => ({ ...prev, dateReturned: e.target.value }))}
               />
@@ -628,7 +628,7 @@ export function HousekeepingLostAndFound({ rooms, staff }: HousekeepingLostAndFo
               <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Handover Notes / Verification</label>
               <input
                 type="text"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-50 outline-none focus:border-emerald-500"
                 placeholder="e.g. Identity card verified, signed receipt filed"
                 value={returnForm.notes}
                 onChange={(e) => setReturnForm(prev => ({ ...prev, notes: e.target.value }))}

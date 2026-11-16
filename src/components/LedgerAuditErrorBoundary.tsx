@@ -53,7 +53,7 @@ export class LedgerAuditErrorBoundary extends Component<Props, State> {
                 <ShieldAlert className="w-6 h-6 text-red-400" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Ledger Audit Error Detected</h3>
+                <h3 className="text-lg font-bold text-zinc-50">Ledger Audit Error Detected</h3>
                 <p className="text-xs text-zinc-400">
                   The ledger audit modal encountered an unexpected rendering error and was safely contained.
                 </p>
